@@ -20,22 +20,22 @@ export const ASPECT_RATIOS: AspectRatio[] = [
 
 export const MODEL_PRESETS: ModelPreset[] = [
   {
-    name: "Realistic Vision V5.1",
-    urn: "urn:air:sd1:checkpoint:civitai:4201@130072",
-    type: "SD1.5",
-    description: "Photorealistic model, excellent for portraits",
+    name: "epiCRealism XL",
+    urn: "urn:air:sdxl:checkpoint:civitai:277058@2514955",
+    type: "SDXL",
+    description: "Top-tier photorealism for SDXL — no early-access cost",
   },
   {
-    name: "DreamShaper XL",
-    urn: "urn:air:sdxl:checkpoint:civitai:112902@351306",
+    name: "CyberRealistic XL v9.0",
+    urn: "urn:air:sdxl:checkpoint:civitai:312530@2611295",
     type: "SDXL",
-    description: "Versatile SDXL model for high-quality generation",
+    description: "Hyper-detailed realism, strong anatomy (early access — 500 buzz/image)",
   },
   {
-    name: "Juggernaut XL",
-    urn: "urn:air:sdxl:checkpoint:civitai:133005@357609",
-    type: "SDXL",
-    description: "High detail SDXL model with strong anatomy",
+    name: "CyberRealistic Flux v2.5",
+    urn: "urn:air:flux1:checkpoint:civitai:1799857@2287992",
+    type: "Flux.1",
+    description: "Flux-based photorealism, best quality (early access — 250 buzz/image, use CFG 1)",
   },
 ];
 
@@ -53,14 +53,14 @@ export const SCHEDULERS: SchedulerOption[] = [
 ];
 
 export const DEFAULT_SETTINGS: GenerationSettings = {
-  modelUrn: "urn:air:sd1:checkpoint:civitai:4201@130072",
-  width: 512,
-  height: 768,
-  steps: 20,
+  modelUrn: "urn:air:sdxl:checkpoint:civitai:277058@2514955",
+  width: 832,
+  height: 1216,
+  steps: 25,
   cfgScale: 7,
-  scheduler: "EulerA",
+  scheduler: "DPM2MKarras",
   seed: -1,
-  clipSkip: 2,
+  clipSkip: 1,
   batchSize: 1,
 };
 

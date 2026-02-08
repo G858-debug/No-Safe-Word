@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getJobStatus, CivitaiError } from "@/lib/civitai";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(
   _request: NextRequest,
@@ -17,12 +18,46 @@ export async function GET(
 
     const job = await getJobStatus(jobId);
 
+    const completed = job.result?.available ?? false;
+    const imageUrl = job.result?.blobUrl ?? null;
+
+    // Update Supabase job status (best-effort)
+    if (completed) {
+      try {
+        await supabase
+          .from("generation_jobs")
+          .update({
+            status: "completed",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("job_id", jobId);
+
+        // Store the image URL on the parent image row
+        if (imageUrl) {
+          const { data: jobRow } = await supabase
+            .from("generation_jobs")
+            .select("image_id")
+            .eq("job_id", jobId)
+            .single();
+
+          if (jobRow?.image_id) {
+            await supabase
+              .from("images")
+              .update({ sfw_url: imageUrl })
+              .eq("id", jobRow.image_id);
+          }
+        }
+      } catch {
+        console.warn("Failed to update job status in Supabase");
+      }
+    }
+
     return NextResponse.json({
       jobId: job.jobId,
       cost: job.cost,
       scheduled: job.scheduled,
-      completed: job.result?.available ?? false,
-      imageUrl: job.result?.blobUrl ?? null,
+      completed,
+      imageUrl,
       imageUrlExpiration: job.result?.blobUrlExpirationDate ?? null,
     });
   } catch (err) {

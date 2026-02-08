@@ -1,7 +1,10 @@
 import type { CharacterData, SceneData, GenerationSettings } from "./types";
 import { buildPrompt, buildNegativePrompt } from "./prompt-builder";
 
-const CIVITAI_API_BASE = "https://civitai.com/api/v1";
+// Generation/job endpoints live on the orchestration host
+const ORCHESTRATION_BASE = "https://orchestration.civitai.com/v1";
+// Model browsing endpoints live on the public REST API
+const REST_BASE = "https://civitai.com/api/v1";
 
 export class CivitaiError extends Error {
   constructor(
@@ -23,12 +26,13 @@ function getApiKey(): string {
 }
 
 async function request<T>(
+  baseUrl: string,
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
   const apiKey = getApiKey();
 
-  const response = await fetch(`${CIVITAI_API_BASE}${path}`, {
+  const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -69,10 +73,11 @@ export async function submitGeneration(
   const prompt = buildPrompt(character, scene);
   const negativePrompt = buildNegativePrompt(scene);
 
-  return request<GenerationResponse>("/consumer/jobs", {
+  return request<GenerationResponse>(ORCHESTRATION_BASE, "/consumer/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      $type: "textToImage",
       model: settings.modelUrn,
       params: {
         prompt,
@@ -107,10 +112,10 @@ export interface JobStatus {
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatus> {
-  return request<JobStatus>(`/consumer/jobs/${jobId}`);
+  return request<JobStatus>(ORCHESTRATION_BASE, `/consumer/jobs/${jobId}`);
 }
 
-// -- Models --
+// -- Models (public REST API) --
 
 export interface CivitaiModel {
   id: number;
@@ -134,5 +139,5 @@ export async function searchModels(
 ): Promise<ModelsResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (query) params.set("query", query);
-  return request<ModelsResponse>(`/models?${params}`);
+  return request<ModelsResponse>(REST_BASE, `/models?${params}`);
 }

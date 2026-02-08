@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const CIVITAI_API_BASE = "https://civitai.com/api/v1";
+const CIVITAI_ORCHESTRATION_BASE = "https://orchestration.civitai.com/v1";
 
 export async function GET(
   _request: NextRequest,
@@ -16,7 +16,7 @@ export async function GET(
   }
 
   const response = await fetch(
-    `${CIVITAI_API_BASE}/consumer/jobs/${params.jobId}`,
+    `${CIVITAI_ORCHESTRATION_BASE}/consumer/jobs/${params.jobId}`,
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,

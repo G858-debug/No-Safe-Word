@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const CIVITAI_API_BASE = "https://civitai.com/api/v1";
+// REST API for model browsing; orchestration API for generation jobs
+const CIVITAI_REST_BASE = "https://civitai.com/api/v1";
+const CIVITAI_ORCHESTRATION_BASE = "https://orchestration.civitai.com/v1";
 
 export async function GET(request: NextRequest) {
   const apiKey = process.env.CIVITAI_API_KEY;
@@ -20,7 +22,7 @@ export async function GET(request: NextRequest) {
   const params = new URLSearchParams({ limit });
   if (query) params.set("query", query);
 
-  const response = await fetch(`${CIVITAI_API_BASE}/${endpoint}?${params}`, {
+  const response = await fetch(`${CIVITAI_REST_BASE}/${endpoint}?${params}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
 
-  const response = await fetch(`${CIVITAI_API_BASE}/consumer/jobs`, {
+  const response = await fetch(`${CIVITAI_ORCHESTRATION_BASE}/consumer/jobs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
