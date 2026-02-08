@@ -19,12 +19,15 @@
  */
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const TEST_RUN_ID = Date.now();
+const TEST_TITLE = `TEST STORY - DELETE ME - ${TEST_RUN_ID}`;
+const TEST_SLUG = `test-story-delete-me-${TEST_RUN_ID}`;
 
 // ─── Test Payload ──────────────────────────────────────────────
 
 const TEST_PAYLOAD = {
   series: {
-    title: "TEST STORY - DELETE ME",
+    title: TEST_TITLE,
     description: "Automated test series for pipeline validation. Safe to delete.",
     hashtag: "#TestStoryDeleteMe",
     total_parts: 2,
@@ -204,8 +207,6 @@ async function main() {
 
   if (importStatus !== 201) {
     console.error("\nImport failed. Response:", JSON.stringify(importResult, null, 2));
-    console.log("\nIf you see a duplicate slug error, a previous test run may not have");
-    console.log('cleaned up. Archive it via the dashboard or re-run with --cleanup-only.\n');
     process.exit(1);
   }
 
@@ -213,7 +214,7 @@ async function main() {
     importResult;
 
   check("Import: series_id", !!series_id, series_id);
-  check("Import: slug", slug === "test-story---delete-me", slug);
+  check("Import: slug", slug === TEST_SLUG, slug);
   check("Import: posts_created", posts_created === 2, `${posts_created}`);
   check("Import: characters_linked", characters_linked === 2, `${characters_linked}`);
   check(
@@ -241,7 +242,7 @@ async function main() {
   const { series, posts, characters, image_prompt_counts } = seriesData;
 
   // Series checks
-  check("Series title", series.title === "TEST STORY - DELETE ME", series.title);
+  check("Series title", series.title === TEST_TITLE, series.title);
   check("Series status", series.status === "characters_pending", series.status);
   check("Series total_parts", series.total_parts === 2, `${series.total_parts}`);
   check("Series hashtag", series.hashtag === "#TestStoryDeleteMe", series.hashtag);
