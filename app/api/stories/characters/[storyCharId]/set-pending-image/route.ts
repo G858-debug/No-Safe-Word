@@ -53,7 +53,7 @@ export async function POST(
         prose_description: {
           ...(typeof storyChar.prose_description === "object" ? storyChar.prose_description : {}),
           ...metadata,
-        },
+        } as unknown as string, // JSONB field typed as string in client
       })
       .eq("id", storyCharId);
 
