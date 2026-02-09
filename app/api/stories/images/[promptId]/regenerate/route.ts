@@ -16,7 +16,7 @@ export async function POST(
     // 1. Fetch the image prompt
     const { data: imgPrompt, error: fetchError } = await supabase
       .from("story_image_prompts")
-      .select("id, post_id, image_type, position, character_name, character_id, prompt")
+      .select("id, post_id, image_type, position, character_name, character_id, prompt, image_id")
       .eq("id", promptId)
       .single();
 
