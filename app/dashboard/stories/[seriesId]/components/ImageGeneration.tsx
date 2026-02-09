@@ -6,7 +6,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import ImageViewer from "@/components/ImageViewer";
 import {
   Select,
   SelectContent,
@@ -794,14 +793,15 @@ function ImageCard({
           </div>
         ) : hasImage ? (
           <div
-            className="h-full w-full cursor-pointer"
+            className="relative h-full w-full cursor-pointer"
             onClick={() => onImageClick(state.imageUrl!)}
           >
-            <ImageViewer
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={state.imageUrl!}
               alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
-              aspectRatio="2/3"
-              containerClassName="h-full w-full"
+              className="h-full w-full object-contain"
+              style={{ aspectRatio: "2/3" }}
             />
             {isApproved && (
               <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-[10px] font-medium text-white shadow backdrop-blur-sm">

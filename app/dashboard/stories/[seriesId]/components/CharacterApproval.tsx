@@ -11,7 +11,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import ImageViewer from "@/components/ImageViewer";
 import {
   Check,
   Loader2,
@@ -601,11 +600,12 @@ export default function CharacterApproval({
                     </div>
                   ) : displayUrl ? (
                     <div className="relative overflow-hidden rounded-lg">
-                      <ImageViewer
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
                         src={displayUrl}
                         alt={`Portrait of ${ch.characters.name}`}
-                        aspectRatio="3/4"
-                        containerClassName="rounded-lg"
+                        className="h-full w-full object-cover rounded-lg"
+                        style={{ aspectRatio: "3/4" }}
                       />
                       {state.approved && (
                         <div className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full bg-green-600/90 px-3 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-sm">
