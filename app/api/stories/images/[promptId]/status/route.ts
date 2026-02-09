@@ -65,12 +65,40 @@ export async function GET(
         .update({ status: "generated" })
         .eq("id", promptId);
 
+      // Auto-store the image if not already stored
+      let finalStoredUrl = storedUrl;
+      if (!storedUrl && blobUrl) {
+        try {
+          const filename = `stories/prompt-${promptId}-${Date.now()}.jpeg`;
+          const storeRes = await fetch(
+            `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/images/store`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                blob_url: blobUrl,
+                image_id: imgPrompt.image_id,
+                filename,
+              }),
+            }
+          );
+
+          if (storeRes.ok) {
+            const storeData = await storeRes.json();
+            finalStoredUrl = storeData.stored_url;
+          }
+        } catch (err) {
+          console.warn("Failed to auto-store image:", err);
+          // Continue without stored URL
+        }
+      }
+
       return NextResponse.json({
         promptId,
         status: "generated",
         jobId: job.job_id,
         blobUrl,
-        storedUrl,
+        storedUrl: finalStoredUrl,
       });
     }
 

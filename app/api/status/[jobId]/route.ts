@@ -22,6 +22,7 @@ export async function GET(
     const imageUrl = job.result?.[0]?.blobUrl ?? null;
 
     // Update Supabase job status (best-effort)
+    let finalImageUrl = imageUrl;
     if (completed) {
       try {
         await supabase
@@ -45,6 +46,18 @@ export async function GET(
               .from("images")
               .update({ sfw_url: imageUrl })
               .eq("id", jobRow.image_id);
+
+            // Check if this image already has a stored_url (permanent URL)
+            const { data: imageRow } = await supabase
+              .from("images")
+              .select("stored_url")
+              .eq("id", jobRow.image_id)
+              .single();
+
+            // Prefer stored_url over temporary blob URL
+            if (imageRow?.stored_url) {
+              finalImageUrl = imageRow.stored_url;
+            }
           }
         }
       } catch {
@@ -57,7 +70,7 @@ export async function GET(
       cost: job.cost,
       scheduled: job.scheduled,
       completed,
-      imageUrl,
+      imageUrl: finalImageUrl,
       imageUrlExpiration: job.result?.[0]?.blobUrlExpirationDate ?? null,
     });
   } catch (err) {

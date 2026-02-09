@@ -204,19 +204,58 @@ export default function CharacterApproval({
           if (data.completed && data.imageUrl) {
             clearInterval(pollTimers.current[storyCharId]);
             delete pollTimers.current[storyCharId];
-            updateChar(storyCharId, {
-              isGenerating: false,
-              imageUrl: data.imageUrl,
-              imageId: imageId,
-              error: null,
-            });
+
+            // Immediately store the image to Supabase Storage to preserve it
+            try {
+              const character = characters.find((c) => c.id === storyCharId);
+              const characterName = character?.characters.name || "character";
+              const timestamp = Date.now();
+              const filename = `characters/${characterName.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.jpeg`;
+
+              const storeRes = await fetch("/api/images/store", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  blob_url: data.imageUrl,
+                  image_id: imageId,
+                  filename,
+                }),
+              });
+
+              if (storeRes.ok) {
+                const storeData = await storeRes.json();
+                // Use the permanent stored URL instead of the temporary blob URL
+                updateChar(storyCharId, {
+                  isGenerating: false,
+                  imageUrl: storeData.stored_url,
+                  imageId: imageId,
+                  error: null,
+                });
+              } else {
+                // Fallback to blob URL if storage fails
+                updateChar(storyCharId, {
+                  isGenerating: false,
+                  imageUrl: data.imageUrl,
+                  imageId: imageId,
+                  error: null,
+                });
+              }
+            } catch {
+              // Fallback to blob URL if storage fails
+              updateChar(storyCharId, {
+                isGenerating: false,
+                imageUrl: data.imageUrl,
+                imageId: imageId,
+                error: null,
+              });
+            }
           }
         } catch {
           // Silently retry — will timeout eventually
         }
       }, POLL_INTERVAL);
     },
-    [updateChar]
+    [updateChar, characters]
   );
 
   // ------- Actions -------
