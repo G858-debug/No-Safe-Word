@@ -133,6 +133,7 @@ export default function ImageGeneration({
   >({});
   const [isPolling, setIsPolling] = useState(false);
   const pollingIdsRef = useRef<Set<string>>(new Set());
+  const promptToJobIdRef = useRef<Map<string, string>>(new Map());
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchApproving, setBatchApproving] = useState(false);
   const [selectedChapter, setSelectedChapter] = useState<string>("");
@@ -199,39 +200,56 @@ export default function ImageGeneration({
     if (!isPolling) return;
 
     const interval = setInterval(async () => {
-      const ids = Array.from(pollingIdsRef.current);
-      if (ids.length === 0) {
+      const promptIds = Array.from(pollingIdsRef.current);
+      if (promptIds.length === 0) {
+        setIsPolling(false);
+        return;
+      }
+
+      // Build array of {promptId, jobId} for polling
+      const pollTargets = promptIds
+        .map((promptId) => ({
+          promptId,
+          jobId: promptToJobIdRef.current.get(promptId),
+        }))
+        .filter((t) => t.jobId) as { promptId: string; jobId: string }[];
+
+      if (pollTargets.length === 0) {
         setIsPolling(false);
         return;
       }
 
       const results = await Promise.allSettled(
-        ids.map((id) =>
-          fetch(`/api/stories/images/${id}/status`)
+        pollTargets.map(({ promptId, jobId }) =>
+          fetch(`/api/status/${jobId}`)
             .then((r) => r.json())
-            .then((data) => ({ id, data }))
+            .then((data) => ({ promptId, jobId, data }))
         )
       );
 
       for (const result of results) {
         if (result.status !== "fulfilled") continue;
-        const { id, data } = result.value;
+        const { promptId, data } = result.value;
 
-        if (data.status === "generated" || data.status === "approved") {
-          pollingIdsRef.current.delete(id);
-          updatePrompt(id, {
-            status: data.status,
-            imageUrl: data.storedUrl || data.blobUrl || null,
+        if (data.completed) {
+          // Job completed successfully
+          pollingIdsRef.current.delete(promptId);
+          promptToJobIdRef.current.delete(promptId);
+          updatePrompt(promptId, {
+            status: "generated",
+            imageUrl: data.imageUrl || null,
             error: null,
           });
-        } else if (data.status === "failed") {
-          pollingIdsRef.current.delete(id);
-          updatePrompt(id, {
+        } else if (data.error) {
+          // Job failed
+          pollingIdsRef.current.delete(promptId);
+          promptToJobIdRef.current.delete(promptId);
+          updatePrompt(promptId, {
             status: "failed",
-            error: "Generation failed",
+            error: data.error || "Generation failed",
           });
         }
-        // If still "generating", keep polling
+        // If not completed and no error, keep polling
       }
 
       // Stop polling if no more IDs
@@ -271,6 +289,9 @@ export default function ImageGeneration({
 
         // Update state for all queued prompts
         for (const job of data.jobs || []) {
+          if (job.jobId) {
+            promptToJobIdRef.current.set(job.promptId, job.jobId);
+          }
           updatePrompt(job.promptId, {
             status: "generating",
             error: null,
@@ -328,6 +349,11 @@ export default function ImageGeneration({
         if (!res.ok) {
           const err = await res.json();
           throw new Error(err.error || "Regeneration failed");
+        }
+
+        const data = await res.json();
+        if (data.jobId) {
+          promptToJobIdRef.current.set(promptId, data.jobId);
         }
 
         pollingIdsRef.current.add(promptId);
@@ -662,6 +688,10 @@ export default function ImageGeneration({
                                   throw new Error(
                                     err.error || "Generation failed"
                                   );
+                                }
+                                const data = await res.json();
+                                if (data.jobId) {
+                                  promptToJobIdRef.current.set(ip.id, data.jobId);
                                 }
                                 pollingIdsRef.current.add(ip.id);
                                 setIsPolling(true);
