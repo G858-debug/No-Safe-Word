@@ -135,6 +135,7 @@ export default function CharacterApproval({
   const pollTimers = useRef<Record<string, NodeJS.Timeout>>({});
   const pollCounts = useRef<Record<string, number>>({});
   const [generatingAll, setGeneratingAll] = useState(false);
+  const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -318,18 +319,57 @@ export default function CharacterApproval({
 
   const handleGenerateAll = useCallback(async () => {
     setGeneratingAll(true);
+    setGenerateAllProgress(null);
+
     const toGenerate = characters.filter((ch) => {
       const s = charStates[ch.id];
       return s && !s.imageUrl && !s.isGenerating && !s.approved;
     });
 
-    for (const ch of toGenerate) {
-      await handleGenerate(ch.id);
-      // Small stagger to avoid hammering the API
-      await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < toGenerate.length; i++) {
+      const ch = toGenerate[i];
+      const charName = ch.characters.name;
+
+      setGenerateAllProgress(`Generating ${i + 1} of ${toGenerate.length}: ${charName}...`);
+
+      try {
+        // Start generation for this character
+        updateChar(ch.id, { isGenerating: true, error: null });
+
+        const res = await fetch(
+          `/api/stories/characters/${ch.id}/generate`,
+          { method: "POST" }
+        );
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Generation failed");
+        }
+
+        const data = await res.json();
+        startPolling(ch.id, data.jobId, data.imageId);
+
+        // Wait 2 seconds before starting the next one to avoid rate limits
+        if (i < toGenerate.length - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      } catch (err) {
+        // On error, mark this character as failed but continue with the next
+        updateChar(ch.id, {
+          isGenerating: false,
+          error: err instanceof Error ? err.message : "Generation failed",
+        });
+
+        // Still wait before next attempt to avoid hammering the API
+        if (i < toGenerate.length - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
     }
+
     setGeneratingAll(false);
-  }, [characters, charStates, handleGenerate]);
+    setGenerateAllProgress(null);
+  }, [characters, charStates, updateChar, startPolling]);
 
   // ------- Derived state -------
 
@@ -384,19 +424,26 @@ export default function CharacterApproval({
         </div>
 
         {ungeneratedCount > 0 && (
-          <Button
-            onClick={handleGenerateAll}
-            disabled={generatingAll || anyGenerating}
-            variant="outline"
-            size="sm"
-          >
-            {generatingAll ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Wand2 className="mr-2 h-4 w-4" />
+          <div className="flex flex-col items-end gap-2">
+            <Button
+              onClick={handleGenerateAll}
+              disabled={generatingAll || anyGenerating}
+              variant="outline"
+              size="sm"
+            >
+              {generatingAll ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="mr-2 h-4 w-4" />
+              )}
+              Generate All ({ungeneratedCount})
+            </Button>
+            {generateAllProgress && (
+              <p className="text-xs text-muted-foreground">
+                {generateAllProgress}
+              </p>
             )}
-            Generate All ({ungeneratedCount})
-          </Button>
+          </div>
         )}
       </div>
 

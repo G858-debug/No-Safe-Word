@@ -163,12 +163,13 @@ export async function POST(
       age: "",
     };
 
-    // 5. Generate each image
+    // 5. Generate each image sequentially with delays to avoid rate limits
     const jobs: QueuedJob[] = [];
     const failed: FailedJob[] = [];
     let skipped = 0;
 
-    for (const imgPrompt of prompts) {
+    for (let i = 0; i < prompts.length; i++) {
+      const imgPrompt = prompts[i];
       try {
         // Mark as generating
         await supabase
@@ -261,6 +262,11 @@ export async function POST(
           promptId: imgPrompt.id,
           jobId: result.jobs[0]?.jobId,
         });
+
+        // Wait 2 seconds before the next generation to avoid rate limits
+        if (i < prompts.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
       } catch (err) {
         // Mark as failed and continue with the rest
         await supabase
@@ -280,6 +286,11 @@ export async function POST(
           message
         );
         failed.push({ promptId: imgPrompt.id, error: message });
+
+        // Wait 2 seconds even after failure to avoid rate limits
+        if (i < prompts.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
       }
     }
 
