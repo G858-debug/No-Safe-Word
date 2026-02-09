@@ -108,11 +108,13 @@ export interface JobStatus {
   jobId: string;
   cost: number;
   scheduled: boolean;
-  result: JobResult;
+  result: JobResult[];
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatus> {
-  return request<JobStatus>(ORCHESTRATION_BASE, `/consumer/jobs/${jobId}`);
+  return request<JobStatus>(ORCHESTRATION_BASE, `/consumer/jobs/${jobId}`, {
+    cache: 'no-store',
+  });
 }
 
 // -- Models (public REST API) --

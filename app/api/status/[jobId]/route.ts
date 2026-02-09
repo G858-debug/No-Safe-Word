@@ -18,8 +18,8 @@ export async function GET(
 
     const job = await getJobStatus(jobId);
 
-    const completed = job.result?.available ?? false;
-    const imageUrl = job.result?.blobUrl ?? null;
+    const completed = job.result?.[0]?.available ?? false;
+    const imageUrl = job.result?.[0]?.blobUrl ?? null;
 
     // Update Supabase job status (best-effort)
     if (completed) {
@@ -58,7 +58,7 @@ export async function GET(
       scheduled: job.scheduled,
       completed,
       imageUrl,
-      imageUrlExpiration: job.result?.blobUrlExpirationDate ?? null,
+      imageUrlExpiration: job.result?.[0]?.blobUrlExpirationDate ?? null,
     });
   } catch (err) {
     if (err instanceof CivitaiError) {
