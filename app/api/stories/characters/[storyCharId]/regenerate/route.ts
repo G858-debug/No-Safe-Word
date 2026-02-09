@@ -27,6 +27,8 @@ export async function POST(
     const body = await request.json();
     const { prompt: customPrompt } = body as { prompt?: string };
 
+    console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}`);
+
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")

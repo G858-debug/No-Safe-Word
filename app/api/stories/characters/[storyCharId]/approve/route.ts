@@ -15,7 +15,10 @@ export async function POST(
       seed?: number;
     };
 
+    console.log(`[StoryPublisher] Approving character ${storyCharId}, image_id: ${image_id}, seed: ${seed}`);
+
     if (!image_id) {
+      console.error(`[StoryPublisher] Approval failed: no image_id provided`);
       return NextResponse.json(
         { error: "image_id is required" },
         { status: 400 }
@@ -58,8 +61,10 @@ export async function POST(
     }
 
     // 3. Download the Civitai blob and upload to Supabase Storage
+    console.log(`[StoryPublisher] Downloading image from: ${image.sfw_url}`);
     const imageResponse = await fetch(image.sfw_url);
     if (!imageResponse.ok) {
+      console.error(`[StoryPublisher] Failed to download image: ${imageResponse.statusText}`);
       return NextResponse.json(
         { error: `Failed to download image: ${imageResponse.statusText}` },
         { status: 502 }
@@ -72,6 +77,7 @@ export async function POST(
     const ext = contentType.includes("png") ? "png" : "jpeg";
     const storagePath = `characters/${image_id}.${ext}`;
 
+    console.log(`[StoryPublisher] Uploading to Supabase Storage: ${storagePath}`);
     const { error: uploadError } = await supabase.storage
       .from("story-images")
       .upload(storagePath, buffer, {
@@ -80,6 +86,7 @@ export async function POST(
       });
 
     if (uploadError) {
+      console.error(`[StoryPublisher] Storage upload failed:`, uploadError);
       return NextResponse.json(
         { error: `Storage upload failed: ${uploadError.message}` },
         { status: 500 }
@@ -89,6 +96,7 @@ export async function POST(
     const {
       data: { publicUrl },
     } = supabase.storage.from("story-images").getPublicUrl(storagePath);
+    console.log(`[StoryPublisher] Image stored at: ${publicUrl}`);
 
     // 4. Update the image record with the stored URL
     await supabase
@@ -97,6 +105,7 @@ export async function POST(
       .eq("id", image_id);
 
     // 5. Approve the story character
+    console.log(`[StoryPublisher] Updating story_characters to mark as approved`);
     const { data: updated, error: updateError } = await supabase
       .from("story_characters")
       .update({
@@ -109,12 +118,14 @@ export async function POST(
       .single();
 
     if (updateError) {
+      console.error(`[StoryPublisher] Failed to approve character:`, updateError);
       return NextResponse.json(
         { error: `Failed to approve character: ${updateError.message}` },
         { status: 500 }
       );
     }
 
+    console.log(`[StoryPublisher] Character approved successfully: ${storyCharId}`);
     return NextResponse.json({
       story_character: updated,
       stored_url: publicUrl,

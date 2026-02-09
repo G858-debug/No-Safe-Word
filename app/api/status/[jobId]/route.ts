@@ -16,10 +16,12 @@ export async function GET(
       );
     }
 
+    console.log(`[StoryPublisher] Polling job status: ${jobId}`);
     const job = await getJobStatus(jobId);
 
     const completed = job.result?.[0]?.available ?? false;
     const imageUrl = job.result?.[0]?.blobUrl ?? null;
+    console.log(`[StoryPublisher] Job ${jobId} status: completed=${completed}, hasImageUrl=${!!imageUrl}`);
 
     // Update Supabase job status (best-effort)
     let finalImageUrl = imageUrl;

@@ -11,7 +11,14 @@ export async function POST(request: NextRequest) {
       image_id?: string;
     };
 
+    console.log(`[StoryPublisher] Storing image from blob URL to Supabase Storage`, {
+      blob_url,
+      filename,
+      image_id
+    });
+
     if (!blob_url) {
+      console.error(`[StoryPublisher] Store image failed: no blob_url provided`);
       return NextResponse.json(
         { error: "blob_url is required" },
         { status: 400 }
@@ -21,6 +28,7 @@ export async function POST(request: NextRequest) {
     // 1. Download the image from Civitai blob URL
     const imageResponse = await fetch(blob_url);
     if (!imageResponse.ok) {
+      console.error(`[StoryPublisher] Failed to download image: ${imageResponse.statusText}`);
       return NextResponse.json(
         { error: `Failed to download image: ${imageResponse.statusText}` },
         { status: 502 }
@@ -35,6 +43,7 @@ export async function POST(request: NextRequest) {
     const ext = contentType.includes("png") ? "png" : "jpeg";
     const storagePath = `stories/${filename || `${crypto.randomUUID()}.${ext}`}`;
 
+    console.log(`[StoryPublisher] Uploading to Supabase Storage: ${storagePath}`);
     // 3. Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from("story-images")
@@ -44,6 +53,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
+      console.error(`[StoryPublisher] Storage upload failed:`, uploadError);
       return NextResponse.json(
         { error: `Storage upload failed: ${uploadError.message}` },
         { status: 500 }
@@ -57,12 +67,14 @@ export async function POST(request: NextRequest) {
 
     // 5. Update the image record with the stored URL if image_id provided
     if (image_id) {
+      console.log(`[StoryPublisher] Updating image record ${image_id} with stored_url: ${publicUrl}`);
       await supabase
         .from("images")
         .update({ stored_url: publicUrl })
         .eq("id", image_id);
     }
 
+    console.log(`[StoryPublisher] Image stored successfully: ${publicUrl}`);
     return NextResponse.json({
       stored_url: publicUrl,
       storage_path: storagePath,

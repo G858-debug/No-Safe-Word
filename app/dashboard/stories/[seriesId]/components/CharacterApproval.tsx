@@ -41,6 +41,8 @@ export interface CharacterFromAPI {
     description: Record<string, unknown>;
   };
   approved_image_url: string | null;
+  pending_image_id: string | null;
+  pending_image_url: string | null;
 }
 
 interface CharacterApprovalProps {
@@ -142,11 +144,25 @@ export default function CharacterApproval({
 
   // Initialize state from props (runs once)
   useEffect(() => {
+    console.log(`[StoryPublisher] CharacterApproval mounted with ${characters.length} characters:`,
+      characters.map(ch => ({
+        id: ch.id,
+        name: ch.characters.name,
+        approved: ch.approved,
+        approved_image_id: ch.approved_image_id,
+        approved_image_url: ch.approved_image_url
+      }))
+    );
+
     const initial: Record<string, CharState> = {};
     for (const ch of characters) {
+      // Use approved image if available, otherwise use pending image
+      const imageUrl = ch.approved_image_url || ch.pending_image_url || null;
+      const imageId = ch.approved_image_id || ch.pending_image_id || null;
+
       initial[ch.id] = {
-        imageUrl: ch.approved_image_url || null,
-        imageId: ch.approved_image_id || null,
+        imageUrl,
+        imageId,
         isGenerating: false,
         approved: ch.approved,
         approvedUrl: ch.approved_image_url || null,
@@ -158,6 +174,7 @@ export default function CharacterApproval({
       };
     }
     setCharStates(initial);
+    console.log(`[StoryPublisher] Initial character states:`, initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -194,6 +211,8 @@ export default function CharacterApproval({
 
   const startPolling = useCallback(
     (storyCharId: string, jobId: string, imageId: string) => {
+      console.log(`[StoryPublisher] Starting polling for character ${storyCharId}, jobId: ${jobId}, imageId: ${imageId}`);
+
       // Clear existing poll if any
       if (pollTimers.current[storyCharId]) {
         clearInterval(pollTimers.current[storyCharId]);
@@ -212,6 +231,7 @@ export default function CharacterApproval({
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
         if (pollCounts.current[storyCharId] >= MAX_POLL_ATTEMPTS) {
+          console.error(`[StoryPublisher] Generation timed out for character ${storyCharId} after ${elapsed}s`);
           clearInterval(pollTimers.current[storyCharId]);
           delete pollTimers.current[storyCharId];
           updateChar(storyCharId, {
@@ -226,8 +246,13 @@ export default function CharacterApproval({
           const res = await fetch(`/api/status/${jobId}`);
           if (!res.ok) throw new Error("Status check failed");
           const data = await res.json();
+          console.log(`[StoryPublisher] Poll attempt ${pollCounts.current[storyCharId]} for ${storyCharId}:`, {
+            completed: data.completed,
+            hasImageUrl: !!data.imageUrl
+          });
 
           if (data.completed && data.imageUrl) {
+            console.log(`[StoryPublisher] Generation completed for ${storyCharId}, imageUrl: ${data.imageUrl}`);
             clearInterval(pollTimers.current[storyCharId]);
             delete pollTimers.current[storyCharId];
 
@@ -238,6 +263,7 @@ export default function CharacterApproval({
               const timestamp = Date.now();
               const filename = `characters/${characterName.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.jpeg`;
 
+              console.log(`[StoryPublisher] Storing image to Supabase Storage for ${characterName}`);
               const storeRes = await fetch("/api/images/store", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -250,6 +276,23 @@ export default function CharacterApproval({
 
               if (storeRes.ok) {
                 const storeData = await storeRes.json();
+                console.log(`[StoryPublisher] Image stored successfully: ${storeData.stored_url}`);
+
+                // Persist the pending image to the database so it survives page refresh
+                try {
+                  await fetch(`/api/stories/characters/${storyCharId}/set-pending-image`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      image_id: imageId,
+                      image_url: storeData.stored_url,
+                    }),
+                  });
+                  console.log(`[StoryPublisher] Pending image persisted to database`);
+                } catch (persistErr) {
+                  console.warn(`[StoryPublisher] Failed to persist pending image:`, persistErr);
+                }
+
                 // Use the permanent stored URL instead of the temporary blob URL
                 updateChar(storyCharId, {
                   isGenerating: false,
@@ -260,6 +303,7 @@ export default function CharacterApproval({
                   pollStartTime: null,
                 });
               } else {
+                console.warn(`[StoryPublisher] Storage failed, using blob URL as fallback`);
                 // Fallback to blob URL if storage fails
                 updateChar(storyCharId, {
                   isGenerating: false,
@@ -270,7 +314,8 @@ export default function CharacterApproval({
                   pollStartTime: null,
                 });
               }
-            } catch {
+            } catch (err) {
+              console.error(`[StoryPublisher] Error storing image:`, err);
               // Fallback to blob URL if storage fails
               updateChar(storyCharId, {
                 isGenerating: false,
@@ -294,6 +339,7 @@ export default function CharacterApproval({
 
   const handleGenerate = useCallback(
     async (storyCharId: string) => {
+      console.log(`[StoryPublisher] Generating portrait for character ${storyCharId}`);
       updateChar(storyCharId, { isGenerating: true, error: null });
 
       try {
@@ -303,11 +349,14 @@ export default function CharacterApproval({
         );
         if (!res.ok) {
           const err = await res.json();
+          console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, err);
           throw new Error(err.error || "Generation failed");
         }
         const data = await res.json();
+        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}`);
         startPolling(storyCharId, data.jobId, data.imageId);
       } catch (err) {
+        console.error(`[StoryPublisher] Error in handleGenerate:`, err);
         updateChar(storyCharId, {
           isGenerating: false,
           error: err instanceof Error ? err.message : "Generation failed",
@@ -357,8 +406,12 @@ export default function CharacterApproval({
   const handleApprove = useCallback(
     async (storyCharId: string) => {
       const state = charStates[storyCharId];
-      if (!state?.imageId) return;
+      if (!state?.imageId) {
+        console.error(`[StoryPublisher] Cannot approve - no imageId for character ${storyCharId}`);
+        return;
+      }
 
+      console.log(`[StoryPublisher] Approving character ${storyCharId}, imageId: ${state.imageId}`);
       updateChar(storyCharId, { error: null });
 
       try {
@@ -372,14 +425,17 @@ export default function CharacterApproval({
         );
         if (!res.ok) {
           const err = await res.json();
+          console.error(`[StoryPublisher] Approval failed for ${storyCharId}:`, err);
           throw new Error(err.error || "Approval failed");
         }
         const data = await res.json();
+        console.log(`[StoryPublisher] Approval successful for ${storyCharId}, stored_url: ${data.stored_url}`);
         updateChar(storyCharId, {
           approved: true,
           approvedUrl: data.stored_url || state.imageUrl,
         });
       } catch (err) {
+        console.error(`[StoryPublisher] Error in handleApprove:`, err);
         updateChar(storyCharId, {
           error: err instanceof Error ? err.message : "Approval failed",
         });

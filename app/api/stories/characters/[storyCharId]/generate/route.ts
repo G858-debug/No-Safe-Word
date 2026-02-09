@@ -24,6 +24,8 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
+    console.log(`[StoryPublisher] Generating portrait for storyCharId: ${storyCharId}`);
+
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
@@ -32,6 +34,7 @@ export async function POST(
       .single();
 
     if (scError || !storyChar) {
+      console.error(`[StoryPublisher] Story character not found: ${storyCharId}`, scError);
       return NextResponse.json(
         { error: "Story character not found" },
         { status: 404 }
@@ -46,11 +49,14 @@ export async function POST(
       .single();
 
     if (charError || !character) {
+      console.error(`[StoryPublisher] Character not found: ${storyChar.character_id}`, charError);
       return NextResponse.json(
         { error: "Character not found" },
         { status: 404 }
       );
     }
+
+    console.log(`[StoryPublisher] Generating for character: ${character.name} (${character.id})`);
 
     // 3. Build CharacterData from the stored description JSON
     const desc = character.description as Record<string, string>;
@@ -72,7 +78,13 @@ export async function POST(
 
     // 4. Generate with default settings (random seed)
     const settings = { ...DEFAULT_SETTINGS, seed: -1, batchSize: 1 };
+    console.log(`[StoryPublisher] Submitting generation to Civitai for ${character.name}`);
     const result = await submitGeneration(characterData, PORTRAIT_SCENE, settings);
+    console.log(`[StoryPublisher] Civitai response:`, {
+      jobCount: result.jobs.length,
+      firstJobId: result.jobs[0]?.jobId,
+      cost: result.jobs[0]?.cost
+    });
 
     // 5. Persist image record and generation jobs
     const prompt = buildPrompt(characterData, PORTRAIT_SCENE);
@@ -101,8 +113,11 @@ export async function POST(
       .single();
 
     if (imgError || !imageRow) {
+      console.error(`[StoryPublisher] Failed to create image record:`, imgError);
       throw new Error(`Failed to create image record: ${imgError?.message}`);
     }
+
+    console.log(`[StoryPublisher] Created image record: ${imageRow.id}`);
 
     if (result.jobs.length > 0) {
       const jobRows = result.jobs.map((job) => ({
@@ -112,8 +127,10 @@ export async function POST(
         cost: job.cost,
       }));
       await supabase.from("generation_jobs").insert(jobRows);
+      console.log(`[StoryPublisher] Inserted ${jobRows.length} generation job(s)`);
     }
 
+    console.log(`[StoryPublisher] Generation started - jobId: ${result.jobs[0]?.jobId}, imageId: ${imageRow.id}`);
     return NextResponse.json({
       jobId: result.jobs[0]?.jobId,
       imageId: imageRow.id,
