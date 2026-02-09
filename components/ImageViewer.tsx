@@ -39,7 +39,7 @@ export default function ImageViewer({
   }, []);
 
   // Calculate distance between two touch points
-  const getTouchDistance = (touch1: Touch, touch2: Touch) => {
+  const getTouchDistance = (touch1: React.Touch, touch2: React.Touch) => {
     const dx = touch1.clientX - touch2.clientX;
     const dy = touch1.clientY - touch2.clientY;
     return Math.sqrt(dx * dx + dy * dy);
