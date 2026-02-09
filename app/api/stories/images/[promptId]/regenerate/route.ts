@@ -27,13 +27,39 @@ export async function POST(
       );
     }
 
-    // 2. Mark as generating
+    // 2. Clean up old image from storage if it exists
+    try {
+      // Check if this prompt already has an image linked
+      if (imgPrompt.image_id) {
+        const { data: oldImage } = await supabase
+          .from("images")
+          .select("stored_url")
+          .eq("id", imgPrompt.image_id)
+          .single();
+
+        if (oldImage?.stored_url) {
+          // Extract storage path from URL
+          // URL format: https://{project}.supabase.co/storage/v1/object/public/story-images/{path}
+          const urlParts = oldImage.stored_url.split("/story-images/");
+          if (urlParts.length === 2) {
+            const storagePath = urlParts[1];
+            await supabase.storage.from("story-images").remove([storagePath]);
+            console.log(`Deleted old story image from storage: ${storagePath}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to clean up old story image:", err);
+      // Continue with regeneration even if cleanup fails
+    }
+
+    // 3. Mark as generating
     await supabase
       .from("story_image_prompts")
       .update({ status: "generating" })
       .eq("id", promptId);
 
-    // 3. Look up character data and approved seed if linked
+    // 4. Look up character data and approved seed if linked
     let charData: CharacterData = {
       name: "",
       gender: "female",
@@ -99,7 +125,7 @@ export async function POST(
       }
     }
 
-    // 4. Build scene from the stored prompt
+    // 5. Build scene from the stored prompt
     const isNsfw = imgPrompt.image_type === "website_nsfw_paired";
     const mode: "sfw" | "nsfw" = isNsfw ? "nsfw" : "sfw";
 
@@ -113,11 +139,11 @@ export async function POST(
       additionalTags: [],
     };
 
-    // 5. Submit generation
+    // 6. Submit generation
     const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1 };
     const result = await submitGeneration(charData, scene, settings);
 
-    // 6. Persist image record
+    // 7. Persist image record
     const negativePrompt = buildNegativePrompt(scene);
     const { data: imageRow, error: imgError } = await supabase
       .from("images")

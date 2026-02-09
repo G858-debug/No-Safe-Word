@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import ImageViewer from "@/components/ImageViewer";
 import {
   Select,
   SelectContent,
@@ -792,13 +793,15 @@ function ImageCard({
             <p className="text-xs text-blue-400">Generating...</p>
           </div>
         ) : hasImage ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+          <div
+            className="h-full w-full cursor-pointer"
+            onClick={() => onImageClick(state.imageUrl!)}
+          >
+            <ImageViewer
               src={state.imageUrl!}
               alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
-              className="h-full w-full cursor-pointer object-cover transition-opacity hover:opacity-90"
-              onClick={() => onImageClick(state.imageUrl!)}
+              aspectRatio="2/3"
+              containerClassName="h-full w-full"
             />
             {isApproved && (
               <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-[10px] font-medium text-white shadow backdrop-blur-sm">
@@ -806,7 +809,7 @@ function ImageCard({
                 Approved
               </div>
             )}
-          </>
+          </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="mb-2 h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">

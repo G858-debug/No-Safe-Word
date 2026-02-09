@@ -73,7 +73,41 @@ export async function POST(
       age: desc.age || "",
     };
 
-    // 4. Determine prompt and negative prompt
+    // 4. Clean up old image from storage if it exists
+    try {
+      // Find any previously generated images for this character
+      const { data: oldImages } = await supabase
+        .from("images")
+        .select("id, stored_url")
+        .eq("character_id", character.id)
+        .not("stored_url", "is", null);
+
+      if (oldImages && oldImages.length > 0) {
+        // Delete old images from storage
+        const pathsToDelete: string[] = [];
+
+        for (const img of oldImages) {
+          if (img.stored_url) {
+            // Extract storage path from URL
+            // URL format: https://{project}.supabase.co/storage/v1/object/public/story-images/{path}
+            const urlParts = img.stored_url.split("/story-images/");
+            if (urlParts.length === 2) {
+              pathsToDelete.push(urlParts[1]);
+            }
+          }
+        }
+
+        if (pathsToDelete.length > 0) {
+          await supabase.storage.from("story-images").remove(pathsToDelete);
+          console.log(`Deleted ${pathsToDelete.length} old character images from storage`);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to clean up old character images:", err);
+      // Continue with regeneration even if cleanup fails
+    }
+
+    // 5. Determine prompt and negative prompt
     let prompt: string;
     let negativePrompt: string;
 
@@ -85,11 +119,11 @@ export async function POST(
       negativePrompt = buildNegativePrompt(PORTRAIT_SCENE);
     }
 
-    // 5. Generate with new random seed
+    // 6. Generate with new random seed
     const settings = { ...DEFAULT_SETTINGS, seed: -1, batchSize: 1 };
     const result = await submitGeneration(characterData, PORTRAIT_SCENE, settings);
 
-    // 6. Persist image record and generation jobs
+    // 7. Persist image record and generation jobs
     const { data: imageRow, error: imgError } = await supabase
       .from("images")
       .insert({
