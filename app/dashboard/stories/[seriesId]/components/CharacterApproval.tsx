@@ -58,6 +58,8 @@ interface CharState {
   prompt: string;
   error: string | null;
   showDescription: boolean;
+  jobId: string | null;
+  pollStartTime: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +121,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 }
 
 const POLL_INTERVAL = 3000;
-const MAX_POLL_ATTEMPTS = 60; // 3 minutes
+const MAX_POLL_ATTEMPTS = 120; // 6 minutes
 
 // ---------------------------------------------------------------------------
 // Component
@@ -136,6 +138,7 @@ export default function CharacterApproval({
   const pollCounts = useRef<Record<string, number>>({});
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
+  const [, setTick] = useState(0); // Force re-render for elapsed time display
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -150,6 +153,8 @@ export default function CharacterApproval({
         prompt: buildPortraitPrompt(ch.characters.description || {}),
         error: null,
         showDescription: false,
+        jobId: null,
+        pollStartTime: null,
       };
     }
     setCharStates(initial);
@@ -162,6 +167,18 @@ export default function CharacterApproval({
       Object.values(pollTimers.current).forEach(clearInterval);
     };
   }, []);
+
+  // Update elapsed time display every second when any character is generating
+  useEffect(() => {
+    const anyGenerating = Object.values(charStates).some((s) => s.isGenerating);
+    if (!anyGenerating) return;
+
+    const interval = setInterval(() => {
+      setTick((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [charStates]);
 
   // ------- Helpers -------
 
@@ -182,16 +199,25 @@ export default function CharacterApproval({
         clearInterval(pollTimers.current[storyCharId]);
       }
       pollCounts.current[storyCharId] = 0;
+      const startTime = Date.now();
+
+      // Store jobId and start time in state
+      updateChar(storyCharId, {
+        jobId,
+        pollStartTime: startTime,
+      });
 
       pollTimers.current[storyCharId] = setInterval(async () => {
         pollCounts.current[storyCharId]++;
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
         if (pollCounts.current[storyCharId] >= MAX_POLL_ATTEMPTS) {
           clearInterval(pollTimers.current[storyCharId]);
           delete pollTimers.current[storyCharId];
           updateChar(storyCharId, {
             isGenerating: false,
-            error: "Generation timed out. Please try again.",
+            error: "Generation timed out. Click 'Check Status' to retry.",
+            pollStartTime: null,
           });
           return;
         }
@@ -230,6 +256,8 @@ export default function CharacterApproval({
                   imageUrl: storeData.stored_url,
                   imageId: imageId,
                   error: null,
+                  jobId: null,
+                  pollStartTime: null,
                 });
               } else {
                 // Fallback to blob URL if storage fails
@@ -238,6 +266,8 @@ export default function CharacterApproval({
                   imageUrl: data.imageUrl,
                   imageId: imageId,
                   error: null,
+                  jobId: null,
+                  pollStartTime: null,
                 });
               }
             } catch {
@@ -247,6 +277,8 @@ export default function CharacterApproval({
                 imageUrl: data.imageUrl,
                 imageId: imageId,
                 error: null,
+                jobId: null,
+                pollStartTime: null,
               });
             }
           }
@@ -356,6 +388,27 @@ export default function CharacterApproval({
     [charStates, updateChar]
   );
 
+  const handleCheckStatus = useCallback(
+    async (storyCharId: string) => {
+      const state = charStates[storyCharId];
+      if (!state?.jobId || !state?.imageId) {
+        updateChar(storyCharId, {
+          error: "No job ID found. Please regenerate.",
+        });
+        return;
+      }
+
+      updateChar(storyCharId, {
+        isGenerating: true,
+        error: null,
+      });
+
+      // Re-start polling with the existing jobId and imageId
+      startPolling(storyCharId, state.jobId, state.imageId);
+    },
+    [charStates, updateChar, startPolling]
+  );
+
   const handleGenerateAll = useCallback(async () => {
     setGeneratingAll(true);
     setGenerateAllProgress(null);
@@ -388,9 +441,9 @@ export default function CharacterApproval({
         const data = await res.json();
         startPolling(ch.id, data.jobId, data.imageId);
 
-        // Wait 2 seconds before starting the next one to avoid rate limits
+        // Wait 4 seconds before starting the next one to avoid rate limits
         if (i < toGenerate.length - 1) {
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 4000));
         }
       } catch (err) {
         // On error, mark this character as failed but continue with the next
@@ -401,7 +454,7 @@ export default function CharacterApproval({
 
         // Still wait before next attempt to avoid hammering the API
         if (i < toGenerate.length - 1) {
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 4000));
         }
       }
     }
@@ -594,9 +647,11 @@ export default function CharacterApproval({
                       <p className="text-sm font-medium text-blue-400">
                         Generating portrait...
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        This may take up to a minute
-                      </p>
+                      {state.pollStartTime && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {Math.floor((Date.now() - state.pollStartTime) / 1000)} seconds elapsed
+                        </p>
+                      )}
                     </div>
                   ) : displayUrl ? (
                     <div className="relative overflow-hidden rounded-lg">
@@ -650,7 +705,40 @@ export default function CharacterApproval({
 
                 {/* Action buttons */}
                 <div className="flex items-center gap-2">
-                  {!hasImage && !state.isGenerating && (
+                  {!hasImage && !state.isGenerating && !state.error && (
+                    <Button
+                      onClick={() => handleGenerate(ch.id)}
+                      disabled={generatingAll}
+                      size="sm"
+                    >
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Generate Portrait
+                    </Button>
+                  )}
+
+                  {!hasImage && !state.isGenerating && state.error && state.jobId && (
+                    <>
+                      <Button
+                        onClick={() => handleCheckStatus(ch.id)}
+                        disabled={generatingAll}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Check Status
+                      </Button>
+                      <Button
+                        onClick={() => handleGenerate(ch.id)}
+                        disabled={generatingAll}
+                        size="sm"
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Generate New
+                      </Button>
+                    </>
+                  )}
+
+                  {!hasImage && !state.isGenerating && state.error && !state.jobId && (
                     <Button
                       onClick={() => handleGenerate(ch.id)}
                       disabled={generatingAll}
