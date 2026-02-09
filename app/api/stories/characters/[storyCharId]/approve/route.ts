@@ -114,7 +114,7 @@ export async function POST(
         approved_seed: seed ?? null,
       })
       .eq("id", storyCharId)
-      .select()
+      .select("*, series_id")
       .single();
 
     if (updateError) {
@@ -126,6 +126,26 @@ export async function POST(
     }
 
     console.log(`[StoryPublisher] Character approved successfully: ${storyCharId}`);
+
+    // 6. Check if all characters are now approved and update series status
+    if (updated) {
+      const { data: allChars } = await supabase
+        .from("story_characters")
+        .select("id, approved")
+        .eq("series_id", updated.series_id);
+
+      if (allChars && allChars.length > 0) {
+        const allApproved = allChars.every((ch) => ch.approved);
+        if (allApproved) {
+          console.log(`[StoryPublisher] All characters approved for series ${updated.series_id}, updating series status`);
+          await supabase
+            .from("story_series")
+            .update({ status: "images_pending" })
+            .eq("id", updated.series_id);
+        }
+      }
+    }
+
     return NextResponse.json({
       story_character: updated,
       stored_url: publicUrl,
