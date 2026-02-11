@@ -1,4 +1,4 @@
-import type { CharacterData, SceneData } from "./types";
+import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 export function buildPrompt(
   character: CharacterData,

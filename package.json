@@ -1,12 +1,18 @@
 {
-  "name": "no-safe-word",
+  "name": "no-safe-word-monorepo",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev": "npm run dev --workspace=@no-safe-word/dashboard",
+    "build": "turbo run build",
+    "build:dashboard": "npm run build --workspace=@no-safe-word/dashboard",
+    "start": "npm run start --workspace=@no-safe-word/dashboard",
+    "lint": "turbo run lint --continue",
+    "test": "npm run test --workspaces --if-present"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
@@ -35,6 +41,7 @@
     "eslint-config-next": "14.0.4",
     "postcss": "^8",
     "tailwindcss": "^3.4",
+    "turbo": "^2.0.0",
     "typescript": "^5"
   }
 }

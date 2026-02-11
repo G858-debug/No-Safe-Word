@@ -1,4 +1,4 @@
-import type { CharacterData, SceneData, GenerationSettings } from "./types";
+import type { CharacterData, SceneData, GenerationSettings } from "@no-safe-word/shared";
 import { buildPrompt, buildNegativePrompt } from "./prompt-builder";
 
 // Generation/job endpoints live on the orchestration host

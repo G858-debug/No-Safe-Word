@@ -1,0 +1,26 @@
+{
+  "name": "@no-safe-word/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./story-types": "./src/story-types.ts",
+    "./constants": "./src/constants.ts",
+    "./utils": "./src/utils.ts",
+    "./database": "./src/database.types.ts"
+  },
+  "scripts": {
+    "lint": "eslint . --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}

@@ -1,11 +1,11 @@
-import { supabase } from "@/lib/supabase";
-import type { Json } from "@/lib/database.types";
+import { supabase } from "./supabase";
+import type { Json } from "@no-safe-word/shared";
 import {
   slugify,
   type StoryImportPayload,
   type ImportResult,
   type CharacterImport,
-} from "@/lib/story-types";
+} from "@no-safe-word/shared";
 
 /**
  * Import a complete story payload into the database.
