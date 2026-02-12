@@ -1,7 +1,7 @@
 -- Enable RLS on all tables
-alter table if exists public.users enable row level security;
-alter table if exists public.subscriptions enable row level security;
-alter table if exists public.payments enable row level security;
+alter table if exists public.nsw_users enable row level security;
+alter table if exists public.nsw_subscriptions enable row level security;
+alter table if exists public.nsw_payments enable row level security;
 alter table if exists public.content_types enable row level security;
 alter table if exists public.characters enable row level security;
 alter table if exists public.images enable row level security;
@@ -11,36 +11,44 @@ alter table if exists public.story_posts enable row level security;
 alter table if exists public.story_characters enable row level security;
 alter table if exists public.story_image_prompts enable row level security;
 
--- Users: can only see/update their own profile
+-- NSW Users: can only see/update their own profile
 create policy "Users can view own profile"
-  on public.users for select
-  using (auth.uid() = id);
+  on public.nsw_users for select
+  using (auth.uid() = auth_user_id);
 
 create policy "Users can update own profile"
-  on public.users for update
-  using (auth.uid() = id);
+  on public.nsw_users for update
+  using (auth.uid() = auth_user_id);
 
--- Subscriptions: users see their own, admins see all
+-- NSW Subscriptions: users see their own, admins see all
 create policy "Users can view own subscriptions"
-  on public.subscriptions for select
+  on public.nsw_subscriptions for select
   using (
-    auth.uid() = user_id
+    exists (
+      select 1 from public.nsw_users
+      where nsw_users.id = nsw_subscriptions.user_id
+      and nsw_users.auth_user_id = auth.uid()
+    )
     or exists (
-      select 1 from public.users
-      where users.id = auth.uid()
-      and users.role = 'admin'
+      select 1 from public.nsw_users
+      where nsw_users.auth_user_id = auth.uid()
+      and nsw_users.role = 'admin'
     )
   );
 
--- Payments: users see their own, admins see all
+-- NSW Payments: users see their own, admins see all
 create policy "Users can view own payments"
-  on public.payments for select
+  on public.nsw_payments for select
   using (
-    auth.uid() = user_id
+    exists (
+      select 1 from public.nsw_users
+      where nsw_users.id = nsw_payments.user_id
+      and nsw_users.auth_user_id = auth.uid()
+    )
     or exists (
-      select 1 from public.users
-      where users.id = auth.uid()
-      and users.role = 'admin'
+      select 1 from public.nsw_users
+      where nsw_users.auth_user_id = auth.uid()
+      and nsw_users.role = 'admin'
     )
   );
 
@@ -53,9 +61,9 @@ create policy "Admins can manage content types"
   on public.content_types for all
   using (
     exists (
-      select 1 from public.users
-      where users.id = auth.uid()
-      and users.role = 'admin'
+      select 1 from public.nsw_users
+      where nsw_users.auth_user_id = auth.uid()
+      and nsw_users.role = 'admin'
     )
   );
 

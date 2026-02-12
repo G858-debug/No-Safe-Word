@@ -9,6 +9,159 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      nsw_users: {
+        Row: {
+          id: string;
+          auth_user_id: string;
+          email: string;
+          display_name: string | null;
+          role: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          auth_user_id: string;
+          email: string;
+          display_name?: string | null;
+          role?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          auth_user_id?: string;
+          email?: string;
+          display_name?: string | null;
+          role?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "nsw_users_auth_user_id_fkey";
+            columns: ["auth_user_id"];
+            isOneToOne: true;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      nsw_subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          plan: string;
+          status: string;
+          starts_at: string;
+          ends_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          plan: string;
+          status: string;
+          starts_at: string;
+          ends_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          plan?: string;
+          status?: string;
+          starts_at?: string;
+          ends_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "nsw_subscriptions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "nsw_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      nsw_payments: {
+        Row: {
+          id: string;
+          user_id: string;
+          subscription_id: string | null;
+          amount: number;
+          currency: string;
+          status: string;
+          payment_provider: string | null;
+          provider_payment_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          subscription_id?: string | null;
+          amount: number;
+          currency?: string;
+          status: string;
+          payment_provider?: string | null;
+          provider_payment_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          subscription_id?: string | null;
+          amount?: number;
+          currency?: string;
+          status?: string;
+          payment_provider?: string | null;
+          provider_payment_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "nsw_payments_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "nsw_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "nsw_payments_subscription_id_fkey";
+            columns: ["subscription_id"];
+            isOneToOne: false;
+            referencedRelation: "nsw_subscriptions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      content_types: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          settings: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          settings?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string | null;
+          settings?: Json;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       characters: {
         Row: {
           id: string;
@@ -383,6 +536,23 @@ export interface ImageSettings {
   batchSize: number;
 }
 
+// NSW User-related types
+export type NswUser = Database["public"]["Tables"]["nsw_users"]["Row"];
+export type NswUserInsert = Database["public"]["Tables"]["nsw_users"]["Insert"];
+export type NswUserUpdate = Database["public"]["Tables"]["nsw_users"]["Update"];
+export type NswSubscription = Database["public"]["Tables"]["nsw_subscriptions"]["Row"];
+export type NswSubscriptionInsert = Database["public"]["Tables"]["nsw_subscriptions"]["Insert"];
+export type NswSubscriptionUpdate = Database["public"]["Tables"]["nsw_subscriptions"]["Update"];
+export type NswPayment = Database["public"]["Tables"]["nsw_payments"]["Row"];
+export type NswPaymentInsert = Database["public"]["Tables"]["nsw_payments"]["Insert"];
+export type NswPaymentUpdate = Database["public"]["Tables"]["nsw_payments"]["Update"];
+
+// Content types
+export type ContentType = Database["public"]["Tables"]["content_types"]["Row"];
+export type ContentTypeInsert = Database["public"]["Tables"]["content_types"]["Insert"];
+export type ContentTypeUpdate = Database["public"]["Tables"]["content_types"]["Update"];
+
+// Character and image types
 export type Character = Database["public"]["Tables"]["characters"]["Row"];
 export type CharacterInsert =
   Database["public"]["Tables"]["characters"]["Insert"];
@@ -392,6 +562,8 @@ export type GenerationJobRow =
   Database["public"]["Tables"]["generation_jobs"]["Row"];
 export type GenerationJobInsert =
   Database["public"]["Tables"]["generation_jobs"]["Insert"];
+
+// Story types
 export type StorySeriesRow =
   Database["public"]["Tables"]["story_series"]["Row"];
 export type StorySeriesInsert =

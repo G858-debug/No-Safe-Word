@@ -1,6 +1,7 @@
--- Users table (extends Supabase auth.users)
-create table if not exists public.users (
-  id uuid primary key references auth.users(id) on delete cascade,
+-- NSW Users table (separate from fitness app users)
+create table if not exists public.nsw_users (
+  id uuid primary key default uuid_generate_v4(),
+  auth_user_id uuid not null unique references auth.users(id) on delete cascade,
   email text not null unique,
   display_name text,
   role text not null default 'viewer' check (role in ('admin', 'editor', 'viewer')),
@@ -8,12 +9,12 @@ create table if not exists public.users (
   updated_at timestamptz not null default now()
 );
 
-comment on table public.users is 'User profiles extending Supabase auth';
+comment on table public.nsw_users is 'No Safe Word user profiles';
 
--- Subscriptions table
-create table if not exists public.subscriptions (
+-- NSW Subscriptions table
+create table if not exists public.nsw_subscriptions (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid not null references public.users(id) on delete cascade,
+  user_id uuid not null references public.nsw_users(id) on delete cascade,
   plan text not null check (plan in ('free', 'basic', 'premium', 'enterprise')),
   status text not null check (status in ('active', 'cancelled', 'expired', 'trial')),
   starts_at timestamptz not null,
@@ -22,15 +23,15 @@ create table if not exists public.subscriptions (
   updated_at timestamptz not null default now()
 );
 
-comment on table public.subscriptions is 'User subscription plans';
-create index if not exists idx_subscriptions_user_id on public.subscriptions(user_id);
-create index if not exists idx_subscriptions_status on public.subscriptions(status);
+comment on table public.nsw_subscriptions is 'No Safe Word subscription plans';
+create index if not exists idx_nsw_subscriptions_user_id on public.nsw_subscriptions(user_id);
+create index if not exists idx_nsw_subscriptions_status on public.nsw_subscriptions(status);
 
--- Payments table
-create table if not exists public.payments (
+-- NSW Payments table
+create table if not exists public.nsw_payments (
   id uuid primary key default uuid_generate_v4(),
-  user_id uuid not null references public.users(id) on delete cascade,
-  subscription_id uuid references public.subscriptions(id) on delete set null,
+  user_id uuid not null references public.nsw_users(id) on delete cascade,
+  subscription_id uuid references public.nsw_subscriptions(id) on delete set null,
   amount numeric not null,
   currency text not null default 'ZAR',
   status text not null check (status in ('pending', 'succeeded', 'failed', 'refunded')),
@@ -39,9 +40,9 @@ create table if not exists public.payments (
   created_at timestamptz not null default now()
 );
 
-comment on table public.payments is 'Payment transaction history';
-create index if not exists idx_payments_user_id on public.payments(user_id);
-create index if not exists idx_payments_status on public.payments(status);
+comment on table public.nsw_payments is 'No Safe Word payment transaction history';
+create index if not exists idx_nsw_payments_user_id on public.nsw_payments(user_id);
+create index if not exists idx_nsw_payments_status on public.nsw_payments(status);
 
 -- Content types table
 create table if not exists public.content_types (
@@ -57,13 +58,13 @@ comment on table public.content_types is 'Configurable content type definitions'
 comment on column public.content_types.settings is 'JSON: validation rules, required fields, publishing options';
 
 -- Add updated_at triggers
-create trigger users_updated_at
-  before update on public.users
+create trigger nsw_users_updated_at
+  before update on public.nsw_users
   for each row
   execute function update_updated_at();
 
-create trigger subscriptions_updated_at
-  before update on public.subscriptions
+create trigger nsw_subscriptions_updated_at
+  before update on public.nsw_subscriptions
   for each row
   execute function update_updated_at();
 
