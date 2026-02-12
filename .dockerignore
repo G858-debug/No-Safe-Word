@@ -1,12 +1,16 @@
 .git
 .github
 node_modules
+apps/*/node_modules
+packages/*/node_modules
 .next
+apps/*/.next
 .env*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 README.md
+SETUP.md
 .DS_Store
 *.tsbuildinfo
 .turbo
