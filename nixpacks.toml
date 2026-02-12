@@ -5,7 +5,7 @@ nixPkgs = ["nodejs_20"]
 cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["npm run build --workspace=@no-safe-word/dashboard"]
+cmds = ["npm run build --workspace=@no-safe-word/web"]
 
 [start]
-cmd = "npm run start --workspace=@no-safe-word/dashboard"
+cmd = "npm run start --workspace=@no-safe-word/web"

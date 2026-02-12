@@ -14,15 +14,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - run: npm run build
+      - run: npm run build --workspace=@no-safe-word/web
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          CIVITAI_API_KEY: ${{ secrets.CIVITAI_API_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - name: Deploy to Railway
         run: |
           npm install -g @railway/cli
-          railway up --service dashboard
+          railway up --service No-Safe-Word
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

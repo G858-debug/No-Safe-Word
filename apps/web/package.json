@@ -15,6 +15,7 @@
   "dependencies": {
     "@no-safe-word/shared": "*",
     "@no-safe-word/story-engine": "*",
+    "@supabase/supabase-js": "^2.95.3",
     "next": "^15.1.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -23,8 +24,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
     "eslint": "^8",
     "eslint-config-next": "^15.1.11",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5"
   }
 }
