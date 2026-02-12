@@ -7,16 +7,17 @@ import type { StorySeriesRow } from "@no-safe-word/shared";
 export const revalidate = 3600;
 
 interface PageProps {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }
 
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
+  const { slug } = await params;
   const { data } = await supabase
     .from("story_series")
     .select("title, description")
-    .eq("slug", params.slug)
+    .eq("slug", slug)
     .eq("status", "published")
     .single();
 
@@ -30,10 +31,11 @@ export async function generateMetadata({
 }
 
 export default async function SeriesPage({ params }: PageProps) {
+  const { slug } = await params;
   const { data: seriesData } = await supabase
     .from("story_series")
     .select("*")
-    .eq("slug", params.slug)
+    .eq("slug", slug)
     .eq("status", "published")
     .single();
 

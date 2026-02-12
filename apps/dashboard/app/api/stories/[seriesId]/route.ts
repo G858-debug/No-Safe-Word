@@ -53,8 +53,8 @@ export async function GET(
   const allImageIds = (posts || [])
     .flatMap((p) =>
       (p.story_image_prompts || [])
-        .map((ip) => ip.image_id)
-        .filter((id): id is string => id !== null)
+        .map((ip: any) => ip.image_id)
+        .filter((id: any): id is string => id !== null)
     );
 
   let imageUrls: Record<string, string> = {};

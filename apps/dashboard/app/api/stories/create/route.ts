@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
-import { slugify } from '@no-safe-word/shared';
+import { slugify, type StorySeriesRow } from '@no-safe-word/shared';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the story series
-    const { data: series, error } = await supabase
+    const { data, error } = await supabase
       .from('story_series')
       .insert({
         title,
@@ -47,13 +47,15 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (error) {
+    if (error || !data) {
       console.error('Error creating story series:', error);
       return NextResponse.json(
-        { error: error.message },
+        { error: error?.message || 'Failed to create story series' },
         { status: 500 }
       );
     }
+
+    const series = data as StorySeriesRow;
 
     // Create empty posts for each part
     const posts = Array.from({ length: total_parts }, (_, i) => ({

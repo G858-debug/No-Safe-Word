@@ -11,7 +11,7 @@ import type {
 export const revalidate = 3600;
 
 interface PageProps {
-  params: { slug: string; partNumber: string };
+  params: Promise<{ slug: string; partNumber: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -21,13 +21,14 @@ interface PageProps {
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
-  const partNumber = parseInt(params.partNumber, 10);
+  const { slug, partNumber: partNumberStr } = await params;
+  const partNumber = parseInt(partNumberStr, 10);
   if (isNaN(partNumber)) return { title: "Not Found | No Safe Word" };
 
   const { data: seriesData } = await supabase
     .from("story_series")
     .select("id, title")
-    .eq("slug", params.slug)
+    .eq("slug", slug)
     .eq("status", "published")
     .single();
 
@@ -183,14 +184,15 @@ function renderStoryContent(text: string, images: InlineImage[]) {
 // ---------------------------------------------------------------------------
 
 export default async function ChapterPage({ params }: PageProps) {
-  const partNumber = parseInt(params.partNumber, 10);
+  const { slug, partNumber: partNumberStr } = await params;
+  const partNumber = parseInt(partNumberStr, 10);
   if (isNaN(partNumber)) notFound();
 
   // 1. Fetch series by slug
   const { data: seriesData } = await supabase
     .from("story_series")
     .select("id, title, slug, total_parts")
-    .eq("slug", params.slug)
+    .eq("slug", slug)
     .eq("status", "published")
     .single();
 
