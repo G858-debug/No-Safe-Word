@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // GET /api/stories/[seriesId]/characters — List characters linked to this series
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { seriesId: string } }
+  props: { params: Promise<{ seriesId: string }> }
 ) {
+  const params = await props.params;
   const { seriesId } = params;
 
   console.log(`[StoryPublisher] Loading characters for series: ${seriesId}`);

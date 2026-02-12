@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // GET /api/stories/[seriesId] — Full series with all related data
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { seriesId: string } }
+  props: { params: Promise<{ seriesId: string }> }
 ) {
+  const params = await props.params;
   const { seriesId } = params;
 
   // Fetch series
@@ -99,8 +100,9 @@ export async function GET(
 // PATCH /api/stories/[seriesId] — Update series metadata
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { seriesId: string } }
+  props: { params: Promise<{ seriesId: string }> }
 ) {
+  const params = await props.params;
   const { seriesId } = params;
   const body = await request.json();
 
@@ -137,8 +139,9 @@ export async function PATCH(
 // DELETE /api/stories/[seriesId] — Archive (soft delete)
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: { seriesId: string } }
+  props: { params: Promise<{ seriesId: string }> }
 ) {
+  const params = await props.params;
   const { seriesId } = params;
 
   const { error } = await supabase

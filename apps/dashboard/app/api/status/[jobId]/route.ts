@@ -4,9 +4,10 @@ import { supabase } from "@no-safe-word/story-engine";
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { jobId: string } }
+  props: { params: Promise<{ jobId: string }> }
 ) {
   try {
+    const params = await props.params;
     const { jobId } = params;
 
     if (!jobId) {

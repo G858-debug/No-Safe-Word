@@ -19,8 +19,9 @@ const PORTRAIT_SCENE: SceneData = {
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait
 export async function POST(
   _request: NextRequest,
-  { params }: { params: { storyCharId: string } }
+  props: { params: Promise<{ storyCharId: string }> }
 ) {
+  const params = await props.params;
   const { storyCharId } = params;
 
   try {

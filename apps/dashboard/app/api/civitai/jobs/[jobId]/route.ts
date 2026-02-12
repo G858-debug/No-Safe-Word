@@ -4,8 +4,9 @@ const CIVITAI_ORCHESTRATION_BASE = "https://orchestration.civitai.com/v1";
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { jobId: string } }
+  props: { params: Promise<{ jobId: string }> }
 ) {
+  const params = await props.params;
   const apiKey = process.env.CIVITAI_API_KEY;
 
   if (!apiKey) {

@@ -19,8 +19,9 @@ const PORTRAIT_SCENE: SceneData = {
 // POST /api/stories/characters/[storyCharId]/regenerate — Regenerate with optional custom prompt
 export async function POST(
   request: NextRequest,
-  { params }: { params: { storyCharId: string } }
+  props: { params: Promise<{ storyCharId: string }> }
 ) {
+  const params = await props.params;
   const { storyCharId } = params;
 
   try {

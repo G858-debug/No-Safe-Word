@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // PATCH /api/stories/images/[promptId] — Update the prompt text for a story image prompt
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { promptId: string } }
+  props: { params: Promise<{ promptId: string }> }
 ) {
+  const params = await props.params;
   const { promptId } = params;
 
   try {

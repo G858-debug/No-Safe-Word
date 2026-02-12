@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // POST /api/stories/[seriesId]/schedule — Schedule all posts in a series
 export async function POST(
   request: NextRequest,
-  { params }: { params: { seriesId: string } }
+  props: { params: Promise<{ seriesId: string }> }
 ) {
+  const params = await props.params;
   const { seriesId } = params;
 
   try {

@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // GET /api/stories/images/[promptId]/status — Check generation status of an image prompt
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { promptId: string } }
+  props: { params: Promise<{ promptId: string }> }
 ) {
+  const params = await props.params;
   const { promptId } = params;
 
   try {

@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // POST /api/stories/characters/[storyCharId]/set-pending-image — Link a generated image as pending
 export async function POST(
   request: NextRequest,
-  { params }: { params: { storyCharId: string } }
+  props: { params: Promise<{ storyCharId: string }> }
 ) {
+  const params = await props.params;
   const { storyCharId } = params;
 
   try {

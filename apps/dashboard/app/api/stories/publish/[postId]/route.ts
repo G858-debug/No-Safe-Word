@@ -11,8 +11,9 @@ interface FacebookPhotoResponse {
 // POST /api/stories/publish/[postId] — Publish a single post to Facebook
 export async function POST(
   request: NextRequest,
-  { params }: { params: { postId: string } }
+  props: { params: Promise<{ postId: string }> }
 ) {
+  const params = await props.params;
   const { postId } = params;
 
   try {

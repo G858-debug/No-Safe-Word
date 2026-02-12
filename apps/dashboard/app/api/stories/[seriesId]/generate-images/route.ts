@@ -18,8 +18,9 @@ interface FailedJob {
 // POST /api/stories/[seriesId]/generate-images — Batch generate story images
 export async function POST(
   request: NextRequest,
-  { params }: { params: { seriesId: string } }
+  props: { params: Promise<{ seriesId: string }> }
 ) {
+  const params = await props.params;
   const { seriesId } = params;
 
   try {

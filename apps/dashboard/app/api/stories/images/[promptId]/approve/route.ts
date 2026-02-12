@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // POST /api/stories/images/[promptId]/approve — Approve a generated story image
 export async function POST(
   _request: NextRequest,
-  { params }: { params: { promptId: string } }
+  props: { params: Promise<{ promptId: string }> }
 ) {
+  const params = await props.params;
   const { promptId } = params;
 
   try {

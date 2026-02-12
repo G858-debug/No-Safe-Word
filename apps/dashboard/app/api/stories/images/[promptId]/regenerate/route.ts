@@ -8,8 +8,9 @@ import type { CharacterData, SceneData } from "@no-safe-word/shared";
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
   _request: NextRequest,
-  { params }: { params: { promptId: string } }
+  props: { params: Promise<{ promptId: string }> }
 ) {
+  const params = await props.params;
   const { promptId } = params;
 
   try {

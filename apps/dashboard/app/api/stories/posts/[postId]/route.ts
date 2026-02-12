@@ -4,8 +4,9 @@ import { supabase } from "@no-safe-word/story-engine";
 // PATCH /api/stories/posts/[postId] — Update individual post content
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { postId: string } }
+  props: { params: Promise<{ postId: string }> }
 ) {
+  const params = await props.params;
   const { postId } = params;
   const body = await request.json();
 
