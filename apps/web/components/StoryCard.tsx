@@ -19,7 +19,7 @@ export default function StoryCard({
 }: StoryCardProps) {
   return (
     <Link href={`/stories/${slug}`} className="group block">
-      <article className="overflow-hidden rounded-xl border border-amber-900/20 bg-surface-raised transition-all hover:border-amber-900/40 hover:bg-surface-overlay">
+      <article className="overflow-hidden rounded-xl border border-amber-900/20 bg-surface-raised transition-all duration-300 hover:border-amber-800/50 hover:bg-surface-overlay hover:shadow-[0_0_30px_-5px_rgba(217,119,6,0.15)]">
         {/* Cover image */}
         <div className="relative aspect-[3/4] overflow-hidden bg-surface-overlay">
           {coverImageUrl ? (

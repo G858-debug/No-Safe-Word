@@ -66,7 +66,8 @@ export default async function HomePage() {
 
       {/* Hero */}
       <section className="relative overflow-hidden border-b border-amber-900/20">
-        <div className="absolute inset-0 bg-gradient-to-b from-amber-950/20 via-transparent to-[#0a0a0a]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-amber-950/30 via-amber-950/10 to-[#0a0a0a]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center_top,_rgba(180,83,9,0.12)_0%,_transparent_60%)]" />
         <div className="relative mx-auto max-w-5xl px-4 py-20 text-center sm:px-6 sm:py-32">
           <h1
             className="text-4xl font-bold tracking-tight text-amber-50 sm:text-5xl lg:text-6xl"
