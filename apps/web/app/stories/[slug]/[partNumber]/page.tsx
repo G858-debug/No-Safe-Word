@@ -10,6 +10,9 @@ import type {
 import StoryRenderer from "@/components/StoryRenderer";
 import ChapterNav from "@/components/ChapterNav";
 import ReadingProgress from "@/components/ReadingProgress";
+import PaywallGate from "@/components/PaywallGate";
+import { createClient } from "@/lib/supabase/server";
+import { checkSeriesAccess, truncateToWords } from "@/lib/access";
 
 export const revalidate = 3600;
 
@@ -95,78 +98,101 @@ export default async function ChapterPage({ params }: PageProps) {
   const post = postData as StoryPostRow | null;
   if (!post) notFound();
 
-  // 3. Fetch approved website images for this post
-  const { data: imagePrompts } = await supabase
-    .from("story_image_prompts")
-    .select(
-      "id, image_type, pairs_with, position, position_after_word, character_name, image_id"
-    )
-    .eq("post_id", post.id)
-    .eq("status", "approved")
-    .in("image_type", ["website_nsfw_paired", "website_only"]);
+  // 3. Check access for Part 2+
+  let hasAccess = true;
+  let isAuthenticated = false;
 
-  // 4. Fetch stored image URLs
-  const imageIds = (imagePrompts || [])
-    .map((ip) => ip.image_id)
-    .filter((id): id is string => id !== null);
+  if (partNumber > 1) {
+    const authSupabase = await createClient();
+    const {
+      data: { user },
+    } = await authSupabase.auth.getUser();
+    isAuthenticated = !!user;
 
-  let imageUrlMap: Record<string, string> = {};
-  if (imageIds.length > 0) {
-    const { data: images } = await supabase
-      .from("images")
-      .select("id, stored_url")
-      .in("id", imageIds);
-
-    if (images) {
-      imageUrlMap = Object.fromEntries(
-        images
-          .filter((img) => img.stored_url)
-          .map((img) => [img.id, img.stored_url!])
-      );
-    }
+    const access = await checkSeriesAccess(
+      user?.id ?? null,
+      series.id,
+      partNumber
+    );
+    hasAccess = access.hasAccess;
   }
 
-  // 5. For paired images without position_after_word, look up the paired prompt
-  const pairedIds = (imagePrompts || [])
-    .filter(
-      (ip) =>
-        ip.pairs_with && ip.position_after_word == null
-    )
-    .map((ip) => ip.pairs_with!);
+  // 4. Determine content to display
+  const displayContent = hasAccess
+    ? post.website_content
+    : truncateToWords(post.website_content, 300);
 
-  let pairedPositions: Record<string, number | null> = {};
-  if (pairedIds.length > 0) {
-    const { data: pairedPrompts } = await supabase
+  // 5. Fetch approved website images for this post (only if has access)
+  let inlineImages: { url: string; afterWord: number; alt: string }[] = [];
+
+  if (hasAccess) {
+    const { data: imagePrompts } = await supabase
       .from("story_image_prompts")
-      .select("id, position_after_word")
-      .in("id", pairedIds);
+      .select(
+        "id, image_type, pairs_with, position, position_after_word, character_name, image_id"
+      )
+      .eq("post_id", post.id)
+      .eq("status", "approved")
+      .in("image_type", ["website_nsfw_paired", "website_only"]);
 
-    if (pairedPrompts) {
-      pairedPositions = Object.fromEntries(
-        pairedPrompts.map((p) => [p.id, p.position_after_word])
-      );
+    const imageIds = (imagePrompts || [])
+      .map((ip) => ip.image_id)
+      .filter((id): id is string => id !== null);
+
+    let imageUrlMap: Record<string, string> = {};
+    if (imageIds.length > 0) {
+      const { data: images } = await supabase
+        .from("images")
+        .select("id, stored_url")
+        .in("id", imageIds);
+
+      if (images) {
+        imageUrlMap = Object.fromEntries(
+          images
+            .filter((img) => img.stored_url)
+            .map((img) => [img.id, img.stored_url!])
+        );
+      }
     }
+
+    // For paired images without position_after_word, look up the paired prompt
+    const pairedIds = (imagePrompts || [])
+      .filter((ip) => ip.pairs_with && ip.position_after_word == null)
+      .map((ip) => ip.pairs_with!);
+
+    let pairedPositions: Record<string, number | null> = {};
+    if (pairedIds.length > 0) {
+      const { data: pairedPrompts } = await supabase
+        .from("story_image_prompts")
+        .select("id, position_after_word")
+        .in("id", pairedIds);
+
+      if (pairedPrompts) {
+        pairedPositions = Object.fromEntries(
+          pairedPrompts.map((p) => [p.id, p.position_after_word])
+        );
+      }
+    }
+
+    inlineImages = (imagePrompts || [])
+      .filter((ip) => ip.image_id && imageUrlMap[ip.image_id])
+      .map((ip) => {
+        let afterWord: number | null = ip.position_after_word;
+
+        if (afterWord == null && ip.pairs_with) {
+          afterWord = pairedPositions[ip.pairs_with] ?? null;
+        }
+
+        return {
+          url: imageUrlMap[ip.image_id!],
+          afterWord: afterWord ?? Infinity,
+          alt: ip.character_name || "Story illustration",
+        };
+      })
+      .sort((a, b) => a.afterWord - b.afterWord);
   }
 
-  // 6. Build the sorted inline image list
-  const inlineImages = (imagePrompts || [])
-    .filter((ip) => ip.image_id && imageUrlMap[ip.image_id])
-    .map((ip) => {
-      let afterWord: number | null = ip.position_after_word;
-
-      if (afterWord == null && ip.pairs_with) {
-        afterWord = pairedPositions[ip.pairs_with] ?? null;
-      }
-
-      return {
-        url: imageUrlMap[ip.image_id!],
-        afterWord: afterWord ?? Infinity,
-        alt: ip.character_name || "Story illustration",
-      };
-    })
-    .sort((a, b) => a.afterWord - b.afterWord);
-
-  // 7. Check for adjacent chapters
+  // 6. Check for adjacent chapters
   const { data: adjacentPosts } = await supabase
     .from("story_posts")
     .select("part_number, title")
@@ -209,33 +235,49 @@ export default async function ChapterPage({ params }: PageProps) {
 
         {/* Story content */}
         <div className="mx-auto max-w-reader">
-          <StoryRenderer text={post.website_content} images={inlineImages} />
+          <StoryRenderer text={displayContent} images={inlineImages} />
         </div>
 
-        {/* Chapter navigation */}
-        <ChapterNav
-          seriesSlug={series.slug}
-          prev={
-            prevPost
-              ? { partNumber: prevPost.part_number, title: prevPost.title }
-              : null
-          }
-          next={
-            nextPost
-              ? { partNumber: nextPost.part_number, title: nextPost.title }
-              : null
-          }
-        />
+        {/* Paywall gate for paywalled content */}
+        {!hasAccess && (
+          <div className="mx-auto max-w-reader">
+            <PaywallGate
+              seriesSlug={series.slug}
+              seriesTitle={series.title}
+              partNumber={partNumber}
+              isAuthenticated={isAuthenticated}
+            />
+          </div>
+        )}
 
-        {/* End of story — back to series */}
-        <div className="mt-12 text-center">
-          <Link
-            href={`/stories/${series.slug}`}
-            className="text-sm text-amber-800 transition-colors hover:text-amber-500"
-          >
-            Back to all chapters
-          </Link>
-        </div>
+        {/* Chapter navigation (only show if has access) */}
+        {hasAccess && (
+          <>
+            <ChapterNav
+              seriesSlug={series.slug}
+              prev={
+                prevPost
+                  ? { partNumber: prevPost.part_number, title: prevPost.title }
+                  : null
+              }
+              next={
+                nextPost
+                  ? { partNumber: nextPost.part_number, title: nextPost.title }
+                  : null
+              }
+            />
+
+            {/* End of story — back to series */}
+            <div className="mt-12 text-center">
+              <Link
+                href={`/stories/${series.slug}`}
+                className="text-sm text-amber-800 transition-colors hover:text-amber-500"
+              >
+                Back to all chapters
+              </Link>
+            </div>
+          </>
+        )}
       </article>
     </>
   );

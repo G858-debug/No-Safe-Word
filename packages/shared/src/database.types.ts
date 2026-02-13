@@ -136,6 +136,57 @@ export interface Database {
           },
         ];
       };
+      nsw_purchases: {
+        Row: {
+          id: string;
+          user_id: string;
+          series_id: string;
+          amount: number;
+          currency: string;
+          payment_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          series_id: string;
+          amount: number;
+          currency?: string;
+          payment_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          series_id?: string;
+          amount?: number;
+          currency?: string;
+          payment_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "nsw_purchases_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "nsw_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "nsw_purchases_series_id_fkey";
+            columns: ["series_id"];
+            isOneToOne: false;
+            referencedRelation: "story_series";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "nsw_purchases_payment_id_fkey";
+            columns: ["payment_id"];
+            isOneToOne: false;
+            referencedRelation: "nsw_payments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       content_types: {
         Row: {
           id: string;
@@ -546,6 +597,9 @@ export type NswSubscriptionUpdate = Database["public"]["Tables"]["nsw_subscripti
 export type NswPayment = Database["public"]["Tables"]["nsw_payments"]["Row"];
 export type NswPaymentInsert = Database["public"]["Tables"]["nsw_payments"]["Insert"];
 export type NswPaymentUpdate = Database["public"]["Tables"]["nsw_payments"]["Update"];
+export type NswPurchase = Database["public"]["Tables"]["nsw_purchases"]["Row"];
+export type NswPurchaseInsert = Database["public"]["Tables"]["nsw_purchases"]["Insert"];
+export type NswPurchaseUpdate = Database["public"]["Tables"]["nsw_purchases"]["Update"];
 
 // Content types
 export type ContentType = Database["public"]["Tables"]["content_types"]["Row"];

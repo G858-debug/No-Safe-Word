@@ -15,6 +15,7 @@
   "dependencies": {
     "@no-safe-word/shared": "*",
     "@no-safe-word/story-engine": "*",
+    "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
     "next": "^15.1.11",
     "react": "^19.0.0",

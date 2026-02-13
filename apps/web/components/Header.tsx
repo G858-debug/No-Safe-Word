@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 
 const navLinks = [
   { href: "/stories", label: "Stories" },
@@ -10,6 +11,7 @@ const navLinks = [
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { user, nswUser, loading } = useAuth();
 
   return (
     <header className="border-b border-amber-900/30 bg-[#0a0a0a]/95 backdrop-blur-sm sticky top-0 z-50">
@@ -35,6 +37,22 @@ export default function Header() {
               {link.label}
             </Link>
           ))}
+          {!loading &&
+            (user ? (
+              <Link
+                href="/account"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-900/40 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-900/60"
+              >
+                {(nswUser?.display_name || user.email || "?")[0].toUpperCase()}
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="rounded-lg bg-amber-700 px-4 py-1.5 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600"
+              >
+                Log in
+              </Link>
+            ))}
         </nav>
 
         {/* Mobile hamburger */}
@@ -68,6 +86,24 @@ export default function Header() {
               {link.label}
             </Link>
           ))}
+          {!loading &&
+            (user ? (
+              <Link
+                href="/account"
+                onClick={() => setMenuOpen(false)}
+                className="block py-3 text-amber-400 transition-colors hover:text-amber-300"
+              >
+                My Account
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setMenuOpen(false)}
+                className="block py-3 font-semibold text-amber-400 transition-colors hover:text-amber-300"
+              >
+                Log in
+              </Link>
+            ))}
         </nav>
       )}
     </header>
