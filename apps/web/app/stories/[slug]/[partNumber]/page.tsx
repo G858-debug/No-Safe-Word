@@ -242,6 +242,7 @@ export default async function ChapterPage({ params }: PageProps) {
         {!hasAccess && (
           <div className="mx-auto max-w-reader">
             <PaywallGate
+              seriesId={series.id}
               seriesSlug={series.slug}
               seriesTitle={series.title}
               partNumber={partNumber}

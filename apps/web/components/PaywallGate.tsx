@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 
 interface PaywallGateProps {
+  seriesId: string;
   seriesSlug: string;
   seriesTitle: string;
   partNumber: number;
@@ -11,18 +12,58 @@ interface PaywallGateProps {
 }
 
 export default function PaywallGate({
+  seriesId,
   seriesSlug,
   seriesTitle,
   partNumber,
   isAuthenticated,
 }: PaywallGateProps) {
-  const [toast, setToast] = useState<string | null>(null);
+  const [loading, setLoading] = useState<"buy" | "subscribe" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const currentPath = `/stories/${seriesSlug}/${partNumber}`;
 
-  function showComingSoon() {
-    setToast("Coming soon — payments launching soon!");
-    setTimeout(() => setToast(null), 3000);
+  async function handlePayfast(type: "buy" | "subscribe") {
+    setLoading(type);
+    setError(null);
+
+    try {
+      const endpoint =
+        type === "buy" ? "/api/payfast/purchase" : "/api/payfast/subscribe";
+      const body =
+        type === "buy" ? JSON.stringify({ seriesId, seriesTitle }) : undefined;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || "Payment failed");
+      }
+
+      // Create hidden form and submit to Payfast
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = json.actionUrl;
+
+      for (const [key, value] of Object.entries(json.data)) {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = key;
+        input.value = value as string;
+        form.appendChild(input);
+      }
+
+      document.body.appendChild(form);
+      form.submit();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      setLoading(null);
+    }
   }
 
   return (
@@ -46,15 +87,19 @@ export default function PaywallGate({
           {isAuthenticated ? (
             <>
               <button
-                onClick={showComingSoon}
-                className="rounded-lg bg-amber-700 px-6 py-3 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600"
+                onClick={() => handlePayfast("buy")}
+                disabled={loading !== null}
+                className="flex items-center justify-center gap-2 rounded-lg bg-amber-700 px-6 py-3 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600 disabled:opacity-60"
               >
+                {loading === "buy" && <Spinner />}
                 Buy this story — R29
               </button>
               <button
-                onClick={showComingSoon}
-                className="rounded-lg border border-amber-900/40 bg-transparent px-6 py-3 text-sm font-semibold text-amber-300 transition-colors hover:border-amber-700 hover:bg-amber-950/30"
+                onClick={() => handlePayfast("subscribe")}
+                disabled={loading !== null}
+                className="flex items-center justify-center gap-2 rounded-lg border border-amber-900/40 bg-transparent px-6 py-3 text-sm font-semibold text-amber-300 transition-colors hover:border-amber-700 hover:bg-amber-950/30 disabled:opacity-60"
               >
+                {loading === "subscribe" && <Spinner />}
                 Subscribe — R55/month
               </button>
             </>
@@ -78,14 +123,36 @@ export default function PaywallGate({
             </>
           )}
         </div>
-      </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-amber-900 px-5 py-3 text-sm font-medium text-amber-50 shadow-lg">
-          {toast}
-        </div>
-      )}
+        {/* Error message */}
+        {error && (
+          <p className="mt-4 text-sm text-red-400">{error}</p>
+        )}
+      </div>
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg
+      className="h-4 w-4 animate-spin"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
   );
 }
