@@ -65,8 +65,7 @@ export async function POST(req: Request) {
         currency: "ZAR",
         status: "pending",
         payment_provider: "payfast",
-        metadata: { type: "purchase", series_id: seriesId },
-      } as Record<string, unknown>);
+      });
 
     if (paymentError) {
       console.error("Failed to create payment record:", paymentError);

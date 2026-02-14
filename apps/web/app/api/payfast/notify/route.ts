@@ -44,8 +44,7 @@ export async function POST(req: Request) {
         .update({
           status: "succeeded",
           provider_payment_id: body.pf_payment_id,
-          metadata: body,
-        } as Record<string, unknown>)
+        })
         .eq("id", body.m_payment_id);
 
       if (paymentError) {
@@ -80,8 +79,7 @@ export async function POST(req: Request) {
         .update({
           status: "succeeded",
           provider_payment_id: body.pf_payment_id,
-          metadata: body,
-        } as Record<string, unknown>)
+        })
         .eq("id", body.m_payment_id);
 
       if (paymentError) {
@@ -96,10 +94,9 @@ export async function POST(req: Request) {
         .from("nsw_subscriptions")
         .update({
           status: "active",
-          payfast_token: body.token,
           starts_at: new Date().toISOString(),
           ends_at: endsAt.toISOString(),
-        } as Record<string, unknown>)
+        })
         .eq("id", body.custom_str4);
 
       if (subError) {
