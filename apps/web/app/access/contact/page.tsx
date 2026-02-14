@@ -41,6 +41,43 @@ export default function AccessContactPage() {
           </a>
         </div>
 
+        {/* Phone */}
+        <div className="rounded-xl border border-amber-900/20 bg-amber-950/10 p-6">
+          <h2
+            className="text-lg font-bold text-amber-50"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            Phone
+          </h2>
+          <p className="mt-3 text-sm text-warm-300">
+            Give us a call or send a WhatsApp message:
+          </p>
+          <a
+            href="tel:+27731863036"
+            className="mt-2 inline-block text-amber-500 transition-colors hover:text-amber-400"
+          >
+            073 186 3036
+          </a>
+        </div>
+
+        {/* Location */}
+        <div className="rounded-xl border border-amber-900/20 bg-amber-950/10 p-6">
+          <h2
+            className="text-lg font-bold text-amber-50"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            Location
+          </h2>
+          <p className="mt-3 text-sm text-warm-300">
+            You can find us at:
+          </p>
+          <address className="mt-2 text-sm not-italic leading-relaxed text-amber-500">
+            117 Falls Road<br />
+            Krugersdorp North<br />
+            1739
+          </address>
+        </div>
+
         {/* Social */}
         <div className="rounded-xl border border-amber-900/20 bg-amber-950/10 p-6">
           <h2
@@ -75,14 +112,24 @@ export default function AccessContactPage() {
         </h2>
         <div className="mt-4 space-y-2 text-sm text-warm-300">
           <p>
-            <span className="text-warm-200">Business Name:</span> No Safe Word
+            <span className="text-warm-200">Registered Name:</span> No Safe Word
+            (Pty) Ltd
           </p>
           <p>
             <span className="text-warm-200">Owner:</span> Nontsikelelo Mabaso
           </p>
           <p>
-            <span className="text-warm-200">Location:</span> Johannesburg,
-            South Africa
+            <span className="text-warm-200">Location:</span> 117 Falls Road,
+            Krugersdorp North, 1739
+          </p>
+          <p>
+            <span className="text-warm-200">Phone:</span>{" "}
+            <a
+              href="tel:+27731863036"
+              className="text-amber-500 transition-colors hover:text-amber-400"
+            >
+              073 186 3036
+            </a>
           </p>
           <p>
             <span className="text-warm-200">Email:</span>{" "}

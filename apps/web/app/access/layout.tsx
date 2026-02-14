@@ -84,8 +84,8 @@ function AccessFooter() {
             </Link>
           </nav>
           <p className="text-xs text-warm-500">
-            &copy; {new Date().getFullYear()} No Safe Word. All rights
-            reserved.
+            &copy; {new Date().getFullYear()} No Safe Word (Pty) Ltd. All
+            rights reserved.
           </p>
         </div>
       </div>
