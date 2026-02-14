@@ -12,7 +12,7 @@ function isAccessSubdomain(host: string): boolean {
 export async function middleware(request: NextRequest) {
   const host = request.headers.get("host") || "";
 
-  // If the request is from the access subdomain, rewrite to /access
+  // If the request is from the access subdomain, rewrite to /access/*
   if (isAccessSubdomain(host)) {
     const pathname = request.nextUrl.pathname;
 
@@ -21,15 +21,16 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
-    // Rewrite all access subdomain requests to the /access route
-    if (pathname !== "/access") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/access";
-      return NextResponse.rewrite(url);
+    // Already under /access — pass through (no auth needed)
+    if (pathname.startsWith("/access")) {
+      return NextResponse.next();
     }
 
-    // For /access path itself, skip Supabase session (no auth needed)
-    return NextResponse.next();
+    // Rewrite subdomain paths to /access prefix
+    // e.g. /about → /access/about, / → /access
+    const url = request.nextUrl.clone();
+    url.pathname = pathname === "/" ? "/access" : `/access${pathname}`;
+    return NextResponse.rewrite(url);
   }
 
   return await updateSession(request);

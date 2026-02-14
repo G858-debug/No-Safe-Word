@@ -1,63 +1,141 @@
-export default function AccessPortalPage() {
+import type { Metadata } from "next";
+import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "No Safe Word — Contemporary Romance Fiction from South Africa",
+};
+
+export default function AccessHomePage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      {/* Ambient background glow */}
-      <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(180,83,9,0.08)_0%,_transparent_70%)]" />
-      </div>
-
-      <div className="relative z-10 w-full max-w-md text-center">
-        {/* Brand */}
-        <h1
-          className="text-4xl font-bold tracking-tight text-amber-50 sm:text-5xl"
-          style={{ fontFamily: "var(--font-serif)" }}
-        >
-          No Safe Word
-        </h1>
-
-        {/* Decorative divider */}
-        <div className="mx-auto mt-6 flex items-center justify-center gap-3">
-          <div className="h-px w-12 bg-gradient-to-r from-transparent to-amber-700/50" />
-          <div className="h-1.5 w-1.5 rotate-45 bg-amber-700/60" />
-          <div className="h-px w-12 bg-gradient-to-l from-transparent to-amber-700/50" />
+    <div>
+      {/* Hero */}
+      <section className="relative overflow-hidden border-b border-amber-900/20">
+        <div className="absolute inset-0 bg-gradient-to-b from-amber-950/30 via-amber-950/10 to-[#0a0a0a]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center_top,_rgba(180,83,9,0.12)_0%,_transparent_60%)]" />
+        <div className="relative mx-auto max-w-3xl px-4 py-20 text-center sm:px-6 sm:py-28">
+          <h1
+            className="text-4xl font-bold tracking-tight text-amber-50 sm:text-5xl"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            No Safe Word
+          </h1>
+          <p className="mx-auto mt-6 max-w-lg text-lg text-warm-200">
+            Contemporary romance fiction by South African author Nontsikelelo
+            Mabaso. Captivating stories of love, desire, and connection.
+          </p>
+          <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+            <Link
+              href="/stories"
+              className="inline-flex items-center gap-2 rounded-lg bg-amber-700 px-8 py-3.5 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600"
+            >
+              Read Story Excerpts
+              <span>&rarr;</span>
+            </Link>
+            <Link
+              href="/about"
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-800/40 px-8 py-3.5 text-sm font-semibold text-amber-200 transition-colors hover:border-amber-700/60 hover:text-amber-100"
+            >
+              About the Author
+            </Link>
+          </div>
         </div>
+      </section>
 
-        {/* Portal title */}
+      {/* What is No Safe Word */}
+      <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
         <h2
-          className="mt-6 text-lg font-semibold tracking-wide text-amber-400/90 sm:text-xl"
+          className="text-2xl font-bold text-amber-50 sm:text-3xl"
           style={{ fontFamily: "var(--font-serif)" }}
         >
-          Access Portal
+          What is No Safe Word?
         </h2>
-
-        {/* Status badge */}
-        <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-amber-900/30 bg-amber-950/20 px-4 py-1.5">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-40" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-600" />
-          </span>
-          <span className="text-xs font-medium tracking-wider text-amber-300/80">
-            COMING SOON
-          </span>
+        <div className="mt-6 space-y-4 text-base leading-relaxed text-warm-200">
+          <p>
+            No Safe Word is a digital publishing platform dedicated to
+            contemporary romance fiction from South Africa. Founded by
+            Nontsikelelo Mabaso, the platform features original serialised
+            stories that explore themes of love, relationships, intimacy, and
+            human connection through the lens of modern South African life.
+          </p>
+          <p>
+            Each story is published in a serialised format, with new parts
+            released regularly. Readers can enjoy the first chapter of every
+            story for free, then choose to purchase individual stories or
+            subscribe for full access to the entire catalogue.
+          </p>
+          <p>
+            Stories are accompanied by original illustrations that bring
+            characters and settings to life, creating an immersive visual
+            reading experience unique to the platform.
+          </p>
         </div>
+      </section>
 
-        {/* Description */}
-        <p className="mx-auto mt-6 max-w-sm text-sm leading-relaxed text-warm-200">
-          This space is reserved for secure authentication and member access.
-        </p>
+      {/* How It Works */}
+      <section className="border-t border-amber-900/20">
+        <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+          <h2
+            className="mb-10 text-center text-2xl font-bold text-amber-50"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            How It Works
+          </h2>
+          <div className="grid grid-cols-1 gap-8 sm:grid-cols-3">
+            {[
+              {
+                step: "1",
+                title: "Browse & Read",
+                desc: "Explore our collection of contemporary romance stories. The first chapter of every story is free to read.",
+              },
+              {
+                step: "2",
+                title: "Purchase a Story",
+                desc: "Enjoy a story? Purchase it for R29 to unlock all chapters. Once purchased, it\u2019s yours to read anytime.",
+              },
+              {
+                step: "3",
+                title: "Subscribe",
+                desc: "Get unlimited access to every story in our catalogue for R55 per month. Cancel anytime.",
+              },
+            ].map((item) => (
+              <div key={item.step} className="text-center">
+                <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-amber-900/30 text-sm font-bold text-amber-400">
+                  {item.step}
+                </div>
+                <h3
+                  className="mb-2 text-lg font-semibold text-amber-50"
+                  style={{ fontFamily: "var(--font-serif)" }}
+                >
+                  {item.title}
+                </h3>
+                <p className="text-sm text-warm-300">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-        {/* Back to main site */}
-        <a
-          href="https://nosafeword.co.za"
-          className="mt-10 inline-flex items-center gap-1.5 text-sm text-warm-300 transition-colors duration-300 hover:text-amber-400"
-        >
-          <span>&larr;</span>
-          <span>Back to No Safe Word</span>
-        </a>
-      </div>
-
-      {/* Bottom border accent */}
-      <div className="fixed bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-800/30 to-transparent" />
+      {/* CTA */}
+      <section className="border-t border-amber-900/20">
+        <div className="mx-auto max-w-3xl px-4 py-16 text-center sm:px-6">
+          <h2
+            className="text-xl font-bold text-amber-50"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            Start Reading Today
+          </h2>
+          <p className="mx-auto mt-4 max-w-md text-sm text-warm-300">
+            Discover captivating contemporary romance fiction from South Africa.
+            No account required to start reading.
+          </p>
+          <Link
+            href="/stories"
+            className="mt-8 inline-flex items-center gap-2 rounded-lg bg-amber-700 px-8 py-3.5 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600"
+          >
+            Explore Stories <span>&rarr;</span>
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }
