@@ -27,8 +27,8 @@ export default function AccessTermsPage() {
             1. Acceptance of Terms
           </h2>
           <p className="mt-3">
-            By accessing and using the No Safe Word website at
-            nosafeword.co.za (&quot;the Service&quot;), you agree to be bound by
+            By accessing and using the No Safe Word website
+            (&quot;the Service&quot;), you agree to be bound by
             these Terms of Service. If you do not agree to these terms, please
             do not use our Service.
           </p>

@@ -118,15 +118,8 @@ export default function AccessStoriesPage() {
 
       <div className="mt-16 rounded-xl border border-amber-900/20 bg-amber-950/10 p-6 text-center">
         <p className="text-sm text-warm-300">
-          These are sample excerpts from our story collection. Full stories are
-          available on{" "}
-          <a
-            href="https://nosafeword.co.za"
-            className="text-amber-500 transition-colors hover:text-amber-400"
-          >
-            nosafeword.co.za
-          </a>
-          , where the first chapter of every story is free to read.
+          These are sample excerpts from our contemporary romance fiction
+          collection. The first chapter of every story is free to read.
         </p>
       </div>
     </div>

@@ -30,8 +30,8 @@ export default function AccessPrivacyPage() {
             No Safe Word (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;)
             respects your privacy and is committed to protecting your personal
             information. This Privacy Policy explains how we collect, use,
-            store, and protect information when you use our website at
-            nosafeword.co.za and any associated services.
+            store, and protect information when you use our website and
+            any associated services.
           </p>
         </section>
 

@@ -85,12 +85,12 @@ export default function AccessContactPage() {
             South Africa
           </p>
           <p>
-            <span className="text-warm-200">Website:</span>{" "}
+            <span className="text-warm-200">Email:</span>{" "}
             <a
-              href="https://nosafeword.co.za"
+              href="mailto:mkhwalo88@gmail.com"
               className="text-amber-500 transition-colors hover:text-amber-400"
             >
-              nosafeword.co.za
+              mkhwalo88@gmail.com
             </a>
           </p>
         </div>
