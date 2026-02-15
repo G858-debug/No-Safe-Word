@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
 import { buildNegativePrompt, extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import type { ImageType } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -309,6 +310,13 @@ export async function POST(
           // Use promptOverride if available, otherwise raw prompt
           const finalPrompt = promptOverride || imgPrompt.prompt;
 
+          // Scene intelligence: classify scene and select LoRAs
+          const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+          const resources = selectResources(classification);
+
+          console.log(`[StoryImage][${imgPrompt.id}] Scene classification:`, JSON.stringify(classification));
+          console.log(`[StoryImage][${imgPrompt.id}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
+
           const workflow = buildWorkflow({
             type: workflowType as "portrait" | "single-character" | "dual-character",
             positivePrompt: finalPrompt,
@@ -321,6 +329,8 @@ export async function POST(
             ipadapterWeight: hasSecondary ? 0.7 : 0.85,
             secondaryFacePrompt,
             secondarySeed,
+            loras: resources.loras,
+            negativePromptAdditions: resources.negativePromptAdditions,
           });
 
           // Submit async job to RunPod

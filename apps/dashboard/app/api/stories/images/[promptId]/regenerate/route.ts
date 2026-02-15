@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
 import { buildNegativePrompt, extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import type { ImageType } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 import { appendFileSync } from "fs";
@@ -250,6 +251,13 @@ export async function POST(
 
       const finalPrompt = promptOverride || imgPrompt.prompt;
 
+      // Scene intelligence: classify scene and select LoRAs
+      const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+      const resources = selectResources(classification);
+
+      diagLog(`[StoryImage][${promptId}] Scene classification: ${JSON.stringify(classification)}`);
+      diagLog(`[StoryImage][${promptId}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
+
       const workflow = buildWorkflow({
         type: workflowType as "portrait" | "single-character" | "dual-character",
         positivePrompt: finalPrompt,
@@ -262,6 +270,8 @@ export async function POST(
         ipadapterWeight: hasSecondary ? 0.7 : 0.85,
         secondaryFacePrompt,
         secondarySeed,
+        loras: resources.loras,
+        negativePromptAdditions: resources.negativePromptAdditions,
       });
 
       const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined);

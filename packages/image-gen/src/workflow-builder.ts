@@ -1,5 +1,11 @@
 type WorkflowType = 'portrait' | 'single-character' | 'dual-character';
 
+interface LoraInput {
+  filename: string;
+  strengthModel: number;
+  strengthClip: number;
+}
+
 interface WorkflowParams {
   /** The scene/portrait prompt text */
   positivePrompt: string;
@@ -12,6 +18,10 @@ interface WorkflowParams {
   seed: number;
   /** Output filename prefix */
   filenamePrefix?: string;
+  /** Dynamic LoRA stack from resource selector. Falls back to detail-tweaker-xl if not provided. */
+  loras?: LoraInput[];
+  /** Additional negative prompt terms from scene classification */
+  negativePromptAdditions?: string;
 }
 
 interface SceneWorkflowParams extends WorkflowParams {
@@ -36,36 +46,80 @@ const DEFAULT_NEGATIVE_PROMPT =
 const DEFAULT_NEGATIVE_PROMPT_DUAL =
   DEFAULT_NEGATIVE_PROMPT + ', three people, crowd, group';
 
+/** Node IDs for up to 4 chained LoRA loaders */
+const LORA_NODE_IDS = ['2', '2a', '2b', '2c'] as const;
+
+/**
+ * Build a chain of LoRA loader nodes and add them to the workflow.
+ * Returns the node ID of the last LoRA loader in the chain (all downstream
+ * nodes should reference this for model/clip).
+ */
+function buildLoraChain(
+  workflow: Record<string, any>,
+  loras?: LoraInput[],
+): string {
+  // Default to single detail-tweaker-xl if no loras provided
+  const loraStack = (loras && loras.length > 0) ? loras : [
+    { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
+  ];
+
+  // Cap at 4 LoRAs
+  const capped = loraStack.slice(0, 4);
+
+  for (let i = 0; i < capped.length; i++) {
+    const nodeId = LORA_NODE_IDS[i];
+    const lora = capped[i];
+    const prevNodeId = i === 0 ? '1' : LORA_NODE_IDS[i - 1];
+
+    workflow[nodeId] = {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: lora.filename,
+        strength_model: lora.strengthModel,
+        strength_clip: lora.strengthClip,
+        model: [prevNodeId, 0],
+        clip: [prevNodeId, 1],
+      },
+    };
+  }
+
+  return LORA_NODE_IDS[capped.length - 1];
+}
+
+/**
+ * Combine base negative prompt with optional additions.
+ */
+function buildNeg(base: string, additions?: string): string {
+  if (!additions) return base;
+  return base + ', ' + additions;
+}
+
 /**
  * Build a portrait generation workflow (no IPAdapter).
  * Used for initial character portrait generation before approval.
  */
 export function buildPortraitWorkflow(params: WorkflowParams): Record<string, any> {
-  const neg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT;
+  const baseNeg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT;
+  const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'portrait';
 
-  return {
+  const workflow: Record<string, any> = {
     '1': {
       class_type: 'CheckpointLoaderSimple',
       inputs: { ckpt_name: 'juggernautXL_v11.safetensors' },
     },
-    '2': {
-      class_type: 'LoraLoader',
-      inputs: {
-        lora_name: 'detail-tweaker-xl.safetensors',
-        strength_model: 0.5,
-        strength_clip: 0.5,
-        model: ['1', 0],
-        clip: ['1', 1],
-      },
-    },
+  };
+
+  const lastLora = buildLoraChain(workflow, params.loras);
+
+  Object.assign(workflow, {
     '3': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: params.positivePrompt, clip: ['2', 1] },
+      inputs: { text: params.positivePrompt, clip: [lastLora, 1] },
     },
     '4': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: neg, clip: ['2', 1] },
+      inputs: { text: neg, clip: [lastLora, 1] },
     },
     '5': {
       class_type: 'EmptyLatentImage',
@@ -74,7 +128,7 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
     '6': {
       class_type: 'KSampler',
       inputs: {
-        model: ['2', 0],
+        model: [lastLora, 0],
         positive: ['3', 0],
         negative: ['4', 0],
         latent_image: ['5', 0],
@@ -102,8 +156,8 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
       class_type: 'FaceDetailer',
       inputs: {
         image: ['7', 0],
-        model: ['2', 0],
-        clip: ['2', 1],
+        model: [lastLora, 0],
+        clip: [lastLora, 1],
         vae: ['1', 2],
         positive: ['3', 0],
         negative: ['4', 0],
@@ -141,7 +195,9 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
       class_type: 'SaveImage',
       inputs: { images: ['12', 0], filename_prefix: prefix },
     },
-  };
+  });
+
+  return workflow;
 }
 
 /**
@@ -149,32 +205,28 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
  * Used when only one character appears in the image.
  */
 export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Record<string, any> {
-  const neg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT;
+  const baseNeg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT;
+  const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'scene';
   const ipaWeight = params.ipadapterWeight ?? 0.85;
 
-  return {
+  const workflow: Record<string, any> = {
     '1': {
       class_type: 'CheckpointLoaderSimple',
       inputs: { ckpt_name: 'juggernautXL_v11.safetensors' },
     },
-    '2': {
-      class_type: 'LoraLoader',
-      inputs: {
-        lora_name: 'detail-tweaker-xl.safetensors',
-        strength_model: 0.5,
-        strength_clip: 0.5,
-        model: ['1', 0],
-        clip: ['1', 1],
-      },
-    },
+  };
+
+  const lastLora = buildLoraChain(workflow, params.loras);
+
+  Object.assign(workflow, {
     '3': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: params.positivePrompt, clip: ['2', 1] },
+      inputs: { text: params.positivePrompt, clip: [lastLora, 1] },
     },
     '4': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: neg, clip: ['2', 1] },
+      inputs: { text: neg, clip: [lastLora, 1] },
     },
     '5': {
       class_type: 'EmptyLatentImage',
@@ -182,7 +234,7 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
     },
     '30': {
       class_type: 'IPAdapterUnifiedLoaderFaceID',
-      inputs: { model: ['2', 0], preset: 'FACEID PLUS V2', lora_strength: 0.6, provider: 'CUDA' },
+      inputs: { model: [lastLora, 0], preset: 'FACEID PLUS V2', lora_strength: 0.6, provider: 'CUDA' },
     },
     '31': {
       class_type: 'LoadImage',
@@ -232,14 +284,14 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
     },
     '40': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: params.primaryFacePrompt, clip: ['2', 1] },
+      inputs: { text: params.primaryFacePrompt, clip: [lastLora, 1] },
     },
     '12': {
       class_type: 'FaceDetailer',
       inputs: {
         image: ['7', 0],
-        model: ['2', 0],
-        clip: ['2', 1],
+        model: [lastLora, 0],
+        clip: [lastLora, 1],
         vae: ['1', 2],
         positive: ['40', 0],
         negative: ['4', 0],
@@ -277,7 +329,9 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
       class_type: 'SaveImage',
       inputs: { images: ['12', 0], filename_prefix: prefix },
     },
-  };
+  });
+
+  return workflow;
 }
 
 /**
@@ -296,11 +350,17 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
     filenamePrefix: prefix,
   });
 
+  // Determine the last LoRA node ID for downstream references
+  const loraCount = (params.loras && params.loras.length > 0)
+    ? Math.min(params.loras.length, 4)
+    : 1;
+  const lastLora = LORA_NODE_IDS[loraCount - 1];
+
   // Add secondary character FaceDetailer (Pass 2)
   // Node 50: Secondary face prompt
   workflow['50'] = {
     class_type: 'CLIPTextEncode',
-    inputs: { text: params.secondaryFacePrompt, clip: ['2', 1] },
+    inputs: { text: params.secondaryFacePrompt, clip: [lastLora, 1] },
   };
 
   // Node 51: FaceDetailer Pass 2 — takes output from Pass 1 (node 12)
@@ -308,8 +368,8 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
     class_type: 'FaceDetailer',
     inputs: {
       image: ['12', 0],
-      model: ['2', 0],
-      clip: ['2', 1],
+      model: [lastLora, 0],
+      clip: [lastLora, 1],
       vae: ['1', 2],
       positive: ['50', 0],
       negative: ['4', 0],
@@ -370,6 +430,8 @@ export function buildWorkflow(config: {
   ipadapterWeight?: number;
   secondaryFacePrompt?: string;
   secondarySeed?: number;
+  loras?: LoraInput[];
+  negativePromptAdditions?: string;
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -380,6 +442,8 @@ export function buildWorkflow(config: {
         height: config.height,
         seed: config.seed,
         filenamePrefix: config.filenamePrefix,
+        loras: config.loras,
+        negativePromptAdditions: config.negativePromptAdditions,
       });
 
     case 'single-character':
@@ -396,6 +460,8 @@ export function buildWorkflow(config: {
         primaryRefImageName: config.primaryRefImageName,
         primaryFacePrompt: config.primaryFacePrompt,
         ipadapterWeight: config.ipadapterWeight,
+        loras: config.loras,
+        negativePromptAdditions: config.negativePromptAdditions,
       });
 
     case 'dual-character':
@@ -414,6 +480,8 @@ export function buildWorkflow(config: {
         ipadapterWeight: config.ipadapterWeight,
         secondaryFacePrompt: config.secondaryFacePrompt,
         secondarySeed: config.secondarySeed,
+        loras: config.loras,
+        negativePromptAdditions: config.negativePromptAdditions,
       });
 
     default:
