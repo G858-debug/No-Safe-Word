@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildPrompt, buildNegativePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodSync, base64ToBuffer, buildPortraitWorkflow } from "@no-safe-word/image-gen";
+import { submitRunPodJob, buildPortraitWorkflow } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 const PORTRAIT_SCENE: SceneData = {
@@ -81,7 +81,7 @@ export async function POST(
     const prompt = buildPrompt(characterData, PORTRAIT_SCENE);
     const negativePrompt = buildNegativePrompt(PORTRAIT_SCENE);
 
-    console.log(`[StoryPublisher] Generating portrait via RunPod for ${character.name}, seed: ${seed}`);
+    console.log(`[StoryPublisher] Submitting portrait to RunPod for ${character.name}, seed: ${seed}`);
 
     const workflow = buildPortraitWorkflow({
       positivePrompt: prompt,
@@ -92,27 +92,10 @@ export async function POST(
       filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
     });
 
-    const { imageBase64, executionTime } = await submitRunPodSync(workflow);
-    console.log(`[StoryPublisher] RunPod portrait generated in ${executionTime}ms`);
+    // Submit async job to RunPod (returns immediately)
+    const { jobId } = await submitRunPodJob(workflow);
 
-    // Store directly to Supabase Storage
-    const buffer = base64ToBuffer(imageBase64);
-    const timestamp = Date.now();
-    const storagePath = `characters/${character.name.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.png`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("story-images")
-      .upload(storagePath, buffer, { contentType: "image/png", upsert: true });
-
-    if (uploadError) {
-      throw new Error(`Storage upload failed: ${uploadError.message}`);
-    }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from("story-images")
-      .getPublicUrl(storagePath);
-
-    // Create image record
+    // Create image record (stored_url will be set when status polling completes)
     const { data: imageRow, error: imgError } = await supabase
       .from("images")
       .insert({
@@ -121,8 +104,6 @@ export async function POST(
         negative_prompt: negativePrompt,
         settings: { width: 832, height: 1216, steps: 30, cfg: 7, seed, engine: "runpod-comfyui" },
         mode: "sfw",
-        sfw_url: publicUrl,
-        stored_url: publicUrl,
       })
       .select("id")
       .single();
@@ -131,12 +112,19 @@ export async function POST(
       throw new Error(`Failed to create image record: ${imgError?.message}`);
     }
 
-    console.log(`[StoryPublisher] RunPod portrait stored: ${publicUrl}, imageId: ${imageRow.id}`);
+    // Create generation job record for status polling
+    await supabase.from("generation_jobs").insert({
+      job_id: `runpod-${jobId}`,
+      image_id: imageRow.id,
+      status: "pending",
+      cost: 0,
+    });
+
+    console.log(`[StoryPublisher] Portrait job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
+
     return NextResponse.json({
+      jobId: `runpod-${jobId}`,
       imageId: imageRow.id,
-      imageUrl: publicUrl,
-      seed,
-      completed: true,
     });
   } catch (err) {
     console.error("Character portrait generation failed:", err);
