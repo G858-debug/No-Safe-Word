@@ -149,6 +149,7 @@ export default function ImageGeneration({
   useEffect(() => {
     const initial: Record<string, PromptState> = {};
     const posMap: Record<string, number> = {};
+    const staleGeneratingIds: string[] = [];
 
     for (const post of posts) {
       for (const ip of post.story_image_prompts) {
@@ -165,9 +166,9 @@ export default function ImageGeneration({
           error: null,
         };
 
-        // If status is generating, add to polling set
+        // Collect "generating" prompts — we'll resolve their real status below
         if (ip.status === "generating") {
-          pollingIdsRef.current.add(ip.id);
+          staleGeneratingIds.push(ip.id);
         }
       }
     }
@@ -175,9 +176,44 @@ export default function ImageGeneration({
     promptPositionMap.current = posMap;
     setPromptStates(initial);
 
-    // Start polling if any were already generating
-    if (pollingIdsRef.current.size > 0) {
-      setIsPolling(true);
+    // For prompts stuck as "generating" from a previous session, check their
+    // actual status via the prompt status endpoint (which also persists
+    // completed images). We don't have jobIds for these, so normal polling
+    // would just leave them stuck.
+    if (staleGeneratingIds.length > 0) {
+      Promise.allSettled(
+        staleGeneratingIds.map(async (promptId) => {
+          try {
+            const res = await fetch(`/api/stories/images/${promptId}/status`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            if (data.status === "generated" || data.status === "approved") {
+              setPromptStates((prev) => ({
+                ...prev,
+                [promptId]: {
+                  ...prev[promptId],
+                  status: data.status,
+                  imageUrl: data.storedUrl || data.blobUrl || prev[promptId]?.imageUrl || null,
+                  error: null,
+                },
+              }));
+            } else if (data.status === "failed") {
+              setPromptStates((prev) => ({
+                ...prev,
+                [promptId]: {
+                  ...prev[promptId],
+                  status: "failed",
+                  error: "Generation failed",
+                },
+              }));
+            }
+            // If still "generating", leave as-is (no jobId to poll with)
+          } catch {
+            // Ignore — will remain as "generating" in UI
+          }
+        })
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
