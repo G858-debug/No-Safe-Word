@@ -489,6 +489,8 @@ export interface Database {
           position_after_word: number | null;
           character_name: string | null;
           character_id: string | null;
+          secondary_character_name: string | null;
+          secondary_character_id: string | null;
           prompt: string;
           image_id: string | null;
           status: string;
@@ -504,6 +506,8 @@ export interface Database {
           position_after_word?: number | null;
           character_name?: string | null;
           character_id?: string | null;
+          secondary_character_name?: string | null;
+          secondary_character_id?: string | null;
           prompt: string;
           image_id?: string | null;
           status?: string;
@@ -519,6 +523,8 @@ export interface Database {
           position_after_word?: number | null;
           character_name?: string | null;
           character_id?: string | null;
+          secondary_character_name?: string | null;
+          secondary_character_id?: string | null;
           prompt?: string;
           image_id?: string | null;
           status?: string;
@@ -542,6 +548,13 @@ export interface Database {
           {
             foreignKeyName: "story_image_prompts_character_id_fkey";
             columns: ["character_id"];
+            isOneToOne: false;
+            referencedRelation: "characters";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "story_image_prompts_secondary_character_id_fkey";
+            columns: ["secondary_character_id"];
             isOneToOne: false;
             referencedRelation: "characters";
             referencedColumns: ["id"];

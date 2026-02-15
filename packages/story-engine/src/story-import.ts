@@ -6,6 +6,7 @@ import {
   type ImportResult,
   type CharacterImport,
 } from "@no-safe-word/shared";
+import { cleanScenePrompt } from "@no-safe-word/image-gen";
 
 /**
  * Import a complete story payload into the database.
@@ -111,6 +112,9 @@ export async function importStory(
       const charId = img.character_name
         ? characterMap.get(img.character_name) || null
         : null;
+      const secondaryCharId = img.secondary_character_name
+        ? characterMap.get(img.secondary_character_name) || null
+        : null;
 
       const { data: promptRow, error: promptError } = await supabase
         .from("story_image_prompts")
@@ -120,7 +124,9 @@ export async function importStory(
           position: img.position,
           character_name: img.character_name || null,
           character_id: charId,
-          prompt: img.prompt,
+          secondary_character_name: img.secondary_character_name || null,
+          secondary_character_id: secondaryCharId,
+          prompt: cleanScenePrompt(img.prompt),
           status: "pending",
         })
         .select("id")
@@ -141,6 +147,9 @@ export async function importStory(
       const charId = img.character_name
         ? characterMap.get(img.character_name) || null
         : null;
+      const secondaryCharId = img.secondary_character_name
+        ? characterMap.get(img.secondary_character_name) || null
+        : null;
 
       const pairedWithId = sfwPromptIds.get(img.pairs_with_facebook) || null;
 
@@ -153,7 +162,9 @@ export async function importStory(
           position: img.pairs_with_facebook,
           character_name: img.character_name || null,
           character_id: charId,
-          prompt: img.prompt,
+          secondary_character_name: img.secondary_character_name || null,
+          secondary_character_id: secondaryCharId,
+          prompt: cleanScenePrompt(img.prompt),
           status: "pending",
         });
 
@@ -172,6 +183,9 @@ export async function importStory(
       const charId = img.character_name
         ? characterMap.get(img.character_name) || null
         : null;
+      const secondaryCharId = img.secondary_character_name
+        ? characterMap.get(img.secondary_character_name) || null
+        : null;
 
       const { error: promptError } = await supabase
         .from("story_image_prompts")
@@ -182,7 +196,9 @@ export async function importStory(
           position_after_word: img.position_after_word,
           character_name: img.character_name || null,
           character_id: charId,
-          prompt: img.prompt,
+          secondary_character_name: img.secondary_character_name || null,
+          secondary_character_id: secondaryCharId,
+          prompt: cleanScenePrompt(img.prompt),
           status: "pending",
         });
 

@@ -26,7 +26,7 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { prompt: customPrompt } = body as { prompt?: string };
+    const { prompt: customPrompt, model_urn } = body as { prompt?: string; model_urn?: string };
 
     console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}`);
 
@@ -122,8 +122,11 @@ export async function POST(
       negativePrompt = buildNegativePrompt(PORTRAIT_SCENE);
     }
 
-    // 6. Generate with new random seed
-    const settings = { ...DEFAULT_SETTINGS, seed: -1, batchSize: 1 };
+    // 6. Generate with a known random seed (not -1) so we can store it for
+    //    character consistency. Civitai does not report back the seed it picks
+    //    when seed=-1, so we choose one ourselves.
+    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
     const result = await submitGeneration(
       characterData,
       PORTRAIT_SCENE,

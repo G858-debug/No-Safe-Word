@@ -63,9 +63,205 @@ export function extractCharacterTags(portraitPrompt: string): string {
   return result.trim().replace(/,\s*$/, "");
 }
 
+/**
+ * Strip inline parenthetical character descriptions from a scene prompt.
+ * These are blocks like "(24, oval face, high cheekbones, neat braids in low bun, slim curvaceous figure)"
+ * that duplicate appearance info already captured in the approved character tags.
+ * Preserves SD emphasis parens like (tag:1.3) which are short single-item groups.
+ */
+export function stripInlineCharacterDescriptions(scenePrompt: string): string {
+  let result = scenePrompt;
+
+  // Remove parenthetical blocks starting with an age number followed by
+  // comma-separated physical descriptors (the dominant pattern from story generation)
+  result = result.replace(/\(\s*\d{1,3}\s*,[^)]{10,}\)/g, "");
+
+  // Remove parenthetical blocks containing multiple comma-separated physical descriptors
+  // even without a leading age number (e.g. "(round face, warm smile, full figure)")
+  result = result.replace(/\([^)]*(?:,\s*[^)]*){2,}\)/g, (match) => {
+    const physicalTerms =
+      /\b(?:face|cheekbone|jawline|hair|braid|bun|ponytail|figure|body|skin|complexion|build|frame|curvaceous|muscular|athletic|slim|petite|slender|toned|oval|round|square|freckles|dimples|stubble|beard|goatee)\b/i;
+    return physicalTerms.test(match) ? "" : match;
+  });
+
+  // Remove leading character intro phrases like:
+  // "A stunning young Black South African woman"
+  // "A muscular young Black South African man"
+  // "A beautiful Black South African couple"
+  result = result.replace(
+    /\b[Aa]n?\s+(?:\w+\s+){0,3}(?:Black\s+)?(?:South\s+)?African\s+(?:woman|man|couple|lady|girl|guy)\b/g,
+    ""
+  );
+
+  // Also strip "Her friend" / "His friend" intro patterns before parenthetical blocks
+  // (the parenthetical itself is already removed above)
+  result = result.replace(/\b(?:Her|His)\s+friend\b/gi, "");
+
+  // Clean up double-commas and extra whitespace left after removals
+  result = result
+    .replace(/,(\s*,)+/g, ",")
+    .replace(/^\s*,\s*/, "")
+    .replace(/\s*,\s*$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return result;
+}
+
+/**
+ * Add emphasis weight to gaze/eye direction instructions in a scene prompt.
+ * These are critical for character consistency and need extra weight to
+ * override the model's tendencies.
+ */
+export function weightGazeDirections(scenePrompt: string): string {
+  let result = scenePrompt;
+
+  // Already-weighted gaze instructions (contains :1.N) — skip
+  // Only process unweighted gaze patterns
+
+  // "looking directly at camera/viewer" → "(looking directly at camera:1.3)"
+  result = result.replace(
+    /(?<!\()looking\s+directly\s+at\s+(?:camera|viewer|the\s+camera|the\s+viewer)(?![\w:]*\))/gi,
+    "(looking directly at camera:1.3)"
+  );
+
+  // "eyes closed" → "(eyes closed:1.3)"
+  result = result.replace(
+    /(?<!\()eyes\s+closed(?![\w:]*\))/gi,
+    "(eyes closed:1.3)"
+  );
+
+  // "looking at him/her/the other person/them" → "(looking at the other person:1.2)"
+  result = result.replace(
+    /(?<!\()looking\s+at\s+(?:him|her|them|the\s+other\s+person)(?![\w:]*\))/gi,
+    "(looking at the other person:1.2)"
+  );
+
+  // "looking down" → "(looking down:1.2)"
+  result = result.replace(
+    /(?<!\()looking\s+down(?![\w:]*\))/gi,
+    "(looking down:1.2)"
+  );
+
+  // "looking over shoulder" → "(looking over shoulder:1.2)"
+  result = result.replace(
+    /(?<!\()looking\s+over\s+(?:her\s+|his\s+)?shoulder(?![\w:]*\))/gi,
+    "(looking over shoulder:1.2)"
+  );
+
+  // "eyes open, staring at ceiling" or "staring at ceiling" → weighted
+  result = result.replace(
+    /(?<!\()(?:eyes\s+open,\s*)?staring\s+at\s+(?:the\s+)?ceiling(?![\w:]*\))/gi,
+    "(eyes open, staring at ceiling:1.2)"
+  );
+
+  // "looking up" → "(looking up:1.2)"
+  result = result.replace(
+    /(?<!\()looking\s+up(?![\w:]*\))/gi,
+    "(looking up:1.2)"
+  );
+
+  // "looking away" → "(looking away:1.2)"
+  result = result.replace(
+    /(?<!\()looking\s+away(?![\w:]*\))/gi,
+    "(looking away:1.2)"
+  );
+
+  return result;
+}
+
+/**
+ * Replace the age in extracted character tags with the correct age from character data.
+ * The age is typically the first token, e.g. "35, male, athletic body, ..." → "26, male, ...".
+ */
+export function replaceTagsAge(tags: string, correctAge: string): string {
+  if (!correctAge) return tags;
+  // Match a leading number optionally followed by "years old" / "year old"
+  return tags.replace(/^\d{1,3}(\s*years?\s*old)?/, correctAge);
+}
+
+/**
+ * Build the final prompt for a story image.
+ *
+ * Supports single-character and dual-character scenes. Character tags
+ * (ground truth for appearance from approved portraits) are placed first,
+ * then the scene prompt with inline character descriptions stripped and
+ * gaze directions emphasized.
+ *
+ * For prompts with NO linked characters (atmospheric/environmental shots),
+ * the scene prompt is used as-is with quality prefix/suffix.
+ */
+export function buildStoryImagePrompt(
+  primaryCharacterTags: string | null,
+  secondaryCharacterTags: string | null,
+  scenePrompt: string,
+  _mode: "sfw" | "nsfw"
+): string {
+  const cleanedScene = weightGazeDirections(
+    stripInlineCharacterDescriptions(scenePrompt)
+  );
+
+  // No linked characters — atmospheric/environmental shot
+  if (!primaryCharacterTags) {
+    return `masterpiece, best quality, highly detailed, ${cleanedScene}, photorealistic`;
+  }
+
+  // Single character
+  if (!secondaryCharacterTags) {
+    return `masterpiece, best quality, highly detailed, ${primaryCharacterTags}, ${cleanedScene}, photorealistic`;
+  }
+
+  // Two characters
+  return `masterpiece, best quality, highly detailed, ${primaryCharacterTags}, second person: ${secondaryCharacterTags}, ${cleanedScene}, photorealistic`;
+}
+
+/**
+ * Clean a scene prompt imported from a story JSON.
+ *
+ * Story JSONs written in the old narrative style contain inline character
+ * descriptions and other boilerplate that conflicts with the prompt builder's
+ * own character-tag injection. This function strips those patterns at import
+ * time so saved prompts contain only scene-specific content.
+ *
+ * Best-effort — handles the most common patterns from our prompt style.
+ */
+export function cleanScenePrompt(prompt: string): string {
+  // Start with existing inline-description stripping (parentheticals + African intros)
+  let result = stripInlineCharacterDescriptions(prompt);
+
+  // Remove broader character intro phrases:
+  // "A stunning young Black South African woman," "A muscular man,"
+  // "A well-dressed young couple," etc.
+  // Only removes when the phrase contains a character-intro adjective or ethnicity term.
+  result = result.replace(
+    /\b[Aa]n?\s+(?:[\w-]+\s+){0,5}(?:woman|man|couple|lady|girl|guy|gentleman)\b(?:\s*,)?/g,
+    (match) => {
+      const introTerms =
+        /\b(?:stunning|beautiful|gorgeous|handsome|attractive|striking|elegant|well-dressed|muscular|athletic|curvaceous|curvy|petite|slender|young|Black|White|Asian|Indian|African|Nigerian|Kenyan|Ethiopian|Caribbean|Latino|Latina|Hispanic|Brazilian|European|American|Middle[\s-]?Eastern|Arab|South[\s-]?African|Mixed[\s-]?race|Biracial)\b/i;
+      return introTerms.test(match) ? "" : match;
+    }
+  );
+
+  // Remove trailing "Photorealistic." / "photorealistic" (added by prompt builder)
+  result = result.replace(/[,.\s]*\b[Pp]hotorealistic\.?\s*$/g, "");
+
+  // Remove leading "Photorealistic," / "Photorealistic."
+  result = result.replace(/^\s*[Pp]hotorealistic[.,]\s*/g, "");
+
+  // Clean up artifacts: double commas, leading/trailing commas, double spaces
+  result = result
+    .replace(/,(\s*,)+/g, ",")
+    .replace(/^\s*,\s*/, "")
+    .replace(/\s*,\s*$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return result;
+}
+
 export function buildNegativePrompt(scene: SceneData): string {
   const base =
-    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, blurry, bad quality, watermark, text, signature";
+    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1)";
 
   if (scene.mode === "sfw") {
     return `${base}, nsfw, nude, naked, sexual`;

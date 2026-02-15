@@ -48,6 +48,7 @@ export interface CharacterFromAPI {
 interface CharacterApprovalProps {
   seriesId: string;
   characters: CharacterFromAPI[];
+  modelUrn?: string;
   onProceedToImages?: () => void;
   onCharacterApproved?: (storyCharId: string, imageUrl: string, imageId: string) => void;
 }
@@ -63,6 +64,7 @@ interface CharState {
   showDescription: boolean;
   jobId: string | null;
   pollStartTime: number | null;
+  seed: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,19 @@ const ROLE_STYLES: Record<string, { label: string; className: string }> = {
     className: "bg-red-500/20 text-red-400 border-red-500/30",
   },
 };
+
+/**
+ * Ensure the age in a portrait prompt matches the canonical age from character data.
+ * If the prompt contains a different age (e.g. manually edited), replace it.
+ */
+function ensureCorrectAge(prompt: string, correctAge: string): string {
+  if (!correctAge) return prompt;
+  // Age appears right after the quality prefix as a standalone number token
+  return prompt.replace(
+    /(masterpiece,\s*best quality,\s*highly detailed,\s*)\d{1,3}(\s*years?\s*old)?/,
+    `$1${correctAge}`
+  );
+}
 
 /** Client-side mirror of the server prompt builder for portrait shots */
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
@@ -133,6 +148,7 @@ const MAX_POLL_ATTEMPTS = 120; // 6 minutes
 export default function CharacterApproval({
   seriesId,
   characters,
+  modelUrn,
   onProceedToImages,
   onCharacterApproved,
 }: CharacterApprovalProps) {
@@ -173,6 +189,7 @@ export default function CharacterApproval({
         showDescription: false,
         jobId: null,
         pollStartTime: null,
+        seed: ch.approved_seed ?? null,
       };
     }
     setCharStates(initial);
@@ -254,9 +271,10 @@ export default function CharacterApproval({
           });
 
           if (data.completed && data.imageUrl) {
-            console.log(`[StoryPublisher] Generation completed for ${storyCharId}, imageUrl: ${data.imageUrl}`);
+            console.log(`[StoryPublisher] Generation completed for ${storyCharId}, imageUrl: ${data.imageUrl}, seed: ${data.seed}`);
             clearInterval(pollTimers.current[storyCharId]);
             delete pollTimers.current[storyCharId];
+            const completedSeed: number | null = data.seed ?? null;
 
             // Immediately store the image to Supabase Storage to preserve it
             try {
@@ -303,6 +321,7 @@ export default function CharacterApproval({
                   error: null,
                   jobId: null,
                   pollStartTime: null,
+                  seed: completedSeed,
                 });
               } else {
                 console.warn(`[StoryPublisher] Storage failed, using blob URL as fallback`);
@@ -314,6 +333,7 @@ export default function CharacterApproval({
                   error: null,
                   jobId: null,
                   pollStartTime: null,
+                  seed: completedSeed,
                 });
               }
             } catch (err) {
@@ -326,6 +346,7 @@ export default function CharacterApproval({
                 error: null,
                 jobId: null,
                 pollStartTime: null,
+                seed: completedSeed,
               });
             }
           }
@@ -347,7 +368,11 @@ export default function CharacterApproval({
       try {
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
-          { method: "POST" }
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+          }
         );
         if (!res.ok) {
           const err = await res.json();
@@ -366,7 +391,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [updateChar, startPolling]
+    [updateChar, startPolling, modelUrn]
   );
 
   const handleRegenerate = useCallback(
@@ -382,12 +407,15 @@ export default function CharacterApproval({
       });
 
       try {
+        const body: Record<string, string> = { prompt: state.prompt };
+        if (modelUrn) body.model_urn = modelUrn;
+
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt: state.prompt }),
+            body: JSON.stringify(body),
           }
         );
         if (!res.ok) {
@@ -404,7 +432,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateChar, startPolling]
+    [charStates, updateChar, startPolling, modelUrn]
   );
 
   const handleApprove = useCallback(
@@ -419,6 +447,21 @@ export default function CharacterApproval({
       updateChar(storyCharId, { error: null });
 
       try {
+        // Validate prompt age against character data before sending
+        const character = characters.find((c) => c.id === storyCharId);
+        const correctAge = (character?.characters.description as Record<string, string>)?.age;
+        const validatedPrompt = correctAge
+          ? ensureCorrectAge(state.prompt, correctAge)
+          : state.prompt;
+
+        if (validatedPrompt !== state.prompt) {
+          console.warn(
+            `[StoryPublisher] Age mismatch detected in prompt for ${storyCharId}. ` +
+            `Corrected to "${correctAge}" from character data.`
+          );
+          updateChar(storyCharId, { prompt: validatedPrompt });
+        }
+
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/approve`,
           {
@@ -426,7 +469,8 @@ export default function CharacterApproval({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               image_id: state.imageId,
-              prompt: state.prompt,
+              seed: state.seed,
+              prompt: validatedPrompt,
             }),
           }
         );
@@ -495,7 +539,11 @@ export default function CharacterApproval({
 
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
-          { method: "POST" }
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+          }
         );
 
         if (!res.ok) {
@@ -527,7 +575,7 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateChar, startPolling]);
+  }, [characters, charStates, updateChar, startPolling, modelUrn]);
 
   // ------- Derived state -------
 

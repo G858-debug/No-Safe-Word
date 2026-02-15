@@ -26,6 +26,7 @@ export async function GET(
 
     // Update Supabase job status (best-effort)
     let finalImageUrl = imageUrl;
+    let seed: number | null = null;
     if (completed) {
       try {
         await supabase
@@ -50,16 +51,23 @@ export async function GET(
               .update({ sfw_url: imageUrl })
               .eq("id", jobRow.image_id);
 
-            // Check if this image already has a stored_url (permanent URL)
+            // Fetch stored_url and seed from the image record
             const { data: imageRow } = await supabase
               .from("images")
-              .select("stored_url")
+              .select("stored_url, settings")
               .eq("id", jobRow.image_id)
               .single();
 
             // Prefer stored_url over temporary blob URL
             if (imageRow?.stored_url) {
               finalImageUrl = imageRow.stored_url;
+            }
+
+            // Extract the seed from image settings so the client can use it
+            // for character approval / consistency
+            const settings = imageRow?.settings as Record<string, unknown> | null;
+            if (settings?.seed != null && settings.seed !== -1) {
+              seed = Number(settings.seed);
             }
           }
         }
@@ -75,6 +83,7 @@ export async function GET(
       completed,
       imageUrl: finalImageUrl,
       imageUrlExpiration: job.result?.[0]?.blobUrlExpirationDate ?? null,
+      seed,
     });
   } catch (err) {
     if (err instanceof CivitaiError) {

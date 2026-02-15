@@ -35,6 +35,17 @@ import type {
   StorySeriesRow,
   StoryPostRow,
 } from "@no-safe-word/shared";
+import {
+  MODEL_PRESETS,
+  DEFAULT_SETTINGS,
+} from "@no-safe-word/shared";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -147,6 +158,9 @@ export default function SeriesDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [selectedModelUrn, setSelectedModelUrn] = useState(
+    DEFAULT_SETTINGS.modelUrn
+  );
 
   // Fetch series data + characters
   useEffect(() => {
@@ -325,7 +339,7 @@ export default function SeriesDetailPage() {
               <CardHeader>
                 <CardTitle className="text-base">Series Info</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
                   <div>
                     <dt className="text-muted-foreground">Status</dt>
@@ -350,6 +364,32 @@ export default function SeriesDetailPage() {
                     </dd>
                   </div>
                 </dl>
+
+                {/* Model selection */}
+                <div className="space-y-1.5">
+                  <label className="text-sm text-muted-foreground">
+                    Generation Model
+                  </label>
+                  <Select
+                    value={selectedModelUrn}
+                    onValueChange={setSelectedModelUrn}
+                  >
+                    <SelectTrigger className="w-full sm:w-[340px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODEL_PRESETS.map((model) => (
+                        <SelectItem key={model.urn} value={model.urn}>
+                          {model.name} ({model.type})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {MODEL_PRESETS.find((m) => m.urn === selectedModelUrn)
+                      ?.description ?? ""}
+                  </p>
+                </div>
               </CardContent>
             </Card>
 
@@ -463,6 +503,7 @@ export default function SeriesDetailPage() {
           <CharacterApproval
             seriesId={seriesId}
             characters={characters}
+            modelUrn={selectedModelUrn}
             onProceedToImages={() => setActiveTab("images")}
             onCharacterApproved={(storyCharId, imageUrl, imageId) => {
               setCharacters((prev) =>
@@ -483,6 +524,7 @@ export default function SeriesDetailPage() {
             posts={posts}
             imageUrls={data.image_urls}
             allCharactersApproved={allCharsApproved}
+            modelUrn={selectedModelUrn}
           />
         </div>
 

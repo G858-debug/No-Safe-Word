@@ -12,6 +12,7 @@
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
+    "@no-safe-word/image-gen": "*",
     "@no-safe-word/shared": "*",
     "@supabase/supabase-js": "^2.49.1"
   },

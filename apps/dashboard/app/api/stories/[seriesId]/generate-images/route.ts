@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
-import { buildNegativePrompt, extractCharacterTags } from "@no-safe-word/image-gen";
+import { buildNegativePrompt, extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -25,7 +25,7 @@ export async function POST(
 
   try {
     const body = await request.json().catch(() => ({}));
-    const { post_id } = body as { post_id?: string };
+    const { post_id, model_urn } = body as { post_id?: string; model_urn?: string };
 
     // 1. Verify all characters in the series are approved
     const { data: storyChars, error: charsError } = await supabase
@@ -104,7 +104,7 @@ export async function POST(
     // 3. Fetch pending image prompts for those posts
     const { data: prompts, error: promptsError } = await supabase
       .from("story_image_prompts")
-      .select("id, post_id, image_type, position, character_name, character_id, prompt")
+      .select("id, post_id, image_type, position, character_name, character_id, secondary_character_name, secondary_character_id, prompt")
       .in("post_id", postIds)
       .eq("status", "pending");
 
@@ -119,11 +119,11 @@ export async function POST(
       return NextResponse.json({ queued: 0, skipped: 0, jobs: [] });
     }
 
-    // 4. Pre-fetch all linked characters for building CharacterData
+    // 4. Pre-fetch all linked characters (primary + secondary) for building CharacterData
     const characterIds = Array.from(
       new Set(
         prompts
-          .map((p) => p.character_id)
+          .flatMap((p) => [p.character_id, p.secondary_character_id])
           .filter((id): id is string => id !== null)
       )
     );
@@ -156,6 +156,20 @@ export async function POST(
         }
       }
     }
+
+    // Safeguard: correct ages in approved tags using canonical character data.
+    // The approved_prompt may contain a manually-edited age that differs from
+    // the character's actual age in the database.
+    approvedTagsMap.forEach((tags, charId) => {
+      const charData = characterDataMap.get(charId);
+      if (charData?.age) {
+        const corrected = replaceTagsAge(tags, charData.age);
+        if (corrected !== tags) {
+          console.warn(`[StoryImage] Age mismatch in approved tags for character ${charId}. Corrected to "${charData.age}".`);
+          approvedTagsMap.set(charId, corrected);
+        }
+      }
+    });
 
     // Empty character for prompts not linked to a character
     const emptyCharacter: CharacterData = {
@@ -217,16 +231,21 @@ export async function POST(
           }
         }
 
-        const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1 };
+        const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
 
-        // Use approved character tags if available for consistency with approved portrait
-        let promptOverride: string | undefined;
-        if (imgPrompt.character_id) {
-          const approvedTags = approvedTagsMap.get(imgPrompt.character_id);
-          if (approvedTags) {
-            promptOverride = `masterpiece, best quality, highly detailed, ${approvedTags}, ${imgPrompt.prompt}`;
-          }
-        }
+        // Build prompt using approved character tags for consistency with approved portraits.
+        // The scene prompt is cleaned of inline character descriptions to avoid
+        // contradicting the authoritative tags from the approved portrait.
+        const primaryTags = imgPrompt.character_id
+          ? approvedTagsMap.get(imgPrompt.character_id) || null
+          : null;
+        const secondaryTags = imgPrompt.secondary_character_id
+          ? approvedTagsMap.get(imgPrompt.secondary_character_id) || null
+          : null;
+
+        const promptOverride = (primaryTags || secondaryTags)
+          ? buildStoryImagePrompt(primaryTags, secondaryTags, imgPrompt.prompt, mode)
+          : undefined;
 
         // Submit to Civitai
         const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);

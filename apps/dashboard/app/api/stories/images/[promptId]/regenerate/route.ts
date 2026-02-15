@@ -1,23 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
-import { buildNegativePrompt, extractCharacterTags } from "@no-safe-word/image-gen";
+import { buildNegativePrompt, extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   props: { params: Promise<{ promptId: string }> }
 ) {
   const params = await props.params;
   const { promptId } = params;
 
   try {
+    const body = await request.json().catch(() => ({}));
+    const { model_urn } = body as { model_urn?: string };
     // 1. Fetch the image prompt
     const { data: imgPrompt, error: fetchError } = await supabase
       .from("story_image_prompts")
-      .select("id, post_id, image_type, position, character_name, character_id, prompt, image_id")
+      .select("id, post_id, image_type, position, character_name, character_id, secondary_character_name, secondary_character_id, prompt, image_id")
       .eq("id", promptId)
       .single();
 
@@ -79,6 +81,7 @@ export async function POST(
 
     let seed = -1;
     let approvedCharacterTags: string | null = null;
+    let secondaryCharacterTags: string | null = null;
 
     if (imgPrompt.character_id) {
       const { data: character } = await supabase
@@ -132,6 +135,21 @@ export async function POST(
         } else {
           console.warn(`[StoryImage] No approved_prompt for character ${imgPrompt.character_id} — falling back to character description. Re-approve the character portrait to save the prompt.`);
         }
+
+        // Look up secondary character's approved tags if linked
+        if (imgPrompt.secondary_character_id) {
+          const { data: secondaryStoryChar } = await supabase
+            .from("story_characters")
+            .select("approved_prompt")
+            .eq("series_id", post.series_id)
+            .eq("character_id", imgPrompt.secondary_character_id)
+            .single();
+
+          if (secondaryStoryChar?.approved_prompt) {
+            secondaryCharacterTags = extractCharacterTags(secondaryStoryChar.approved_prompt);
+            console.log(`[StoryImage] Using approved_prompt tags for secondary character ${imgPrompt.secondary_character_id}:`, secondaryCharacterTags);
+          }
+        }
       }
     }
 
@@ -149,12 +167,11 @@ export async function POST(
       additionalTags: [],
     };
 
-    // 6. Submit generation — use approved character tags if available for consistency
-    const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1 };
-    let promptOverride: string | undefined;
-    if (approvedCharacterTags) {
-      promptOverride = `masterpiece, best quality, highly detailed, ${approvedCharacterTags}, ${imgPrompt.prompt}`;
-    }
+    // 6. Submit generation — use approved character tags for consistency with approved portraits
+    const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
+    const promptOverride = (approvedCharacterTags || secondaryCharacterTags)
+      ? buildStoryImagePrompt(approvedCharacterTags, secondaryCharacterTags, imgPrompt.prompt, mode)
+      : undefined;
     const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
 
     // 7. Persist image record

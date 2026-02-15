@@ -64,18 +64,21 @@ export interface PostImagesImport {
 export interface FacebookSfwImage {
   position: number;
   character_name: string | null;
+  secondary_character_name?: string;
   prompt: string;
 }
 
 export interface WebsiteNsfwPairedImage {
   pairs_with_facebook: number; // position number of the facebook_sfw image
   character_name: string | null;
+  secondary_character_name?: string;
   prompt: string;
 }
 
 export interface WebsiteOnlyImage {
   position_after_word: number;
   character_name: string | null;
+  secondary_character_name?: string;
   prompt: string;
 }
 
@@ -158,6 +161,8 @@ export interface StoryImagePromptRow {
   position_after_word: number | null;
   character_name: string | null;
   character_id: string | null;
+  secondary_character_name: string | null;
+  secondary_character_id: string | null;
   prompt: string;
   image_id: string | null;
   status: ImagePromptStatus;

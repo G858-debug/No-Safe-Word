@@ -41,10 +41,10 @@ export async function POST(
       );
     }
 
-    // 2. Fetch the image to get its blob URL
+    // 2. Fetch the image to get its blob URL and seed
     const { data: image, error: imgError } = await supabase
       .from("images")
-      .select("id, sfw_url")
+      .select("id, sfw_url, settings")
       .eq("id", image_id)
       .single();
 
@@ -61,6 +61,11 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // If the client didn't send a seed, try to recover it from image settings
+    const imgSettings = image.settings as Record<string, unknown> | null;
+    const resolvedSeed = seed ?? (imgSettings?.seed != null && imgSettings.seed !== -1 ? Number(imgSettings.seed) : null);
+    console.log(`[StoryPublisher] Resolved seed for approval: ${resolvedSeed} (from body: ${seed}, from settings: ${imgSettings?.seed})`);
 
     // 3. Download the Civitai blob and upload to Supabase Storage
     console.log(`[StoryPublisher] Downloading image from: ${image.sfw_url}`);
@@ -113,7 +118,7 @@ export async function POST(
       .update({
         approved: true,
         approved_image_id: image_id,
-        approved_seed: seed ?? null,
+        approved_seed: resolvedSeed,
         approved_prompt: prompt ?? null,
       })
       .eq("id", storyCharId)

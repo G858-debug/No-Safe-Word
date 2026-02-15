@@ -18,13 +18,16 @@ const PORTRAIT_SCENE: SceneData = {
 
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
   const params = await props.params;
   const { storyCharId } = params;
 
   try {
+    const body = await request.json().catch(() => ({}));
+    const { model_urn } = body as { model_urn?: string };
+
     console.log(`[StoryPublisher] Generating portrait for storyCharId: ${storyCharId}`);
 
     // 1. Fetch the story_character row
@@ -77,8 +80,11 @@ export async function POST(
       age: desc.age || "",
     };
 
-    // 4. Generate with default settings (random seed)
-    const settings = { ...DEFAULT_SETTINGS, seed: -1, batchSize: 1 };
+    // 4. Generate with a known random seed (not -1) so we can reproduce the
+    //    result later. Civitai does not return the seed it picks when seed=-1,
+    //    so we must choose one ourselves.
+    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
     console.log(`[StoryPublisher] Submitting generation to Civitai for ${character.name}`);
     const result = await submitGeneration(characterData, PORTRAIT_SCENE, settings);
     console.log(`[StoryPublisher] Civitai response:`, {

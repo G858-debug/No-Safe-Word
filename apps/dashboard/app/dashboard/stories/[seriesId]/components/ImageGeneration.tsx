@@ -56,6 +56,7 @@ interface ImageGenerationProps {
   posts: PostWithPrompts[];
   imageUrls: Record<string, string>;
   allCharactersApproved: boolean;
+  modelUrn?: string;
 }
 
 interface PromptState {
@@ -126,6 +127,7 @@ export default function ImageGeneration({
   posts,
   imageUrls,
   allCharactersApproved,
+  modelUrn,
 }: ImageGenerationProps) {
   // ---- State ----
   const [promptStates, setPromptStates] = useState<
@@ -328,6 +330,7 @@ export default function ImageGeneration({
       try {
         const body: Record<string, string> = {};
         if (postId) body.post_id = postId;
+        if (modelUrn) body.model_urn = modelUrn;
 
         const res = await fetch(
           `/api/stories/${seriesId}/generate-images`,
@@ -374,7 +377,7 @@ export default function ImageGeneration({
         setBatchGenerating(false);
       }
     },
-    [seriesId, updatePrompt]
+    [seriesId, updatePrompt, modelUrn]
   );
 
   const handleRegenerate = useCallback(
@@ -401,7 +404,11 @@ export default function ImageGeneration({
       try {
         const res = await fetch(
           `/api/stories/images/${promptId}/regenerate`,
-          { method: "POST" }
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+          }
         );
 
         if (!res.ok) {
@@ -423,7 +430,7 @@ export default function ImageGeneration({
         });
       }
     },
-    [promptStates, updatePrompt]
+    [promptStates, updatePrompt, modelUrn]
   );
 
   const handleApprove = useCallback(
@@ -739,7 +746,11 @@ export default function ImageGeneration({
                               try {
                                 const res = await fetch(
                                   `/api/stories/images/${ip.id}/regenerate`,
-                                  { method: "POST" }
+                                  {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+                                  }
                                 );
                                 if (!res.ok) {
                                   const err = await res.json();
