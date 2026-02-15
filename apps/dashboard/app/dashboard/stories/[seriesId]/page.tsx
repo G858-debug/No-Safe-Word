@@ -465,6 +465,15 @@ export default function SeriesDetailPage() {
             seriesId={seriesId}
             characters={characters}
             onProceedToImages={() => setActiveTab("images")}
+            onCharacterApproved={(storyCharId, imageUrl, imageId) => {
+              setCharacters((prev) =>
+                prev.map((c) =>
+                  c.id === storyCharId
+                    ? { ...c, approved: true, approved_image_url: imageUrl, approved_image_id: imageId }
+                    : c
+                )
+              );
+            }}
           />
         </TabsContent>
 

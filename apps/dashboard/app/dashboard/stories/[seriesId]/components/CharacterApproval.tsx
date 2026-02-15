@@ -49,6 +49,7 @@ interface CharacterApprovalProps {
   seriesId: string;
   characters: CharacterFromAPI[];
   onProceedToImages?: () => void;
+  onCharacterApproved?: (storyCharId: string, imageUrl: string, imageId: string) => void;
 }
 
 interface CharState {
@@ -133,6 +134,7 @@ export default function CharacterApproval({
   seriesId,
   characters,
   onProceedToImages,
+  onCharacterApproved,
 }: CharacterApprovalProps) {
   // Per-character state keyed by story_character id
   const [charStates, setCharStates] = useState<Record<string, CharState>>({});
@@ -432,10 +434,12 @@ export default function CharacterApproval({
         }
         const data = await res.json();
         console.log(`[StoryPublisher] Approval successful for ${storyCharId}, stored_url: ${data.stored_url}`);
+        const finalUrl = data.stored_url || state.imageUrl;
         updateChar(storyCharId, {
           approved: true,
-          approvedUrl: data.stored_url || state.imageUrl,
+          approvedUrl: finalUrl,
         });
+        onCharacterApproved?.(storyCharId, finalUrl!, state.imageId!);
       } catch (err) {
         console.error(`[StoryPublisher] Error in handleApprove:`, err);
         updateChar(storyCharId, {
@@ -443,7 +447,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateChar]
+    [charStates, updateChar, onCharacterApproved]
   );
 
   const handleCheckStatus = useCallback(
