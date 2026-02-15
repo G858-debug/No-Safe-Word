@@ -247,6 +247,16 @@ export async function POST(
           ? buildStoryImagePrompt(primaryTags, secondaryTags, imgPrompt.prompt, mode)
           : undefined;
 
+        // Diagnostic logging — trace the prompt pipeline
+        console.log(`[StoryImage][${imgPrompt.id}] Raw scene prompt:`, imgPrompt.prompt.substring(0, 120));
+        console.log(`[StoryImage][${imgPrompt.id}] character_id: ${imgPrompt.character_id}, secondary_character_id: ${imgPrompt.secondary_character_id}`);
+        console.log(`[StoryImage][${imgPrompt.id}] Primary tags: ${primaryTags ? primaryTags.substring(0, 120) : 'NULL (no approved_prompt)'}`);
+        console.log(`[StoryImage][${imgPrompt.id}] Secondary tags: ${secondaryTags ? secondaryTags.substring(0, 120) : 'NULL'}`);
+        console.log(`[StoryImage][${imgPrompt.id}] promptOverride: ${promptOverride ? 'YES — using buildStoryImagePrompt' : 'NO — falling back to buildPrompt(charData, scene)'}`);
+        if (promptOverride) {
+          console.log(`[StoryImage][${imgPrompt.id}] Final prompt to Civitai:`, promptOverride.substring(0, 200));
+        }
+
         // Submit to Civitai
         const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
 

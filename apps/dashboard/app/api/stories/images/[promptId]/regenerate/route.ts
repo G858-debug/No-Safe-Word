@@ -4,6 +4,8 @@ import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
 import { buildNegativePrompt, extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
+import { appendFileSync } from "fs";
+const diagLog = (msg: string) => { console.log(msg); try { appendFileSync("/tmp/storyimage-debug.log", msg + "\n"); } catch {} };
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
@@ -172,6 +174,19 @@ export async function POST(
     const promptOverride = (approvedCharacterTags || secondaryCharacterTags)
       ? buildStoryImagePrompt(approvedCharacterTags, secondaryCharacterTags, imgPrompt.prompt, mode)
       : undefined;
+
+    // Diagnostic logging — trace the prompt pipeline (writes to /tmp/storyimage-debug.log)
+    diagLog(`[StoryImage][${promptId}] === REGENERATE START ===`);
+    diagLog(`[StoryImage][${promptId}] Raw scene prompt: ${imgPrompt.prompt.substring(0, 200)}`);
+    diagLog(`[StoryImage][${promptId}] character_id: ${imgPrompt.character_id}, secondary_character_id: ${imgPrompt.secondary_character_id}`);
+    diagLog(`[StoryImage][${promptId}] Approved tags: ${approvedCharacterTags ? approvedCharacterTags.substring(0, 200) : 'NULL (no approved_prompt)'}`);
+    diagLog(`[StoryImage][${promptId}] Secondary tags: ${secondaryCharacterTags ? secondaryCharacterTags.substring(0, 120) : 'NULL'}`);
+    diagLog(`[StoryImage][${promptId}] promptOverride: ${promptOverride ? 'YES — using buildStoryImagePrompt' : 'NO — falling back to buildPrompt(charData, scene)'}`);
+    if (promptOverride) {
+      diagLog(`[StoryImage][${promptId}] Final prompt to Civitai: ${promptOverride}`);
+    }
+    diagLog(`[StoryImage][${promptId}] === REGENERATE END ===`);
+
     const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
 
     // 7. Persist image record

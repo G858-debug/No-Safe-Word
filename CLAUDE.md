@@ -42,6 +42,25 @@ Example (new style — USE THIS):
 - Budget: epiCRealism XL (free/low cost)
 - Maximum quality (expensive): CyberRealistic XL v9.0 or CyberRealistic Flux v2.5
 
+### Self-Contained Prompts (Critical)
+Every image prompt must be fully self-contained. The Civitai API generates each image independently — there is NO context, NO memory, and NO reference to any other image or prompt.
+
+NEVER use in any prompt:
+- "Same scene...", "Same bedroom...", "Same café..."
+- "Same lighting...", "Same composition..."
+- "But now...", "This time...", "Tighter framing than before..."
+- "More intimate version of...", "The next beat of..."
+- Any phrase that assumes the model knows what a previous image looked like
+
+ALWAYS re-describe:
+- The full setting (location, environment, props)
+- The lighting (specific light source and direction)
+- The atmosphere and mood
+- Character positioning and spatial relationship
+- Camera angle and composition
+
+For NSFW paired prompts, achieve visual continuity by independently describing the same setting details (not by saying "same") while advancing the intimacy level.
+
 ### Multi-Character Scenes
 - Tag the scene with the PRIMARY character only
 - Describe the secondary character by role and clothing, not by physical features

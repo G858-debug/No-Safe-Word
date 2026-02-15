@@ -11,17 +11,26 @@ export function buildPrompt(
   if (character.age) parts.push(character.age);
   if (character.gender) parts.push(character.gender);
   if (character.ethnicity) parts.push(character.ethnicity);
-  if (character.bodyType) parts.push(`${character.bodyType} body`);
+  if (character.bodyType) {
+    parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(character.bodyType)
+      ? character.bodyType
+      : `${character.bodyType} body`);
+  }
   if (character.hairColor && character.hairStyle) {
-    parts.push(`${character.hairColor} ${character.hairStyle} hair`);
+    const needsSuffix = !/\bhair\b/i.test(character.hairStyle);
+    parts.push(`${character.hairColor} ${character.hairStyle}${needsSuffix ? " hair" : ""}`);
   } else if (character.hairColor) {
     parts.push(`${character.hairColor} hair`);
   } else if (character.hairStyle) {
-    parts.push(`${character.hairStyle} hair`);
+    parts.push(/\bhair\b/i.test(character.hairStyle) ? character.hairStyle : `${character.hairStyle} hair`);
   }
   if (character.eyeColor) parts.push(`${character.eyeColor} eyes`);
   if (character.skinTone) parts.push(`${character.skinTone} skin`);
-  if (character.expression) parts.push(`${character.expression} expression`);
+  if (character.expression) {
+    parts.push(/\bexpression\b|smile\b|smiling\b|grin\b|gaze\b|look\b|frown\b/i.test(character.expression)
+      ? character.expression
+      : `${character.expression} expression`);
+  }
   if (character.clothing) parts.push(`wearing ${character.clothing}`);
   if (character.pose) parts.push(character.pose);
   if (character.distinguishingFeatures)
@@ -42,10 +51,18 @@ export function buildPrompt(
 
 /**
  * Extract just the character-description tags from a full portrait prompt.
- * Strips the quality prefix and portrait-scene suffix that buildPortraitPrompt adds,
- * leaving only the appearance tags (age, gender, body, hair, eyes, etc.).
+ * Strips the quality prefix, portrait-scene suffix, clothing field, and
+ * deduplicates phrases so the result contains only clean appearance tags.
+ *
+ * Options:
+ *  - stripClothing: remove "wearing ..." phrases (default true for story images
+ *    where scene prompts specify scene-specific clothing)
  */
-export function extractCharacterTags(portraitPrompt: string): string {
+export function extractCharacterTags(
+  portraitPrompt: string,
+  options: { stripClothing?: boolean } = {}
+): string {
+  const { stripClothing = true } = options;
   let result = portraitPrompt;
 
   // Strip quality prefix
@@ -60,7 +77,59 @@ export function extractCharacterTags(portraitPrompt: string): string {
     ""
   );
 
-  return result.trim().replace(/,\s*$/, "");
+  // Split into individual tags for filtering and deduplication
+  const tags = result.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // Physical-feature keywords that signal the END of a clothing run
+  const appearancePattern =
+    /\b(?:eyes|skin|shoulders|hands|face|cheekbone|jawline|smile|dimple|freckle|scar|tattoo|beard|stubble|goatee|muscular|athletic|slim|petite|slender|build|frame|figure|physique|confidence|presence)\b/i;
+
+  const filtered: string[] = [];
+  let inClothingRun = false;
+
+  for (const tag of tags) {
+    // Detect start of clothing run: "wearing ..."
+    if (stripClothing && /^wearing\s/i.test(tag)) {
+      inClothingRun = true;
+      continue;
+    }
+
+    // If we're in a clothing run, check if this tag is still clothing
+    // (no appearance keywords) or if we've hit a real appearance tag
+    if (inClothingRun) {
+      if (appearancePattern.test(tag)) {
+        inClothingRun = false;
+        // fall through to add this tag
+      } else {
+        // Still clothing — skip (handles "work boots", "jeans and plain t-shirt", etc.)
+        continue;
+      }
+    }
+
+    // Fix double-word suffixes from existing approved_prompts:
+    // "short natural hair hair" → "short natural hair"
+    // "naturally muscular from physical work body" stays (already has "body" only once)
+    let cleaned = tag
+      .replace(/\b(hair)\s+\1\b/gi, "$1")
+      .replace(/\b(body)\s+\1\b/gi, "$1")
+      .replace(/\b(expression)\s+\1\b/gi, "$1")
+      .replace(/\b(skin)\s+\1\b/gi, "$1");
+
+    filtered.push(cleaned);
+  }
+
+  // Deduplicate exact matches (case-insensitive), preserving order
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const part of filtered) {
+    const key = part.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(part);
+    }
+  }
+
+  return unique.join(", ");
 }
 
 /**
@@ -97,12 +166,13 @@ export function stripInlineCharacterDescriptions(scenePrompt: string): string {
   // (the parenthetical itself is already removed above)
   result = result.replace(/\b(?:Her|His)\s+friend\b/gi, "");
 
-  // Clean up double-commas and extra whitespace left after removals
+  // Clean up artifacts left after removals
   result = result
-    .replace(/,(\s*,)+/g, ",")
-    .replace(/^\s*,\s*/, "")
-    .replace(/\s*,\s*$/, "")
-    .replace(/\s{2,}/g, " ")
+    .replace(/,(\s*,)+/g, ",")           // collapse multiple commas
+    .replace(/\.\s*,/g, ".")             // "Night scene. ," → "Night scene."
+    .replace(/^\s*[.,]\s*/, "")          // leading comma/period
+    .replace(/\s*,\s*$/, "")             // trailing comma
+    .replace(/\s{2,}/g, " ")            // collapse whitespace
     .trim();
 
   return result;
