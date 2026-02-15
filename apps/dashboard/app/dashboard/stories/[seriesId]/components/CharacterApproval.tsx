@@ -350,7 +350,8 @@ export default function CharacterApproval({
         if (!res.ok) {
           const err = await res.json();
           console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, err);
-          throw new Error(err.error || "Generation failed");
+          const detail = err.details ? ` — ${err.details}` : "";
+          throw new Error((err.error || "Generation failed") + detail);
         }
         const data = await res.json();
         console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}`);
@@ -389,7 +390,8 @@ export default function CharacterApproval({
         );
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.error || "Regeneration failed");
+          const detail = err.details ? ` — ${err.details}` : "";
+          throw new Error((err.error || "Regeneration failed") + detail);
         }
         const data = await res.json();
         startPolling(storyCharId, data.jobId, data.imageId);
@@ -491,7 +493,8 @@ export default function CharacterApproval({
 
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.error || "Generation failed");
+          const detail = err.details ? ` — ${err.details}` : "";
+          throw new Error((err.error || "Generation failed") + detail);
         }
 
         const data = await res.json();
