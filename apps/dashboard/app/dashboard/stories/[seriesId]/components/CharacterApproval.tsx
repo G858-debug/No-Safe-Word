@@ -270,6 +270,18 @@ export default function CharacterApproval({
             hasImageUrl: !!data.imageUrl
           });
 
+          if (data.error && !data.completed) {
+            console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, data.error);
+            clearInterval(pollTimers.current[storyCharId]);
+            delete pollTimers.current[storyCharId];
+            updateChar(storyCharId, {
+              isGenerating: false,
+              error: data.error,
+              pollStartTime: null,
+            });
+            return;
+          }
+
           if (data.completed && data.imageUrl) {
             console.log(`[StoryPublisher] Generation completed for ${storyCharId}, imageUrl: ${data.imageUrl}, seed: ${data.seed}`);
             clearInterval(pollTimers.current[storyCharId]);

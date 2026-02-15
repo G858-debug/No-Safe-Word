@@ -106,7 +106,7 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
   const workflow: Record<string, any> = {
     '1': {
       class_type: 'CheckpointLoaderSimple',
-      inputs: { ckpt_name: 'juggernautXL_v11.safetensors' },
+      inputs: { ckpt_name: 'juggernaut-x-v10.safetensors' },
     },
   };
 
@@ -213,7 +213,7 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
   const workflow: Record<string, any> = {
     '1': {
       class_type: 'CheckpointLoaderSimple',
-      inputs: { ckpt_name: 'juggernautXL_v11.safetensors' },
+      inputs: { ckpt_name: 'juggernaut-x-v10.safetensors' },
     },
   };
 
