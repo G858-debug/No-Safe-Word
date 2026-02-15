@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
 import { buildNegativePrompt, extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -188,10 +189,11 @@ export async function POST(
       age: "",
     };
 
-    // 5. Generate each image sequentially with delays to avoid rate limits
+    // 5. Generate each image sequentially with delays
     const jobs: QueuedJob[] = [];
     const failed: FailedJob[] = [];
     let skipped = 0;
+    const useRunPod = process.env.USE_RUNPOD === "true";
 
     for (let i = 0; i < prompts.length; i++) {
       const imgPrompt = prompts[i];
@@ -206,23 +208,12 @@ export async function POST(
         const isNsfw = imgPrompt.image_type === "website_nsfw_paired";
         const mode: "sfw" | "nsfw" = isNsfw ? "nsfw" : "sfw";
 
-        // Build scene with the pre-written prompt as the description
-        const scene: SceneData = {
-          mode,
-          setting: "",
-          lighting: "",
-          mood: "",
-          sfwDescription: isNsfw ? "" : imgPrompt.prompt,
-          nsfwDescription: isNsfw ? imgPrompt.prompt : "",
-          additionalTags: [],
-        };
-
         // Get character data and seed
         const charData = imgPrompt.character_id
           ? characterDataMap.get(imgPrompt.character_id) || emptyCharacter
           : emptyCharacter;
 
-        // Calculate seed: approved_seed + position for consistency, or -1 for random
+        // Calculate seed: approved_seed + position for consistency, or random
         let seed = -1;
         if (imgPrompt.character_id) {
           const approvedSeed = seedMap.get(imgPrompt.character_id);
@@ -230,12 +221,11 @@ export async function POST(
             seed = approvedSeed + imgPrompt.position;
           }
         }
+        if (seed === -1) {
+          seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+        }
 
-        const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
-
-        // Build prompt using approved character tags for consistency with approved portraits.
-        // The scene prompt is cleaned of inline character descriptions to avoid
-        // contradicting the authoritative tags from the approved portrait.
+        // Build prompt using approved character tags for consistency
         const primaryTags = imgPrompt.character_id
           ? approvedTagsMap.get(imgPrompt.character_id) || null
           : null;
@@ -254,67 +244,198 @@ export async function POST(
         console.log(`[StoryImage][${imgPrompt.id}] Secondary tags: ${secondaryTags ? secondaryTags.substring(0, 120) : 'NULL'}`);
         console.log(`[StoryImage][${imgPrompt.id}] promptOverride: ${promptOverride ? 'YES — using buildStoryImagePrompt' : 'NO — falling back to buildPrompt(charData, scene)'}`);
         if (promptOverride) {
-          console.log(`[StoryImage][${imgPrompt.id}] Final prompt to Civitai:`, promptOverride.substring(0, 200));
+          console.log(`[StoryImage][${imgPrompt.id}] Final prompt:`, promptOverride.substring(0, 200));
         }
 
-        // Submit to Civitai
-        const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
+        if (useRunPod) {
+          // === RUNPOD PATH ===
+          const hasSecondary = !!imgPrompt.secondary_character_id;
+          const workflowType = imgPrompt.character_id
+            ? (hasSecondary ? "dual-character" : "single-character")
+            : "portrait";
 
-        // Persist image record
-        const negativePrompt = buildNegativePrompt(scene);
-        const { data: imageRow, error: imgError } = await supabase
-          .from("images")
-          .insert({
-            character_id: imgPrompt.character_id || null,
-            prompt: imgPrompt.prompt,
-            negative_prompt: negativePrompt,
-            settings: {
-              modelUrn: settings.modelUrn,
-              width: settings.width,
-              height: settings.height,
-              steps: settings.steps,
-              cfgScale: settings.cfgScale,
-              scheduler: settings.scheduler,
-              seed: settings.seed,
-              clipSkip: settings.clipSkip,
-              batchSize: settings.batchSize,
-            },
-            mode,
-          })
-          .select("id")
-          .single();
+          // Fetch primary character's approved portrait as base64 for IPAdapter
+          const images: Array<{ name: string; image: string }> = [];
+          let primaryFacePrompt: string | undefined;
 
-        if (imgError || !imageRow) {
-          throw new Error(
-            `Failed to create image record: ${imgError?.message}`
-          );
-        }
+          if (imgPrompt.character_id && workflowType !== "portrait") {
+            const { data: sc } = await supabase
+              .from("story_characters")
+              .select("approved_image_id")
+              .eq("series_id", seriesId)
+              .eq("character_id", imgPrompt.character_id)
+              .single();
 
-        // Save generation jobs
-        if (result.jobs.length > 0) {
-          const jobRows = result.jobs.map((job) => ({
-            job_id: job.jobId,
+            if (sc?.approved_image_id) {
+              const { data: img } = await supabase
+                .from("images")
+                .select("stored_url")
+                .eq("id", sc.approved_image_id)
+                .single();
+
+              if (img?.stored_url) {
+                const primaryRefBase64 = await imageUrlToBase64(img.stored_url);
+                images.push({ name: "primary_ref.png", image: primaryRefBase64 });
+              }
+            }
+
+            // Build face prompt from approved tags or character data
+            primaryFacePrompt = primaryTags ||
+              `portrait of ${charData.name}, ${charData.ethnicity}, ${charData.skinTone} skin, ${charData.hairStyle} ${charData.hairColor} hair, ${charData.eyeColor} eyes, photorealistic`;
+          }
+
+          // Build secondary face prompt for dual-character scenes
+          let secondaryFacePrompt: string | undefined;
+          let secondarySeed: number | undefined;
+
+          if (hasSecondary && imgPrompt.secondary_character_id) {
+            const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
+            secondaryFacePrompt = secondaryTags || (secondaryCharData
+              ? `portrait of ${secondaryCharData.name}, ${secondaryCharData.ethnicity}, ${secondaryCharData.skinTone} skin, ${secondaryCharData.hairStyle} ${secondaryCharData.hairColor} hair, photorealistic`
+              : "person, photorealistic");
+
+            const secondaryApprovedSeed = seedMap.get(imgPrompt.secondary_character_id);
+            secondarySeed = secondaryApprovedSeed ? secondaryApprovedSeed + imgPrompt.position : seed + 1000;
+          }
+
+          // Determine dimensions
+          const promptLower = imgPrompt.prompt.toLowerCase();
+          const isLandscape = promptLower.includes("wide") ||
+            promptLower.includes("establishing") ||
+            promptLower.includes("panoram");
+          const width = isLandscape ? 1216 : 832;
+          const height = isLandscape ? 832 : 1216;
+
+          // Use promptOverride if available, otherwise raw prompt
+          const finalPrompt = promptOverride || imgPrompt.prompt;
+
+          const workflow = buildWorkflow({
+            type: workflowType as "portrait" | "single-character" | "dual-character",
+            positivePrompt: finalPrompt,
+            width,
+            height,
+            seed,
+            filenamePrefix: `story_${imgPrompt.id.substring(0, 8)}`,
+            primaryRefImageName: workflowType !== "portrait" ? "primary_ref.png" : undefined,
+            primaryFacePrompt,
+            ipadapterWeight: hasSecondary ? 0.7 : 0.85,
+            secondaryFacePrompt,
+            secondarySeed,
+          });
+
+          // Submit async job to RunPod
+          const { jobId } = await submitRunPodJob(workflow, images.length > 0 ? images : undefined);
+
+          // Create image record
+          const { data: imageRow, error: imgError } = await supabase
+            .from("images")
+            .insert({
+              character_id: imgPrompt.character_id || null,
+              prompt: imgPrompt.prompt,
+              negative_prompt: "auto",
+              settings: { width, height, steps: 30, cfg: 7, seed, engine: "runpod-comfyui", workflowType },
+              mode,
+            })
+            .select("id")
+            .single();
+
+          if (imgError || !imageRow) {
+            throw new Error(`Failed to create image record: ${imgError?.message}`);
+          }
+
+          // Save RunPod job with 'runpod-' prefix
+          await supabase.from("generation_jobs").insert({
+            job_id: `runpod-${jobId}`,
             image_id: imageRow.id,
-            status: "pending" as const,
-            cost: job.cost,
-          }));
-          await supabase.from("generation_jobs").insert(jobRows);
-        }
+            status: "pending",
+            cost: 0,
+          });
 
-        // Link image to the prompt row
-        await supabase
-          .from("story_image_prompts")
-          .update({ image_id: imageRow.id })
-          .eq("id", imgPrompt.id);
+          // Link image to the prompt row
+          await supabase
+            .from("story_image_prompts")
+            .update({ image_id: imageRow.id })
+            .eq("id", imgPrompt.id);
 
-        jobs.push({
-          promptId: imgPrompt.id,
-          jobId: result.jobs[0]?.jobId,
-        });
+          jobs.push({
+            promptId: imgPrompt.id,
+            jobId: `runpod-${jobId}`,
+          });
 
-        // Wait 2 seconds before the next generation to avoid rate limits
-        if (i < prompts.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          // Small delay between RunPod jobs
+          if (i < prompts.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+
+        } else {
+          // === CIVITAI PATH ===
+          const scene: SceneData = {
+            mode,
+            setting: "",
+            lighting: "",
+            mood: "",
+            sfwDescription: isNsfw ? "" : imgPrompt.prompt,
+            nsfwDescription: isNsfw ? imgPrompt.prompt : "",
+            additionalTags: [],
+          };
+
+          const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
+
+          const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
+
+          // Persist image record
+          const negativePrompt = buildNegativePrompt(scene);
+          const { data: imageRow, error: imgError } = await supabase
+            .from("images")
+            .insert({
+              character_id: imgPrompt.character_id || null,
+              prompt: imgPrompt.prompt,
+              negative_prompt: negativePrompt,
+              settings: {
+                modelUrn: settings.modelUrn,
+                width: settings.width,
+                height: settings.height,
+                steps: settings.steps,
+                cfgScale: settings.cfgScale,
+                scheduler: settings.scheduler,
+                seed: settings.seed,
+                clipSkip: settings.clipSkip,
+                batchSize: settings.batchSize,
+              },
+              mode,
+            })
+            .select("id")
+            .single();
+
+          if (imgError || !imageRow) {
+            throw new Error(`Failed to create image record: ${imgError?.message}`);
+          }
+
+          if (result.jobs.length > 0) {
+            const jobRows = result.jobs.map((job) => ({
+              job_id: job.jobId,
+              image_id: imageRow.id,
+              status: "pending" as const,
+              cost: job.cost,
+            }));
+            await supabase.from("generation_jobs").insert(jobRows);
+          }
+
+          // Link image to the prompt row
+          await supabase
+            .from("story_image_prompts")
+            .update({ image_id: imageRow.id })
+            .eq("id", imgPrompt.id);
+
+          jobs.push({
+            promptId: imgPrompt.id,
+            jobId: result.jobs[0]?.jobId,
+          });
+
+          // Wait 2 seconds before the next generation to avoid rate limits
+          if (i < prompts.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
         }
       } catch (err) {
         // Mark as failed and continue with the rest
@@ -336,9 +457,8 @@ export async function POST(
         );
         failed.push({ promptId: imgPrompt.id, error: message });
 
-        // Wait 2 seconds even after failure to avoid rate limits
         if (i < prompts.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await new Promise((resolve) => setTimeout(resolve, useRunPod ? 500 : 2000));
         }
       }
     }

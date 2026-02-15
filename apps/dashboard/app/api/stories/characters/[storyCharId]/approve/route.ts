@@ -41,10 +41,10 @@ export async function POST(
       );
     }
 
-    // 2. Fetch the image to get its blob URL and seed
+    // 2. Fetch the image to get its URL, stored_url, and seed
     const { data: image, error: imgError } = await supabase
       .from("images")
-      .select("id, sfw_url, settings")
+      .select("id, sfw_url, stored_url, settings")
       .eq("id", image_id)
       .single();
 
@@ -55,9 +55,9 @@ export async function POST(
       );
     }
 
-    if (!image.sfw_url) {
+    if (!image.sfw_url && !image.stored_url) {
       return NextResponse.json(
-        { error: "Image has no blob URL yet — is the generation complete?" },
+        { error: "Image has no URL yet — is the generation complete?" },
         { status: 400 }
       );
     }
@@ -67,49 +67,58 @@ export async function POST(
     const resolvedSeed = seed ?? (imgSettings?.seed != null && imgSettings.seed !== -1 ? Number(imgSettings.seed) : null);
     console.log(`[StoryPublisher] Resolved seed for approval: ${resolvedSeed} (from body: ${seed}, from settings: ${imgSettings?.seed})`);
 
-    // 3. Download the Civitai blob and upload to Supabase Storage
-    console.log(`[StoryPublisher] Downloading image from: ${image.sfw_url}`);
-    const imageResponse = await fetch(image.sfw_url);
-    if (!imageResponse.ok) {
-      console.error(`[StoryPublisher] Failed to download image: ${imageResponse.statusText}`);
-      return NextResponse.json(
-        { error: `Failed to download image: ${imageResponse.statusText}` },
-        { status: 502 }
-      );
+    // 3. Ensure image is in Supabase Storage
+    let publicUrl: string;
+
+    if (image.stored_url) {
+      // Image already in Supabase Storage (RunPod stores during generation)
+      console.log(`[StoryPublisher] Image already stored, skipping re-upload: ${image.stored_url}`);
+      publicUrl = image.stored_url;
+    } else {
+      // Civitai path — download blob and upload to storage
+      console.log(`[StoryPublisher] Downloading image from: ${image.sfw_url}`);
+      const imageResponse = await fetch(image.sfw_url!);
+      if (!imageResponse.ok) {
+        console.error(`[StoryPublisher] Failed to download image: ${imageResponse.statusText}`);
+        return NextResponse.json(
+          { error: `Failed to download image: ${imageResponse.statusText}` },
+          { status: 502 }
+        );
+      }
+
+      const buffer = await imageResponse.arrayBuffer();
+      const contentType =
+        imageResponse.headers.get("content-type") || "image/jpeg";
+      const ext = contentType.includes("png") ? "png" : "jpeg";
+      const storagePath = `characters/${image_id}.${ext}`;
+
+      console.log(`[StoryPublisher] Uploading to Supabase Storage: ${storagePath}`);
+      const { error: uploadError } = await supabase.storage
+        .from("story-images")
+        .upload(storagePath, buffer, {
+          contentType,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error(`[StoryPublisher] Storage upload failed:`, uploadError);
+        return NextResponse.json(
+          { error: `Storage upload failed: ${uploadError.message}` },
+          { status: 500 }
+        );
+      }
+
+      const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(storagePath);
+      publicUrl = urlData.publicUrl;
+
+      // Update the image record with the stored URL
+      await supabase
+        .from("images")
+        .update({ stored_url: publicUrl })
+        .eq("id", image_id);
     }
 
-    const buffer = await imageResponse.arrayBuffer();
-    const contentType =
-      imageResponse.headers.get("content-type") || "image/jpeg";
-    const ext = contentType.includes("png") ? "png" : "jpeg";
-    const storagePath = `characters/${image_id}.${ext}`;
-
-    console.log(`[StoryPublisher] Uploading to Supabase Storage: ${storagePath}`);
-    const { error: uploadError } = await supabase.storage
-      .from("story-images")
-      .upload(storagePath, buffer, {
-        contentType,
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.error(`[StoryPublisher] Storage upload failed:`, uploadError);
-      return NextResponse.json(
-        { error: `Storage upload failed: ${uploadError.message}` },
-        { status: 500 }
-      );
-    }
-
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("story-images").getPublicUrl(storagePath);
     console.log(`[StoryPublisher] Image stored at: ${publicUrl}`);
-
-    // 4. Update the image record with the stored URL
-    await supabase
-      .from("images")
-      .update({ stored_url: publicUrl })
-      .eq("id", image_id);
 
     // 5. Approve the story character
     console.log(`[StoryPublisher] Updating story_characters to mark as approved`);

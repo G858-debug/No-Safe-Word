@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
 import { buildPrompt, buildNegativePrompt } from "@no-safe-word/image-gen";
+import { submitRunPodSync, base64ToBuffer, buildPortraitWorkflow } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -122,61 +123,124 @@ export async function POST(
       negativePrompt = buildNegativePrompt(PORTRAIT_SCENE);
     }
 
-    // 6. Generate with a known random seed (not -1) so we can store it for
-    //    character consistency. Civitai does not report back the seed it picks
-    //    when seed=-1, so we choose one ourselves.
+    // 6. Generate with a known random seed
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
-    const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
-    const result = await submitGeneration(
-      characterData,
-      PORTRAIT_SCENE,
-      settings,
-      customPrompt ? { prompt: customPrompt } : undefined
-    );
+    const useRunPod = process.env.USE_RUNPOD === "true";
 
-    // 7. Persist image record and generation jobs
-    const { data: imageRow, error: imgError } = await supabase
-      .from("images")
-      .insert({
-        character_id: character.id,
-        prompt,
-        negative_prompt: negativePrompt,
-        settings: {
-          modelUrn: settings.modelUrn,
-          width: settings.width,
-          height: settings.height,
-          steps: settings.steps,
-          cfgScale: settings.cfgScale,
-          scheduler: settings.scheduler,
-          seed: settings.seed,
-          clipSkip: settings.clipSkip,
-          batchSize: settings.batchSize,
-        },
-        mode: "sfw",
-      })
-      .select("id")
-      .single();
+    if (useRunPod) {
+      // === RUNPOD PATH ===
+      console.log(`[StoryPublisher] Regenerating portrait via RunPod for ${character.name}, seed: ${seed}`);
 
-    if (imgError || !imageRow) {
-      throw new Error(`Failed to create image record: ${imgError?.message}`);
+      const workflow = buildPortraitWorkflow({
+        positivePrompt: prompt,
+        negativePrompt,
+        width: 832,
+        height: 1216,
+        seed,
+        filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
+      });
+
+      const { imageBase64, executionTime } = await submitRunPodSync(workflow);
+      console.log(`[StoryPublisher] RunPod portrait regenerated in ${executionTime}ms`);
+
+      // Store directly to Supabase Storage
+      const buffer = base64ToBuffer(imageBase64);
+      const timestamp = Date.now();
+      const storagePath = `characters/${character.name.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.png`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("story-images")
+        .upload(storagePath, buffer, { contentType: "image/png", upsert: true });
+
+      if (uploadError) {
+        throw new Error(`Storage upload failed: ${uploadError.message}`);
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("story-images")
+        .getPublicUrl(storagePath);
+
+      // Create image record
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt,
+          negative_prompt: negativePrompt,
+          settings: { width: 832, height: 1216, steps: 30, cfg: 7, seed, engine: "runpod-comfyui" },
+          mode: "sfw",
+          sfw_url: publicUrl,
+          stored_url: publicUrl,
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      // Don't change approval status — old image stays until new one is approved
+
+      return NextResponse.json({
+        imageId: imageRow.id,
+        imageUrl: publicUrl,
+        seed,
+        completed: true,
+      });
+
+    } else {
+      // === CIVITAI PATH ===
+      const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
+      const result = await submitGeneration(
+        characterData,
+        PORTRAIT_SCENE,
+        settings,
+        customPrompt ? { prompt: customPrompt } : undefined
+      );
+
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt,
+          negative_prompt: negativePrompt,
+          settings: {
+            modelUrn: settings.modelUrn,
+            width: settings.width,
+            height: settings.height,
+            steps: settings.steps,
+            cfgScale: settings.cfgScale,
+            scheduler: settings.scheduler,
+            seed: settings.seed,
+            clipSkip: settings.clipSkip,
+            batchSize: settings.batchSize,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      if (result.jobs.length > 0) {
+        const jobRows = result.jobs.map((job) => ({
+          job_id: job.jobId,
+          image_id: imageRow.id,
+          status: "pending" as const,
+          cost: job.cost,
+        }));
+        await supabase.from("generation_jobs").insert(jobRows);
+      }
+
+      // Don't change approval status — old image stays until new one is approved
+
+      return NextResponse.json({
+        jobId: result.jobs[0]?.jobId,
+        imageId: imageRow.id,
+      });
     }
-
-    if (result.jobs.length > 0) {
-      const jobRows = result.jobs.map((job) => ({
-        job_id: job.jobId,
-        image_id: imageRow.id,
-        status: "pending" as const,
-        cost: job.cost,
-      }));
-      await supabase.from("generation_jobs").insert(jobRows);
-    }
-
-    // Don't change approval status — old image stays until new one is approved
-
-    return NextResponse.json({
-      jobId: result.jobs[0]?.jobId,
-      imageId: imageRow.id,
-    });
   } catch (err) {
     if (err instanceof CivitaiError) {
       return NextResponse.json(
