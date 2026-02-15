@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
 import { buildPrompt, buildNegativePrompt } from "@no-safe-word/image-gen";
 import { submitRunPodSync, base64ToBuffer, buildPortraitWorkflow } from "@no-safe-word/image-gen";
-import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 const PORTRAIT_SCENE: SceneData = {
@@ -27,7 +25,7 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { prompt: customPrompt, model_urn } = body as { prompt?: string; model_urn?: string };
+    const { prompt: customPrompt } = body as { prompt?: string };
 
     console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}`);
 
@@ -79,7 +77,6 @@ export async function POST(
 
     // 4. Clean up old image from storage if it exists
     try {
-      // Find any previously generated images for this character
       const { data: oldImages } = await supabase
         .from("images")
         .select("id, stored_url")
@@ -87,13 +84,10 @@ export async function POST(
         .not("stored_url", "is", null);
 
       if (oldImages && oldImages.length > 0) {
-        // Delete old images from storage
         const pathsToDelete: string[] = [];
 
         for (const img of oldImages) {
           if (img.stored_url) {
-            // Extract storage path from URL
-            // URL format: https://{project}.supabase.co/storage/v1/object/public/story-images/{path}
             const urlParts = img.stored_url.split("/story-images/");
             if (urlParts.length === 2) {
               pathsToDelete.push(urlParts[1]);
@@ -108,7 +102,6 @@ export async function POST(
       }
     } catch (err) {
       console.warn("Failed to clean up old character images:", err);
-      // Continue with regeneration even if cleanup fails
     }
 
     // 5. Determine prompt and negative prompt
@@ -125,129 +118,66 @@ export async function POST(
 
     // 6. Generate with a known random seed
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
-    const useRunPod = process.env.USE_RUNPOD === "true";
 
-    if (useRunPod) {
-      // === RUNPOD PATH ===
-      console.log(`[StoryPublisher] Regenerating portrait via RunPod for ${character.name}, seed: ${seed}`);
+    console.log(`[StoryPublisher] Regenerating portrait via RunPod for ${character.name}, seed: ${seed}`);
 
-      const workflow = buildPortraitWorkflow({
-        positivePrompt: prompt,
-        negativePrompt,
-        width: 832,
-        height: 1216,
-        seed,
-        filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      });
+    const workflow = buildPortraitWorkflow({
+      positivePrompt: prompt,
+      negativePrompt,
+      width: 832,
+      height: 1216,
+      seed,
+      filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
+    });
 
-      const { imageBase64, executionTime } = await submitRunPodSync(workflow);
-      console.log(`[StoryPublisher] RunPod portrait regenerated in ${executionTime}ms`);
+    const { imageBase64, executionTime } = await submitRunPodSync(workflow);
+    console.log(`[StoryPublisher] RunPod portrait regenerated in ${executionTime}ms`);
 
-      // Store directly to Supabase Storage
-      const buffer = base64ToBuffer(imageBase64);
-      const timestamp = Date.now();
-      const storagePath = `characters/${character.name.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.png`;
+    // Store directly to Supabase Storage
+    const buffer = base64ToBuffer(imageBase64);
+    const timestamp = Date.now();
+    const storagePath = `characters/${character.name.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.png`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("story-images")
-        .upload(storagePath, buffer, { contentType: "image/png", upsert: true });
+    const { error: uploadError } = await supabase.storage
+      .from("story-images")
+      .upload(storagePath, buffer, { contentType: "image/png", upsert: true });
 
-      if (uploadError) {
-        throw new Error(`Storage upload failed: ${uploadError.message}`);
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("story-images")
-        .getPublicUrl(storagePath);
-
-      // Create image record
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt,
-          negative_prompt: negativePrompt,
-          settings: { width: 832, height: 1216, steps: 30, cfg: 7, seed, engine: "runpod-comfyui" },
-          mode: "sfw",
-          sfw_url: publicUrl,
-          stored_url: publicUrl,
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      // Don't change approval status — old image stays until new one is approved
-
-      return NextResponse.json({
-        imageId: imageRow.id,
-        imageUrl: publicUrl,
-        seed,
-        completed: true,
-      });
-
-    } else {
-      // === CIVITAI PATH ===
-      const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1, ...(model_urn ? { modelUrn: model_urn } : {}) };
-      const result = await submitGeneration(
-        characterData,
-        PORTRAIT_SCENE,
-        settings,
-        customPrompt ? { prompt: customPrompt } : undefined
-      );
-
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt,
-          negative_prompt: negativePrompt,
-          settings: {
-            modelUrn: settings.modelUrn,
-            width: settings.width,
-            height: settings.height,
-            steps: settings.steps,
-            cfgScale: settings.cfgScale,
-            scheduler: settings.scheduler,
-            seed: settings.seed,
-            clipSkip: settings.clipSkip,
-            batchSize: settings.batchSize,
-          },
-          mode: "sfw",
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      if (result.jobs.length > 0) {
-        const jobRows = result.jobs.map((job) => ({
-          job_id: job.jobId,
-          image_id: imageRow.id,
-          status: "pending" as const,
-          cost: job.cost,
-        }));
-        await supabase.from("generation_jobs").insert(jobRows);
-      }
-
-      // Don't change approval status — old image stays until new one is approved
-
-      return NextResponse.json({
-        jobId: result.jobs[0]?.jobId,
-        imageId: imageRow.id,
-      });
+    if (uploadError) {
+      throw new Error(`Storage upload failed: ${uploadError.message}`);
     }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from("story-images")
+      .getPublicUrl(storagePath);
+
+    // Create image record
+    const { data: imageRow, error: imgError } = await supabase
+      .from("images")
+      .insert({
+        character_id: character.id,
+        prompt,
+        negative_prompt: negativePrompt,
+        settings: { width: 832, height: 1216, steps: 30, cfg: 7, seed, engine: "runpod-comfyui" },
+        mode: "sfw",
+        sfw_url: publicUrl,
+        stored_url: publicUrl,
+      })
+      .select("id")
+      .single();
+
+    if (imgError || !imageRow) {
+      throw new Error(`Failed to create image record: ${imgError?.message}`);
+    }
+
+    // Don't change approval status — old image stays until new one is approved
+
+    return NextResponse.json({
+      imageId: imageRow.id,
+      imageUrl: publicUrl,
+      seed,
+      completed: true,
+    });
   } catch (err) {
-    if (err instanceof CivitaiError) {
-      return NextResponse.json(
-        { error: err.message, details: err.details },
-        { status: err.status }
-      );
-    }
     console.error("Character portrait regeneration failed:", err);
     return NextResponse.json(
       {

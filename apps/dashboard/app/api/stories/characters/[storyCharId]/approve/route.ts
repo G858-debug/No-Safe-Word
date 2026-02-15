@@ -75,7 +75,7 @@ export async function POST(
       console.log(`[StoryPublisher] Image already stored, skipping re-upload: ${image.stored_url}`);
       publicUrl = image.stored_url;
     } else {
-      // Civitai path — download blob and upload to storage
+      // Fallback — download from sfw_url and upload to storage
       console.log(`[StoryPublisher] Downloading image from: ${image.sfw_url}`);
       const imageResponse = await fetch(image.sfw_url!);
       if (!imageResponse.ok) {

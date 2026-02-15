@@ -67,7 +67,7 @@ export async function POST(
       });
     }
 
-    // 3. Download the Civitai blob
+    // 3. Download the image from blob URL (fallback when stored_url is missing)
     const blobUrl = image.sfw_url || image.nsfw_url;
     if (!blobUrl) {
       return NextResponse.json(

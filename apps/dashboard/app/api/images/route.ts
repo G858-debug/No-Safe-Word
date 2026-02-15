@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // If a Civitai job_id was provided, create a generation_jobs record linked to this image
+  // If a job_id was provided, create a generation_jobs record linked to this image
   if (job_id) {
     const { error: jobError } = await supabase
       .from("generation_jobs")

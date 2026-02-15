@@ -4,15 +4,11 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "image.civitai.com",
-      },
-      {
-        protocol: "https",
         hostname: "*.digitaloceanspaces.com",
       },
       {
         protocol: "https",
-        hostname: "orchestration.civitai.com",
+        hostname: "*.supabase.co",
       },
     ],
   },

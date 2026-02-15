@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
-// POST /api/images/store — Download a Civitai blob URL and upload to Supabase Storage
+// POST /api/images/store — Download an image from a blob URL and upload to Supabase Storage
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Download the image from Civitai blob URL
+    // 1. Download the image from blob URL
     const imageResponse = await fetch(blob_url);
     if (!imageResponse.ok) {
       console.error(`[StoryPublisher] Failed to download image: ${imageResponse.statusText}`);
