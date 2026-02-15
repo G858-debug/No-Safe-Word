@@ -128,6 +128,9 @@ export async function POST(
         // Extract character description tags from the approved portrait prompt
         if (storyChar?.approved_prompt) {
           approvedCharacterTags = extractCharacterTags(storyChar.approved_prompt);
+          console.log(`[StoryImage] Using approved_prompt tags for character ${imgPrompt.character_id}:`, approvedCharacterTags);
+        } else {
+          console.warn(`[StoryImage] No approved_prompt for character ${imgPrompt.character_id} — falling back to character description. Re-approve the character portrait to save the prompt.`);
         }
       }
     }

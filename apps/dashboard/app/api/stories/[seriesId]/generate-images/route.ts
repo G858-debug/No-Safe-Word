@@ -64,6 +64,9 @@ export async function POST(
       if (sc.approved_prompt) {
         const tags = extractCharacterTags(sc.approved_prompt);
         if (tags) approvedTagsMap.set(sc.character_id, tags);
+        console.log(`[StoryImage] Using approved_prompt tags for character ${sc.character_id}:`, tags);
+      } else {
+        console.warn(`[StoryImage] No approved_prompt for character ${sc.character_id} — falling back to character description. Re-approve the character portrait to save the prompt.`);
       }
     });
 

@@ -146,6 +146,7 @@ export interface StoryCharacterRow {
   approved: boolean;
   approved_image_id: string | null;
   approved_seed: number | null;
+  approved_prompt: string | null;
 }
 
 export interface StoryImagePromptRow {

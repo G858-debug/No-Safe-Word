@@ -17,7 +17,7 @@ export async function POST(
       prompt?: string;
     };
 
-    console.log(`[StoryPublisher] Approving character ${storyCharId}, image_id: ${image_id}, seed: ${seed}`);
+    console.log(`[StoryPublisher] Approving character ${storyCharId}, image_id: ${image_id}, seed: ${seed}, prompt: ${prompt ? prompt.substring(0, 80) + '...' : 'NOT PROVIDED'}`);
 
     if (!image_id) {
       console.error(`[StoryPublisher] Approval failed: no image_id provided`);
