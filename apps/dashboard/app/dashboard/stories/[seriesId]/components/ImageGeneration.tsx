@@ -232,14 +232,36 @@ export default function ImageGeneration({
         const { promptId, data } = result.value;
 
         if (data.completed) {
-          // Job completed successfully
+          // Job completed — persist to DB and store image permanently
           pollingIdsRef.current.delete(promptId);
           promptToJobIdRef.current.delete(promptId);
-          updatePrompt(promptId, {
-            status: "generated",
-            imageUrl: data.imageUrl || null,
-            error: null,
-          });
+
+          // Call the prompt status endpoint which updates story_image_prompts
+          // status to "generated" and stores the blob to Supabase Storage
+          try {
+            const statusRes = await fetch(`/api/stories/images/${promptId}/status`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              updatePrompt(promptId, {
+                status: "generated",
+                imageUrl: statusData.storedUrl || statusData.blobUrl || data.imageUrl || null,
+                error: null,
+              });
+            } else {
+              updatePrompt(promptId, {
+                status: "generated",
+                imageUrl: data.imageUrl || null,
+                error: null,
+              });
+            }
+          } catch {
+            // Fallback to blob URL if status endpoint fails
+            updatePrompt(promptId, {
+              status: "generated",
+              imageUrl: data.imageUrl || null,
+              error: null,
+            });
+          }
         } else if (data.error) {
           // Job failed
           pollingIdsRef.current.delete(promptId);

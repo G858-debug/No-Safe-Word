@@ -14,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tabs,
-  TabsContent,
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
@@ -319,7 +318,7 @@ export default function SeriesDetailPage() {
         </TabsList>
 
         {/* ====================== OVERVIEW TAB ====================== */}
-        <TabsContent value="overview" className="mt-6">
+        <div className={activeTab === "overview" ? "mt-6" : "hidden"}>
           <div className="space-y-6">
             {/* Series metadata */}
             <Card>
@@ -457,10 +456,10 @@ export default function SeriesDetailPage() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        </div>
 
         {/* ===================== CHARACTERS TAB ===================== */}
-        <TabsContent value="characters" className="mt-6">
+        <div className={activeTab === "characters" ? "mt-6" : "hidden"}>
           <CharacterApproval
             seriesId={seriesId}
             characters={characters}
@@ -475,26 +474,26 @@ export default function SeriesDetailPage() {
               );
             }}
           />
-        </TabsContent>
+        </div>
 
         {/* ====================== IMAGES TAB ======================== */}
-        <TabsContent value="images" className="mt-6">
+        <div className={activeTab === "images" ? "mt-6" : "hidden"}>
           <ImageGeneration
             seriesId={seriesId}
             posts={posts}
             imageUrls={data.image_urls}
             allCharactersApproved={allCharsApproved}
           />
-        </TabsContent>
+        </div>
 
         {/* ====================== PUBLISH TAB ======================= */}
-        <TabsContent value="publish" className="mt-6">
+        <div className={activeTab === "publish" ? "mt-6" : "hidden"}>
           <PublishPanel
             seriesId={seriesId}
             posts={posts}
             imageUrls={data.image_urls}
           />
-        </TabsContent>
+        </div>
       </Tabs>
     </div>
   );

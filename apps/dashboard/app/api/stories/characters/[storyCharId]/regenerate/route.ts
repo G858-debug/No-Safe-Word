@@ -124,7 +124,12 @@ export async function POST(
 
     // 6. Generate with new random seed
     const settings = { ...DEFAULT_SETTINGS, seed: -1, batchSize: 1 };
-    const result = await submitGeneration(characterData, PORTRAIT_SCENE, settings);
+    const result = await submitGeneration(
+      characterData,
+      PORTRAIT_SCENE,
+      settings,
+      customPrompt ? { prompt: customPrompt } : undefined
+    );
 
     // 7. Persist image record and generation jobs
     const { data: imageRow, error: imgError } = await supabase

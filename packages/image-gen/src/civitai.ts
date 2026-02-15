@@ -68,10 +68,11 @@ export interface GenerationResponse {
 export async function submitGeneration(
   character: CharacterData,
   scene: SceneData,
-  settings: GenerationSettings
+  settings: GenerationSettings,
+  overrides?: { prompt?: string; negativePrompt?: string }
 ): Promise<GenerationResponse> {
-  const prompt = buildPrompt(character, scene);
-  const negativePrompt = buildNegativePrompt(scene);
+  const prompt = overrides?.prompt || buildPrompt(character, scene);
+  const negativePrompt = overrides?.negativePrompt || buildNegativePrompt(scene);
 
   return request<GenerationResponse>(ORCHESTRATION_BASE, "/consumer/jobs", {
     method: "POST",
