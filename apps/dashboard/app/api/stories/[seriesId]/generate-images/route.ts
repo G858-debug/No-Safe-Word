@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
-import { buildNegativePrompt } from "@no-safe-word/image-gen";
+import { buildNegativePrompt, extractCharacterTags } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -30,7 +30,7 @@ export async function POST(
     // 1. Verify all characters in the series are approved
     const { data: storyChars, error: charsError } = await supabase
       .from("story_characters")
-      .select("id, character_id, approved, approved_seed")
+      .select("id, character_id, approved, approved_seed, approved_prompt")
       .eq("series_id", seriesId);
 
     if (charsError) {
@@ -56,9 +56,16 @@ export async function POST(
       );
     }
 
-    // Build a character_id → approved_seed map
+    // Build character_id → approved_seed and character_id → approved character tags maps
     const seedMap = new Map<string, number | null>();
-    storyChars.forEach((sc) => seedMap.set(sc.character_id, sc.approved_seed));
+    const approvedTagsMap = new Map<string, string>();
+    storyChars.forEach((sc) => {
+      seedMap.set(sc.character_id, sc.approved_seed);
+      if (sc.approved_prompt) {
+        const tags = extractCharacterTags(sc.approved_prompt);
+        if (tags) approvedTagsMap.set(sc.character_id, tags);
+      }
+    });
 
     // 2. Find target posts
     let postIds: string[];
@@ -209,8 +216,17 @@ export async function POST(
 
         const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1 };
 
+        // Use approved character tags if available for consistency with approved portrait
+        let promptOverride: string | undefined;
+        if (imgPrompt.character_id) {
+          const approvedTags = approvedTagsMap.get(imgPrompt.character_id);
+          if (approvedTags) {
+            promptOverride = `masterpiece, best quality, highly detailed, ${approvedTags}, ${imgPrompt.prompt}`;
+          }
+        }
+
         // Submit to Civitai
-        const result = await submitGeneration(charData, scene, settings);
+        const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
 
         // Persist image record
         const negativePrompt = buildNegativePrompt(scene);

@@ -424,7 +424,10 @@ export default function CharacterApproval({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image_id: state.imageId }),
+            body: JSON.stringify({
+              image_id: state.imageId,
+              prompt: state.prompt,
+            }),
           }
         );
         if (!res.ok) {

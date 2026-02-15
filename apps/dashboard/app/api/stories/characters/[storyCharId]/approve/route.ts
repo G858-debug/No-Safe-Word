@@ -11,9 +11,10 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { image_id, seed } = body as {
+    const { image_id, seed, prompt } = body as {
       image_id: string;
       seed?: number;
+      prompt?: string;
     };
 
     console.log(`[StoryPublisher] Approving character ${storyCharId}, image_id: ${image_id}, seed: ${seed}`);
@@ -113,6 +114,7 @@ export async function POST(
         approved: true,
         approved_image_id: image_id,
         approved_seed: seed ?? null,
+        approved_prompt: prompt ?? null,
       })
       .eq("id", storyCharId)
       .select("*, series_id")

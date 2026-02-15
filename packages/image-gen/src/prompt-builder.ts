@@ -40,6 +40,29 @@ export function buildPrompt(
   return parts.filter(Boolean).join(", ");
 }
 
+/**
+ * Extract just the character-description tags from a full portrait prompt.
+ * Strips the quality prefix and portrait-scene suffix that buildPortraitPrompt adds,
+ * leaving only the appearance tags (age, gender, body, hair, eyes, etc.).
+ */
+export function extractCharacterTags(portraitPrompt: string): string {
+  let result = portraitPrompt;
+
+  // Strip quality prefix
+  result = result.replace(
+    /^masterpiece,\s*best quality,\s*highly detailed,\s*/i,
+    ""
+  );
+
+  // Strip portrait-scene suffix (everything from "studio portrait" onwards)
+  result = result.replace(
+    /,\s*studio portrait,\s*clean neutral background.*/i,
+    ""
+  );
+
+  return result.trim().replace(/,\s*$/, "");
+}
+
 export function buildNegativePrompt(scene: SceneData): string {
   const base =
     "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, blurry, bad quality, watermark, text, signature";

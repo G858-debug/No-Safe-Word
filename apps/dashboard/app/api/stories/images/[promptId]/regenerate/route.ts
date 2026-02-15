@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitGeneration, CivitaiError } from "@no-safe-word/image-gen";
-import { buildNegativePrompt } from "@no-safe-word/image-gen";
+import { buildNegativePrompt, extractCharacterTags } from "@no-safe-word/image-gen";
 import { DEFAULT_SETTINGS } from "@no-safe-word/shared";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -60,7 +60,7 @@ export async function POST(
       .update({ status: "generating" })
       .eq("id", promptId);
 
-    // 4. Look up character data and approved seed if linked
+    // 4. Look up character data, approved seed, and approved prompt if linked
     let charData: CharacterData = {
       name: "",
       gender: "female",
@@ -78,6 +78,7 @@ export async function POST(
     };
 
     let seed = -1;
+    let approvedCharacterTags: string | null = null;
 
     if (imgPrompt.character_id) {
       const { data: character } = await supabase
@@ -105,7 +106,7 @@ export async function POST(
         };
       }
 
-      // Look up the approved seed from story_characters via the post's series
+      // Look up the approved seed and prompt from story_characters via the post's series
       const { data: post } = await supabase
         .from("story_posts")
         .select("series_id")
@@ -115,13 +116,18 @@ export async function POST(
       if (post) {
         const { data: storyChar } = await supabase
           .from("story_characters")
-          .select("approved_seed")
+          .select("approved_seed, approved_prompt")
           .eq("series_id", post.series_id)
           .eq("character_id", imgPrompt.character_id)
           .single();
 
         if (storyChar?.approved_seed != null && storyChar.approved_seed > 0) {
           seed = storyChar.approved_seed + imgPrompt.position;
+        }
+
+        // Extract character description tags from the approved portrait prompt
+        if (storyChar?.approved_prompt) {
+          approvedCharacterTags = extractCharacterTags(storyChar.approved_prompt);
         }
       }
     }
@@ -140,9 +146,13 @@ export async function POST(
       additionalTags: [],
     };
 
-    // 6. Submit generation
+    // 6. Submit generation — use approved character tags if available for consistency
     const settings = { ...DEFAULT_SETTINGS, seed, batchSize: 1 };
-    const result = await submitGeneration(charData, scene, settings);
+    let promptOverride: string | undefined;
+    if (approvedCharacterTags) {
+      promptOverride = `masterpiece, best quality, highly detailed, ${approvedCharacterTags}, ${imgPrompt.prompt}`;
+    }
+    const result = await submitGeneration(charData, scene, settings, promptOverride ? { prompt: promptOverride } : undefined);
 
     // 7. Persist image record
     const negativePrompt = buildNegativePrompt(scene);
