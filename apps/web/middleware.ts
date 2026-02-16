@@ -28,10 +28,10 @@ function isDashboardApiRoute(pathname: string): boolean {
   );
 }
 
-function isAdminAuthenticated(request: NextRequest): boolean {
+async function isAdminAuthenticated(request: NextRequest): Promise<boolean> {
   const token = request.cookies.get(COOKIE_NAME)?.value;
   if (!token) return false;
-  return validateSessionToken(token);
+  return await validateSessionToken(token);
 }
 
 export async function middleware(request: NextRequest) {
@@ -58,7 +58,7 @@ export async function middleware(request: NextRequest) {
 
   // Protect /dashboard/* page routes — require admin session cookie
   if (pathname.startsWith("/dashboard")) {
-    if (!isAdminAuthenticated(request)) {
+    if (!(await isAdminAuthenticated(request))) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }
     return NextResponse.next();
@@ -66,7 +66,7 @@ export async function middleware(request: NextRequest) {
 
   // Protect dashboard API routes — return 401 instead of redirect
   if (isDashboardApiRoute(pathname)) {
-    if (!isAdminAuthenticated(request)) {
+    if (!(await isAdminAuthenticated(request))) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
