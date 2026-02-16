@@ -56,7 +56,6 @@ interface ImageGenerationProps {
   posts: PostWithPrompts[];
   imageUrls: Record<string, string>;
   allCharactersApproved: boolean;
-  modelUrn?: string;
 }
 
 interface PromptState {
@@ -127,7 +126,6 @@ export default function ImageGeneration({
   posts,
   imageUrls,
   allCharactersApproved,
-  modelUrn,
 }: ImageGenerationProps) {
   // ---- State ----
   const [promptStates, setPromptStates] = useState<
@@ -330,7 +328,6 @@ export default function ImageGeneration({
       try {
         const body: Record<string, string> = {};
         if (postId) body.post_id = postId;
-        if (modelUrn) body.model_urn = modelUrn;
 
         const res = await fetch(
           `/api/stories/${seriesId}/generate-images`,
@@ -377,7 +374,7 @@ export default function ImageGeneration({
         setBatchGenerating(false);
       }
     },
-    [seriesId, updatePrompt, modelUrn]
+    [seriesId, updatePrompt]
   );
 
   const handleRegenerate = useCallback(
@@ -407,7 +404,7 @@ export default function ImageGeneration({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+            body: JSON.stringify({}),
           }
         );
 
@@ -430,7 +427,7 @@ export default function ImageGeneration({
         });
       }
     },
-    [promptStates, updatePrompt, modelUrn]
+    [promptStates, updatePrompt]
   );
 
   const handleApprove = useCallback(
@@ -749,7 +746,7 @@ export default function ImageGeneration({
                                   {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+                                    body: JSON.stringify({}),
                                   }
                                 );
                                 if (!res.ok) {

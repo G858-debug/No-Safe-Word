@@ -48,7 +48,6 @@ export interface CharacterFromAPI {
 interface CharacterApprovalProps {
   seriesId: string;
   characters: CharacterFromAPI[];
-  modelUrn?: string;
   onProceedToImages?: () => void;
   onCharacterApproved?: (storyCharId: string, imageUrl: string, imageId: string) => void;
 }
@@ -148,7 +147,6 @@ const MAX_POLL_ATTEMPTS = 120; // 6 minutes
 export default function CharacterApproval({
   seriesId,
   characters,
-  modelUrn,
   onProceedToImages,
   onCharacterApproved,
 }: CharacterApprovalProps) {
@@ -383,7 +381,7 @@ export default function CharacterApproval({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+            body: JSON.stringify({}),
           }
         );
         if (!res.ok) {
@@ -403,7 +401,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [updateChar, startPolling, modelUrn]
+    [updateChar, startPolling]
   );
 
   const handleRegenerate = useCallback(
@@ -420,7 +418,6 @@ export default function CharacterApproval({
 
       try {
         const body: Record<string, string> = { prompt: state.prompt };
-        if (modelUrn) body.model_urn = modelUrn;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
@@ -444,7 +441,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateChar, startPolling, modelUrn]
+    [charStates, updateChar, startPolling]
   );
 
   const handleApprove = useCallback(
@@ -554,7 +551,7 @@ export default function CharacterApproval({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(modelUrn ? { model_urn: modelUrn } : {}),
+            body: JSON.stringify({}),
           }
         );
 
@@ -587,7 +584,7 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateChar, startPolling, modelUrn]);
+  }, [characters, charStates, updateChar, startPolling]);
 
   // ------- Derived state -------
 
