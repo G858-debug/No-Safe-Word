@@ -4,7 +4,7 @@ import { validateSessionToken, COOKIE_NAME } from "@/lib/admin-auth";
 
 const ACCESS_SUBDOMAINS = ["access.nosafeword.co.za", "access.localhost"];
 
-// Dashboard API route prefixes that get proxied to the dashboard app
+// Dashboard API route prefixes that require admin auth
 const DASHBOARD_API_PREFIXES = [
   "/api/stories",
   "/api/images",
@@ -12,6 +12,7 @@ const DASHBOARD_API_PREFIXES = [
   "/api/ai",
   "/api/status",
   "/api/civitai",
+  "/api/generate",
   "/api/webhook/story-import",
 ];
 
