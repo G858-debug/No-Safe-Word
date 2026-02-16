@@ -40,6 +40,30 @@ download_model \
     "loras" \
     "detail-tweaker-xl.safetensors"
 
+# realistic-skin-xl — Skin Texture Style v4 by EauDeNoire (photorealistic skin pores/texture)
+download_model \
+    "https://huggingface.co/MarkBW/detailed-skin-xl/resolve/main/skin%20texture%20style%20v4.safetensors" \
+    "loras" \
+    "realistic-skin-xl.safetensors"
+
+# eyes-detail-xl — DetailedEyes v3 by bdsqlsz (better eyes and gaze accuracy)
+download_model \
+    "https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/detailedEyes_v3.safetensors" \
+    "loras" \
+    "eyes-detail-xl.safetensors"
+
+# negative-hands-v2 — Hands XL v2.1 by EauDeNoire (reduce hand artifacts)
+download_model \
+    "https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/hands_xl_v21.safetensors" \
+    "loras" \
+    "negative-hands-v2.safetensors"
+
+# cinematic-lighting-xl — Cinematic lighting slider (subtle lighting enhancement)
+download_model \
+    "https://huggingface.co/ntc-ai/SDXL-LoRA-slider.cinematic-lighting/resolve/main/cinematic%20lighting.safetensors" \
+    "loras" \
+    "cinematic-lighting-xl.safetensors"
+
 # YOLO face detection — used by UltralyticsDetectorProvider / FaceDetailer
 download_model \
     "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt" \

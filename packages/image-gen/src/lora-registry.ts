@@ -10,6 +10,8 @@ export interface LoraEntry {
   triggerWord?: string;
   description: string;
   compatibleWith: ContentMode[];
+  /** Whether this LoRA is installed on the RunPod ComfyUI instance */
+  installed: boolean;
 }
 
 export const LORA_REGISTRY: LoraEntry[] = [
@@ -21,6 +23,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     clipStrength: 0.5,
     description: 'Overall sharpness and detail enhancement, always on',
     compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
   },
   {
     name: 'Realistic Skin XL',
@@ -28,8 +31,9 @@ export const LORA_REGISTRY: LoraEntry[] = [
     category: 'skin',
     defaultStrength: 0.6,
     clipStrength: 0.6,
-    description: 'Photorealistic skin texture for close-up and medium shots',
+    description: 'Photorealistic skin texture for close-up and medium shots (Skin Texture Style v4 by EauDeNoire)',
     compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
   },
   {
     name: 'Eyes Detail XL',
@@ -37,17 +41,19 @@ export const LORA_REGISTRY: LoraEntry[] = [
     category: 'eyes',
     defaultStrength: 0.5,
     clipStrength: 0.5,
-    description: 'Better eyes and gaze accuracy for eye contact shots',
+    description: 'Better eyes and gaze accuracy for eye contact shots (DetailedEyes v3 by bdsqlsz)',
     compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
   },
   {
-    name: 'Negative Hands v2',
+    name: 'Hands XL',
     filename: 'negative-hands-v2.safetensors',
     category: 'hands',
     defaultStrength: 0.8,
     clipStrength: 0.8,
-    description: 'Reduce hand artifacts, use only when hands are visible',
+    description: 'Reduce hand artifacts, use only when hands are visible (Hands XL v2.1 by EauDeNoire)',
     compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
   },
   {
     name: 'Better Bodies XL',
@@ -57,6 +63,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     clipStrength: 0.5,
     description: 'Anatomical accuracy for NSFW content',
     compatibleWith: ['nsfw'],
+    installed: false,
   },
   {
     name: 'Cinematic Lighting XL',
@@ -64,8 +71,9 @@ export const LORA_REGISTRY: LoraEntry[] = [
     category: 'lighting',
     defaultStrength: 0.4,
     clipStrength: 0.4,
-    description: 'Enhanced dramatic lighting for cinematic scenes',
+    description: 'Enhanced dramatic lighting for cinematic scenes (ntc-ai slider)',
     compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
   },
 ];
 

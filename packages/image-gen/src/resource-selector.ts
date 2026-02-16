@@ -22,7 +22,7 @@ export interface ResourceSelection {
 const PRIORITY_ORDER = ['detail', 'skin', 'eyes', 'bodies', 'lighting', 'hands'] as const;
 
 function getLoraFromRegistry(filename: string): SelectedLora | null {
-  const entry = LORA_REGISTRY.find((l) => l.filename === filename);
+  const entry = LORA_REGISTRY.find((l) => l.filename === filename && l.installed);
   if (!entry) return null;
   return {
     filename: entry.filename,
