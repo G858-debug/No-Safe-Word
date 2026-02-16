@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Wand2 } from "lucide-react";
 import { LogoutButton } from "@/app/dashboard-components/LogoutButton";
 
 export default function StoriesLayout({
@@ -22,10 +22,6 @@ export default function StoriesLayout({
         <header className="mb-8">
           <div className="mb-2 flex items-center justify-between">
             <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <Link href="/dashboard" className="hover:text-foreground transition-colors">
-              Dashboard
-            </Link>
-            <ChevronRight className="h-3.5 w-3.5" />
             <Link
               href="/dashboard/stories"
               className={
@@ -47,7 +43,16 @@ export default function StoriesLayout({
               </>
             )}
             </nav>
-            <LogoutButton />
+            <div className="flex items-center gap-2">
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center gap-1.5 rounded-md border border-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Wand2 className="h-3.5 w-3.5" />
+                Manual Generation
+              </Link>
+              <LogoutButton />
+            </div>
           </div>
           <h1 className="text-3xl font-bold tracking-tight">Story Publisher</h1>
           <p className="text-muted-foreground">

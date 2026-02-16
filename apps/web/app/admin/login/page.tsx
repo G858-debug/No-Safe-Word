@@ -28,7 +28,7 @@ export default function AdminLoginPage() {
         return;
       }
 
-      router.push("/dashboard");
+      router.push("/dashboard/stories");
     } catch {
       setError("Something went wrong. Please try again.");
       setLoading(false);
