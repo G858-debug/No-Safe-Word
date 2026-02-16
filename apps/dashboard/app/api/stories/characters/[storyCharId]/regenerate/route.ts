@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { buildPrompt, buildNegativePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, buildPortraitWorkflow } from "@no-safe-word/image-gen";
+import { buildPrompt, buildNegativePrompt, needsDarkSkinBiasCorrection } from "@no-safe-word/image-gen";
+import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 const PORTRAIT_SCENE: SceneData = {
@@ -108,17 +108,27 @@ export async function POST(
     let prompt: string;
     let negativePrompt: string;
 
+    const skinHints = {
+      darkSkinBiasCorrection: needsDarkSkinBiasCorrection(characterData),
+    };
+
     if (customPrompt) {
       prompt = customPrompt;
-      negativePrompt = buildNegativePrompt(PORTRAIT_SCENE);
+      negativePrompt = buildNegativePrompt(PORTRAIT_SCENE, skinHints);
     } else {
       prompt = buildPrompt(characterData, PORTRAIT_SCENE);
-      negativePrompt = buildNegativePrompt(PORTRAIT_SCENE);
+      negativePrompt = buildNegativePrompt(PORTRAIT_SCENE, skinHints);
     }
 
-    // 6. Generate with a known random seed
+    // 6. Scene intelligence: classify portrait and select LoRAs + negative additions
+    const classification = classifyScene(prompt, "portrait");
+    const resources = selectResources(classification);
+
+    // 7. Generate with a known random seed
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
+    console.log(`[StoryPublisher] Portrait classification:`, JSON.stringify(classification));
+    console.log(`[StoryPublisher] Selected LoRAs: ${resources.loras.map(l => l.filename).join(", ")}`);
     console.log(`[StoryPublisher] Submitting portrait regeneration to RunPod for ${character.name}, seed: ${seed}`);
 
     const workflow = buildPortraitWorkflow({
@@ -128,6 +138,8 @@ export async function POST(
       height: 1216,
       seed,
       filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
+      loras: resources.loras,
+      negativePromptAdditions: resources.negativePromptAdditions,
     });
 
     // Submit async job to RunPod (returns immediately)

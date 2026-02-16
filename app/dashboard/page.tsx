@@ -5,7 +5,7 @@ import { CharacterForm } from "@/app/components/CharacterForm";
 import { SceneBuilder } from "@/app/components/SceneBuilder";
 import { SettingsPanel } from "@/app/components/SettingsPanel";
 import { ImageGallery } from "@/app/components/ImageGallery";
-import { buildPrompt, buildNegativePrompt } from "@no-safe-word/image-gen";
+import { buildPrompt, buildNegativePrompt, needsDarkSkinBiasCorrection } from "@no-safe-word/image-gen";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,7 +30,9 @@ export default function DashboardPage() {
   } = useGeneration();
 
   const prompt = buildPrompt(character, scene);
-  const negativePrompt = buildNegativePrompt(scene);
+  const negativePrompt = buildNegativePrompt(scene, {
+    darkSkinBiasCorrection: needsDarkSkinBiasCorrection(character),
+  });
 
   return (
     <div className="dark min-h-screen bg-background text-foreground">

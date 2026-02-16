@@ -41,7 +41,7 @@ interface DualCharacterWorkflowParams extends SceneWorkflowParams {
 }
 
 const DEFAULT_NEGATIVE_PROMPT =
-  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, extra fingers, missing fingers, extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts';
+  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, extra fingers, missing fingers, extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like';
 
 const DEFAULT_NEGATIVE_PROMPT_DUAL =
   DEFAULT_NEGATIVE_PROMPT + ', three people, crowd, group';

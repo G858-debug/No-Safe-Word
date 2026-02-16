@@ -1,10 +1,22 @@
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
+/**
+ * Detect whether a character triggers SDXL's lighter-skin bias on male subjects.
+ * When true, callers should pass { darkSkinBiasCorrection: true } to buildNegativePrompt.
+ */
+export function needsDarkSkinBiasCorrection(character: CharacterData): boolean {
+  return (
+    character.gender === "male" &&
+    /\b(?:Black|African)\b/i.test(character.ethnicity)
+  );
+}
+
 export function buildPrompt(
   character: CharacterData,
   scene: SceneData
 ): string {
   const parts: string[] = [];
+  const darkSkinCorrection = needsDarkSkinBiasCorrection(character);
 
   parts.push("masterpiece, best quality, highly detailed");
 
@@ -25,7 +37,16 @@ export function buildPrompt(
     parts.push(/\bhair\b/i.test(character.hairStyle) ? character.hairStyle : `${character.hairStyle} hair`);
   }
   if (character.eyeColor) parts.push(`${character.eyeColor} eyes`);
-  if (character.skinTone) parts.push(`${character.skinTone} skin`);
+
+  // SDXL bias correction: emphasize dark skin tone for Black/African male characters
+  if (darkSkinCorrection) {
+    parts.push("(deep rich dark brown skin:1.3)");
+    if (character.skinTone) parts.push(`${character.skinTone} skin`);
+    parts.push("dark melanin complexion, Bantu features");
+  } else if (character.skinTone) {
+    parts.push(`${character.skinTone} skin`);
+  }
+
   if (character.expression) {
     parts.push(/\bexpression\b|smile\b|smiling\b|grin\b|gaze\b|look\b|frown\b/i.test(character.expression)
       ? character.expression
@@ -329,13 +350,23 @@ export function cleanScenePrompt(prompt: string): string {
   return result;
 }
 
-export function buildNegativePrompt(scene: SceneData): string {
+export function buildNegativePrompt(
+  scene: SceneData,
+  characterHints?: { darkSkinBiasCorrection?: boolean }
+): string {
   const base =
     "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1)";
 
+  let result = base;
+
   if (scene.mode === "sfw") {
-    return `${base}, nsfw, nude, naked, sexual`;
+    result += ", nsfw, nude, naked, sexual";
   }
 
-  return base;
+  // Counter SDXL's bias toward lighter skin on Black/African male subjects
+  if (characterHints?.darkSkinBiasCorrection) {
+    result += ", light skin, pale skin, mixed race, light complexion";
+  }
+
+  return result;
 }

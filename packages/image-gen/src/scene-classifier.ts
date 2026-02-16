@@ -11,7 +11,7 @@ export interface SceneClassification {
   needsEyeDetail: boolean;
 }
 
-export type ImageType = 'facebook_sfw' | 'website_nsfw_paired' | 'website_only';
+export type ImageType = 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait';
 
 const HAND_KEYWORDS = [
   'hand', 'hands', 'finger', 'fingers', 'grip', 'gripping',
@@ -204,8 +204,8 @@ export function classifyScene(
   // Character count
   const characterCount = countCharacterReferences(lower);
 
-  // Hands visible
-  const hasHandsVisible = hasKeyword(lower, HAND_KEYWORDS);
+  // Hands visible — portraits are head-and-shoulders shots where hands may appear
+  const hasHandsVisible = imageType === 'portrait' || hasKeyword(lower, HAND_KEYWORDS);
 
   // Mood
   let mood: SceneClassification['mood'] = 'contemplative';
@@ -223,9 +223,9 @@ export function classifyScene(
     mood = 'contemplative';
   }
 
-  // Needs skin detail: close-up or medium shots with skin visible
+  // Needs skin detail: portraits always need it; otherwise close-up/medium shots with skin visible
   const hasSkinVisible = hasKeyword(lower, SKIN_KEYWORDS);
-  const needsSkinDetail = hasSkinVisible && (shotType === 'close-up' || shotType === 'medium');
+  const needsSkinDetail = imageType === 'portrait' || (hasSkinVisible && (shotType === 'close-up' || shotType === 'medium'));
 
   // Needs eye detail: gaze/eyes prominent in the prompt
   const needsEyeDetail = hasKeyword(lower, EYE_KEYWORDS);
