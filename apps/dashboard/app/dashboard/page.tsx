@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Sparkles, BookOpen, ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { LogoutButton } from "@/app/components/LogoutButton";
 
 export default function DashboardPage() {
   const {
@@ -43,13 +44,16 @@ export default function DashboardPage() {
               AI Image Generation Dashboard
             </p>
           </div>
-          <Link href="/dashboard/stories">
-            <Button variant="secondary" className="gap-2">
-              <BookOpen className="h-4 w-4" />
-              Story Publisher
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard/stories">
+              <Button variant="secondary" className="gap-2">
+                <BookOpen className="h-4 w-4" />
+                Story Publisher
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+            <LogoutButton />
+          </div>
         </header>
 
         {/* Input Forms via Tabs */}

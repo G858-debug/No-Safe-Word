@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
+import { LogoutButton } from "@/app/components/LogoutButton";
 
 export default function StoriesLayout({
   children,
@@ -19,7 +20,8 @@ export default function StoriesLayout({
       <div className="container mx-auto max-w-7xl px-4 py-8">
         {/* Header */}
         <header className="mb-8">
-          <nav className="mb-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <div className="mb-2 flex items-center justify-between">
+            <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Link href="/dashboard" className="hover:text-foreground transition-colors">
               Dashboard
             </Link>
@@ -44,7 +46,9 @@ export default function StoriesLayout({
                 </span>
               </>
             )}
-          </nav>
+            </nav>
+            <LogoutButton />
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Story Publisher</h1>
           <p className="text-muted-foreground">
             Import, generate images, and publish serialized fiction
