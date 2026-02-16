@@ -2,8 +2,11 @@
 /node_modules
 
 # next.js
-/.next/
+.next/
 /out/
+
+# turbo
+.turbo/
 
 # production
 /build
@@ -13,6 +16,9 @@
 
 # debug
 npm-debug.log*
+
+# build info
+*.tsbuildinfo
 
 # misc
 .DS_Store

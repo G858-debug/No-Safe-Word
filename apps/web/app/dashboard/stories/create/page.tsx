@@ -146,10 +146,10 @@ export default function CreateStoryPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>What's Next?</CardTitle>
+          <CardTitle>What&apos;s Next?</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>After creating the story series, you'll be able to:</p>
+          <p>After creating the story series, you&apos;ll be able to:</p>
           <ol className="list-decimal list-inside space-y-1 ml-2">
             <li>Add characters to the story</li>
             <li>Generate character portraits</li>

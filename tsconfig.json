@@ -27,10 +27,5 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"],
-  "references": [
-    { "path": "./packages/shared" },
-    { "path": "./packages/image-gen" },
-    { "path": "./packages/story-engine" }
-  ]
+  "exclude": ["node_modules"]
 }
