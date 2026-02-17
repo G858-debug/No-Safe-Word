@@ -1,15 +1,18 @@
 #!/bin/bash
 # download-models.sh — Downloads required models on first container startup.
 # Skips files that already exist (e.g. persisted on a RunPod network volume).
-set -e
+# Retries failed downloads up to 3 times. Continues past failures so all
+# models get a chance to download even if one source is temporarily down.
 
 COMFY_DIR="${COMFY_DIR:-/comfyui}"
 MODELS_DIR="${COMFY_DIR}/models"
+FAILED=0
 
 download_model() {
     local url="$1"
     local dir="$2"
     local filename="$3"
+    local max_retries=3
     local dest="${MODELS_DIR}/${dir}/${filename}"
 
     if [ -f "$dest" ]; then
@@ -17,11 +20,25 @@ download_model() {
         return 0
     fi
 
-    echo "[NSW] Downloading ${filename}..."
     mkdir -p "${MODELS_DIR}/${dir}"
-    wget -q -O "${dest}.tmp" "$url"
-    mv "${dest}.tmp" "$dest"
-    echo "[NSW] ✓ ${filename} (downloaded)"
+
+    local attempt=1
+    while [ $attempt -le $max_retries ]; do
+        echo "[NSW] Downloading ${filename} (attempt ${attempt}/${max_retries})..."
+        if wget -q --timeout=60 --tries=1 -O "${dest}.tmp" "$url" 2>/dev/null; then
+            mv "${dest}.tmp" "$dest"
+            echo "[NSW] ✓ ${filename} (downloaded)"
+            return 0
+        fi
+        rm -f "${dest}.tmp"
+        echo "[NSW] ✗ ${filename} attempt ${attempt} failed"
+        attempt=$((attempt + 1))
+        [ $attempt -le $max_retries ] && sleep 5
+    done
+
+    echo "[NSW] ✗✗ ${filename} FAILED after ${max_retries} attempts"
+    FAILED=$((FAILED + 1))
+    return 1
 }
 
 echo "[NSW] ========================================="
@@ -77,5 +94,10 @@ download_model \
     "sam_vit_b_01ec64.pth"
 
 echo "[NSW] ========================================="
-echo "[NSW] All models ready."
+if [ $FAILED -gt 0 ]; then
+    echo "[NSW] WARNING: ${FAILED} model(s) failed to download."
+    echo "[NSW] ComfyUI will start but some features may not work."
+else
+    echo "[NSW] All models ready."
+fi
 echo "[NSW] ========================================="
