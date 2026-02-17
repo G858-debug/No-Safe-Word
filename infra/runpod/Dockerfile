@@ -18,7 +18,7 @@ RUN wget -v -O ${COMFY_DIR}/models/loras/detail-tweaker-xl.safetensors \
     && echo "✓ detail-tweaker-xl"
 
 RUN wget -v -O ${COMFY_DIR}/models/loras/realistic-skin-xl.safetensors \
-      "https://huggingface.co/MarkBW/detailed-skin-xl/resolve/main/skin%20texture%20style%20v4.safetensors" \
+      "https://huggingface.co/ford442/sdxl-vae-bf16/resolve/main/LoRA/skin_texture_style_v4.safetensors" \
     && echo "✓ realistic-skin-xl"
 
 RUN wget -v -O ${COMFY_DIR}/models/loras/eyes-detail-xl.safetensors \

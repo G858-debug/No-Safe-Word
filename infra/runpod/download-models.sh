@@ -58,8 +58,9 @@ download_model \
     "detail-tweaker-xl.safetensors"
 
 # realistic-skin-xl — Skin Texture Style v4 by EauDeNoire (photorealistic skin pores/texture)
+# Mirror from ford442/sdxl-vae-bf16 — original MarkBW/detailed-skin-xl has intermittent CDN auth issues
 download_model \
-    "https://huggingface.co/MarkBW/detailed-skin-xl/resolve/main/skin%20texture%20style%20v4.safetensors" \
+    "https://huggingface.co/ford442/sdxl-vae-bf16/resolve/main/LoRA/skin_texture_style_v4.safetensors" \
     "loras" \
     "realistic-skin-xl.safetensors"
 
