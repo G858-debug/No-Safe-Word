@@ -103,26 +103,69 @@ function ensureCorrectAge(prompt: string, correctAge: string): string {
   );
 }
 
+/** Detect whether dark skin bias correction is needed for Black/African male characters */
+function needsDarkSkinCorrection(d: Record<string, string>): boolean {
+  return d.gender === "male" && /\b(?:Black|African)\b/i.test(d.ethnicity || "");
+}
+
+/** Simplify long bodyType descriptions to prevent SDXL bodybuilder exaggeration */
+function simplifyBodyType(raw: string): string {
+  if (!raw.includes(",")) return raw;
+  const buildKw = [
+    "slim", "slender", "petite", "lean", "thin",
+    "athletic", "toned", "fit", "gym-fit",
+    "muscular", "naturally muscular", "well-built",
+    "curvy", "curvaceous", "voluptuous", "full-figured",
+    "stocky", "heavyset", "broad", "tall", "short",
+  ];
+  const lower = raw.toLowerCase();
+  const matched: string[] = [];
+  for (const kw of buildKw) {
+    if (lower.includes(kw)) {
+      if (kw === "muscular" && matched.some((m) => m.includes("muscular"))) continue;
+      matched.push(kw);
+    }
+  }
+  return matched.length > 0 ? matched.slice(0, 3).join(", ") : raw.split(",")[0].trim();
+}
+
 /** Client-side mirror of the server prompt builder for portrait shots */
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
-  const parts: string[] = ["masterpiece, best quality, highly detailed"];
+  const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
+  const darkSkin = needsDarkSkinCorrection(d);
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
   if (d.ethnicity) parts.push(d.ethnicity);
-  if (d.bodyType) parts.push(`${d.bodyType} body`);
+  if (d.bodyType) {
+    const sanitized = simplifyBodyType(d.bodyType);
+    parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
+      ? sanitized
+      : `${sanitized} body`);
+  }
 
   if (d.hairColor && d.hairStyle) {
-    parts.push(`${d.hairColor} ${d.hairStyle} hair`);
+    const needsSuffix = !/\bhair\b/i.test(d.hairStyle);
+    parts.push(`${d.hairColor} ${d.hairStyle}${needsSuffix ? " hair" : ""}`);
   } else if (d.hairColor) {
     parts.push(`${d.hairColor} hair`);
   } else if (d.hairStyle) {
-    parts.push(`${d.hairStyle} hair`);
+    parts.push(/\bhair\b/i.test(d.hairStyle) ? d.hairStyle : `${d.hairStyle} hair`);
   }
 
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
-  if (d.skinTone) parts.push(`${d.skinTone} skin`);
+
+  if (darkSkin) {
+    parts.push("(very dark skin:1.5)");
+    parts.push("(deep rich dark brown skin:1.4)");
+    parts.push("(African man:1.3)");
+    if (d.skinTone) parts.push(`(${d.skinTone} skin:1.2)`);
+    parts.push("(deep melanin complexion:1.3), sub-Saharan African, Bantu features");
+  } else if (d.skinTone) {
+    parts.push(`${d.skinTone} skin`);
+  }
+
   if (d.expression) parts.push(`${d.expression} expression`);
   if (d.clothing) parts.push(`wearing ${d.clothing}`);
   if (d.pose) parts.push(d.pose);

@@ -1,3 +1,7 @@
+export type InteractionType =
+  | 'intimate' | 'romantic' | 'conversational' | 'confrontational'
+  | 'side-by-side' | 'observing' | 'unknown';
+
 export interface SceneClassification {
   settingType: 'indoor' | 'outdoor' | 'studio';
   lightingMood: 'dramatic' | 'soft' | 'natural' | 'neon' | 'candlelight' | 'golden_hour';
@@ -9,6 +13,10 @@ export interface SceneClassification {
   mood: 'romantic' | 'tense' | 'passionate' | 'contemplative' | 'playful' | 'vulnerable';
   needsSkinDetail: boolean;
   needsEyeDetail: boolean;
+  /** Whether the prompt already contains spatial/composition cues */
+  hasCompositionCues: boolean;
+  /** Detected interaction type between characters (for dual-character scenes) */
+  interactionType: InteractionType;
 }
 
 export type ImageType = 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait';
@@ -117,6 +125,48 @@ const PLAYFUL_KEYWORDS = [
 const VULNERABLE_KEYWORDS = [
   'vulnerable', 'exposed', 'raw', 'emotional', 'tear', 'crying',
   'biting lip', 'hesitant', 'shy', 'nervous',
+];
+
+const COMPOSITION_CUE_KEYWORDS = [
+  'foreground', 'background', 'left side', 'right side',
+  'in front of', 'behind', 'beside', 'next to',
+  'facing each other', 'back to back', 'side by side',
+  'over shoulder', 'from behind', 'two-shot', 'two shot',
+  'symmetrical composition', 'depth separation',
+];
+
+const INTIMATE_INTERACTION_KEYWORDS = [
+  'bodies touching', 'close proximity', 'faces inches apart',
+  'skin against', 'intertwined', 'wrapped around',
+  'pressed together', 'pressed against', 'entwined',
+  'straddling', 'on top of', 'beneath',
+];
+
+const ROMANTIC_INTERACTION_KEYWORDS = [
+  'leaning toward', 'eye contact between', 'soft eye contact',
+  'gazing at each other', 'holding hands', 'hand in hand',
+  'forehead to forehead', 'nuzzling', 'cuddling', 'spooning',
+];
+
+const CONVERSATIONAL_INTERACTION_KEYWORDS = [
+  'seated facing', 'across the table', 'talking',
+  'conversation', 'chatting', 'discussing', 'laughing together',
+  'sharing a drink', 'over coffee', 'over wine',
+];
+
+const CONFRONTATIONAL_INTERACTION_KEYWORDS = [
+  'confrontation', 'facing off', 'staring down',
+  'across the frame', 'opposing', 'standoff', 'argument',
+];
+
+const SIDE_BY_SIDE_KEYWORDS = [
+  'side by side', 'shoulder to shoulder', 'walking together',
+  'standing together', 'sitting together', 'next to each other',
+];
+
+const OBSERVING_INTERACTION_KEYWORDS = [
+  'watching from', 'observing', 'looking on',
+  'in the distance', 'from afar', 'across the room',
 ];
 
 function hasKeyword(prompt: string, keywords: string[]): boolean {
@@ -230,6 +280,31 @@ export function classifyScene(
   // Needs eye detail: gaze/eyes prominent in the prompt
   const needsEyeDetail = hasKeyword(lower, EYE_KEYWORDS);
 
+  // Composition cues: does the prompt already contain spatial/layout instructions?
+  const hasCompositionCues = hasKeyword(lower, COMPOSITION_CUE_KEYWORDS);
+
+  // Interaction type detection (for dual-character composition intelligence)
+  let interactionType: InteractionType = 'unknown';
+  if (hasKeyword(lower, INTIMATE_INTERACTION_KEYWORDS) || hasIntimateContent) {
+    interactionType = 'intimate';
+  } else if (hasKeyword(lower, ROMANTIC_INTERACTION_KEYWORDS)) {
+    interactionType = 'romantic';
+  } else if (hasKeyword(lower, CONFRONTATIONAL_INTERACTION_KEYWORDS)) {
+    interactionType = 'confrontational';
+  } else if (hasKeyword(lower, CONVERSATIONAL_INTERACTION_KEYWORDS)) {
+    interactionType = 'conversational';
+  } else if (hasKeyword(lower, SIDE_BY_SIDE_KEYWORDS)) {
+    interactionType = 'side-by-side';
+  } else if (hasKeyword(lower, OBSERVING_INTERACTION_KEYWORDS)) {
+    interactionType = 'observing';
+  } else if (interactionType === 'unknown' && characterCount === 2) {
+    // Fall back to mood-based inference for dual-character scenes
+    if (mood === 'passionate' || mood === 'vulnerable') interactionType = 'intimate';
+    else if (mood === 'romantic') interactionType = 'romantic';
+    else if (mood === 'tense') interactionType = 'confrontational';
+    else if (mood === 'playful' || mood === 'contemplative') interactionType = 'conversational';
+  }
+
   return {
     settingType,
     lightingMood,
@@ -241,5 +316,7 @@ export function classifyScene(
     mood,
     needsSkinDetail,
     needsEyeDetail,
+    hasCompositionCues,
+    interactionType,
   };
 }

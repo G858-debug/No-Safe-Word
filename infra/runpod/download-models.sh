@@ -103,6 +103,37 @@ download_model \
     "sams" \
     "sam_vit_b_01ec64.pth"
 
+# =============================================
+# Premium models — opt-in via INSTALL_PREMIUM_MODELS=true
+# These are additional checkpoints for model selection intelligence.
+# They require extra disk space (~20GB) so are only downloaded on demand.
+# =============================================
+if [ "${INSTALL_PREMIUM_MODELS}" = "true" ]; then
+    echo "[NSW] ========================================="
+    echo "[NSW] Installing premium models..."
+    echo "[NSW] ========================================="
+
+    # RealVisXL V5.0 — premium portrait model (superior face and skin rendering)
+    download_model \
+        "https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0.safetensors" \
+        "checkpoints" \
+        "realvisxl-v5.safetensors"
+
+    # epiCRealism XL — budget photorealistic model
+    download_model \
+        "https://huggingface.co/stablediffusionapi/epicrealism-xl/resolve/main/epicRealismXL.safetensors" \
+        "checkpoints" \
+        "epicrealism-xl.safetensors"
+
+    # CyberRealistic XL v9.0 — maximum quality photorealistic model
+    download_model \
+        "https://huggingface.co/cyberdelia/CyberRealisticXL/resolve/main/CyberRealisticXL_v9.0.safetensors" \
+        "checkpoints" \
+        "cyberrealistic-xl-v9.safetensors"
+else
+    echo "[NSW] Skipping premium models (set INSTALL_PREMIUM_MODELS=true to install)"
+fi
+
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then
     echo "[NSW] WARNING: ${FAILED} model(s) failed to download."

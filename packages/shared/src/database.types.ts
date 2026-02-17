@@ -432,6 +432,7 @@ export interface Database {
           approved_image_id: string | null;
           approved_seed: number | null;
           approved_prompt: string | null;
+          regen_count: number;
         };
         Insert: {
           id?: string;
@@ -443,6 +444,7 @@ export interface Database {
           approved_image_id?: string | null;
           approved_seed?: number | null;
           approved_prompt?: string | null;
+          regen_count?: number;
         };
         Update: {
           id?: string;
@@ -454,6 +456,7 @@ export interface Database {
           approved_image_id?: string | null;
           approved_seed?: number | null;
           approved_prompt?: string | null;
+          regen_count?: number;
         };
         Relationships: [
           {

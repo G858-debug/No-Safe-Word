@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
 import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import { augmentComposition } from "@no-safe-word/image-gen";
 import type { ImageType } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
@@ -231,8 +232,21 @@ export async function POST(
           ? approvedTagsMap.get(imgPrompt.secondary_character_id) || null
           : null;
 
+        const hasSecondary = !!imgPrompt.secondary_character_id;
+
+        // Composition intelligence: augment dual-character scenes with spatial cues
+        let scenePromptForBuild = imgPrompt.prompt;
+        if (hasSecondary) {
+          const preClassification = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType);
+          const compositionResult = augmentComposition(imgPrompt.prompt, preClassification);
+          if (compositionResult.wasAugmented) {
+            scenePromptForBuild = compositionResult.augmentedPrompt;
+            console.log(`[StoryImage][${imgPrompt.id}] Composition augmented: +${compositionResult.injectedCues.join(', ')}`);
+          }
+        }
+
         const promptOverride = (primaryTags || secondaryTags)
-          ? buildStoryImagePrompt(primaryTags, secondaryTags, imgPrompt.prompt, mode)
+          ? buildStoryImagePrompt(primaryTags, secondaryTags, scenePromptForBuild, mode)
           : undefined;
 
         // Diagnostic logging — trace the prompt pipeline
@@ -244,8 +258,6 @@ export async function POST(
         if (promptOverride) {
           console.log(`[StoryImage][${imgPrompt.id}] Final prompt:`, promptOverride.substring(0, 200));
         }
-
-        const hasSecondary = !!imgPrompt.secondary_character_id;
         const workflowType = imgPrompt.character_id
           ? (hasSecondary ? "dual-character" : "single-character")
           : "portrait";

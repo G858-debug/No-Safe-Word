@@ -1,3 +1,5 @@
+import { DEFAULT_MODEL } from './model-registry';
+
 type WorkflowType = 'portrait' | 'single-character' | 'dual-character';
 
 interface LoraInput {
@@ -22,6 +24,12 @@ interface WorkflowParams {
   loras?: LoraInput[];
   /** Additional negative prompt terms from scene classification */
   negativePromptAdditions?: string;
+  /** Checkpoint model filename. Defaults to DEFAULT_MODEL (Juggernaut XL v10). */
+  checkpointName?: string;
+  /** Override CFG scale (default 7) */
+  cfg?: number;
+  /** Override sampler name (default 'euler_ancestral') */
+  samplerName?: string;
 }
 
 interface SceneWorkflowParams extends WorkflowParams {
@@ -102,11 +110,14 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
   const baseNeg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT;
   const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'portrait';
+  const ckpt = params.checkpointName || DEFAULT_MODEL;
+  const cfg = params.cfg || 7;
+  const sampler = params.samplerName || 'euler_ancestral';
 
   const workflow: Record<string, any> = {
     '1': {
       class_type: 'CheckpointLoaderSimple',
-      inputs: { ckpt_name: 'juggernaut-x-v10.safetensors' },
+      inputs: { ckpt_name: ckpt },
     },
   };
 
@@ -134,8 +145,8 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
         latent_image: ['5', 0],
         seed: params.seed,
         steps: 30,
-        cfg: 7,
-        sampler_name: 'euler_ancestral',
+        cfg,
+        sampler_name: sampler,
         scheduler: 'normal',
         denoise: 1.0,
       },
@@ -168,10 +179,10 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
         max_size: 1024,
         seed: params.seed,
         steps: 20,
-        cfg: 7,
-        sampler_name: 'euler_ancestral',
+        cfg,
+        sampler_name: sampler,
         scheduler: 'normal',
-        denoise: 0.4,
+        denoise: 0.3,
         feather: 5,
         noise_mask: true,
         force_inpaint: true,
@@ -209,11 +220,14 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
   const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'scene';
   const ipaWeight = params.ipadapterWeight ?? 0.85;
+  const ckpt = params.checkpointName || DEFAULT_MODEL;
+  const cfg = params.cfg || 7;
+  const sampler = params.samplerName || 'euler_ancestral';
 
   const workflow: Record<string, any> = {
     '1': {
       class_type: 'CheckpointLoaderSimple',
-      inputs: { ckpt_name: 'juggernaut-x-v10.safetensors' },
+      inputs: { ckpt_name: ckpt },
     },
   };
 
@@ -264,8 +278,8 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
         latent_image: ['5', 0],
         seed: params.seed,
         steps: 30,
-        cfg: 7,
-        sampler_name: 'euler_ancestral',
+        cfg,
+        sampler_name: sampler,
         scheduler: 'normal',
         denoise: 1.0,
       },
@@ -302,10 +316,10 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
         max_size: 1024,
         seed: params.seed,
         steps: 20,
-        cfg: 7,
-        sampler_name: 'euler_ancestral',
+        cfg,
+        sampler_name: sampler,
         scheduler: 'normal',
-        denoise: 0.4,
+        denoise: 0.3,
         feather: 5,
         noise_mask: true,
         force_inpaint: true,
@@ -380,8 +394,8 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
       max_size: 1024,
       seed: params.secondarySeed,
       steps: 20,
-      cfg: 7,
-      sampler_name: 'euler_ancestral',
+      cfg: params.cfg || 7,
+      sampler_name: params.samplerName || 'euler_ancestral',
       scheduler: 'normal',
       denoise: 0.4,
       feather: 5,
@@ -432,6 +446,12 @@ export function buildWorkflow(config: {
   secondarySeed?: number;
   loras?: LoraInput[];
   negativePromptAdditions?: string;
+  /** Checkpoint model filename. Defaults to DEFAULT_MODEL. */
+  checkpointName?: string;
+  /** Override CFG scale (default 7) */
+  cfg?: number;
+  /** Override sampler name (default 'euler_ancestral') */
+  samplerName?: string;
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -444,6 +464,9 @@ export function buildWorkflow(config: {
         filenamePrefix: config.filenamePrefix,
         loras: config.loras,
         negativePromptAdditions: config.negativePromptAdditions,
+        checkpointName: config.checkpointName,
+        cfg: config.cfg,
+        samplerName: config.samplerName,
       });
 
     case 'single-character':
@@ -462,6 +485,9 @@ export function buildWorkflow(config: {
         ipadapterWeight: config.ipadapterWeight,
         loras: config.loras,
         negativePromptAdditions: config.negativePromptAdditions,
+        checkpointName: config.checkpointName,
+        cfg: config.cfg,
+        samplerName: config.samplerName,
       });
 
     case 'dual-character':
@@ -482,6 +508,9 @@ export function buildWorkflow(config: {
         secondarySeed: config.secondarySeed,
         loras: config.loras,
         negativePromptAdditions: config.negativePromptAdditions,
+        checkpointName: config.checkpointName,
+        cfg: config.cfg,
+        samplerName: config.samplerName,
       });
 
     default:

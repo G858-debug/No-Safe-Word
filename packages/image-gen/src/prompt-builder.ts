@@ -11,6 +11,51 @@ export function needsDarkSkinBiasCorrection(character: CharacterData): boolean {
   );
 }
 
+/**
+ * Sanitize long bodyType descriptions to prevent SDXL from interpreting
+ * multiple muscle-related phrases as "bodybuilder."
+ *
+ * Strategy: if the bodyType contains commas (multi-phrase narrative description),
+ * extract just the core build keyword(s) and drop body-part-specific details
+ * like "broad shoulders, strong hands" that push the model toward exaggeration.
+ */
+function sanitizeBodyType(raw: string): string {
+  // Short/simple descriptions — pass through as-is
+  if (!raw.includes(",")) return raw;
+
+  // Known core build keywords to preserve (first match wins)
+  const buildKeywords = [
+    "slim", "slender", "petite", "lean", "thin",
+    "athletic", "toned", "fit", "gym-fit",
+    "muscular", "naturally muscular", "well-built",
+    "curvy", "curvaceous", "voluptuous", "full-figured",
+    "stocky", "heavyset", "broad",
+    "average", "medium",
+    "tall", "short",
+  ];
+
+  const lower = raw.toLowerCase();
+
+  // Collect all matching build keywords
+  const matched: string[] = [];
+  for (const kw of buildKeywords) {
+    if (lower.includes(kw)) {
+      // Avoid adding both "muscular" and "naturally muscular"
+      if (kw === "muscular" && matched.some((m) => m.includes("muscular"))) continue;
+      if (kw === "broad" && matched.some((m) => m.includes("built"))) continue;
+      matched.push(kw);
+    }
+  }
+
+  if (matched.length > 0) {
+    // Cap at 3 descriptors to keep it concise
+    return matched.slice(0, 3).join(", ");
+  }
+
+  // Fallback: take just the first comma-separated phrase
+  return raw.split(",")[0].trim();
+}
+
 export function buildPrompt(
   character: CharacterData,
   scene: SceneData
@@ -18,15 +63,19 @@ export function buildPrompt(
   const parts: string[] = [];
   const darkSkinCorrection = needsDarkSkinBiasCorrection(character);
 
-  parts.push("masterpiece, best quality, highly detailed");
+  parts.push("masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
 
   if (character.age) parts.push(character.age);
   if (character.gender) parts.push(character.gender);
   if (character.ethnicity) parts.push(character.ethnicity);
   if (character.bodyType) {
-    parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(character.bodyType)
-      ? character.bodyType
-      : `${character.bodyType} body`);
+    // Sanitize long bodyType descriptions: SDXL interprets multiple muscle-related
+    // phrases (e.g. "broad muscular shoulders, strong hands, naturally muscular
+    // from physical work") as "bodybuilder". Extract only the core build descriptor.
+    const sanitized = sanitizeBodyType(character.bodyType);
+    parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
+      ? sanitized
+      : `${sanitized} body`);
   }
   if (character.hairColor && character.hairStyle) {
     const needsSuffix = !/\bhair\b/i.test(character.hairStyle);
@@ -39,10 +88,14 @@ export function buildPrompt(
   if (character.eyeColor) parts.push(`${character.eyeColor} eyes`);
 
   // SDXL bias correction: emphasize dark skin tone for Black/African male characters
+  // Juggernaut XL has a strong bias toward lighter skin on male subjects —
+  // high emphasis weights + multiple reinforcing tags are needed to overcome it.
   if (darkSkinCorrection) {
-    parts.push("(deep rich dark brown skin:1.3)");
-    if (character.skinTone) parts.push(`${character.skinTone} skin`);
-    parts.push("dark melanin complexion, Bantu features");
+    parts.push("(very dark skin:1.5)");
+    parts.push("(deep rich dark brown skin:1.4)");
+    parts.push("(African man:1.3)");
+    if (character.skinTone) parts.push(`(${character.skinTone} skin:1.2)`);
+    parts.push("(deep melanin complexion:1.3), sub-Saharan African, Bantu features");
   } else if (character.skinTone) {
     parts.push(`${character.skinTone} skin`);
   }
@@ -365,7 +418,7 @@ export function buildNegativePrompt(
 
   // Counter SDXL's bias toward lighter skin on Black/African male subjects
   if (characterHints?.darkSkinBiasCorrection) {
-    result += ", light skin, pale skin, mixed race, light complexion";
+    result += ", (light skin:1.4), (pale skin:1.4), (mixed race:1.3), (light complexion:1.3), (Indian:1.2), (Latino:1.2), (Asian:1.2), fair skin, white skin";
   }
 
   return result;
