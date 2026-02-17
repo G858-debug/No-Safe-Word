@@ -10,27 +10,34 @@ RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
 # Baking them into the image guarantees they're available on every worker
 # regardless of runtime network conditions.
 # Each is a separate RUN layer for better caching and error isolation.
+# We use Python (not wget) because wget decodes percent-encoded chars in
+# redirect URLs, breaking AWS S3 signatures for files with spaces in names.
 ENV COMFY_DIR=/comfyui
 RUN mkdir -p ${COMFY_DIR}/models/loras
 
-RUN wget -v -O ${COMFY_DIR}/models/loras/detail-tweaker-xl.safetensors \
-      "https://huggingface.co/LyliaEngine/add-detail-xl/resolve/main/add-detail-xl.safetensors" \
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve(\
+  'https://huggingface.co/LyliaEngine/add-detail-xl/resolve/main/add-detail-xl.safetensors',\
+  '${COMFY_DIR}/models/loras/detail-tweaker-xl.safetensors')" \
     && echo "✓ detail-tweaker-xl"
 
-RUN wget -v -O ${COMFY_DIR}/models/loras/realistic-skin-xl.safetensors \
-      "https://huggingface.co/ford442/sdxl-vae-bf16/resolve/main/LoRA/skin_texture_style_v4.safetensors" \
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve(\
+  'https://huggingface.co/ford442/sdxl-vae-bf16/resolve/main/LoRA/skin_texture_style_v4.safetensors',\
+  '${COMFY_DIR}/models/loras/realistic-skin-xl.safetensors')" \
     && echo "✓ realistic-skin-xl"
 
-RUN wget -v -O ${COMFY_DIR}/models/loras/eyes-detail-xl.safetensors \
-      "https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/detailedEyes_v3.safetensors" \
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve(\
+  'https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/detailedEyes_v3.safetensors',\
+  '${COMFY_DIR}/models/loras/eyes-detail-xl.safetensors')" \
     && echo "✓ eyes-detail-xl"
 
-RUN wget -v -O ${COMFY_DIR}/models/loras/negative-hands-v2.safetensors \
-      "https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/hands_xl_v21.safetensors" \
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve(\
+  'https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/hands_xl_v21.safetensors',\
+  '${COMFY_DIR}/models/loras/negative-hands-v2.safetensors')" \
     && echo "✓ negative-hands-v2"
 
-RUN wget -v -O ${COMFY_DIR}/models/loras/cinematic-lighting-xl.safetensors \
-      "https://huggingface.co/ntc-ai/SDXL-LoRA-slider.cinematic-lighting/resolve/main/cinematic%20lighting.safetensors" \
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve(\
+  'https://huggingface.co/ntc-ai/SDXL-LoRA-slider.cinematic-lighting/resolve/main/cinematic%20lighting.safetensors',\
+  '${COMFY_DIR}/models/loras/cinematic-lighting-xl.safetensors')" \
     && echo "✓ cinematic-lighting-xl"
 
 # ---- Runtime Model Download ----

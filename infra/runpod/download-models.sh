@@ -3,6 +3,8 @@
 # Skips files that already exist (e.g. persisted on a RunPod network volume).
 # Retries failed downloads up to 3 times. Continues past failures so all
 # models get a chance to download even if one source is temporarily down.
+# Uses Python urllib (not wget) to avoid wget's redirect URL-decoding bug
+# that breaks AWS S3 signatures for files with spaces in their names.
 
 COMFY_DIR="${COMFY_DIR:-/comfyui}"
 MODELS_DIR="${COMFY_DIR}/models"
@@ -25,7 +27,14 @@ download_model() {
     local attempt=1
     while [ $attempt -le $max_retries ]; do
         echo "[NSW] Downloading ${filename} (attempt ${attempt}/${max_retries})..."
-        if wget -q --timeout=60 --tries=1 -O "${dest}.tmp" "$url" 2>/dev/null; then
+        if python3 -c "
+import urllib.request, sys
+try:
+    urllib.request.urlretrieve('${url}', '${dest}.tmp')
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1; then
             mv "${dest}.tmp" "$dest"
             echo "[NSW] ✓ ${filename} (downloaded)"
             return 0
