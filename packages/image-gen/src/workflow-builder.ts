@@ -26,7 +26,7 @@ interface WorkflowParams {
   negativePromptAdditions?: string;
   /** Checkpoint model filename. Defaults to DEFAULT_MODEL (Juggernaut XL v10). */
   checkpointName?: string;
-  /** Override CFG scale (default 7) */
+  /** Override CFG scale (default 6.5) */
   cfg?: number;
   /** Override sampler name (default 'euler_ancestral') */
   samplerName?: string;
@@ -111,7 +111,7 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
   const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'portrait';
   const ckpt = params.checkpointName || DEFAULT_MODEL;
-  const cfg = params.cfg || 7;
+  const cfg = params.cfg || 6.5;
   const sampler = params.samplerName || 'euler_ancestral';
 
   const workflow: Record<string, any> = {
@@ -221,7 +221,7 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
   const prefix = params.filenamePrefix || 'scene';
   const ipaWeight = params.ipadapterWeight ?? 0.85;
   const ckpt = params.checkpointName || DEFAULT_MODEL;
-  const cfg = params.cfg || 7;
+  const cfg = params.cfg || 6.5;
   const sampler = params.samplerName || 'euler_ancestral';
 
   const workflow: Record<string, any> = {
@@ -394,7 +394,7 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
       max_size: 1024,
       seed: params.secondarySeed,
       steps: 20,
-      cfg: params.cfg || 7,
+      cfg: params.cfg || 6.5,
       sampler_name: params.samplerName || 'euler_ancestral',
       scheduler: 'normal',
       denoise: 0.4,
@@ -448,7 +448,7 @@ export function buildWorkflow(config: {
   negativePromptAdditions?: string;
   /** Checkpoint model filename. Defaults to DEFAULT_MODEL. */
   checkpointName?: string;
-  /** Override CFG scale (default 7) */
+  /** Override CFG scale (default 6.5) */
   cfg?: number;
   /** Override sampler name (default 'euler_ancestral') */
   samplerName?: string;

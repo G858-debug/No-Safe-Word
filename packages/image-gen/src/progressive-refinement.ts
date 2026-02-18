@@ -51,75 +51,25 @@ export function applyDarkSkinWeightBoost(prompt: string, boost: number): string 
 }
 
 /**
- * Get progressive parameter adjustments based on how many times a portrait
- * has been regenerated. Each regeneration applies increasingly aggressive
- * changes to break out of repetitive failure patterns.
+ * Returns fixed generation parameters based on the best-performing settings
+ * found during testing (originally "Regen 1" from the progressive system).
  *
- * Regen 0: No adjustments (first generation)
- * Regen 1: Slight CFG reduction (6.5), nearby seed for variation
- * Regen 2: Higher CFG (7.5), wider seed range, boost skin LoRA, boost dark skin if applicable
- * Regen 3+: Switch sampler, CFG 8, append photographic tag, max skin/dark-skin boosts
+ * CFG 6.5 with random seed — no escalation across regenerations.
+ * Users adjust prompts directly for fine-tuning.
  */
 export function getProgressiveAdjustments(
-  regenCount: number,
-  classification: SceneClassification,
-  character: CharacterData,
+  _regenCount: number,
+  _classification: SceneClassification,
+  _character: CharacterData,
 ): ProgressiveAdjustments {
-  const isDarkSkinSubject =
-    character.gender === 'male' &&
-    /\b(?:Black|African)\b/i.test(character.ethnicity);
-
-  // First generation — no adjustments
-  if (regenCount <= 0) {
-    return {
-      cfg: 7,
-      samplerName: null,
-      seedStrategy: 'random',
-      seedRange: 0,
-      skinLoraMultiplier: 1.0,
-      darkSkinBoost: 0,
-      promptSuffix: '',
-      reason: 'First generation — default parameters',
-    };
-  }
-
-  // Regen 1: gentle variation
-  if (regenCount === 1) {
-    return {
-      cfg: 6.5,
-      samplerName: null,
-      seedStrategy: 'nearby',
-      seedRange: 100,
-      skinLoraMultiplier: 1.0,
-      darkSkinBoost: 0,
-      promptSuffix: '',
-      reason: 'Regen 1: CFG 6.5, nearby seed (±100)',
-    };
-  }
-
-  // Regen 2: stronger push
-  if (regenCount === 2) {
-    return {
-      cfg: 7.5,
-      samplerName: null,
-      seedStrategy: 'nearby',
-      seedRange: 500,
-      skinLoraMultiplier: 1.13,
-      darkSkinBoost: isDarkSkinSubject ? 0.2 : 0,
-      promptSuffix: '',
-      reason: `Regen 2: CFG 7.5, wider seed (±500), skin LoRA ×1.13${isDarkSkinSubject ? ', dark skin +0.2' : ''}`,
-    };
-  }
-
-  // Regen 3+: aggressive changes
   return {
-    cfg: 8,
-    samplerName: 'dpmpp_2m',
-    seedStrategy: 'nearby',
-    seedRange: 1000,
-    skinLoraMultiplier: 1.2,
-    darkSkinBoost: isDarkSkinSubject ? 0.3 : 0,
-    promptSuffix: '(photographic:1.2)',
-    reason: `Regen ${regenCount}: CFG 8, dpmpp_2m sampler, skin LoRA ×1.2${isDarkSkinSubject ? ', dark skin +0.3' : ''}, +photographic`,
+    cfg: 6.5,
+    samplerName: null,
+    seedStrategy: 'random',
+    seedRange: 0,
+    skinLoraMultiplier: 1.0,
+    darkSkinBoost: 0,
+    promptSuffix: '',
+    reason: 'Fixed baseline: CFG 6.5',
   };
 }
