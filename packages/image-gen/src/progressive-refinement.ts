@@ -52,24 +52,28 @@ export function applyDarkSkinWeightBoost(prompt: string, boost: number): string 
 
 /**
  * Returns fixed generation parameters based on the best-performing settings
- * found during testing (originally "Regen 1" from the progressive system).
+ * found during testing (originally "Regen 2" from the progressive system).
  *
- * CFG 6.5 with random seed — no escalation across regenerations.
- * Users adjust prompts directly for fine-tuning.
+ * CFG 7.5, skin LoRA ×1.13, dark skin boost +0.2 for Black/African males.
+ * No escalation across regenerations — users adjust prompts directly.
  */
 export function getProgressiveAdjustments(
   _regenCount: number,
   _classification: SceneClassification,
-  _character: CharacterData,
+  character: CharacterData,
 ): ProgressiveAdjustments {
+  const isDarkSkinSubject =
+    character.gender === 'male' &&
+    /\b(?:Black|African)\b/i.test(character.ethnicity);
+
   return {
-    cfg: 6.5,
+    cfg: 7.5,
     samplerName: null,
     seedStrategy: 'random',
     seedRange: 0,
-    skinLoraMultiplier: 1.0,
-    darkSkinBoost: 0,
+    skinLoraMultiplier: 1.13,
+    darkSkinBoost: isDarkSkinSubject ? 0.2 : 0,
     promptSuffix: '',
-    reason: 'Fixed baseline: CFG 6.5',
+    reason: `Fixed baseline: CFG 7.5, skin LoRA ×1.13${isDarkSkinSubject ? ', dark skin +0.2' : ''}`,
   };
 }
