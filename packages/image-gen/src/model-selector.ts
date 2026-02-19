@@ -7,6 +7,8 @@ export interface ModelSelectionOptions {
   forceModel?: string;
   /** Prefer premium models when available */
   preferPremium?: boolean;
+  /** Explicit content level override (falls back to classification.contentLevel) */
+  contentLevel?: 'sfw' | 'suggestive' | 'nsfw';
 }
 
 export interface ModelSelection {
@@ -46,7 +48,23 @@ export function selectModel(
     };
   }
 
-  // 2. Portrait images prefer premium portrait models
+  // 2. NSFW content prefers maximum quality model
+  const contentLevel = options.contentLevel || classification.contentLevel;
+  if (contentLevel === 'nsfw') {
+    const maxQuality = MODEL_REGISTRY.find(
+      (m) => m.installed && m.tier === 'maximum'
+    );
+    if (maxQuality) {
+      return {
+        checkpointName: maxQuality.filename,
+        model: maxQuality,
+        fellBack: false,
+        reason: `NSFW content: using maximum quality model ${maxQuality.name}`,
+      };
+    }
+  }
+
+  // 3. Portrait images prefer premium portrait models
   if (imageType === 'portrait' || classification.shotType === 'close-up') {
     const premium = MODEL_REGISTRY.find(
       (m) => m.installed && m.strengths.includes('portrait') && m.tier === 'premium'
@@ -61,7 +79,7 @@ export function selectModel(
     }
   }
 
-  // 3. Maximum quality for premium preference
+  // 4. Maximum quality for premium preference
   if (options.preferPremium) {
     const maxQuality = MODEL_REGISTRY.find(
       (m) => m.installed && m.tier === 'maximum'
@@ -76,7 +94,7 @@ export function selectModel(
     }
   }
 
-  // 4. Default
+  // 5. Default
   return {
     checkpointName: DEFAULT_MODEL,
     model: defaultEntry,

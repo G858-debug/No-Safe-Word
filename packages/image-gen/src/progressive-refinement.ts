@@ -62,9 +62,11 @@ export function getProgressiveAdjustments(
   _classification: SceneClassification,
   character: CharacterData,
 ): ProgressiveAdjustments {
-  const isDarkSkinSubject =
+  const isAfricanCharacter =
     character.gender === 'male' &&
-    /\b(?:Black|African)\b/i.test(character.ethnicity);
+    /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(
+      character.ethnicity
+    );
 
   return {
     cfg: 7.5,
@@ -72,8 +74,8 @@ export function getProgressiveAdjustments(
     seedStrategy: 'random',
     seedRange: 0,
     skinLoraMultiplier: 1.13,
-    darkSkinBoost: isDarkSkinSubject ? 0.2 : 0,
+    darkSkinBoost: isAfricanCharacter ? 0.2 : 0,
     promptSuffix: '',
-    reason: `Fixed baseline: CFG 7.5, skin LoRA ×1.13${isDarkSkinSubject ? ', dark skin +0.2' : ''}`,
+    reason: `Fixed baseline: CFG 7.5, skin LoRA ×1.13${isAfricanCharacter ? ', dark skin +0.2' : ''}`,
   };
 }

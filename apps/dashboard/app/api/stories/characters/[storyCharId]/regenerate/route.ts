@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { buildPrompt, buildNegativePrompt, needsDarkSkinBiasCorrection } from "@no-safe-word/image-gen";
+import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
 import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
 import { getProgressiveAdjustments, computeNearbySeed, applyDarkSkinWeightBoost } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
@@ -110,7 +110,7 @@ export async function POST(
     let negativePrompt: string;
 
     const skinHints = {
-      darkSkinBiasCorrection: needsDarkSkinBiasCorrection(characterData),
+      africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
     };
 
     if (customPrompt) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { buildPrompt, buildNegativePrompt, needsDarkSkinBiasCorrection } from "@no-safe-word/image-gen";
+import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
 import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -80,7 +80,7 @@ export async function POST(
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
     const prompt = buildPrompt(characterData, PORTRAIT_SCENE);
     const negativePrompt = buildNegativePrompt(PORTRAIT_SCENE, {
-      darkSkinBiasCorrection: needsDarkSkinBiasCorrection(characterData),
+      africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
     });
 
     // Scene intelligence: classify portrait and select LoRAs + negative additions

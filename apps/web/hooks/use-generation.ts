@@ -12,7 +12,7 @@ import {
   DEFAULT_CHARACTER,
   DEFAULT_SCENE,
 } from "@no-safe-word/shared";
-import { buildPrompt, buildNegativePrompt, needsDarkSkinBiasCorrection } from "@no-safe-word/image-gen";
+import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
 
 export function useGeneration() {
   const [character, setCharacter] = useState<CharacterData>(DEFAULT_CHARACTER);
@@ -81,7 +81,7 @@ export function useGeneration() {
 
     const prompt = buildPrompt(character, scene);
     const negativePrompt = buildNegativePrompt(scene, {
-      darkSkinBiasCorrection: needsDarkSkinBiasCorrection(character),
+      africanFeatureCorrection: needsAfricanFeatureCorrection(character),
     });
 
     try {

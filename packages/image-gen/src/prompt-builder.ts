@@ -1,13 +1,16 @@
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 /**
- * Detect whether a character triggers SDXL's lighter-skin bias on male subjects.
- * When true, callers should pass { darkSkinBiasCorrection: true } to buildNegativePrompt.
+ * Detect whether a character needs African facial feature correction.
+ * SDXL has a strong bias toward European facial geometry on male subjects —
+ * this corrects lip fullness and cheekbone structure for Black/African male characters.
  */
-export function needsDarkSkinBiasCorrection(character: CharacterData): boolean {
+export function needsAfricanFeatureCorrection(character: CharacterData): boolean {
   return (
     character.gender === "male" &&
-    /\b(?:Black|African)\b/i.test(character.ethnicity)
+    /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(
+      character.ethnicity
+    )
   );
 }
 
@@ -61,7 +64,7 @@ export function buildPrompt(
   scene: SceneData
 ): string {
   const parts: string[] = [];
-  const darkSkinCorrection = needsDarkSkinBiasCorrection(character);
+  const africanFeatureCorrection = needsAfricanFeatureCorrection(character);
 
   parts.push("masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
 
@@ -87,15 +90,19 @@ export function buildPrompt(
   }
   if (character.eyeColor) parts.push(`${character.eyeColor} eyes`);
 
-  // SDXL bias correction: emphasize dark skin tone for Black/African male characters
-  // Juggernaut XL has a strong bias toward lighter skin on male subjects —
-  // high emphasis weights + multiple reinforcing tags are needed to overcome it.
-  if (darkSkinCorrection) {
-    parts.push("(very dark skin:1.5)");
-    parts.push("(deep rich dark brown skin:1.4)");
-    parts.push("(African man:1.3)");
-    if (character.skinTone) parts.push(`(${character.skinTone} skin:1.2)`);
-    parts.push("(deep melanin complexion:1.3), sub-Saharan African, Bantu features");
+  // SDXL bias correction: fix facial features for Black/African characters
+  // SDXL defaults to European facial geometry — these tags correct nose shape,
+  // lip fullness, and cheekbone structure for African characters.
+  if (africanFeatureCorrection) {
+    // Fix facial features — applies regardless of skin tone
+    // This corrects SDXL's default bias toward European facial geometry
+    parts.push("(African facial features:1.3)");
+    parts.push("(full lips:1.2), (prominent cheekbones:1.2)");
+    parts.push("sub-Saharan African, Bantu features");
+    // Respect the character's actual skin tone from their description
+    if (character.skinTone) {
+      parts.push(`(${character.skinTone} skin:1.2)`);
+    }
   } else if (character.skinTone) {
     parts.push(`${character.skinTone} skin`);
   }
@@ -405,7 +412,7 @@ export function cleanScenePrompt(prompt: string): string {
 
 export function buildNegativePrompt(
   scene: SceneData,
-  characterHints?: { darkSkinBiasCorrection?: boolean }
+  characterHints?: { africanFeatureCorrection?: boolean }
 ): string {
   const base =
     "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1)";
@@ -416,9 +423,9 @@ export function buildNegativePrompt(
     result += ", nsfw, nude, naked, sexual";
   }
 
-  // Counter SDXL's bias toward lighter skin on Black/African male subjects
-  if (characterHints?.darkSkinBiasCorrection) {
-    result += ", (light skin:1.4), (pale skin:1.4), (mixed race:1.3), (light complexion:1.3), (Indian:1.2), (Latino:1.2), (Asian:1.2), fair skin, white skin";
+  // Counter SDXL's default European facial geometry for African characters
+  if (characterHints?.africanFeatureCorrection) {
+    result += ", European facial features, caucasian features, thin lips, pinched nose, narrow nose bridge";
   }
 
   return result;
