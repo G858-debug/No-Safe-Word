@@ -30,7 +30,7 @@ RESULT=$(curl -s "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
   -X POST \
   -H "Content-Type: application/json" \
   -d "{
-    \"query\": \"mutation { saveTemplate(input: { id: \\\"${TEMPLATE_ID}\\\", name: \\\"nsw-image-gen__template__0mllfo\\\", imageName: \\\"${IMAGE_NAME}\\\", containerDiskInGb: 30, volumeInGb: 0, dockerArgs: \\\"\\\", env: [{ key: \\\"REFRESH_WORKER\\\", value: \\\"true\\\" }, { key: \\\"INSTALL_PREMIUM_MODELS\\\", value: \\\"true\\\" }, { key: \\\"CIVITAI_API_KEY\\\", value: \\\"${CIVITAI_API_KEY}\\\" }] }) { id imageName } }\"
+    \"query\": \"mutation { saveTemplate(input: { id: \\\"${TEMPLATE_ID}\\\", name: \\\"nsw-image-gen__template__0mllfo\\\", imageName: \\\"${IMAGE_NAME}\\\", containerDiskInGb: 36, volumeInGb: 0, dockerArgs: \\\"\\\", env: [{ key: \\\"REFRESH_WORKER\\\", value: \\\"true\\\" }, { key: \\\"INSTALL_PREMIUM_MODELS\\\", value: \\\"true\\\" }, { key: \\\"CIVITAI_API_KEY\\\", value: \\\"${CIVITAI_API_KEY}\\\" }] }) { id imageName } }\"
   }")
 
 echo "Response: ${RESULT}"

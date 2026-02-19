@@ -28,9 +28,14 @@ download_model() {
     while [ $attempt -le $max_retries ]; do
         echo "[NSW] Downloading ${filename} (attempt ${attempt}/${max_retries})..."
         if python3 -c "
-import urllib.request, sys
+import urllib.request, sys, shutil
 try:
-    urllib.request.urlretrieve('${url}', '${dest}.tmp')
+    req = urllib.request.Request('${url}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${dest}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
 except Exception as e:
     print(f'Error: {e}', file=sys.stderr)
     sys.exit(1)
