@@ -113,23 +113,31 @@ if [ "${INSTALL_PREMIUM_MODELS}" = "true" ]; then
     echo "[NSW] Installing premium models..."
     echo "[NSW] ========================================="
 
-    # RealVisXL V5.0 — premium portrait model (superior face and skin rendering)
-    download_model \
-        "https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0.safetensors" \
-        "checkpoints" \
-        "realvisxl-v5.safetensors"
+    if [ -z "${CIVITAI_API_KEY}" ]; then
+        echo "[NSW] WARNING: CIVITAI_API_KEY not set — skipping premium model downloads"
+        echo "[NSW] Set CIVITAI_API_KEY env var to enable premium model downloads from Civitai"
+    else
+        # RealVisXL V5.0 (BakedVAE) — premium portrait model (superior face and skin rendering)
+        # Civitai model 139562, version 789646
+        download_model \
+            "https://civitai.com/api/download/models/789646?token=${CIVITAI_API_KEY}" \
+            "checkpoints" \
+            "realvisxl-v5.safetensors"
 
-    # epiCRealism XL — budget photorealistic model
-    download_model \
-        "https://huggingface.co/stablediffusionapi/epicrealism-xl/resolve/main/epicRealismXL.safetensors" \
-        "checkpoints" \
-        "epicrealism-xl.safetensors"
+        # epiCRealism XL Pure_fix — budget photorealistic model
+        # Civitai model 277058, version 2514955
+        download_model \
+            "https://civitai.com/api/download/models/2514955?token=${CIVITAI_API_KEY}" \
+            "checkpoints" \
+            "epicrealism-xl.safetensors"
 
-    # CyberRealistic XL v9.0 — maximum quality photorealistic model
-    download_model \
-        "https://huggingface.co/cyberdelia/CyberRealisticXL/resolve/main/CyberRealisticXL_v9.0.safetensors" \
-        "checkpoints" \
-        "cyberrealistic-xl-v9.safetensors"
+        # CyberRealistic XL v9.0 — maximum quality photorealistic model
+        # Civitai model 312530, version 2611295
+        download_model \
+            "https://civitai.com/api/download/models/2611295?token=${CIVITAI_API_KEY}" \
+            "checkpoints" \
+            "cyberrealistic-xl-v9.safetensors"
+    fi
 else
     echo "[NSW] Skipping premium models (set INSTALL_PREMIUM_MODELS=true to install)"
 fi
