@@ -130,14 +130,42 @@ function stripFullBodyCues(text: string): string {
   return text.replace(/\b(?:full[- ]?body|full[- ]?length|from head to toe)\b/gi, "").replace(/\s{2,}/g, " ").trim();
 }
 
+/** Detect African male character from description fields (client-side mirror) */
+function isAfricanMaleDesc(d: Record<string, string>): boolean {
+  return (
+    d.gender === "male" &&
+    /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(d.ethnicity || "")
+  );
+}
+
 /** Client-side mirror of the server prompt builder for portrait shots */
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
+  const africanMale = isAfricanMaleDesc(d);
   const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
+
+  // African males: put weighted skin tone and ethnicity EARLY so SDXL commits
+  // to correct complexion before other features compete for attention
+  if (africanMale && d.skinTone) {
+    parts.push(`(${d.skinTone} skin:1.4)`);
+    parts.push("(dark-skinned:1.3)");
+  }
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
-  if (d.ethnicity) parts.push(d.ethnicity);
+
+  if (d.ethnicity) {
+    if (africanMale) {
+      parts.push("(African man:1.3)");
+      const specific = (d.ethnicity || "").replace(/^Black\s+/i, "").trim();
+      if (specific && specific.toLowerCase() !== "african") {
+        parts.push(specific);
+      }
+    } else {
+      parts.push(d.ethnicity);
+    }
+  }
+
   if (d.bodyType) {
     const sanitized = stripFullBodyCues(simplifyBodyType(d.bodyType));
     if (sanitized) {
@@ -158,8 +186,14 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
 
-  if (d.skinTone) {
+  // Skin tone: already added early with emphasis for African males
+  if (d.skinTone && !africanMale) {
     parts.push(`${d.skinTone} skin`);
+  }
+
+  // Positive African facial feature cues
+  if (africanMale) {
+    parts.push("(broad nose:1.2), (full lips:1.1), (strong jawline:1.1)");
   }
 
   if (d.expression) parts.push(`${d.expression} expression`);
