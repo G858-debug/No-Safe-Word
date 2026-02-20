@@ -104,9 +104,9 @@ function ensureCorrectAge(prompt: string, correctAge: string): string {
   );
 }
 
-/** Detect whether dark skin bias correction is needed for Black/African male characters */
-function needsDarkSkinCorrection(d: Record<string, string>): boolean {
-  return d.gender === "male" && /\b(?:Black|African)\b/i.test(d.ethnicity || "");
+/** Detect whether African facial feature correction is needed for Black/African male characters */
+function needsAfricanFeatureCorrection(d: Record<string, string>): boolean {
+  return d.gender === "male" && /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(d.ethnicity || "");
 }
 
 /** Simplify long bodyType descriptions to prevent SDXL bodybuilder exaggeration */
@@ -134,7 +134,7 @@ function simplifyBodyType(raw: string): string {
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
   const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
-  const darkSkin = needsDarkSkinCorrection(d);
+  const africanCorrection = needsAfricanFeatureCorrection(d);
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
@@ -157,12 +157,11 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
 
-  if (darkSkin) {
-    parts.push("(very dark skin:1.5)");
-    parts.push("(deep rich dark brown skin:1.4)");
-    parts.push("(African man:1.3)");
+  if (africanCorrection) {
+    parts.push("(African facial features:1.3)");
+    parts.push("(full lips:1.2), (prominent cheekbones:1.2)");
+    parts.push("sub-Saharan African, Bantu features");
     if (d.skinTone) parts.push(`(${d.skinTone} skin:1.2)`);
-    parts.push("(deep melanin complexion:1.3), sub-Saharan African, Bantu features");
   } else if (d.skinTone) {
     parts.push(`${d.skinTone} skin`);
   }
