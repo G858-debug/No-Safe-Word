@@ -121,6 +121,7 @@ export async function GET(
         jobId,
         completed: false,
         status: status.status,
+        delayTime: status.delayTime ?? null,
       });
     }
   } catch (err) {

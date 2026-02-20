@@ -66,6 +66,7 @@ interface CharState {
   jobId: string | null;
   pollStartTime: number | null;
   seed: number | null;
+  runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,10 +235,31 @@ export default function CharacterApproval({
         jobId: null,
         pollStartTime: null,
         seed: ch.approved_seed ?? null,
+        runpodStatus: null,
       };
     }
     setCharStates(initial);
     console.log(`[StoryPublisher] Initial character states:`, initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pre-warm the RunPod endpoint on mount so cold start happens before user clicks Generate
+  useEffect(() => {
+    const anyNeedGeneration = characters.some(
+      (ch) => !ch.approved_image_url && !ch.pending_image_url
+    );
+    if (anyNeedGeneration) {
+      fetch("/api/warmup", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.triggered) {
+            console.log("[StoryPublisher] Pre-warm triggered — cold start in progress");
+          } else if (data.warmed) {
+            console.log("[StoryPublisher] Workers already warm:", data.workers);
+          }
+        })
+        .catch(() => {/* ignore warmup errors */});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -301,6 +323,7 @@ export default function CharacterApproval({
             isGenerating: false,
             error: "Generation timed out. Click 'Check Status' to retry.",
             pollStartTime: null,
+            runpodStatus: null,
           });
           return;
         }
@@ -314,6 +337,11 @@ export default function CharacterApproval({
             hasImageUrl: !!data.imageUrl
           });
 
+          // Track RunPod status for phase-aware progress messages
+          if (data.status && !data.completed) {
+            updateChar(storyCharId, { runpodStatus: data.status });
+          }
+
           if (data.error && !data.completed) {
             console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, data.error);
             clearInterval(pollTimers.current[storyCharId]);
@@ -322,6 +350,7 @@ export default function CharacterApproval({
               isGenerating: false,
               error: data.error,
               pollStartTime: null,
+              runpodStatus: null,
             });
             return;
           }
@@ -378,6 +407,7 @@ export default function CharacterApproval({
                   jobId: null,
                   pollStartTime: null,
                   seed: completedSeed,
+                  runpodStatus: null,
                 });
               } else {
                 console.warn(`[StoryPublisher] Storage failed, using blob URL as fallback`);
@@ -390,6 +420,7 @@ export default function CharacterApproval({
                   jobId: null,
                   pollStartTime: null,
                   seed: completedSeed,
+                  runpodStatus: null,
                 });
               }
             } catch (err) {
@@ -403,6 +434,7 @@ export default function CharacterApproval({
                 jobId: null,
                 pollStartTime: null,
                 seed: completedSeed,
+                runpodStatus: null,
               });
             }
           }
@@ -816,13 +848,29 @@ export default function CharacterApproval({
                     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 py-16">
                       <Loader2 className="mb-3 h-8 w-8 animate-spin text-blue-400" />
                       <p className="text-sm font-medium text-blue-400">
-                        Generating portrait...
+                        {state.runpodStatus === "IN_QUEUE"
+                          ? "Waiting for GPU worker..."
+                          : state.runpodStatus === "IN_PROGRESS"
+                            ? "Rendering portrait..."
+                            : "Submitting to GPU..."}
                       </p>
-                      {state.pollStartTime && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {Math.floor((Date.now() - state.pollStartTime) / 1000)} seconds elapsed
-                        </p>
-                      )}
+                      {state.pollStartTime && (() => {
+                        const elapsed = Math.floor((Date.now() - state.pollStartTime) / 1000);
+                        return (
+                          <>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {elapsed < 60
+                                ? `${elapsed}s elapsed`
+                                : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`}
+                            </p>
+                            {elapsed > 60 && state.runpodStatus === "IN_QUEUE" && (
+                              <p className="mt-1 text-xs text-muted-foreground/70">
+                                GPU worker is starting up — this can take a few minutes on first run
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : displayUrl ? (
                     <div className="relative overflow-hidden rounded-lg">

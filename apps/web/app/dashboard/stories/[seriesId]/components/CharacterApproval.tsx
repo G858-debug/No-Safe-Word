@@ -59,11 +59,13 @@ interface CharState {
   approved: boolean;
   approvedUrl: string | null;
   prompt: string;
+  promptEdited: boolean;
   error: string | null;
   showDescription: boolean;
   jobId: string | null;
   pollStartTime: number | null;
   seed: number | null;
+  runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,9 +104,9 @@ function ensureCorrectAge(prompt: string, correctAge: string): string {
   );
 }
 
-/** Detect whether dark skin bias correction is needed for Black/African male characters */
-function needsDarkSkinCorrection(d: Record<string, string>): boolean {
-  return d.gender === "male" && /\b(?:Black|African)\b/i.test(d.ethnicity || "");
+/** Detect whether African facial feature correction is needed for Black/African male characters */
+function needsAfricanFeatureCorrection(d: Record<string, string>): boolean {
+  return d.gender === "male" && /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(d.ethnicity || "");
 }
 
 /** Simplify long bodyType descriptions to prevent SDXL bodybuilder exaggeration */
@@ -132,7 +134,7 @@ function simplifyBodyType(raw: string): string {
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
   const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
-  const darkSkin = needsDarkSkinCorrection(d);
+  const africanCorrection = needsAfricanFeatureCorrection(d);
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
@@ -155,12 +157,11 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
 
-  if (darkSkin) {
-    parts.push("(very dark skin:1.5)");
-    parts.push("(deep rich dark brown skin:1.4)");
-    parts.push("(African man:1.3)");
+  if (africanCorrection) {
+    parts.push("(African facial features:1.3)");
+    parts.push("(full lips:1.2), (prominent cheekbones:1.2)");
+    parts.push("sub-Saharan African, Bantu features");
     if (d.skinTone) parts.push(`(${d.skinTone} skin:1.2)`);
-    parts.push("(deep melanin complexion:1.3), sub-Saharan African, Bantu features");
   } else if (d.skinTone) {
     parts.push(`${d.skinTone} skin`);
   }
@@ -181,7 +182,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 }
 
 const POLL_INTERVAL = 3000;
-const MAX_POLL_ATTEMPTS = 120; // 6 minutes
+const MAX_POLL_ATTEMPTS = 360; // 18 minutes (cold starts with premium model downloads take ~14 min)
 
 // ---------------------------------------------------------------------------
 // Component
@@ -226,15 +227,37 @@ export default function CharacterApproval({
         approved: ch.approved,
         approvedUrl: ch.approved_image_url || null,
         prompt: buildPortraitPrompt(ch.characters.description || {}),
+        promptEdited: false,
         error: null,
         showDescription: false,
         jobId: null,
         pollStartTime: null,
         seed: ch.approved_seed ?? null,
+        runpodStatus: null,
       };
     }
     setCharStates(initial);
     console.log(`[StoryPublisher] Initial character states:`, initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pre-warm the RunPod endpoint on mount so cold start happens before user clicks Generate
+  useEffect(() => {
+    const anyNeedGeneration = characters.some(
+      (ch) => !ch.approved_image_url && !ch.pending_image_url
+    );
+    if (anyNeedGeneration) {
+      fetch("/api/warmup", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.triggered) {
+            console.log("[StoryPublisher] Pre-warm triggered — cold start in progress");
+          } else if (data.warmed) {
+            console.log("[StoryPublisher] Workers already warm:", data.workers);
+          }
+        })
+        .catch(() => {/* ignore warmup errors */});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -298,6 +321,7 @@ export default function CharacterApproval({
             isGenerating: false,
             error: "Generation timed out. Click 'Check Status' to retry.",
             pollStartTime: null,
+            runpodStatus: null,
           });
           return;
         }
@@ -311,6 +335,11 @@ export default function CharacterApproval({
             hasImageUrl: !!data.imageUrl
           });
 
+          // Track RunPod status for phase-aware progress messages
+          if (data.status && !data.completed) {
+            updateChar(storyCharId, { runpodStatus: data.status });
+          }
+
           if (data.error && !data.completed) {
             console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, data.error);
             clearInterval(pollTimers.current[storyCharId]);
@@ -319,6 +348,7 @@ export default function CharacterApproval({
               isGenerating: false,
               error: data.error,
               pollStartTime: null,
+              runpodStatus: null,
             });
             return;
           }
@@ -375,6 +405,7 @@ export default function CharacterApproval({
                   jobId: null,
                   pollStartTime: null,
                   seed: completedSeed,
+                  runpodStatus: null,
                 });
               } else {
                 console.warn(`[StoryPublisher] Storage failed, using blob URL as fallback`);
@@ -387,6 +418,7 @@ export default function CharacterApproval({
                   jobId: null,
                   pollStartTime: null,
                   seed: completedSeed,
+                  runpodStatus: null,
                 });
               }
             } catch (err) {
@@ -400,6 +432,7 @@ export default function CharacterApproval({
                 jobId: null,
                 pollStartTime: null,
                 seed: completedSeed,
+                runpodStatus: null,
               });
             }
           }
@@ -460,7 +493,8 @@ export default function CharacterApproval({
       });
 
       try {
-        const body: Record<string, string> = { prompt: state.prompt };
+        const body: Record<string, string> = {};
+        if (state.promptEdited) body.prompt = state.prompt;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
@@ -811,13 +845,29 @@ export default function CharacterApproval({
                     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 py-16">
                       <Loader2 className="mb-3 h-8 w-8 animate-spin text-blue-400" />
                       <p className="text-sm font-medium text-blue-400">
-                        Generating portrait...
+                        {state.runpodStatus === "IN_QUEUE"
+                          ? "Waiting for GPU worker..."
+                          : state.runpodStatus === "IN_PROGRESS"
+                            ? "Rendering portrait..."
+                            : "Submitting to GPU..."}
                       </p>
-                      {state.pollStartTime && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {Math.floor((Date.now() - state.pollStartTime) / 1000)} seconds elapsed
-                        </p>
-                      )}
+                      {state.pollStartTime && (() => {
+                        const elapsed = Math.floor((Date.now() - state.pollStartTime) / 1000);
+                        return (
+                          <>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {elapsed < 60
+                                ? `${elapsed}s elapsed`
+                                : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`}
+                            </p>
+                            {elapsed > 60 && state.runpodStatus === "IN_QUEUE" && (
+                              <p className="mt-1 text-xs text-muted-foreground/70">
+                                GPU worker is starting up — this can take a few minutes on first run
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : displayUrl ? (
                     <div className="relative overflow-hidden rounded-lg">
@@ -861,7 +911,7 @@ export default function CharacterApproval({
                   <Textarea
                     value={state.prompt}
                     onChange={(e) =>
-                      updateChar(ch.id, { prompt: e.target.value })
+                      updateChar(ch.id, { prompt: e.target.value, promptEdited: true })
                     }
                     rows={4}
                     className="text-xs leading-relaxed resize-y bg-muted/30"
@@ -882,7 +932,7 @@ export default function CharacterApproval({
                     </Button>
                   )}
 
-                  {!hasImage && !state.isGenerating && state.error && state.jobId && (
+                  {!state.isGenerating && state.error && state.jobId && (
                     <>
                       <Button
                         onClick={() => handleCheckStatus(ch.id)}
