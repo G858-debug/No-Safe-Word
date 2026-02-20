@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
-import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources, selectModel, DEFAULT_MODEL } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
+
+/** Debug levels for systematic resource testing (progressive — each level adds one layer) */
+type DebugLevel = "bare" | "model" | "loras" | "negative" | "full";
 
 const PORTRAIT_SCENE: SceneData = {
   mode: "sfw",
@@ -24,7 +27,18 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    console.log(`[StoryPublisher] Generating portrait for storyCharId: ${storyCharId}`);
+    // Parse optional debugLevel from request body
+    let debugLevel: DebugLevel = "full";
+    try {
+      const body = await request.json();
+      if (body.debugLevel && ["bare", "model", "loras", "negative", "full"].includes(body.debugLevel)) {
+        debugLevel = body.debugLevel;
+      }
+    } catch {
+      // No body or invalid JSON — use default "full"
+    }
+
+    console.log(`[StoryPublisher] Generating portrait for storyCharId: ${storyCharId}, debugLevel: ${debugLevel}`);
 
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
@@ -79,17 +93,41 @@ export async function POST(
     // 4. Generate with a known random seed
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
     const prompt = buildPrompt(characterData, PORTRAIT_SCENE);
-    const negativePrompt = buildNegativePrompt(PORTRAIT_SCENE, {
-      africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
-    });
 
-    // Scene intelligence: classify portrait and select LoRAs + negative additions
+    // --- Debug level resource selection ---
+    // bare:     Base model (Juggernaut), no LoRAs, minimal negative, no FaceDetailer
+    // model:    Selected model (e.g. RealVisXL), no LoRAs, minimal negative, no FaceDetailer
+    // loras:    Selected model + LoRAs, minimal negative, no FaceDetailer
+    // negative: Selected model + LoRAs + full negative prompt, no FaceDetailer
+    // full:     Normal pipeline (everything)
+
+    const useFullNegative = debugLevel === "negative" || debugLevel === "full";
+    const useLoras = debugLevel === "loras" || debugLevel === "negative" || debugLevel === "full";
+    const useModelSelection = debugLevel !== "bare";
+    const useFaceDetailer = debugLevel === "full";
+
+    // Negative prompt
+    const negativePrompt = useFullNegative
+      ? buildNegativePrompt(PORTRAIT_SCENE, {
+          africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
+        })
+      : "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature";
+
+    // Scene classification + resources
     const classification = classifyScene(prompt, "portrait");
-    const resources = selectResources(classification);
+    const resources = useLoras ? selectResources(classification) : { loras: [], negativePromptAdditions: "" };
 
-    console.log(`[StoryPublisher] Portrait classification:`, JSON.stringify(classification));
-    console.log(`[StoryPublisher] Selected LoRAs: ${resources.loras.map(l => l.filename).join(", ")}`);
-    console.log(`[StoryPublisher] Submitting portrait to RunPod for ${character.name}, seed: ${seed}`);
+    // Model selection
+    const modelSelection = useModelSelection
+      ? selectModel(classification, "portrait")
+      : { checkpointName: DEFAULT_MODEL, model: null, fellBack: false, reason: "Debug: bare mode — using base model" };
+
+    console.log(`[StoryPublisher] Debug level: ${debugLevel}`);
+    console.log(`[StoryPublisher]   Model: ${modelSelection.checkpointName} (${modelSelection.reason})`);
+    console.log(`[StoryPublisher]   LoRAs: ${resources.loras.length > 0 ? resources.loras.map(l => l.filename).join(", ") : "NONE"}`);
+    console.log(`[StoryPublisher]   Negative prompt: ${useFullNegative ? "full (SFW + African correction)" : "minimal (base only)"}`);
+    console.log(`[StoryPublisher]   FaceDetailer: ${useFaceDetailer ? "ON" : "OFF"}`);
+    console.log(`[StoryPublisher]   Seed: ${seed}`);
 
     const workflow = buildPortraitWorkflow({
       positivePrompt: prompt,
@@ -98,8 +136,10 @@ export async function POST(
       height: 1216,
       seed,
       filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      loras: resources.loras,
-      negativePromptAdditions: resources.negativePromptAdditions,
+      loras: useLoras ? (resources.loras.length > 0 ? resources.loras : undefined) : [],
+      negativePromptAdditions: resources.negativePromptAdditions || undefined,
+      checkpointName: modelSelection.checkpointName,
+      skipFaceDetailer: !useFaceDetailer,
     });
 
     // Submit async job to RunPod (returns immediately)
@@ -112,7 +152,14 @@ export async function POST(
         character_id: character.id,
         prompt,
         negative_prompt: negativePrompt,
-        settings: { width: 832, height: 1216, steps: 30, cfg: 7, seed, engine: "runpod-comfyui" },
+        settings: {
+          width: 832, height: 1216, steps: 30, cfg: 7.5, seed,
+          engine: "runpod-comfyui",
+          debugLevel,
+          model: modelSelection.checkpointName,
+          loras: resources.loras.map(l => l.filename),
+          faceDetailer: useFaceDetailer,
+        },
         mode: "sfw",
       })
       .select("id")
@@ -135,6 +182,7 @@ export async function POST(
     return NextResponse.json({
       jobId: `runpod-${jobId}`,
       imageId: imageRow.id,
+      debugLevel,
     });
   } catch (err) {
     console.error("Character portrait generation failed:", err);

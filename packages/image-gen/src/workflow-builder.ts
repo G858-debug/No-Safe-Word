@@ -30,6 +30,8 @@ interface WorkflowParams {
   cfg?: number;
   /** Override sampler name (default 'euler_ancestral') */
   samplerName?: string;
+  /** Skip the FaceDetailer pass (debug mode — saves directly from VAEDecode) */
+  skipFaceDetailer?: boolean;
 }
 
 interface SceneWorkflowParams extends WorkflowParams {
@@ -66,6 +68,12 @@ function buildLoraChain(
   workflow: Record<string, any>,
   loras?: LoraInput[],
 ): string {
+  // Explicit empty array means "no LoRAs" (debug mode). Undefined means "use default".
+  if (loras && loras.length === 0) {
+    // No LoRA nodes — downstream nodes connect directly to checkpoint loader (node 1)
+    return '1';
+  }
+
   // Default to single detail-tweaker-xl if no loras provided
   const loraStack = (loras && loras.length > 0) ? loras : [
     { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
@@ -155,58 +163,69 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
       class_type: 'VAEDecode',
       inputs: { samples: ['6', 0], vae: ['1', 2] },
     },
-    '10': {
-      class_type: 'UltralyticsDetectorProvider',
-      inputs: { model_name: 'bbox/face_yolov8m.pt' },
-    },
-    '11': {
-      class_type: 'SAMLoader',
-      inputs: { model_name: 'sam_vit_b_01ec64.pth', device_mode: 'AUTO' },
-    },
-    '12': {
-      class_type: 'FaceDetailer',
-      inputs: {
-        image: ['7', 0],
-        model: [lastLora, 0],
-        clip: [lastLora, 1],
-        vae: ['1', 2],
-        positive: ['3', 0],
-        negative: ['4', 0],
-        bbox_detector: ['10', 0],
-        sam_model_opt: ['11', 0],
-        guide_size: 512,
-        guide_size_for: true,
-        max_size: 1024,
-        seed: params.seed,
-        steps: 20,
-        cfg,
-        sampler_name: sampler,
-        scheduler: 'normal',
-        denoise: 0.3,
-        feather: 5,
-        noise_mask: true,
-        force_inpaint: true,
-        bbox_threshold: 0.5,
-        bbox_dilation: 10,
-        bbox_crop_factor: 3.0,
-        sam_detection_hint: 'center-1',
-        sam_dilation: 0,
-        sam_threshold: 0.93,
-        sam_bbox_expansion: 0,
-        sam_mask_hint_threshold: 0.7,
-        sam_mask_hint_use_negative: 'False',
-        drop_size: 10,
-        wildcard: '',
-        cycle: 1,
-        inpaint_model: false,
-        noise_mask_feather: 20,
-      },
-    },
-    '20': {
-      class_type: 'SaveImage',
-      inputs: { images: ['12', 0], filename_prefix: prefix },
-    },
   });
+
+  // FaceDetailer pass — skip in debug mode to isolate its effect on output
+  if (!params.skipFaceDetailer) {
+    Object.assign(workflow, {
+      '10': {
+        class_type: 'UltralyticsDetectorProvider',
+        inputs: { model_name: 'bbox/face_yolov8m.pt' },
+      },
+      '11': {
+        class_type: 'SAMLoader',
+        inputs: { model_name: 'sam_vit_b_01ec64.pth', device_mode: 'AUTO' },
+      },
+      '12': {
+        class_type: 'FaceDetailer',
+        inputs: {
+          image: ['7', 0],
+          model: [lastLora, 0],
+          clip: [lastLora, 1],
+          vae: ['1', 2],
+          positive: ['3', 0],
+          negative: ['4', 0],
+          bbox_detector: ['10', 0],
+          sam_model_opt: ['11', 0],
+          guide_size: 512,
+          guide_size_for: true,
+          max_size: 1024,
+          seed: params.seed,
+          steps: 20,
+          cfg,
+          sampler_name: sampler,
+          scheduler: 'normal',
+          denoise: 0.3,
+          feather: 5,
+          noise_mask: true,
+          force_inpaint: true,
+          bbox_threshold: 0.5,
+          bbox_dilation: 10,
+          bbox_crop_factor: 3.0,
+          sam_detection_hint: 'center-1',
+          sam_dilation: 0,
+          sam_threshold: 0.93,
+          sam_bbox_expansion: 0,
+          sam_mask_hint_threshold: 0.7,
+          sam_mask_hint_use_negative: 'False',
+          drop_size: 10,
+          wildcard: '',
+          cycle: 1,
+          inpaint_model: false,
+          noise_mask_feather: 20,
+        },
+      },
+    });
+  }
+
+  // SaveImage — connect to FaceDetailer output (node 12) or VAEDecode (node 7) if skipped
+  workflow['20'] = {
+    class_type: 'SaveImage',
+    inputs: {
+      images: [params.skipFaceDetailer ? '7' : '12', 0],
+      filename_prefix: prefix,
+    },
+  };
 
   return workflow;
 }
@@ -452,6 +471,8 @@ export function buildWorkflow(config: {
   cfg?: number;
   /** Override sampler name (default 'euler_ancestral') */
   samplerName?: string;
+  /** Skip the FaceDetailer pass (debug mode) */
+  skipFaceDetailer?: boolean;
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -467,6 +488,7 @@ export function buildWorkflow(config: {
         checkpointName: config.checkpointName,
         cfg: config.cfg,
         samplerName: config.samplerName,
+        skipFaceDetailer: config.skipFaceDetailer,
       });
 
     case 'single-character':

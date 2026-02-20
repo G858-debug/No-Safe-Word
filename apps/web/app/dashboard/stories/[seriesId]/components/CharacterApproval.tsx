@@ -177,6 +177,15 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   return parts.filter(Boolean).join(", ");
 }
 
+/** Debug levels for systematic resource testing */
+const DEBUG_LEVELS = [
+  { value: "full", label: "Full Pipeline", description: "Normal — all resources active" },
+  { value: "bare", label: "Bare (base model only)", description: "Juggernaut XL, no LoRAs, minimal negative, no FaceDetailer" },
+  { value: "model", label: "+ Model Selection", description: "Selected model (e.g. RealVisXL), no LoRAs, minimal negative, no FaceDetailer" },
+  { value: "loras", label: "+ LoRAs", description: "Selected model + LoRAs, minimal negative, no FaceDetailer" },
+  { value: "negative", label: "+ Full Negative", description: "Selected model + LoRAs + full negative prompt, no FaceDetailer" },
+] as const;
+
 const POLL_INTERVAL = 3000;
 const MAX_POLL_ATTEMPTS = 360; // 18 minutes (cold starts with premium model downloads take ~14 min)
 
@@ -197,6 +206,7 @@ export default function CharacterApproval({
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for elapsed time display
+  const [debugLevel, setDebugLevel] = useState("full");
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -444,16 +454,19 @@ export default function CharacterApproval({
 
   const handleGenerate = useCallback(
     async (storyCharId: string) => {
-      console.log(`[StoryPublisher] Generating portrait for character ${storyCharId}`);
+      console.log(`[StoryPublisher] Generating portrait for character ${storyCharId}, debugLevel: ${debugLevel}`);
       updateChar(storyCharId, { isGenerating: true, error: null });
 
       try {
+        const body: Record<string, string> = {};
+        if (debugLevel !== "full") body.debugLevel = debugLevel;
+
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify(body),
           }
         );
         if (!res.ok) {
@@ -463,7 +476,7 @@ export default function CharacterApproval({
           throw new Error((err.error || "Generation failed") + detail);
         }
         const data = await res.json();
-        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}`);
+        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, debugLevel: ${data.debugLevel}`);
         startPolling(storyCharId, data.jobId, data.imageId);
       } catch (err) {
         console.error(`[StoryPublisher] Error in handleGenerate:`, err);
@@ -473,7 +486,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [updateChar, startPolling]
+    [updateChar, startPolling, debugLevel]
   );
 
   const handleRegenerate = useCallback(
@@ -491,6 +504,7 @@ export default function CharacterApproval({
       try {
         const body: Record<string, string> = {};
         if (state.promptEdited) body.prompt = state.prompt;
+        if (debugLevel !== "full") body.debugLevel = debugLevel;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
@@ -514,7 +528,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateChar, startPolling]
+    [charStates, updateChar, startPolling, debugLevel]
   );
 
   const handleApprove = useCallback(
@@ -619,12 +633,15 @@ export default function CharacterApproval({
         // Start generation for this character
         updateChar(ch.id, { isGenerating: true, error: null });
 
+        const body: Record<string, string> = {};
+        if (debugLevel !== "full") body.debugLevel = debugLevel;
+
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify(body),
           }
         );
 
@@ -657,7 +674,7 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateChar, startPolling]);
+  }, [characters, charStates, updateChar, startPolling, debugLevel]);
 
   // ------- Derived state -------
 
@@ -733,6 +750,28 @@ export default function CharacterApproval({
             )}
           </div>
         )}
+      </div>
+
+      {/* Debug resource level selector */}
+      <div className="flex items-center gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
+        <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
+          Debug Level
+        </label>
+        <select
+          value={debugLevel}
+          onChange={(e) => setDebugLevel(e.target.value)}
+          className="flex-1 rounded-md border border-yellow-500/30 bg-background px-3 py-1.5 text-sm"
+          disabled={anyGenerating}
+        >
+          {DEBUG_LEVELS.map((level) => (
+            <option key={level.value} value={level.value}>
+              {level.label}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-muted-foreground hidden sm:inline">
+          {DEBUG_LEVELS.find((l) => l.value === debugLevel)?.description}
+        </span>
       </div>
 
       {/* All approved banner */}
