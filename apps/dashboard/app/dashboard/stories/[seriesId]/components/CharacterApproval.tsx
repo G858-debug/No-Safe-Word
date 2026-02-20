@@ -60,6 +60,7 @@ interface CharState {
   approved: boolean;
   approvedUrl: string | null;
   prompt: string;
+  promptEdited: boolean;
   error: string | null;
   showDescription: boolean;
   jobId: string | null;
@@ -228,6 +229,7 @@ export default function CharacterApproval({
         approved: ch.approved,
         approvedUrl: ch.approved_image_url || null,
         prompt: buildPortraitPrompt(ch.characters.description || {}),
+        promptEdited: false,
         error: null,
         showDescription: false,
         jobId: null,
@@ -462,7 +464,8 @@ export default function CharacterApproval({
       });
 
       try {
-        const body: Record<string, string> = { prompt: state.prompt };
+        const body: Record<string, string> = {};
+        if (state.promptEdited) body.prompt = state.prompt;
         if (modelUrn) body.model_urn = modelUrn;
 
         const res = await fetch(
@@ -864,7 +867,7 @@ export default function CharacterApproval({
                   <Textarea
                     value={state.prompt}
                     onChange={(e) =>
-                      updateChar(ch.id, { prompt: e.target.value })
+                      updateChar(ch.id, { prompt: e.target.value, promptEdited: true })
                     }
                     rows={4}
                     className="text-xs leading-relaxed resize-y bg-muted/30"
