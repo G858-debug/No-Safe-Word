@@ -158,9 +158,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
 
-  if (africanCorrection) {
-    if (d.skinTone) parts.push(`(${d.skinTone} skin:1.2)`);
-  } else if (d.skinTone) {
+  if (d.skinTone) {
     parts.push(`${d.skinTone} skin`);
   }
 
