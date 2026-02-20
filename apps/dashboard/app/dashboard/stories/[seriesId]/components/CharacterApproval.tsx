@@ -183,7 +183,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 }
 
 const POLL_INTERVAL = 3000;
-const MAX_POLL_ATTEMPTS = 120; // 6 minutes
+const MAX_POLL_ATTEMPTS = 360; // 18 minutes (cold starts with premium model downloads take ~14 min)
 
 // ---------------------------------------------------------------------------
 // Component
@@ -888,7 +888,7 @@ export default function CharacterApproval({
                     </Button>
                   )}
 
-                  {!hasImage && !state.isGenerating && state.error && state.jobId && (
+                  {!state.isGenerating && state.error && state.jobId && (
                     <>
                       <Button
                         onClick={() => handleCheckStatus(ch.id)}
