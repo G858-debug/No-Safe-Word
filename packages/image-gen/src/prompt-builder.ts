@@ -94,10 +94,6 @@ export function buildPrompt(
   // SDXL defaults to European facial geometry — these tags correct nose shape,
   // lip fullness, and cheekbone structure for African characters.
   if (africanFeatureCorrection) {
-    // Fix facial features — applies regardless of skin tone
-    // This corrects SDXL's default bias toward European facial geometry
-    parts.push("(African facial features:1.3)");
-    parts.push("(full lips:1.2), (prominent cheekbones:1.2)");
     parts.push("sub-Saharan African, Bantu features");
     // Respect the character's actual skin tone from their description
     if (character.skinTone) {

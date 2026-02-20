@@ -159,8 +159,6 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
 
   if (africanCorrection) {
-    parts.push("(African facial features:1.3)");
-    parts.push("(full lips:1.2), (prominent cheekbones:1.2)");
     parts.push("sub-Saharan African, Bantu features");
     if (d.skinTone) parts.push(`(${d.skinTone} skin:1.2)`);
   } else if (d.skinTone) {
