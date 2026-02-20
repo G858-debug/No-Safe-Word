@@ -22,6 +22,11 @@ export function needsAfricanFeatureCorrection(character: CharacterData): boolean
  * extract just the core build keyword(s) and drop body-part-specific details
  * like "broad shoulders, strong hands" that push the model toward exaggeration.
  */
+/** Strip full-body framing cues that conflict with head-and-shoulders portrait framing */
+function stripFullBodyCues(text: string): string {
+  return text.replace(/\b(?:full[- ]?body|full[- ]?length|from head to toe)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
 function sanitizeBodyType(raw: string): string {
   // Short/simple descriptions — pass through as-is
   if (!raw.includes(",")) return raw;
@@ -75,10 +80,13 @@ export function buildPrompt(
     // Sanitize long bodyType descriptions: SDXL interprets multiple muscle-related
     // phrases (e.g. "broad muscular shoulders, strong hands, naturally muscular
     // from physical work") as "bodybuilder". Extract only the core build descriptor.
-    const sanitized = sanitizeBodyType(character.bodyType);
-    parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
-      ? sanitized
-      : `${sanitized} body`);
+    // Also strip "full body" framing cues that conflict with portrait framing.
+    const sanitized = stripFullBodyCues(sanitizeBodyType(character.bodyType));
+    if (sanitized) {
+      parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
+        ? sanitized
+        : `${sanitized} body`);
+    }
   }
   if (character.hairColor && character.hairStyle) {
     const needsSuffix = !/\bhair\b/i.test(character.hairStyle);
@@ -410,7 +418,7 @@ export function buildNegativePrompt(
   let result = base;
 
   if (scene.mode === "sfw") {
-    result += ", nsfw, nude, naked, sexual";
+    result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), (cleavage:1.2), sexual, explicit, revealing clothing, exposed skin";
   }
 
   // Counter SDXL's default European facial geometry for African characters

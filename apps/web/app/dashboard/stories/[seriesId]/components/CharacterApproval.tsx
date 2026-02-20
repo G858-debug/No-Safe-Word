@@ -104,11 +104,6 @@ function ensureCorrectAge(prompt: string, correctAge: string): string {
   );
 }
 
-/** Detect whether African facial feature correction is needed for Black/African male characters */
-function needsAfricanFeatureCorrection(d: Record<string, string>): boolean {
-  return d.gender === "male" && /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(d.ethnicity || "");
-}
-
 /** Simplify long bodyType descriptions to prevent SDXL bodybuilder exaggeration */
 function simplifyBodyType(raw: string): string {
   if (!raw.includes(",")) return raw;
@@ -130,20 +125,26 @@ function simplifyBodyType(raw: string): string {
   return matched.length > 0 ? matched.slice(0, 3).join(", ") : raw.split(",")[0].trim();
 }
 
+/** Strip full-body framing cues that cause NSFW issues in head-and-shoulders portraits */
+function stripFullBodyCues(text: string): string {
+  return text.replace(/\b(?:full[- ]?body|full[- ]?length|from head to toe)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
 /** Client-side mirror of the server prompt builder for portrait shots */
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
   const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
-  const africanCorrection = needsAfricanFeatureCorrection(d);
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
   if (d.ethnicity) parts.push(d.ethnicity);
   if (d.bodyType) {
-    const sanitized = simplifyBodyType(d.bodyType);
-    parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
-      ? sanitized
-      : `${sanitized} body`);
+    const sanitized = stripFullBodyCues(simplifyBodyType(d.bodyType));
+    if (sanitized) {
+      parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
+        ? sanitized
+        : `${sanitized} body`);
+    }
   }
 
   if (d.hairColor && d.hairStyle) {
