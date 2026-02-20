@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
-import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources, selectModel } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 const PORTRAIT_SCENE: SceneData = {
@@ -87,7 +87,10 @@ export async function POST(
     const classification = classifyScene(prompt, "portrait");
     const resources = selectResources(classification);
 
+    const modelSelection = selectModel(classification, "portrait");
+
     console.log(`[StoryPublisher] Portrait classification:`, JSON.stringify(classification));
+    console.log(`[StoryPublisher] Selected model: ${modelSelection.checkpointName} (${modelSelection.reason})`);
     console.log(`[StoryPublisher] Selected LoRAs: ${resources.loras.map(l => l.filename).join(", ")}`);
     console.log(`[StoryPublisher] Submitting portrait to RunPod for ${character.name}, seed: ${seed}`);
 
@@ -100,6 +103,7 @@ export async function POST(
       filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
       loras: resources.loras,
       negativePromptAdditions: resources.negativePromptAdditions,
+      checkpointName: modelSelection.checkpointName,
     });
 
     // Submit async job to RunPod (returns immediately)

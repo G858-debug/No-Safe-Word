@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
-import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources, selectModel } from "@no-safe-word/image-gen";
 import { getProgressiveAdjustments, computeNearbySeed, applyDarkSkinWeightBoost } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
@@ -162,7 +162,10 @@ export async function POST(
       return l;
     });
 
+    const modelSelection = selectModel(classification, "portrait");
+
     console.log(`[StoryPublisher] Portrait classification:`, JSON.stringify(classification));
+    console.log(`[StoryPublisher] Selected model: ${modelSelection.checkpointName} (${modelSelection.reason})`);
     console.log(`[StoryPublisher] Selected LoRAs: ${adjustedLoras.map(l => `${l.filename}(${l.strengthModel.toFixed(2)})`).join(", ")}`);
     console.log(`[StoryPublisher] Submitting portrait regeneration to RunPod for ${character.name}, seed: ${seed}, cfg: ${adjustments.cfg}`);
 
@@ -175,6 +178,7 @@ export async function POST(
       filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
       loras: adjustedLoras,
       negativePromptAdditions: resources.negativePromptAdditions,
+      checkpointName: modelSelection.checkpointName,
       cfg: adjustments.cfg,
       samplerName: adjustments.samplerName || undefined,
     });
