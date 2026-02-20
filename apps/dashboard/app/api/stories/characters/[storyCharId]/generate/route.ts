@@ -28,12 +28,16 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    // Parse optional debugLevel from request body
+    // Parse optional debugLevel and forceModel from request body
     let debugLevel: DebugLevel = "full";
+    let forceModel: string | undefined;
     try {
       const body = await request.json();
       if (body.debugLevel && ["bare", "model", "loras", "negative", "full"].includes(body.debugLevel)) {
         debugLevel = body.debugLevel;
+      }
+      if (body.forceModel && typeof body.forceModel === "string") {
+        forceModel = body.forceModel;
       }
     } catch {
       // No body or invalid JSON — use default "full"
@@ -118,10 +122,12 @@ export async function POST(
     const classification = classifyScene(prompt, "portrait");
     const resources = useLoras ? selectResources(classification) : { loras: [], negativePromptAdditions: "" };
 
-    // Model selection
-    const modelSelection = useModelSelection
-      ? selectModel(classification, "portrait")
-      : { checkpointName: DEFAULT_MODEL, model: null, fellBack: false, reason: "Debug: bare mode — using base model" };
+    // Model selection (forceModel overrides both debug level and auto-selection)
+    const modelSelection = forceModel
+      ? selectModel(classification, "portrait", { forceModel })
+      : useModelSelection
+        ? selectModel(classification, "portrait")
+        : { checkpointName: DEFAULT_MODEL, model: null, fellBack: false, reason: "Debug: bare mode — using base model" };
 
     console.log(`[StoryPublisher] Debug level: ${debugLevel}`);
     console.log(`[StoryPublisher]   Model: ${modelSelection.checkpointName} (${modelSelection.reason})`);

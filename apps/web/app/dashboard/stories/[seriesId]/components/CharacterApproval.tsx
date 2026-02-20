@@ -180,10 +180,19 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 /** Debug levels for systematic resource testing */
 const DEBUG_LEVELS = [
   { value: "full", label: "Full Pipeline", description: "Normal — all resources active" },
-  { value: "bare", label: "Bare (base model only)", description: "Juggernaut XL, no LoRAs, minimal negative, no FaceDetailer" },
-  { value: "model", label: "+ Model Selection", description: "Selected model (e.g. RealVisXL), no LoRAs, minimal negative, no FaceDetailer" },
-  { value: "loras", label: "+ LoRAs", description: "Selected model + LoRAs, minimal negative, no FaceDetailer" },
-  { value: "negative", label: "+ Full Negative", description: "Selected model + LoRAs + full negative prompt, no FaceDetailer" },
+  { value: "bare", label: "Bare", description: "No LoRAs, minimal negative, no FaceDetailer" },
+  { value: "model", label: "+ Model Selection", description: "Auto-selected model, no LoRAs, minimal negative, no FaceDetailer" },
+  { value: "loras", label: "+ LoRAs", description: "Model + LoRAs, minimal negative, no FaceDetailer" },
+  { value: "negative", label: "+ Full Negative", description: "Model + LoRAs + full negative prompt, no FaceDetailer" },
+] as const;
+
+/** Available checkpoint models */
+const MODEL_OPTIONS = [
+  { value: "auto", label: "Auto (pipeline default)" },
+  { value: "juggernaut-x-v10.safetensors", label: "Juggernaut XL v10" },
+  { value: "realvisxl-v5.safetensors", label: "RealVisXL V5.0" },
+  { value: "epicrealism-xl.safetensors", label: "epiCRealism XL" },
+  { value: "cyberrealistic-xl-v9.safetensors", label: "CyberRealistic XL v9" },
 ] as const;
 
 const POLL_INTERVAL = 3000;
@@ -207,6 +216,7 @@ export default function CharacterApproval({
   const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for elapsed time display
   const [debugLevel, setDebugLevel] = useState("full");
+  const [forceModel, setForceModel] = useState("auto");
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -460,6 +470,7 @@ export default function CharacterApproval({
       try {
         const body: Record<string, string> = {};
         if (debugLevel !== "full") body.debugLevel = debugLevel;
+        if (forceModel !== "auto") body.forceModel = forceModel;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
@@ -486,7 +497,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [updateChar, startPolling, debugLevel]
+    [updateChar, startPolling, debugLevel, forceModel]
   );
 
   const handleRegenerate = useCallback(
@@ -505,6 +516,7 @@ export default function CharacterApproval({
         const body: Record<string, string> = {};
         if (state.promptEdited) body.prompt = state.prompt;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
+        if (forceModel !== "auto") body.forceModel = forceModel;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
@@ -528,7 +540,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateChar, startPolling, debugLevel]
+    [charStates, updateChar, startPolling, debugLevel, forceModel]
   );
 
   const handleApprove = useCallback(
@@ -635,6 +647,7 @@ export default function CharacterApproval({
 
         const body: Record<string, string> = {};
         if (debugLevel !== "full") body.debugLevel = debugLevel;
+        if (forceModel !== "auto") body.forceModel = forceModel;
 
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
@@ -674,7 +687,7 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateChar, startPolling, debugLevel]);
+  }, [characters, charStates, updateChar, startPolling, debugLevel, forceModel]);
 
   // ------- Derived state -------
 
@@ -753,25 +766,49 @@ export default function CharacterApproval({
       </div>
 
       {/* Debug resource level selector */}
-      <div className="flex items-center gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
-        <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
-          Debug Level
-        </label>
-        <select
-          value={debugLevel}
-          onChange={(e) => setDebugLevel(e.target.value)}
-          className="flex-1 rounded-md border border-yellow-500/30 bg-background px-3 py-1.5 text-sm"
-          disabled={anyGenerating}
-        >
-          {DEBUG_LEVELS.map((level) => (
-            <option key={level.value} value={level.value}>
-              {level.label}
-            </option>
-          ))}
-        </select>
-        <span className="text-xs text-muted-foreground hidden sm:inline">
-          {DEBUG_LEVELS.find((l) => l.value === debugLevel)?.description}
-        </span>
+      <div className="flex flex-col gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
+            Debug Level
+          </label>
+          <select
+            value={debugLevel}
+            onChange={(e) => setDebugLevel(e.target.value)}
+            className="flex-1 rounded-md border border-yellow-500/30 bg-background px-3 py-1.5 text-sm"
+            disabled={anyGenerating}
+          >
+            {DEBUG_LEVELS.map((level) => (
+              <option key={level.value} value={level.value}>
+                {level.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            {DEBUG_LEVELS.find((l) => l.value === debugLevel)?.description}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
+            Model
+          </label>
+          <select
+            value={forceModel}
+            onChange={(e) => setForceModel(e.target.value)}
+            className="flex-1 rounded-md border border-yellow-500/30 bg-background px-3 py-1.5 text-sm"
+            disabled={anyGenerating}
+          >
+            {MODEL_OPTIONS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          {forceModel !== "auto" && (
+            <span className="text-xs text-yellow-400/70 hidden sm:inline">
+              Overrides debug level model selection
+            </span>
+          )}
+        </div>
       </div>
 
       {/* All approved banner */}
