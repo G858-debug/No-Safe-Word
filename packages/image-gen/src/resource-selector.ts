@@ -15,6 +15,7 @@ export interface ResourceSelection {
     steps?: number;
     cfg?: number;
     denoise?: number;
+    hiresFixEnabled?: boolean;
   };
 }
 
@@ -111,5 +112,8 @@ export function selectResources(classification: SceneClassification): ResourceSe
   return {
     loras: selectedLoras,
     negativePromptAdditions: negativeAdditions.join(', '),
+    paramOverrides: {
+      hiresFixEnabled: true,
+    },
   };
 }

@@ -263,6 +263,7 @@ export async function POST(
       negativePromptAdditions: resources.negativePromptAdditions,
       checkpointName: modelSelection.checkpointName,
       cfg: modelSelection.paramOverrides?.cfg,
+      hiresFixEnabled: resources.paramOverrides?.hiresFixEnabled ?? true,
     });
 
     const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined);
@@ -274,7 +275,7 @@ export async function POST(
         character_id: imgPrompt.character_id || null,
         prompt: imgPrompt.prompt,
         negative_prompt: "auto",
-        settings: { width, height, steps: 30, cfg: 7, seed, engine: "runpod-comfyui", workflowType },
+        settings: { width, height, steps: 30, cfg: 7, seed, engine: "runpod-comfyui", workflowType, hiresFix: true },
         mode,
       })
       .select("id")

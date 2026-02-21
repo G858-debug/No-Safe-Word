@@ -32,6 +32,12 @@ interface WorkflowParams {
   samplerName?: string;
   /** Skip the FaceDetailer pass (debug mode — saves directly from VAEDecode) */
   skipFaceDetailer?: boolean;
+  /** Enable hires fix (two-pass generation with latent upscale). Roughly doubles generation time. */
+  hiresFixEnabled?: boolean;
+  /** Hires fix upscale factor (default 1.25) */
+  hiresFixScale?: number;
+  /** Hires fix denoise strength (default 0.45) */
+  hiresFixDenoise?: number;
 }
 
 interface SceneWorkflowParams extends WorkflowParams {
@@ -111,6 +117,51 @@ function buildNeg(base: string, additions?: string): string {
 }
 
 /**
+ * Insert hires fix nodes into a workflow between the base KSampler and VAEDecode.
+ * Chain: KSampler(6) → LatentUpscale(60) → HiresKSampler(61) → VAEDecode(7)
+ */
+function applyHiresFix(
+  workflow: Record<string, any>,
+  params: WorkflowParams,
+  modelSource: string,
+  cfg: number,
+  sampler: string,
+): void {
+  // Node 60: Latent Upscale — upscale the KSampler output before VAE decode
+  workflow['60'] = {
+    class_type: 'LatentUpscaleBy',
+    inputs: {
+      samples: ['6', 0],
+      upscale_method: 'bislerp',
+      scale_by: params.hiresFixScale || 1.25,
+    },
+  };
+
+  // Node 61: Second KSampler pass — refine the upscaled latent
+  workflow['61'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [modelSource, 0],
+      positive: ['3', 0],
+      negative: ['4', 0],
+      latent_image: ['60', 0],
+      seed: params.seed + 1,
+      steps: 20,
+      cfg: cfg - 0.5,
+      sampler_name: sampler,
+      scheduler: 'karras',
+      denoise: params.hiresFixDenoise || 0.45,
+    },
+  };
+
+  // Update VAEDecode to take from hires KSampler instead of base KSampler
+  workflow['7'] = {
+    class_type: 'VAEDecode',
+    inputs: { samples: ['61', 0], vae: ['1', 2] },
+  };
+}
+
+/**
  * Build a portrait generation workflow (no IPAdapter).
  * Used for initial character portrait generation before approval.
  */
@@ -164,6 +215,12 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
       inputs: { samples: ['6', 0], vae: ['1', 2] },
     },
   });
+
+  // Hires fix: upscale latent and refine with second KSampler pass
+  // Uses lastLora as model source since portrait workflow has no IPAdapter
+  if (params.hiresFixEnabled) {
+    applyHiresFix(workflow, params, lastLora, cfg, sampler);
+  }
 
   // FaceDetailer pass — skip in debug mode to isolate its effect on output
   if (!params.skipFaceDetailer) {
@@ -364,6 +421,12 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
     },
   });
 
+  // Hires fix: upscale latent and refine with second KSampler pass
+  // Uses '32' (IPAdapter output) as model source to preserve face identity
+  if (params.hiresFixEnabled) {
+    applyHiresFix(workflow, params, '32', cfg, sampler);
+  }
+
   return workflow;
 }
 
@@ -473,6 +536,12 @@ export function buildWorkflow(config: {
   samplerName?: string;
   /** Skip the FaceDetailer pass (debug mode) */
   skipFaceDetailer?: boolean;
+  /** Enable hires fix (two-pass generation with latent upscale) */
+  hiresFixEnabled?: boolean;
+  /** Hires fix upscale factor (default 1.25) */
+  hiresFixScale?: number;
+  /** Hires fix denoise strength (default 0.45) */
+  hiresFixDenoise?: number;
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -489,6 +558,9 @@ export function buildWorkflow(config: {
         cfg: config.cfg,
         samplerName: config.samplerName,
         skipFaceDetailer: config.skipFaceDetailer,
+        hiresFixEnabled: config.hiresFixEnabled,
+        hiresFixScale: config.hiresFixScale,
+        hiresFixDenoise: config.hiresFixDenoise,
       });
 
     case 'single-character':
@@ -510,6 +582,9 @@ export function buildWorkflow(config: {
         checkpointName: config.checkpointName,
         cfg: config.cfg,
         samplerName: config.samplerName,
+        hiresFixEnabled: config.hiresFixEnabled,
+        hiresFixScale: config.hiresFixScale,
+        hiresFixDenoise: config.hiresFixDenoise,
       });
 
     case 'dual-character':
@@ -533,6 +608,9 @@ export function buildWorkflow(config: {
         checkpointName: config.checkpointName,
         cfg: config.cfg,
         samplerName: config.samplerName,
+        hiresFixEnabled: config.hiresFixEnabled,
+        hiresFixScale: config.hiresFixScale,
+        hiresFixDenoise: config.hiresFixDenoise,
       });
 
     default:
