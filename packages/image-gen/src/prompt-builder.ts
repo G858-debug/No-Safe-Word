@@ -73,17 +73,6 @@ export function buildPrompt(
 
   parts.push("masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
 
-  // For African male characters: put skin tone and ethnicity EARLY with emphasis.
-  // SDXL's CLIP tokenizer interprets "Black" as a color, not an ethnicity, and
-  // pays most attention to early tokens. Moving weighted skin/ethnicity to the
-  // front forces the model to commit to the correct complexion before other
-  // features compete for attention. Women render correctly without this because
-  // SDXL has better training data diversity for female subjects.
-  if (isAfricanMale && character.skinTone) {
-    parts.push(`(${character.skinTone} skin:1.4)`);
-    parts.push("(dark-skinned:1.3)");
-  }
-
   if (character.age) parts.push(character.age);
   if (character.gender) parts.push(character.gender);
 
@@ -92,7 +81,7 @@ export function buildPrompt(
       // Replace generic "Black South African" with SDXL-friendly terms
       // "African" + specific ethnic group works better than "Black" which
       // CLIP treats as a color adjective
-      parts.push(`(African man:1.3)`);
+      parts.push("African");
       // Keep the original ethnicity minus the ambiguous "Black" prefix
       const specificEthnicity = character.ethnicity
         .replace(/^Black\s+/i, "")
@@ -127,8 +116,7 @@ export function buildPrompt(
   }
   if (character.eyeColor) parts.push(`${character.eyeColor} eyes`);
 
-  // Skin tone: already added early with emphasis for African males, add normally for others
-  if (character.skinTone && !isAfricanMale) {
+  if (character.skinTone) {
     parts.push(`${character.skinTone} skin`);
   }
 
@@ -136,7 +124,7 @@ export function buildPrompt(
   // Instead of only pushing European features to the negative prompt,
   // actively guide the model toward correct facial geometry.
   if (isAfricanMale) {
-    parts.push("(broad nose:1.2), (full lips:1.1), (strong jawline:1.1)");
+    parts.push("full lips, strong jawline");
   }
 
   if (character.expression) {

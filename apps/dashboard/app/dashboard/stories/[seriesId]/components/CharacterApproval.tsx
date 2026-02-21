@@ -145,19 +145,12 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const africanMale = isAfricanMaleDesc(d);
   const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
 
-  // African males: put weighted skin tone and ethnicity EARLY so SDXL commits
-  // to correct complexion before other features compete for attention
-  if (africanMale && d.skinTone) {
-    parts.push(`(${d.skinTone} skin:1.4)`);
-    parts.push("(dark-skinned:1.3)");
-  }
-
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
 
   if (d.ethnicity) {
     if (africanMale) {
-      parts.push("(African man:1.3)");
+      parts.push("African");
       const specific = (d.ethnicity || "").replace(/^Black\s+/i, "").trim();
       if (specific && specific.toLowerCase() !== "african") {
         parts.push(specific);
@@ -187,14 +180,12 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 
   if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
 
-  // Skin tone: already added early with emphasis for African males
-  if (d.skinTone && !africanMale) {
+  if (d.skinTone) {
     parts.push(`${d.skinTone} skin`);
   }
 
-  // Positive African facial feature cues
   if (africanMale) {
-    parts.push("(broad nose:1.2), (full lips:1.1), (strong jawline:1.1)");
+    parts.push("full lips, strong jawline");
   }
 
   if (d.expression) parts.push(`${d.expression} expression`);
