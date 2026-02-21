@@ -29,9 +29,6 @@ export type { ModelEntry, ModelTier, ModelStrength } from './model-registry';
 export { selectModel } from './model-selector';
 export type { ModelSelection, ModelSelectionOptions } from './model-selector';
 
-// Progressive refinement
-export { getProgressiveAdjustments, computeNearbySeed, applyDarkSkinWeightBoost } from './progressive-refinement';
-export type { ProgressiveAdjustments } from './progressive-refinement';
 
 // Composition intelligence
 export { augmentComposition } from './composition-advisor';

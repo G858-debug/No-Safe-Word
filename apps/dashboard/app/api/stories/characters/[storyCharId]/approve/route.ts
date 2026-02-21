@@ -129,7 +129,6 @@ export async function POST(
         approved_image_id: image_id,
         approved_seed: resolvedSeed,
         approved_prompt: prompt ?? null,
-        regen_count: 0,
       })
       .eq("id", storyCharId)
       .select("*, series_id")

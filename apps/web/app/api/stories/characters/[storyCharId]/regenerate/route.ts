@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
 import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
-import { getProgressiveAdjustments, computeNearbySeed, applyDarkSkinWeightBoost } from "@no-safe-word/image-gen";
 import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 const PORTRAIT_SCENE: SceneData = {
@@ -30,10 +29,10 @@ export async function POST(
 
     console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}`);
 
-    // 1. Fetch the story_character row (including regen_count and approved_seed for progressive refinement)
+    // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
-      .select("id, character_id, regen_count, approved_seed")
+      .select("id, character_id")
       .eq("id", storyCharId)
       .single();
 
@@ -124,46 +123,13 @@ export async function POST(
     const classification = classifyScene(prompt, "portrait");
     const resources = selectResources(classification);
 
-    // 7. Progressive refinement: adjust parameters based on regen count
-    const regenCount = (storyChar as any).regen_count ?? 0;
-    const prevSeed = (storyChar as any).approved_seed as number | null;
-    const adjustments = getProgressiveAdjustments(regenCount, classification, characterData);
-
-    console.log(`[StoryPublisher] Progressive refinement (regen ${regenCount}): ${adjustments.reason}`);
-
-    // Apply seed strategy
-    let seed: number;
-    if (adjustments.seedStrategy === 'nearby' && prevSeed) {
-      seed = computeNearbySeed(prevSeed, adjustments.seedRange);
-    } else {
-      seed = Math.floor(Math.random() * 2_147_483_647) + 1;
-    }
-
-    // Apply dark skin weight boost to prompt if applicable
-    if (adjustments.darkSkinBoost > 0) {
-      prompt = applyDarkSkinWeightBoost(prompt, adjustments.darkSkinBoost);
-    }
-
-    // Append prompt suffix if progressive refinement provides one
-    if (adjustments.promptSuffix) {
-      prompt = `${prompt}, ${adjustments.promptSuffix}`;
-    }
-
-    // Apply skin LoRA multiplier
-    const adjustedLoras = resources.loras.map(l => {
-      if (l.filename === 'realistic-skin-xl.safetensors' && adjustments.skinLoraMultiplier !== 1.0) {
-        return {
-          ...l,
-          strengthModel: l.strengthModel * adjustments.skinLoraMultiplier,
-          strengthClip: l.strengthClip * adjustments.skinLoraMultiplier,
-        };
-      }
-      return l;
-    });
+    // 7. Fixed generation settings (CFG 6.5, random seed)
+    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    const cfg = 6.5;
 
     console.log(`[StoryPublisher] Portrait classification:`, JSON.stringify(classification));
-    console.log(`[StoryPublisher] Selected LoRAs: ${adjustedLoras.map(l => `${l.filename}(${l.strengthModel.toFixed(2)})`).join(", ")}`);
-    console.log(`[StoryPublisher] Submitting portrait regeneration to RunPod for ${character.name}, seed: ${seed}, cfg: ${adjustments.cfg}`);
+    console.log(`[StoryPublisher] Selected LoRAs: ${resources.loras.map(l => `${l.filename}(${l.strengthModel.toFixed(2)})`).join(", ")}`);
+    console.log(`[StoryPublisher] Submitting portrait regeneration to RunPod for ${character.name}, seed: ${seed}, cfg: ${cfg}`);
 
     const workflow = buildPortraitWorkflow({
       positivePrompt: prompt,
@@ -172,10 +138,9 @@ export async function POST(
       height: 1216,
       seed,
       filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      loras: adjustedLoras,
+      loras: resources.loras,
       negativePromptAdditions: resources.negativePromptAdditions,
-      cfg: adjustments.cfg,
-      samplerName: adjustments.samplerName || undefined,
+      cfg,
     });
 
     // Submit async job to RunPod (returns immediately)
@@ -190,10 +155,9 @@ export async function POST(
         negative_prompt: negativePrompt,
         settings: {
           width: 832, height: 1216, steps: 30,
-          cfg: adjustments.cfg, seed,
-          sampler: adjustments.samplerName || 'euler_ancestral',
+          cfg, seed,
+          sampler: 'euler_ancestral',
           engine: "runpod-comfyui",
-          regenCount,
         },
         mode: "sfw",
       })
@@ -212,13 +176,7 @@ export async function POST(
       cost: 0,
     });
 
-    // Increment regen_count for progressive refinement on next regeneration
-    await supabase
-      .from("story_characters")
-      .update({ regen_count: regenCount + 1 })
-      .eq("id", storyCharId);
-
-    console.log(`[StoryPublisher] Portrait regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}, regen: ${regenCount + 1}`);
+    console.log(`[StoryPublisher] Portrait regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
 
     return NextResponse.json({
       jobId: `runpod-${jobId}`,
