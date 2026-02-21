@@ -18,8 +18,8 @@ export interface ResourceSelection {
   };
 }
 
-// Priority order for LoRA selection when capping at 4
-const PRIORITY_ORDER = ['detail', 'skin', 'eyes', 'bodies', 'lighting', 'hands'] as const;
+// Priority order for LoRA selection when capping at 6
+const PRIORITY_ORDER = ['detail', 'skin', 'eyes', 'bodies', 'cinematic', 'melanin', 'lighting', 'hands'] as const;
 
 function getLoraFromRegistry(filename: string): SelectedLora | null {
   const entry = LORA_REGISTRY.find((l) => l.filename === filename && l.installed);
@@ -81,13 +81,27 @@ export function selectResources(classification: SceneClassification): ResourceSe
   if (cinematicMoods.includes(classification.lightingMood)) {
     const lightingLora = getLoraFromRegistry('cinematic-lighting-xl.safetensors');
     if (lightingLora) {
-      candidates.push({ priority: 4, lora: lightingLora });
+      candidates.push({ priority: 6, lora: lightingLora });
     }
   }
 
-  // 7. Cap at 4 LoRAs — sort by priority (lower number = higher priority) and take first 4
+  // 7. Always include cinecolor-harmonizer at low strength for cinematic warmth
+  const cinecolorLora = getLoraFromRegistry('cinecolor-harmonizer.safetensors');
+  if (cinecolorLora) {
+    candidates.push({ priority: 4, lora: cinecolorLora });
+  }
+
+  // 8. If dark-skinned subject detected: add melanin-mix-xl for skin accuracy
+  if (classification.hasDarkSkinSubject) {
+    const melaninLora = getLoraFromRegistry('melanin-mix-xl.safetensors');
+    if (melaninLora) {
+      candidates.push({ priority: 5, lora: melaninLora });
+    }
+  }
+
+  // 9. Cap at 6 LoRAs — sort by priority (lower number = higher priority) and take first 6
   candidates.sort((a, b) => a.priority - b.priority);
-  const selectedLoras = candidates.slice(0, 4).map((c) => c.lora);
+  const selectedLoras = candidates.slice(0, 6).map((c) => c.lora);
 
   // Build negative prompt additions based on classification
   if (classification.hasIntimateContent && classification.contentLevel !== 'nsfw') {

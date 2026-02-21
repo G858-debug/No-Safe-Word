@@ -28,7 +28,7 @@ interface WorkflowParams {
   checkpointName?: string;
   /** Override CFG scale (default 7.5) */
   cfg?: number;
-  /** Override sampler name (default 'euler_ancestral') */
+  /** Override sampler name (default 'dpmpp_2m') */
   samplerName?: string;
   /** Skip the FaceDetailer pass (debug mode — saves directly from VAEDecode) */
   skipFaceDetailer?: boolean;
@@ -56,8 +56,8 @@ const DEFAULT_NEGATIVE_PROMPT =
 const DEFAULT_NEGATIVE_PROMPT_DUAL =
   DEFAULT_NEGATIVE_PROMPT + ', three people, crowd, group';
 
-/** Node IDs for up to 4 chained LoRA loaders */
-const LORA_NODE_IDS = ['2', '2a', '2b', '2c'] as const;
+/** Node IDs for up to 6 chained LoRA loaders */
+const LORA_NODE_IDS = ['2', '2a', '2b', '2c', '2d', '2e'] as const;
 
 /**
  * Build a chain of LoRA loader nodes and add them to the workflow.
@@ -79,8 +79,8 @@ function buildLoraChain(
     { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
   ];
 
-  // Cap at 4 LoRAs
-  const capped = loraStack.slice(0, 4);
+  // Cap at 6 LoRAs
+  const capped = loraStack.slice(0, 6);
 
   for (let i = 0; i < capped.length; i++) {
     const nodeId = LORA_NODE_IDS[i];
@@ -120,7 +120,7 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
   const prefix = params.filenamePrefix || 'portrait';
   const ckpt = params.checkpointName || DEFAULT_MODEL;
   const cfg = params.cfg || 7.5;
-  const sampler = params.samplerName || 'euler_ancestral';
+  const sampler = params.samplerName || 'dpmpp_2m';
 
   const workflow: Record<string, any> = {
     '1': {
@@ -152,10 +152,10 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
         negative: ['4', 0],
         latent_image: ['5', 0],
         seed: params.seed,
-        steps: 30,
+        steps: 40,
         cfg,
         sampler_name: sampler,
-        scheduler: 'normal',
+        scheduler: 'karras',
         denoise: 1.0,
       },
     },
@@ -191,10 +191,10 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
           guide_size_for: true,
           max_size: 1024,
           seed: params.seed,
-          steps: 20,
+          steps: 25,
           cfg,
           sampler_name: sampler,
-          scheduler: 'normal',
+          scheduler: 'karras',
           denoise: 0.3,
           feather: 5,
           noise_mask: true,
@@ -241,7 +241,7 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
   const ipaWeight = params.ipadapterWeight ?? 0.85;
   const ckpt = params.checkpointName || DEFAULT_MODEL;
   const cfg = params.cfg || 7.5;
-  const sampler = params.samplerName || 'euler_ancestral';
+  const sampler = params.samplerName || 'dpmpp_2m';
 
   const workflow: Record<string, any> = {
     '1': {
@@ -296,10 +296,10 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
         negative: ['4', 0],
         latent_image: ['5', 0],
         seed: params.seed,
-        steps: 30,
+        steps: 40,
         cfg,
         sampler_name: sampler,
-        scheduler: 'normal',
+        scheduler: 'karras',
         denoise: 1.0,
       },
     },
@@ -334,10 +334,10 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
         guide_size_for: true,
         max_size: 1024,
         seed: params.seed,
-        steps: 20,
+        steps: 25,
         cfg,
         sampler_name: sampler,
-        scheduler: 'normal',
+        scheduler: 'karras',
         denoise: 0.3,
         feather: 5,
         noise_mask: true,
@@ -385,7 +385,7 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
 
   // Determine the last LoRA node ID for downstream references
   const loraCount = (params.loras && params.loras.length > 0)
-    ? Math.min(params.loras.length, 4)
+    ? Math.min(params.loras.length, 6)
     : 1;
   const lastLora = LORA_NODE_IDS[loraCount - 1];
 
@@ -412,10 +412,10 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
       guide_size_for: true,
       max_size: 1024,
       seed: params.secondarySeed,
-      steps: 20,
+      steps: 25,
       cfg: params.cfg || 7.5,
-      sampler_name: params.samplerName || 'euler_ancestral',
-      scheduler: 'normal',
+      sampler_name: params.samplerName || 'dpmpp_2m',
+      scheduler: 'karras',
       denoise: 0.4,
       feather: 5,
       noise_mask: true,
@@ -469,7 +469,7 @@ export function buildWorkflow(config: {
   checkpointName?: string;
   /** Override CFG scale (default 7.5) */
   cfg?: number;
-  /** Override sampler name (default 'euler_ancestral') */
+  /** Override sampler name (default 'dpmpp_2m') */
   samplerName?: string;
   /** Skip the FaceDetailer pass (debug mode) */
   skipFaceDetailer?: boolean;

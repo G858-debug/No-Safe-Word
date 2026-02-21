@@ -20,6 +20,8 @@ export interface ModelSelection {
   fellBack: boolean;
   /** Reason for the selection (for logging) */
   reason: string;
+  /** Optional parameter overrides for this model/content combination */
+  paramOverrides?: { cfg?: number; steps?: number };
 }
 
 export function selectModel(
@@ -60,6 +62,7 @@ export function selectModel(
         model: maxQuality,
         fellBack: false,
         reason: `NSFW content: using maximum quality model ${maxQuality.name}`,
+        paramOverrides: { cfg: 6.0 },
       };
     }
   }
@@ -75,6 +78,7 @@ export function selectModel(
         model: premium,
         fellBack: false,
         reason: `Portrait/close-up: using premium model ${premium.name}`,
+        paramOverrides: { cfg: 6.5, steps: 35 },
       };
     }
   }

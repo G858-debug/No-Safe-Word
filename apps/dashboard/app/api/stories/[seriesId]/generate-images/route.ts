@@ -345,6 +345,7 @@ export async function POST(
           loras: resources.loras,
           negativePromptAdditions: resources.negativePromptAdditions,
           checkpointName: modelSelection.checkpointName,
+          cfg: modelSelection.paramOverrides?.cfg,
         });
 
         // Submit async job to RunPod

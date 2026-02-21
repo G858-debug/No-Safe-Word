@@ -17,6 +17,8 @@ export interface SceneClassification {
   hasCompositionCues: boolean;
   /** Detected interaction type between characters (for dual-character scenes) */
   interactionType: InteractionType;
+  /** Whether the prompt or character tags indicate a dark-skinned subject */
+  hasDarkSkinSubject: boolean;
 }
 
 export type ImageType = 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait';
@@ -125,6 +127,14 @@ const PLAYFUL_KEYWORDS = [
 const VULNERABLE_KEYWORDS = [
   'vulnerable', 'exposed', 'raw', 'emotional', 'tear', 'crying',
   'biting lip', 'hesitant', 'shy', 'nervous',
+];
+
+const DARK_SKIN_KEYWORDS = [
+  'black woman', 'black man', 'black south african',
+  'african', 'ebony', 'dark skin', 'dark-skin',
+  'melanin', 'medium-brown', 'medium brown',
+  'dark brown', 'deep brown', 'dark complexion',
+  'brown skin', 'brown-skin',
 ];
 
 const COMPOSITION_CUE_KEYWORDS = [
@@ -283,6 +293,9 @@ export function classifyScene(
   // Composition cues: does the prompt already contain spatial/layout instructions?
   const hasCompositionCues = hasKeyword(lower, COMPOSITION_CUE_KEYWORDS);
 
+  // Dark skin subject detection (for melanin enhancement LoRA)
+  const hasDarkSkinSubject = hasKeyword(lower, DARK_SKIN_KEYWORDS);
+
   // Interaction type detection (for dual-character composition intelligence)
   let interactionType: InteractionType = 'unknown';
   if (hasKeyword(lower, INTIMATE_INTERACTION_KEYWORDS) || hasIntimateContent) {
@@ -318,5 +331,6 @@ export function classifyScene(
     needsEyeDetail,
     hasCompositionCues,
     interactionType,
+    hasDarkSkinSubject,
   };
 }

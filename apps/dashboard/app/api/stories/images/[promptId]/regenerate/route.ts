@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel } from "@no-safe-word/image-gen";
 import type { ImageType } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
@@ -242,6 +242,11 @@ export async function POST(
     console.log(`[StoryImage][${promptId}] Scene classification:`, JSON.stringify(classification));
     console.log(`[StoryImage][${promptId}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
 
+    const modelSelection = selectModel(classification, imgPrompt.image_type as ImageType, {
+      contentLevel: classification.contentLevel,
+    });
+    console.log(`[StoryImage][${promptId}] Model selected: ${modelSelection.checkpointName} — ${modelSelection.reason}`);
+
     const workflow = buildWorkflow({
       type: workflowType as "portrait" | "single-character" | "dual-character",
       positivePrompt: finalPrompt,
@@ -256,6 +261,8 @@ export async function POST(
       secondarySeed,
       loras: resources.loras,
       negativePromptAdditions: resources.negativePromptAdditions,
+      checkpointName: modelSelection.checkpointName,
+      cfg: modelSelection.paramOverrides?.cfg,
     });
 
     const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined);

@@ -103,8 +103,21 @@ if [ -n "${CIVITAI_API_KEY}" ]; then
         "https://civitai.com/api/download/models/359579?type=Model&format=SafeTensor&token=${CIVITAI_API_KEY}" \
         "loras" \
         "better-bodies-xl.safetensors"
+    # cinecolor-harmonizer — Cinematic golden color grading (jarod2212)
+    # Civitai model 2389677, version 2686970
+    download_model \
+        "https://civitai.com/api/download/models/2686970?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "cinecolor-harmonizer.safetensors"
+
+    # melanin-mix-xl — Dark skin enhancement trained on 1000+ Black influencer photos (Ggrue)
+    # Civitai model 390634, version 435833
+    download_model \
+        "https://civitai.com/api/download/models/435833?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "melanin-mix-xl.safetensors"
 else
-    echo "[NSW] ⚠ Skipping better-bodies-xl (CIVITAI_API_KEY not set)"
+    echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl (CIVITAI_API_KEY not set)"
 fi
 
 # YOLO face detection — used by UltralyticsDetectorProvider / FaceDetailer

@@ -1,4 +1,4 @@
-export type LoraCategory = 'detail' | 'skin' | 'eyes' | 'hands' | 'lighting' | 'bodies' | 'style';
+export type LoraCategory = 'detail' | 'skin' | 'eyes' | 'hands' | 'lighting' | 'bodies' | 'style' | 'cinematic' | 'melanin';
 export type ContentMode = 'sfw' | 'nsfw';
 
 export interface LoraEntry {
@@ -72,6 +72,28 @@ export const LORA_REGISTRY: LoraEntry[] = [
     defaultStrength: 0.4,
     clipStrength: 0.4,
     description: 'Enhanced dramatic lighting for cinematic scenes (ntc-ai slider)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+  },
+  {
+    name: 'CineColor Harmonizer',
+    filename: 'cinecolor-harmonizer.safetensors',
+    category: 'cinematic',
+    defaultStrength: 0.3,
+    clipStrength: 0.3,
+    triggerWord: 'sunset_gold_film',
+    description: 'Warm golden color grading with cinematic contrast — pure palette modifier, no anatomy changes (jarod2212)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+  },
+  {
+    name: 'Melanin Mix XL',
+    filename: 'melanin-mix-xl.safetensors',
+    category: 'melanin',
+    defaultStrength: 0.5,
+    clipStrength: 0.5,
+    triggerWord: 'melanin',
+    description: 'Dark skin tone and texture enhancement trained on 1000+ Black influencer photos (Ggrue)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
   },
