@@ -12,12 +12,26 @@ RUN cd /comfyui/custom_nodes && git clone https://github.com/cubiq/ComfyUI_IPAda
 RUN pip install --no-cache-dir insightface onnxruntime-gpu
 
 # Pre-download InsightFace buffalo_l models (used by IPAdapter FaceID at inference time)
+# Use wget + Python zipfile since base image lacks curl/unzip
 ENV COMFY_DIR=/comfyui
 RUN mkdir -p ${COMFY_DIR}/models/insightface/models && \
-    curl -L -o /tmp/buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && \
-    unzip -q /tmp/buffalo_l.zip -d ${COMFY_DIR}/models/insightface/models/ && \
-    rm /tmp/buffalo_l.zip && \
-    echo "InsightFace buffalo_l models installed."
+    python3 -c "\
+import urllib.request, zipfile, os, ssl;\
+ctx = ssl.create_default_context();\
+url = 'https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip';\
+dest = '/tmp/buffalo_l.zip';\
+outdir = os.environ['COMFY_DIR'] + '/models/insightface/models/';\
+print('Downloading InsightFace buffalo_l models...');\
+req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'});\
+resp = urllib.request.urlopen(req, context=ctx, timeout=300);\
+with open(dest, 'wb') as f:\
+    import shutil; shutil.copyfileobj(resp, f);\
+resp.close();\
+print('Extracting...');\
+with zipfile.ZipFile(dest, 'r') as z: z.extractall(outdir);\
+os.remove(dest);\
+print('InsightFace buffalo_l models installed.')\
+"
 
 # ---- Build-time LoRA Downloads ----
 # LoRAs are small (~1GB total) and critical for portrait generation.
