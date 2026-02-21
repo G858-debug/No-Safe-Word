@@ -209,10 +209,27 @@ export default function ImageGeneration({
                   error: "Generation failed",
                 },
               }));
+            } else {
+              // Still "generating" but no active job — reset to pending so user can retry
+              setPromptStates((prev) => ({
+                ...prev,
+                [promptId]: {
+                  ...prev[promptId],
+                  status: "pending",
+                  error: null,
+                },
+              }));
             }
-            // If still "generating", leave as-is (no jobId to poll with)
           } catch {
-            // Ignore — will remain as "generating" in UI
+            // Status endpoint failed — reset to pending so user can retry
+            setPromptStates((prev) => ({
+              ...prev,
+              [promptId]: {
+                ...prev[promptId],
+                status: "pending",
+                error: null,
+              },
+            }));
           }
         })
       );
@@ -565,7 +582,7 @@ export default function ImageGeneration({
           {/* Generate All */}
           <Button
             onClick={() => handleBatchGenerate()}
-            disabled={batchGenerating || counts.pending === 0}
+            disabled={batchGenerating || (counts.pending + counts.failed === 0)}
           >
             {batchGenerating ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -574,7 +591,7 @@ export default function ImageGeneration({
             )}
             {batchGenerating
               ? "Submitting..."
-              : `Generate All Images (${counts.pending})`}
+              : `Generate All Images (${counts.pending + counts.failed})`}
           </Button>
 
           {/* Generate Chapter */}
@@ -976,7 +993,7 @@ function ImageCard({
 
         {/* Actions */}
         <div className="flex items-center gap-1.5">
-          {isPending && (
+          {(isPending || isFailed) && (
             <Button
               size="sm"
               className="h-7 text-xs"
@@ -984,10 +1001,10 @@ function ImageCard({
               disabled={batchGenerating}
             >
               <Sparkles className="mr-1 h-3 w-3" />
-              Generate
+              {isFailed ? "Retry" : "Generate"}
             </Button>
           )}
-          {(isGenerated || isFailed) && (
+          {(isGenerated) && (
             <Button
               variant="outline"
               size="sm"
