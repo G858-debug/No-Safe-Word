@@ -145,6 +145,11 @@ export function buildPrompt(
   if (character.distinguishingFeatures)
     parts.push(character.distinguishingFeatures);
 
+  // Female characters always wear heels in full-body shots
+  if (scene.mood === "fashion photography" && character.gender !== "male") {
+    parts.push("wearing high heels");
+  }
+
   if (scene.setting) parts.push(scene.setting);
   if (scene.lighting) parts.push(`${scene.lighting} lighting`);
   if (scene.mood) parts.push(`${scene.mood} mood`);

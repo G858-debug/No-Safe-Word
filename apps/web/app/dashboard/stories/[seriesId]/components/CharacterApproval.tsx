@@ -261,6 +261,11 @@ function buildFullBodyPrompt(desc: Record<string, unknown>): string {
   if (d.distinguishingFeatures) parts.push(d.distinguishingFeatures);
   if (d.clothing) parts.push(`wearing ${d.clothing}`);
 
+  // Female characters always wear heels in full-body shots
+  if (d.gender?.toLowerCase() !== "male") {
+    parts.push("wearing high heels");
+  }
+
   parts.push("full body standing pose, full body visible head to feet");
   parts.push("standing naturally, looking at camera");
   parts.push("soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background");
