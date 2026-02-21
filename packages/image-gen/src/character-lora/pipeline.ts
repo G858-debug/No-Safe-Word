@@ -1,6 +1,14 @@
 // Character LoRA Pipeline — Main Orchestrator
 // Runs all 6 stages sequentially with retry logic.
 // Designed to run as a background job (fire-and-forget from API route).
+//
+// HYBRID APPROACH:
+//   Stage 1: Dataset generation (Nano Banana Pro for face/head + ComfyUI for body)
+//   Stage 2: Claude Vision quality evaluation against BOTH reference images
+//   Stage 3: Auto-captioning from prompt templates
+//   Stage 4: Replicate SDXL LoRA training
+//   Stage 5: Validation (generate test images with LoRA, evaluate face consistency)
+//   Stage 6: Deploy to Supabase Storage + register in character_loras
 
 import type {
   CharacterInput,
@@ -8,7 +16,7 @@ import type {
   PipelineProgress,
   VariationType,
 } from './types';
-import { DEFAULT_TRAINING_PARAMS, PIPELINE_CONFIG } from './types';
+import { PIPELINE_CONFIG } from './types';
 import { generateDataset, generateReplacements } from './dataset-generator';
 import { evaluateDataset } from './quality-evaluator';
 import { generateCaptions } from './caption-generator';
@@ -38,11 +46,14 @@ export async function runPipeline(
 
   try {
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`[LoRA Pipeline] Starting for ${character.characterName}`);
+    console.log(`[LoRA Pipeline] Starting HYBRID pipeline for ${character.characterName}`);
     console.log(`[LoRA Pipeline] LoRA ID: ${loraId}`);
+    console.log(`[LoRA Pipeline] Type: ${character.pipelineType}`);
+    console.log(`[LoRA Pipeline] Portrait ref: ${character.approvedImageUrl.substring(0, 60)}...`);
+    console.log(`[LoRA Pipeline] Full-body ref: ${character.fullBodyImageUrl.substring(0, 60)}...`);
     console.log(`${'='.repeat(60)}\n`);
 
-    // ── STAGE 1: Dataset Generation ──────────────────────────
+    // ── STAGE 1: Hybrid Dataset Generation ────────────────────
     await updateStatus(loraId, 'generating_dataset', deps);
 
     const datasetResult = await generateDataset(character, loraId, deps);
@@ -51,12 +62,17 @@ export async function runPipeline(
       throw new Error('Dataset generation produced no images');
     }
 
+    console.log(
+      `[LoRA Pipeline] Dataset: ${datasetResult.totalGenerated} images generated`
+    );
+
     // ── STAGE 2: Quality Evaluation (with replacement loop) ──
     await updateStatus(loraId, 'evaluating', deps);
 
     let allImages = [...datasetResult.imageRecords];
     let evalResult = await evaluateDataset(
       character.approvedImageUrl,
+      character.fullBodyImageUrl,
       allImages,
       deps,
     );
@@ -72,7 +88,6 @@ export async function runPipeline(
         `[LoRA Pipeline] Replacement round ${round + 1}: ${evalResult.passed} passed, need ${PIPELINE_CONFIG.targetPassedImages}`
       );
 
-      // Find which prompts failed
       const failedPromptIds = allImages
         .filter(
           (img) =>
@@ -83,7 +98,6 @@ export async function runPipeline(
           variationType: img.variation_type as VariationType,
         }));
 
-      // Mark old failed images as replaced
       for (const img of allImages) {
         if (!evalResult.passedImages.some((p) => p.id === img.id)) {
           await deps.supabase
@@ -93,7 +107,6 @@ export async function runPipeline(
         }
       }
 
-      // Generate replacements
       const replacements = await generateReplacements(
         character,
         loraId,
@@ -101,14 +114,13 @@ export async function runPipeline(
         deps,
       );
 
-      // Evaluate replacements
       const replacementEval = await evaluateDataset(
         character.approvedImageUrl,
+        character.fullBodyImageUrl,
         replacements,
         deps,
       );
 
-      // Merge passed images
       evalResult.passedImages = [
         ...evalResult.passedImages,
         ...replacementEval.passedImages,
@@ -117,7 +129,6 @@ export async function runPipeline(
       allImages = [...allImages, ...replacements];
     }
 
-    // Check minimum threshold
     if (evalResult.passed < PIPELINE_CONFIG.minPassedImages) {
       throw new Error(
         `Only ${evalResult.passed} images passed evaluation (minimum ${PIPELINE_CONFIG.minPassedImages} required). ` +
@@ -149,7 +160,6 @@ export async function runPipeline(
       attempt++
     ) {
       try {
-        // Stage 4: Training
         await updateStatus(loraId, 'training', deps);
 
         const paramsOverrides = attempt > 1 ? getRetryParams(attempt) : {};
@@ -166,7 +176,6 @@ export async function runPipeline(
 
         loraBuffer = trainingResult.loraBuffer;
 
-        // Deploy to temporary location for validation
         const tempFilename = `char_${characterSlug}_${loraId.slice(0, 8)}.safetensors`;
         const tempStoragePath = `character-loras/validation/${tempFilename}`;
 
@@ -183,7 +192,6 @@ export async function runPipeline(
 
         loraFilename = tempFilename;
 
-        // Stage 5: Validation
         await updateStatus(loraId, 'validating', deps);
 
         const validationResult = await validateLora(
@@ -267,7 +275,6 @@ export async function getPipelineProgress(
   characterId: string,
   deps: PipelineDeps,
 ): Promise<PipelineProgress | null> {
-  // Get the most recent LoRA record for this character
   const { data: lora, error } = await deps.supabase
     .from('character_loras')
     .select('*')
@@ -280,7 +287,6 @@ export async function getPipelineProgress(
 
   const loraRecord = lora as CharacterLoraRow;
 
-  // Count dataset image stats
   const { count: generated } = await deps.supabase
     .from('lora_dataset_images')
     .select('*', { count: 'exact', head: true })
@@ -292,14 +298,13 @@ export async function getPipelineProgress(
     .eq('lora_id', loraRecord.id)
     .eq('eval_status', 'passed');
 
-  // Estimate time remaining based on current stage
   const timeEstimates: Record<string, string> = {
-    pending: '~20 minutes',
-    generating_dataset: '~15 minutes',
-    evaluating: '~12 minutes',
-    captioning: '~10 minutes',
-    training: '~8 minutes',
-    validating: '~3 minutes',
+    pending: '~25 minutes',
+    generating_dataset: '~20 minutes',
+    evaluating: '~15 minutes',
+    captioning: '~12 minutes',
+    training: '~10 minutes',
+    validating: '~5 minutes',
     deployed: 'Complete',
     failed: 'Failed',
     archived: 'Archived',

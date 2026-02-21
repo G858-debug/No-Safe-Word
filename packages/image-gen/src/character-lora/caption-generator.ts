@@ -1,10 +1,15 @@
-// Stage 3: Auto-Captioning from Prompt Templates
+// Stage 3: Auto-Captioning for LoRA Training Dataset
 // Generates tag-based captions for each dataset image.
-// Captions are derived from the prompt templates (not image analysis)
-// since we control the generation prompts.
+//
+// Format: "tok woman, [category framing], [scene-specific tags]"
+//
+// CRITICAL: Captions must NOT include permanent character features
+// (skin tone, hair color, body type, ethnicity) because the LoRA
+// should learn these implicitly from the images, not from captions.
+// Only describe what VARIES per image: pose, angle, lighting, clothing, expression.
 
-import type { CaptionResult, LoraDatasetImageRow } from './types';
-import { DATASET_PROMPTS } from './dataset-prompts';
+import type { CaptionResult, LoraDatasetImageRow, ImageCategory } from './types';
+import { ALL_PROMPTS } from './dataset-prompts';
 
 interface CaptionGeneratorDeps {
   supabase: {
@@ -12,156 +17,121 @@ interface CaptionGeneratorDeps {
   };
 }
 
-// Tags that describe permanent character features — these should NOT
-// appear in captions since the LoRA should learn them implicitly.
+// Tags that describe permanent character features — filter these OUT
 const PERMANENT_FEATURE_PATTERNS = [
-  /\bskin tone\b/i,
-  /\bskin color\b/i,
-  /\bcomplexion\b/i,
-  /\bhair color\b/i,
-  /\beye color\b/i,
-  /\bbody type\b/i,
-  /\bslim\b/i,
-  /\bcurvy\b/i,
-  /\bathletic build\b/i,
-  /\boval face\b/i,
-  /\bhigh cheekbones\b/i,
-  /\bthis person\b/i,
-  /\bphotorealistic\b/i,
+  /\bskin tone\b/i, /\bskin color\b/i, /\bcomplexion\b/i,
+  /\bhair color\b/i, /\beye color\b/i, /\bbody type\b/i,
+  /\bslim\b/i, /\bcurvy\b/i, /\bathletic build\b/i,
+  /\boval face\b/i, /\bhigh cheekbones\b/i,
+  /\bthis person\b/i, /\bphotorealistic\b/i,
+  /\bmasterpiece\b/i, /\bbest quality\b/i,
+  /\[ethnicity\]/i, /\[bodyType\]/i, /\[skinTone\]/i,
+  /\[hairStyle\]/i, /\[hairColor\]/i,
 ];
 
-// Map prompt template keywords to concise caption tags
+// Category → base framing tag
+const CATEGORY_FRAMING: Record<ImageCategory, string> = {
+  'face-closeup': 'close-up portrait',
+  'head-shoulders': 'head and shoulders portrait',
+  'waist-up': 'waist-up portrait',
+  'full-body': 'full body photo',
+  'body-detail': 'intimate portrait',
+};
+
+// Pattern → caption tags extraction table
 const TAG_EXTRACTIONS: Array<{ pattern: RegExp; tags: string[] }> = [
   // Angles
   { pattern: /front view/i, tags: ['front view'] },
-  { pattern: /three-quarter view.*left/i, tags: ['three-quarter view', 'turned left'] },
-  { pattern: /three-quarter view.*right/i, tags: ['three-quarter view', 'turned right'] },
+  { pattern: /3\/4 angle.*right/i, tags: ['three-quarter view', 'turned right'] },
+  { pattern: /3\/4 angle.*left/i, tags: ['three-quarter view', 'turned left'] },
   { pattern: /three-quarter view/i, tags: ['three-quarter view'] },
-  { pattern: /left side profile/i, tags: ['left profile'] },
-  { pattern: /right side profile/i, tags: ['right profile'] },
-  { pattern: /slightly elevated angle/i, tags: ['high angle', 'looking up'] },
+  { pattern: /profile view/i, tags: ['profile view'] },
+  { pattern: /over.*shoulder/i, tags: ['over shoulder'] },
+  { pattern: /slight angle/i, tags: ['slight angle'] },
 
   // Expressions
-  { pattern: /warm genuine smile showing teeth/i, tags: ['smiling', 'teeth showing', 'joyful'] },
-  { pattern: /serious focused expression/i, tags: ['serious expression', 'intense'] },
-  { pattern: /laughing naturally/i, tags: ['laughing', 'head tilted back'] },
-  { pattern: /thoughtful contemplative/i, tags: ['contemplative', 'gaze downward'] },
-  { pattern: /confident assured/i, tags: ['confident expression', 'chin raised'] },
-  { pattern: /seductive half-smile/i, tags: ['seductive', 'half-smile', 'parted lips'] },
+  { pattern: /warm smile/i, tags: ['smiling'] },
   { pattern: /neutral expression/i, tags: ['neutral expression'] },
-  { pattern: /relaxed expression/i, tags: ['relaxed expression'] },
-  { pattern: /gentle expression/i, tags: ['gentle expression'] },
-  { pattern: /natural expression/i, tags: ['natural expression'] },
-  { pattern: /pleasant.*expression/i, tags: ['pleasant expression'] },
-  { pattern: /peaceful expression/i, tags: ['peaceful expression'] },
-  { pattern: /warm natural expression/i, tags: ['warm expression'] },
+  { pattern: /serious.*expression/i, tags: ['serious expression'] },
+  { pattern: /contemplative/i, tags: ['contemplative'] },
+  { pattern: /laughing/i, tags: ['laughing'] },
+  { pattern: /confident/i, tags: ['confident expression'] },
+  { pattern: /vulnerable/i, tags: ['vulnerable expression'] },
+  { pattern: /joyful/i, tags: ['joyful expression'] },
+  { pattern: /pensive/i, tags: ['pensive expression'] },
+  { pattern: /serene/i, tags: ['serene expression'] },
+  { pattern: /sensual/i, tags: ['sensual expression'] },
+  { pattern: /smirk/i, tags: ['subtle smirk'] },
+  { pattern: /composed/i, tags: ['composed expression'] },
+  { pattern: /relaxed smile/i, tags: ['relaxed smile'] },
+  { pattern: /genuine smile/i, tags: ['genuine smile'] },
 
   // Gaze
-  { pattern: /facing directly at camera/i, tags: ['looking at camera'] },
   { pattern: /direct eye contact/i, tags: ['direct eye contact'] },
-  { pattern: /intense eye contact/i, tags: ['intense eye contact'] },
-  { pattern: /eyes looking at camera/i, tags: ['looking at camera'] },
-  { pattern: /looking up at the camera/i, tags: ['looking up at camera'] },
-  { pattern: /looking straight ahead/i, tags: ['looking straight ahead'] },
-  { pattern: /looking at camera with slight smile/i, tags: ['looking at camera', 'slight smile'] },
+  { pattern: /eyes.*downcast/i, tags: ['gaze downward'] },
+  { pattern: /looking.*camera/i, tags: ['looking at camera'] },
 
   // Lighting
-  { pattern: /soft even lighting/i, tags: ['soft even lighting'] },
-  { pattern: /soft studio lighting/i, tags: ['soft studio lighting'] },
-  { pattern: /professional lighting/i, tags: ['professional lighting'] },
-  { pattern: /rim lighting/i, tags: ['rim lighting'] },
-  { pattern: /warm studio lighting/i, tags: ['warm studio lighting'] },
-  { pattern: /dramatic side lighting/i, tags: ['dramatic side lighting'] },
-  { pattern: /natural daylight/i, tags: ['natural daylight'] },
-  { pattern: /soft natural window light/i, tags: ['window light'] },
-  { pattern: /golden hour light/i, tags: ['golden hour lighting'] },
-  { pattern: /warm golden sunlight/i, tags: ['golden hour', 'warm sunlight'] },
-  { pattern: /high-key bright even lighting/i, tags: ['high-key lighting'] },
-  { pattern: /strong side lighting from the left/i, tags: ['strong side lighting', 'half face shadow'] },
-  { pattern: /warm amber streetlight/i, tags: ['streetlight', 'night lighting'] },
-  { pattern: /warm candlelight/i, tags: ['candlelight', 'warm ambience'] },
-  { pattern: /overhead soft lighting/i, tags: ['overhead lighting'] },
-  { pattern: /warm lighting/i, tags: ['warm lighting'] },
-  { pattern: /bright lighting/i, tags: ['bright lighting'] },
-  { pattern: /soft window light/i, tags: ['window light'] },
-  { pattern: /warm interior lighting/i, tags: ['warm interior lighting'] },
   { pattern: /studio lighting/i, tags: ['studio lighting'] },
-  { pattern: /natural light from window/i, tags: ['window light'] },
-  { pattern: /full studio lighting/i, tags: ['studio lighting'] },
-  { pattern: /even studio lighting/i, tags: ['even studio lighting'] },
-  { pattern: /professional portrait lighting/i, tags: ['portrait lighting'] },
+  { pattern: /golden hour/i, tags: ['golden hour lighting'] },
+  { pattern: /dramatic.*lighting/i, tags: ['dramatic lighting'] },
+  { pattern: /shadow lighting/i, tags: ['shadow lighting'] },
+  { pattern: /natural daylight/i, tags: ['natural daylight'] },
+  { pattern: /window light/i, tags: ['window light'] },
+  { pattern: /warm.*lighting/i, tags: ['warm lighting'] },
+  { pattern: /backlit/i, tags: ['backlit'] },
+  { pattern: /rim lighting/i, tags: ['rim lighting'] },
+  { pattern: /ambient light/i, tags: ['ambient light'] },
+  { pattern: /side lighting/i, tags: ['side lighting'] },
+  { pattern: /bright.*lighting/i, tags: ['bright lighting'] },
+  { pattern: /amber light/i, tags: ['amber light'] },
+  { pattern: /diffused light/i, tags: ['diffused light'] },
+  { pattern: /bedroom lighting/i, tags: ['warm bedroom lighting'] },
+  { pattern: /gym lighting/i, tags: ['bright gym lighting'] },
+  { pattern: /office lighting/i, tags: ['soft office lighting'] },
 
-  // Framing
-  { pattern: /extreme close-up/i, tags: ['extreme close-up', 'face filling frame'] },
-  { pattern: /head and shoulders/i, tags: ['head and shoulders'] },
-  { pattern: /waist-up/i, tags: ['waist-up'] },
-  { pattern: /three-quarter body/i, tags: ['three-quarter body'] },
-  { pattern: /full body/i, tags: ['full body'] },
-  { pattern: /shallow depth of field/i, tags: ['shallow depth of field'] },
-  { pattern: /lens flare/i, tags: ['lens flare'] },
-
-  // Setting / Background
-  { pattern: /plain studio background/i, tags: ['studio background'] },
-  { pattern: /plain background/i, tags: ['plain background'] },
+  // Background / Setting
   { pattern: /clean background/i, tags: ['clean background'] },
-  { pattern: /neutral background/i, tags: ['neutral background'] },
   { pattern: /dark background/i, tags: ['dark background'] },
   { pattern: /white background/i, tags: ['white background'] },
-  { pattern: /blurred background/i, tags: ['blurred background'] },
-  { pattern: /office environment blurred/i, tags: ['office background', 'blurred'] },
-  { pattern: /outdoor park setting/i, tags: ['outdoor', 'park background'] },
-  { pattern: /dimly lit restaurant/i, tags: ['restaurant background', 'dim lighting'] },
-  { pattern: /gym or outdoor exercise/i, tags: ['gym background'] },
-  { pattern: /clean background with warm tones/i, tags: ['warm toned background'] },
-  { pattern: /bedroom setting/i, tags: ['bedroom setting'] },
-  { pattern: /urban background/i, tags: ['urban background'] },
-  { pattern: /outdoor setting/i, tags: ['outdoor'] },
-  { pattern: /indoors/i, tags: ['indoors'] },
-  { pattern: /outdoors/i, tags: ['outdoors'] },
-  { pattern: /blurred indoor background/i, tags: ['indoor background', 'blurred'] },
-  { pattern: /blurred neutral background/i, tags: ['neutral background', 'blurred'] },
-  { pattern: /blurred room background/i, tags: ['room background', 'blurred'] },
+  { pattern: /simple background/i, tags: ['simple background'] },
+  { pattern: /neutral background/i, tags: ['neutral background'] },
+  { pattern: /outdoor/i, tags: ['outdoor'] },
+  { pattern: /indoor/i, tags: ['indoor'] },
 
-  // Clothing
-  { pattern: /professional business attire/i, tags: ['business attire'] },
-  { pattern: /fitted blazer over a blouse/i, tags: ['blazer', 'blouse'] },
-  { pattern: /tailored button-up shirt/i, tags: ['button-up shirt'] },
-  { pattern: /small gold earrings/i, tags: ['gold earrings'] },
-  { pattern: /simple fitted t-shirt/i, tags: ['t-shirt', 'casual'] },
-  { pattern: /elegant dress or formal top/i, tags: ['elegant dress'] },
-  { pattern: /fitted dark suit/i, tags: ['dark suit'] },
-  { pattern: /statement earrings/i, tags: ['statement earrings'] },
-  { pattern: /sports top or tank/i, tags: ['sports top'] },
-  { pattern: /athletic tank top/i, tags: ['tank top'] },
-  { pattern: /traditional African print/i, tags: ['African print fabric', 'vibrant colors'] },
-  { pattern: /silk camisole or sleep shirt/i, tags: ['silk camisole'] },
-  { pattern: /plain t-shirt or bare chest/i, tags: ['casual sleepwear'] },
-  { pattern: /hair pulled back/i, tags: ['hair pulled back'] },
-  { pattern: /hair loose and natural/i, tags: ['hair loose'] },
+  // Clothing (variable per image)
+  { pattern: /blazer/i, tags: ['wearing blazer'] },
+  { pattern: /fitted top/i, tags: ['fitted top'] },
+  { pattern: /off-shoulder/i, tags: ['off-shoulder top'] },
+  { pattern: /African print/i, tags: ['African print top'] },
+  { pattern: /white blouse/i, tags: ['white blouse'] },
+  { pattern: /gold jewelry/i, tags: ['gold jewelry'] },
+  { pattern: /tank top/i, tags: ['tank top'] },
+  { pattern: /wrap dress/i, tags: ['wrap dress'] },
+  { pattern: /jeans/i, tags: ['jeans'] },
+  { pattern: /t-shirt/i, tags: ['t-shirt'] },
+  { pattern: /blouse/i, tags: ['blouse'] },
+  { pattern: /evening dress/i, tags: ['evening dress'] },
+  { pattern: /crop top/i, tags: ['crop top'] },
+  { pattern: /bodycon dress/i, tags: ['bodycon dress'] },
+  { pattern: /sports bra/i, tags: ['sports bra'] },
+  { pattern: /workout/i, tags: ['workout attire'] },
+  { pattern: /summer dress/i, tags: ['summer dress'] },
+  { pattern: /lingerie/i, tags: ['lingerie'] },
+  { pattern: /silk robe/i, tags: ['silk robe'] },
+  { pattern: /button-up/i, tags: ['button-up shirt'] },
 
   // Pose
-  { pattern: /seated in a chair/i, tags: ['seated', 'chair'] },
-  { pattern: /relaxed posture leaning.*forward/i, tags: ['leaning forward'] },
-  { pattern: /hands in lap/i, tags: ['hands in lap'] },
-  { pattern: /standing upright/i, tags: ['standing'] },
-  { pattern: /standing naturally/i, tags: ['standing naturally'] },
-  { pattern: /weight on one leg/i, tags: ['weight on one leg'] },
-  { pattern: /one hand on hip/i, tags: ['hand on hip'] },
-  { pattern: /arms at sides/i, tags: ['arms at sides'] },
-  { pattern: /casual confident pose/i, tags: ['confident pose'] },
-  { pattern: /relaxed natural pose/i, tags: ['relaxed pose'] },
-  { pattern: /chin slightly raised/i, tags: ['chin raised'] },
-  { pattern: /head tilted slightly back/i, tags: ['head tilted back'] },
-  { pattern: /gaze slightly downward/i, tags: ['gaze downward'] },
-
-  // Mood
-  { pattern: /moody cinematic/i, tags: ['moody', 'cinematic'] },
-  { pattern: /cultural celebration/i, tags: ['cultural celebration'] },
+  { pattern: /standing pose/i, tags: ['standing'] },
+  { pattern: /seated/i, tags: ['seated'] },
+  { pattern: /walking pose/i, tags: ['walking'] },
+  { pattern: /athletic pose/i, tags: ['athletic pose'] },
+  { pattern: /confident.*stance/i, tags: ['confident stance'] },
+  { pattern: /doorway/i, tags: ['standing in doorway'] },
 ];
 
 /**
  * Generate captions for all passed dataset images.
- * Captions are tag-based, derived from prompt templates.
  */
 export async function generateCaptions(
   passedImages: LoraDatasetImageRow[],
@@ -175,9 +145,8 @@ export async function generateCaptions(
   const captionedImages: CaptionResult['captionedImages'] = [];
 
   for (const image of passedImages) {
-    const caption = buildCaption(image.prompt_template, genderTag);
+    const caption = buildCaption(image, genderTag);
 
-    // Update database record
     await deps.supabase
       .from('lora_dataset_images')
       .update({ caption })
@@ -201,27 +170,27 @@ export async function generateCaptions(
 }
 
 /**
- * Build a caption from a prompt template ID.
- * Format: "tok woman, [scene-specific tags]"
+ * Build a caption from a dataset image record.
+ * Format: "tok woman, [category framing], [scene-specific tags]"
  */
-function buildCaption(promptTemplateId: string, genderTag: string): string {
-  // Find the original prompt text
-  // Handle replacement IDs like "angle_front_replacement"
-  const baseId = promptTemplateId.replace(/_replacement$/, '');
-  const template = DATASET_PROMPTS.find((p) => p.id === baseId);
+function buildCaption(image: LoraDatasetImageRow, genderTag: string): string {
+  const baseId = image.prompt_template.replace(/_replacement$/, '');
+  const template = ALL_PROMPTS.find((p) => p.id === baseId);
 
   if (!template) {
-    // Fallback: minimal caption
-    return `tok ${genderTag}, portrait photo`;
+    const category = (image.category || 'face-closeup') as ImageCategory;
+    const framing = CATEGORY_FRAMING[category] || 'portrait';
+    return `tok ${genderTag}, ${framing}`;
   }
 
-  const promptText = template.prompt;
-  const tags: string[] = ['tok', genderTag];
+  const tags: string[] = [`tok ${genderTag}`];
 
-  // Add the variation type as a category tag
-  tags.push(`${template.variationType} variation`);
+  // Add category framing tag
+  const framing = CATEGORY_FRAMING[template.category];
+  if (framing) tags.push(framing);
 
   // Extract scene-specific tags from the prompt
+  const promptText = template.prompt;
   for (const extraction of TAG_EXTRACTIONS) {
     if (extraction.pattern.test(promptText)) {
       for (const tag of extraction.tags) {
@@ -232,7 +201,7 @@ function buildCaption(promptTemplateId: string, genderTag: string): string {
     }
   }
 
-  // Remove any permanent feature tags that might have slipped in
+  // Filter out any permanent feature tags
   const filteredTags = tags.filter(
     (tag) => !PERMANENT_FEATURE_PATTERNS.some((p) => p.test(tag))
   );

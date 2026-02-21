@@ -32,6 +32,7 @@ export interface CharacterLoraRow {
   training_attempts: number;
   status: PipelineStatus;
   error: string | null;
+  pipeline_type: PipelineType;
   created_at: string;
   updated_at: string;
   deployed_at: string | null;
@@ -44,12 +45,20 @@ export interface LoraDatasetImageRow {
   storage_path: string;
   prompt_template: string;
   variation_type: VariationType;
+  source: ImageSource;
+  category: ImageCategory;
   eval_status: EvalStatus;
   eval_score: number | null;
   eval_details: EvalDetails | null;
   caption: string | null;
   created_at: string;
 }
+
+// ── Hybrid Pipeline Types ───────────────────────────────────────
+
+export type ImageSource = 'nano-banana' | 'comfyui';
+export type ImageCategory = 'face-closeup' | 'head-shoulders' | 'waist-up' | 'full-body' | 'body-detail';
+export type PipelineType = 'story_character' | 'author_persona';
 
 // ── Variation & Evaluation ──────────────────────────────────────
 
@@ -107,8 +116,10 @@ export const PIPELINE_CONFIG = {
   maxReplacementRounds: 2,
   /** Max training attempts before failing */
   maxTrainingAttempts: 3,
-  /** Parallel image generation limit */
-  generationConcurrency: 5,
+  /** Delay between Nano Banana requests (ms) */
+  nanoBananaDelay: 2000,
+  /** Delay between ComfyUI requests (ms) */
+  comfyuiDelay: 1000,
   /** Parallel evaluation limit */
   evaluationConcurrency: 3,
   /** Replicate polling interval (ms) */
@@ -121,7 +132,20 @@ export const PIPELINE_CONFIG = {
   minValidationPasses: 5,
 } as const;
 
-// ── Character Input ─────────────────────────────────────────────
+// ── Character Input (Hybrid — dual-image) ───────────────────────
+
+/** Structured character data from the story JSON description field */
+export interface CharacterStructured {
+  gender: string;
+  ethnicity: string;
+  bodyType: string;
+  skinTone: string;
+  hairColor: string;
+  hairStyle: string;
+  eyeColor: string;
+  age: string;
+  distinguishingFeatures?: string;
+}
 
 export interface CharacterInput {
   characterId: string;
@@ -129,6 +153,15 @@ export interface CharacterInput {
   gender: string;
   approvedImageUrl: string;
   approvedPrompt: string;
+  /** Full-body reference image URL (for hybrid ComfyUI pipeline) */
+  fullBodyImageUrl: string;
+  fullBodySeed: number;
+  /** Portrait seed for reproducibility */
+  portraitSeed: number;
+  /** Structured character data for ComfyUI prompt interpolation */
+  structuredData: CharacterStructured;
+  /** Pipeline type controls dataset size: author_persona gets more images */
+  pipelineType: PipelineType;
 }
 
 // ── Stage Results ───────────────────────────────────────────────

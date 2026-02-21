@@ -40,7 +40,11 @@ export type { CompositionResult } from './composition-advisor';
 // that break webpack client builds.
 export type {
   CharacterInput,
+  CharacterStructured,
   CharacterLoraRow,
   PipelineProgress,
   PipelineStatus,
+  PipelineType,
+  ImageSource,
+  ImageCategory,
 } from './character-lora/types';

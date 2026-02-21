@@ -42,10 +42,23 @@ const TEST_CHARACTER: CharacterInput = {
   characterId: 'efc71e1c-06aa-4cc1-993d-c852636ce10e',
   characterName: 'Lindiwe Dlamini',
   gender: 'female',
-  // We need a real image URL. If there's no stored portrait yet,
-  // you can paste a test image URL here:
   approvedImageUrl: process.env.TEST_PORTRAIT_URL || '',
   approvedPrompt: 'young Black South African woman, oval face, high cheekbones, neat braids in low bun, slim curvaceous figure, warm brown skin, dark brown eyes',
+  fullBodyImageUrl: process.env.TEST_FULLBODY_URL || '',
+  fullBodySeed: 42,
+  portraitSeed: 42,
+  structuredData: {
+    gender: 'female',
+    ethnicity: 'Black South African',
+    bodyType: 'slim, curvaceous figure, medium bust',
+    skinTone: 'warm brown',
+    hairColor: 'dark brown',
+    hairStyle: 'neat braids in low bun',
+    eyeColor: 'dark brown',
+    age: '24',
+    distinguishingFeatures: 'oval face, high cheekbones',
+  },
+  pipelineType: 'story_character',
 };
 
 // Number of prompts to test with (use fewer for quick tests)
@@ -94,16 +107,16 @@ async function testStage1(loraId: string, quick: boolean) {
   }
 
   const promptCount = quick ? QUICK_TEST_COUNT : undefined;
-  console.log(`Generating ${promptCount || DATASET_PROMPTS.length} images via Nano Banana Pro...`);
+  console.log(`Generating ${promptCount || DATASET_PROMPTS.length} images via hybrid pipeline...`);
   console.log(`Character: ${TEST_CHARACTER.characterName}`);
-  console.log(`Reference: ${TEST_CHARACTER.approvedImageUrl.substring(0, 80)}...`);
+  console.log(`Portrait ref: ${TEST_CHARACTER.approvedImageUrl.substring(0, 80)}...`);
+  console.log(`Full-body ref: ${TEST_CHARACTER.fullBodyImageUrl.substring(0, 80)}...`);
   console.log(`LoRA ID: ${loraId}`);
 
   const result = await generateDataset(TEST_CHARACTER, loraId, { supabase }, promptCount);
 
   console.log('\n--- Stage 1 Results ---');
-  console.log(`Generated: ${result.generatedCount}`);
-  console.log(`Failed: ${result.failedCount}`);
+  console.log(`Total generated: ${result.totalGenerated}`);
   console.log(`Images stored in Supabase Storage: character-loras/datasets/${loraId}/`);
 
   return result;
@@ -128,6 +141,7 @@ async function testStage2(loraId: string) {
 
   const result = await evaluateDataset(
     TEST_CHARACTER.approvedImageUrl,
+    TEST_CHARACTER.fullBodyImageUrl,
     images,
     { supabase },
   );
@@ -165,10 +179,10 @@ async function testStage3(loraId: string) {
   );
 
   console.log('\n--- Stage 3 Results ---');
-  console.log(`Captioned: ${result.captionedCount}`);
+  console.log(`Captioned: ${result.totalCaptioned}`);
   console.log('\nSample captions:');
-  for (const sample of result.captions.slice(0, 3)) {
-    console.log(`  [${sample.promptId}] ${sample.caption}`);
+  for (const sample of result.captionedImages.slice(0, 3)) {
+    console.log(`  ${sample.storagePath}: ${sample.caption}`);
   }
 
   return result;

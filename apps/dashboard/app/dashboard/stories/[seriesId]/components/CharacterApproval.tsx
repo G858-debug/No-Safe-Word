@@ -21,6 +21,7 @@ import {
   User,
   Wand2,
   AlertCircle,
+  Dna,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -77,10 +78,23 @@ interface ImageSlotState {
   runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | null;
 }
 
+interface LoraTrainingState {
+  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "captioning" | "training" | "validating" | "deployed" | "failed";
+  loraId: string | null;
+  datasetGenerated: number;
+  datasetApproved: number;
+  trainingAttempt: number;
+  validationScore: number | null;
+  error: string | null;
+  estimatedTimeRemaining: string | null;
+  isTriggering: boolean;
+}
+
 interface CharState {
   portrait: ImageSlotState;
   fullBody: ImageSlotState;
   showDescription: boolean;
+  lora: LoraTrainingState;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +412,17 @@ export default function CharacterApproval({
           buildPortraitNegativePrompt(desc),
         ),
         showDescription: false,
+        lora: {
+          status: "no_lora",
+          loraId: null,
+          datasetGenerated: 0,
+          datasetApproved: 0,
+          trainingAttempt: 0,
+          validationScore: null,
+          error: null,
+          estimatedTimeRemaining: null,
+          isTriggering: false,
+        },
       };
     }
     setCharStates(initial);
@@ -864,6 +889,133 @@ export default function CharacterApproval({
     setGeneratingAll(false);
     setGenerateAllProgress(null);
   }, [characters, charStates, updateSlot, startPolling, modelUrn, debugLevel, forceModel]);
+
+  // ------- LoRA Training Actions -------
+
+  const updateLoraState = useCallback(
+    (id: string, updates: Partial<LoraTrainingState>) => {
+      setCharStates((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          lora: { ...prev[id]?.lora, ...updates },
+        },
+      }));
+    },
+    []
+  );
+
+  const handleTrainLora = useCallback(
+    async (storyCharId: string) => {
+      updateLoraState(storyCharId, { isTriggering: true, error: null });
+
+      try {
+        const res = await fetch(
+          `/api/stories/characters/${storyCharId}/train-lora`,
+          { method: "POST", headers: { "Content-Type": "application/json" } }
+        );
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to start LoRA training");
+        }
+
+        const data = await res.json();
+        updateLoraState(storyCharId, {
+          isTriggering: false,
+          status: "pending",
+          loraId: data.loraId,
+        });
+
+        // Start polling for progress
+        startLoraPolling(storyCharId);
+      } catch (err) {
+        updateLoraState(storyCharId, {
+          isTriggering: false,
+          error: err instanceof Error ? err.message : "Failed to start training",
+        });
+      }
+    },
+    [updateLoraState]
+  );
+
+  const loraPollingTimers = useRef<Record<string, NodeJS.Timeout>>({});
+
+  const startLoraPolling = useCallback(
+    (storyCharId: string) => {
+      // Clear existing timer
+      if (loraPollingTimers.current[storyCharId]) {
+        clearInterval(loraPollingTimers.current[storyCharId]);
+      }
+
+      loraPollingTimers.current[storyCharId] = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/stories/characters/${storyCharId}/lora-progress`);
+          if (!res.ok) return;
+
+          const data = await res.json();
+
+          if (!data || data.status === "no_lora") return;
+
+          updateLoraState(storyCharId, {
+            status: data.status,
+            loraId: data.loraId,
+            datasetGenerated: data.progress?.datasetGenerated || 0,
+            datasetApproved: data.progress?.datasetApproved || 0,
+            trainingAttempt: data.progress?.trainingAttempt || 0,
+            validationScore: data.progress?.validationScore || null,
+            error: data.error,
+            estimatedTimeRemaining: data.estimatedTimeRemaining,
+          });
+
+          // Stop polling when terminal state reached
+          if (["deployed", "failed", "archived"].includes(data.status)) {
+            clearInterval(loraPollingTimers.current[storyCharId]);
+            delete loraPollingTimers.current[storyCharId];
+          }
+        } catch {
+          // Silently retry
+        }
+      }, 5000);
+    },
+    [updateLoraState]
+  );
+
+  // On mount: check LoRA progress for already-approved characters
+  useEffect(() => {
+    for (const ch of characters) {
+      if (ch.approved && ch.approved_fullbody) {
+        // Check if there's an existing LoRA training
+        fetch(`/api/stories/characters/${ch.id}/lora-progress`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data && data.status && data.status !== "no_lora") {
+              updateLoraState(ch.id, {
+                status: data.status,
+                loraId: data.loraId,
+                datasetGenerated: data.progress?.datasetGenerated || 0,
+                datasetApproved: data.progress?.datasetApproved || 0,
+                trainingAttempt: data.progress?.trainingAttempt || 0,
+                validationScore: data.progress?.validationScore || null,
+                error: data.error,
+                estimatedTimeRemaining: data.estimatedTimeRemaining,
+              });
+
+              // If still in progress, start polling
+              if (!["deployed", "failed", "archived", "no_lora"].includes(data.status)) {
+                startLoraPolling(ch.id);
+              }
+            }
+          })
+          .catch(() => {/* ignore */});
+      }
+    }
+
+    return () => {
+      Object.values(loraPollingTimers.current).forEach(clearInterval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ------- Derived state -------
 
@@ -1346,11 +1498,179 @@ export default function CharacterApproval({
                     )}
                   </span>
                 </div>
+
+                {/* LoRA Training Section — shows after both images approved */}
+                {fullyApproved && (
+                  <LoraTrainingSection
+                    storyCharId={ch.id}
+                    characterName={ch.characters.name}
+                    loraState={state.lora}
+                    onTrain={() => handleTrainLora(ch.id)}
+                  />
+                )}
               </CardContent>
             </Card>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LoRA Training Section Component
+// ---------------------------------------------------------------------------
+
+const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; description: string }> = {
+  no_lora: { label: "Not Started", color: "text-muted-foreground/50", description: "Train a character LoRA for consistent identity across all scenes" },
+  pending: { label: "Starting...", color: "text-blue-400", description: "Initializing pipeline" },
+  generating_dataset: { label: "Generating Dataset", color: "text-blue-400", description: "Creating training images (Nano Banana Pro + ComfyUI)" },
+  evaluating: { label: "Evaluating Quality", color: "text-blue-400", description: "Claude Vision is checking face & body consistency" },
+  captioning: { label: "Captioning", color: "text-blue-400", description: "Generating training captions" },
+  training: { label: "Training LoRA", color: "text-purple-400", description: "SDXL LoRA training on Replicate" },
+  validating: { label: "Validating", color: "text-purple-400", description: "Testing LoRA with sample generations" },
+  deployed: { label: "Active", color: "text-green-400", description: "Character LoRA is deployed and will be used in scene generation" },
+  failed: { label: "Failed", color: "text-red-400", description: "Training failed — click Retry to try again" },
+};
+
+function LoraTrainingSection({
+  storyCharId,
+  characterName,
+  loraState,
+  onTrain,
+}: {
+  storyCharId: string;
+  characterName: string;
+  loraState: LoraTrainingState;
+  onTrain: () => void;
+}) {
+  const config = LORA_STATUS_CONFIG[loraState.status] || LORA_STATUS_CONFIG.no_lora;
+  const isInProgress = !["no_lora", "deployed", "failed", "archived"].includes(loraState.status);
+  const isDeployed = loraState.status === "deployed";
+  const isFailed = loraState.status === "failed";
+
+  return (
+    <div className="border-t border-muted/50 pt-3 mt-1 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Dna className={`h-4 w-4 ${isDeployed ? "text-green-400" : isInProgress ? "text-purple-400" : "text-muted-foreground/50"}`} />
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            LoRA Training
+          </span>
+          <span className={`text-xs font-medium ${config.color}`}>
+            {config.label}
+          </span>
+        </div>
+
+        {/* Action buttons */}
+        {loraState.status === "no_lora" && (
+          <Button
+            onClick={onTrain}
+            disabled={loraState.isTriggering}
+            size="sm"
+            variant="outline"
+            className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+          >
+            {loraState.isTriggering ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Dna className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Train Character LoRA
+          </Button>
+        )}
+
+        {isFailed && (
+          <Button
+            onClick={onTrain}
+            disabled={loraState.isTriggering}
+            size="sm"
+            variant="outline"
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+          >
+            {loraState.isTriggering ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Retry
+          </Button>
+        )}
+
+        {isDeployed && (
+          <span className="flex items-center gap-1 text-xs text-green-400">
+            <Check className="h-3 w-3" />
+            LoRA Active
+          </span>
+        )}
+      </div>
+
+      {/* Progress details for in-progress states */}
+      {isInProgress && (
+        <div className="rounded-md bg-purple-500/5 border border-purple-500/20 p-2.5 space-y-1.5">
+          <p className="text-xs text-purple-300">{config.description}</p>
+
+          {loraState.status === "generating_dataset" && loraState.datasetGenerated > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Dataset: {loraState.datasetGenerated}/30 images</span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-muted/50">
+                <div
+                  className="h-1.5 rounded-full bg-purple-500 transition-all duration-500"
+                  style={{ width: `${Math.min(100, (loraState.datasetGenerated / 30) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {loraState.status === "evaluating" && (
+            <p className="text-xs text-muted-foreground">
+              {loraState.datasetApproved} images approved so far
+            </p>
+          )}
+
+          {loraState.status === "training" && loraState.trainingAttempt > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Attempt {loraState.trainingAttempt}/3
+            </p>
+          )}
+
+          {loraState.estimatedTimeRemaining && (
+            <p className="text-xs text-muted-foreground/70">
+              Estimated: {loraState.estimatedTimeRemaining}
+            </p>
+          )}
+
+          <div className="flex items-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin text-purple-400" />
+            <span className="text-xs text-purple-400">Running in background...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error display */}
+      {isFailed && loraState.error && (
+        <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {loraState.error}
+        </div>
+      )}
+
+      {/* Deployed details */}
+      {isDeployed && (
+        <p className="text-xs text-muted-foreground/70">
+          {config.description}
+          {loraState.validationScore && ` (validation: ${loraState.validationScore.toFixed(1)}/10)`}
+        </p>
+      )}
+
+      {/* Not started description */}
+      {loraState.status === "no_lora" && (
+        <p className="text-xs text-muted-foreground/50">
+          {config.description}
+        </p>
+      )}
     </div>
   );
 }

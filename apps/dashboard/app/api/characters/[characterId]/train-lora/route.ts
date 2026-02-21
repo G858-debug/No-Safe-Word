@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 import { runPipeline } from '@no-safe-word/image-gen/server/character-lora';
-import type { CharacterInput } from '@no-safe-word/image-gen';
+import type { CharacterInput, CharacterStructured } from '@no-safe-word/image-gen';
 
 // POST /api/characters/[characterId]/train-lora
 // Kicks off the full LoRA training pipeline. Returns immediately with a loraId.
@@ -28,12 +28,13 @@ export async function POST(
       );
     }
 
-    // 2. Find the approved story_character record
+    // 2. Find the approved story_character record (both portrait and full-body must be approved)
     let storyCharQuery = supabase
       .from('story_characters')
-      .select('id, approved, approved_image_id, approved_prompt')
+      .select('id, approved, approved_image_id, approved_seed, approved_prompt, approved_fullbody, approved_fullbody_image_id, approved_fullbody_seed')
       .eq('character_id', characterId)
-      .eq('approved', true);
+      .eq('approved', true)
+      .eq('approved_fullbody', true);
 
     if (seriesId) {
       storyCharQuery = storyCharQuery.eq('series_id', seriesId);
@@ -45,42 +46,35 @@ export async function POST(
 
     if (scError || !storyChar) {
       return NextResponse.json(
-        { error: 'No approved portrait found for this character. Approve a portrait first.' },
+        { error: 'Both portrait and full-body must be approved before LoRA training.' },
         { status: 400 }
       );
     }
 
-    if (!storyChar.approved_image_id) {
+    if (!storyChar.approved_image_id || !storyChar.approved_fullbody_image_id) {
       return NextResponse.json(
-        { error: 'Character is approved but has no approved image ID' },
+        { error: 'Character is approved but missing image IDs for portrait or full-body' },
         { status: 400 }
       );
     }
 
-    // 3. Get the approved image URL
-    const { data: image, error: imgError } = await supabase
-      .from('images')
-      .select('id, stored_url, sfw_url')
-      .eq('id', storyChar.approved_image_id)
-      .single();
+    // 3. Get the approved image URLs for both portrait and full-body
+    const [portraitImage, fullBodyImage] = await Promise.all([
+      supabase.from('images').select('stored_url, sfw_url').eq('id', storyChar.approved_image_id).single(),
+      supabase.from('images').select('stored_url, sfw_url').eq('id', storyChar.approved_fullbody_image_id).single(),
+    ]);
 
-    if (imgError || !image) {
-      return NextResponse.json(
-        { error: 'Approved image not found in database' },
-        { status: 404 }
-      );
-    }
+    const portraitUrl = portraitImage.data?.stored_url || portraitImage.data?.sfw_url;
+    const fullBodyUrl = fullBodyImage.data?.stored_url || fullBodyImage.data?.sfw_url;
 
-    const approvedImageUrl = image.stored_url || image.sfw_url;
-    if (!approvedImageUrl) {
+    if (!portraitUrl || !fullBodyUrl) {
       return NextResponse.json(
-        { error: 'Approved image has no URL' },
+        { error: 'Could not find stored URLs for approved images' },
         { status: 400 }
       );
     }
 
     // 4. Check for existing active/in-progress LoRA
-    // Note: character_loras table is not in auto-generated types yet, so we use 'as any'
     const { data: existingLora } = await (supabase as any)
       .from('character_loras')
       .select('id, status')
@@ -100,8 +94,8 @@ export async function POST(
     }
 
     // 5. Create the character_loras record
-    const description = character.description as Record<string, string> | null;
-    const gender = description?.gender || 'female';
+    const desc = character.description as Record<string, string> | null;
+    const gender = desc?.gender || 'female';
 
     const { data: loraRecord, error: createError } = await (supabase as any)
       .from('character_loras')
@@ -110,9 +104,10 @@ export async function POST(
         filename: '',
         storage_path: '',
         trigger_word: 'tok',
-        base_model: 'lustify-v5-endgame',
+        base_model: 'sdxl',
         training_provider: 'replicate',
         status: 'pending',
+        pipeline_type: 'story_character',
       })
       .select()
       .single() as { data: { id: string } | null; error: any };
@@ -124,13 +119,30 @@ export async function POST(
       );
     }
 
-    // 6. Build character input
+    // 6. Build structured data and character input
+    const structuredData: CharacterStructured = {
+      gender: desc?.gender || 'female',
+      ethnicity: desc?.ethnicity || '',
+      bodyType: desc?.bodyType || '',
+      skinTone: desc?.skinTone || '',
+      hairColor: desc?.hairColor || '',
+      hairStyle: desc?.hairStyle || '',
+      eyeColor: desc?.eyeColor || '',
+      age: desc?.age || '',
+      distinguishingFeatures: desc?.distinguishingFeatures,
+    };
+
     const characterInput: CharacterInput = {
       characterId,
       characterName: character.name,
       gender,
-      approvedImageUrl,
+      approvedImageUrl: portraitUrl,
       approvedPrompt: storyChar.approved_prompt || '',
+      fullBodyImageUrl: fullBodyUrl,
+      fullBodySeed: storyChar.approved_fullbody_seed || 42,
+      portraitSeed: storyChar.approved_seed || 42,
+      structuredData,
+      pipelineType: 'story_character',
     };
 
     // 7. Fire off pipeline (no await — runs in background)

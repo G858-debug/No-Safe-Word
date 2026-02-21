@@ -1,230 +1,317 @@
-// 30 Prompt Templates for LoRA Training Dataset Generation
-// Organized by variation type to ensure training diversity
+// Dataset Prompt Templates for Hybrid LoRA Training Pipeline
+//
+// SPLIT:
+//   Nano Banana Pro (14-18 images) — face close-ups + head-and-shoulders (SFW only)
+//   ComfyUI/RunPod (10-14 images) — waist-up, full body, body detail (no restrictions)
+//
+// Nano Banana prompts are simple and SFW — no body-specific terms.
+// ComfyUI prompts use [placeholder] tokens interpolated with character structured data.
 
-import type { VariationType } from './types';
+import type { ImageSource, ImageCategory, VariationType } from './types';
 
 export interface DatasetPrompt {
   id: string;
   variationType: VariationType;
+  source: ImageSource;
+  category: ImageCategory;
   prompt: string;
   description: string;
+  /** ComfyUI checkpoint override (default RealVisXL; 'lustify' for NSFW) */
+  checkpoint?: 'realvis' | 'lustify';
 }
 
-export const DATASET_PROMPTS: DatasetPrompt[] = [
-  // ── ANGLES (6 prompts) ──────────────────────────────────────
+// ── NANO BANANA PRO PROMPTS (SFW face/head shots) ───────────────
+// These are sent with the approved portrait as a reference image.
+// Nano Banana Pro excels at face consistency but content-restricts body terms.
+
+const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
+  // Face close-ups (8-10)
   {
-    id: 'angle_front',
+    id: 'nb_face_front_neutral',
     variationType: 'angle',
-    prompt: 'Portrait photo of this person, front view, facing directly at camera, neutral expression, plain studio background, soft even lighting, head and shoulders, photorealistic',
-    description: 'Front-facing portrait, neutral',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, front view, neutral expression, soft studio lighting, clean background',
+    description: 'Front-facing close-up, neutral',
   },
   {
-    id: 'angle_three_quarter_left',
+    id: 'nb_face_34_right_smile',
     variationType: 'angle',
-    prompt: 'Portrait photo of this person, three-quarter view turned slightly to the left, natural expression, plain background, soft studio lighting, head and shoulders, photorealistic',
-    description: '3/4 left turn',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, 3/4 angle looking slightly right, warm smile, golden hour side lighting',
+    description: '3/4 right with warm smile',
   },
   {
-    id: 'angle_three_quarter_right',
-    variationType: 'angle',
-    prompt: 'Portrait photo of this person, three-quarter view turned slightly to the right, relaxed expression, clean background, professional lighting, head and shoulders, photorealistic',
-    description: '3/4 right turn',
+    id: 'nb_face_over_shoulder',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, looking over left shoulder, serious contemplative expression, dramatic shadow lighting',
+    description: 'Over-shoulder contemplative',
   },
   {
-    id: 'angle_profile_left',
-    variationType: 'angle',
-    prompt: 'Profile portrait of this person, left side profile view, looking straight ahead, clean background, rim lighting on face, head and shoulders, photorealistic',
-    description: 'Left profile',
+    id: 'nb_face_laughing',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, slight head tilt, laughing genuinely, bright natural daylight',
+    description: 'Laughing candid',
   },
   {
-    id: 'angle_profile_right',
-    variationType: 'angle',
-    prompt: 'Profile portrait of this person, right side profile view, chin slightly raised, clean background, soft side lighting, head and shoulders, photorealistic',
-    description: 'Right profile',
+    id: 'nb_face_confident',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, direct eye contact, confident subtle smirk, warm indoor ambient light',
+    description: 'Confident direct gaze',
   },
   {
-    id: 'angle_slight_above',
+    id: 'nb_face_vulnerable',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, eyes slightly downcast, thoughtful vulnerable expression, soft window light from the side',
+    description: 'Vulnerable downcast gaze',
+  },
+  {
+    id: 'nb_face_profile',
     variationType: 'angle',
-    prompt: 'Portrait of this person from a slightly elevated angle, looking up at the camera with a gentle expression, clean background, overhead soft lighting, head and shoulders, photorealistic',
-    description: 'Slight high angle looking up',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, profile view facing left, serene expression, backlit rim lighting',
+    description: 'Left profile with rim light',
+  },
+  {
+    id: 'nb_face_34_left_joy',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: 'Close-up portrait, 3/4 angle looking slightly left, joyful bright expression, outdoor natural light',
+    description: '3/4 left with joy',
   },
 
-  // ── EXPRESSIONS (6 prompts) ──────────────────────────────────
+  // Head-and-shoulders (6-8)
   {
-    id: 'expr_smile',
-    variationType: 'expression',
-    prompt: 'Portrait photo of this person, warm genuine smile showing teeth, eyes crinkling with joy, front view, plain background, warm studio lighting, head and shoulders, photorealistic',
-    description: 'Warm smile',
-  },
-  {
-    id: 'expr_serious',
-    variationType: 'expression',
-    prompt: 'Portrait photo of this person, serious focused expression, intense eye contact with camera, slight furrow in brow, front view, plain background, dramatic side lighting, head and shoulders, photorealistic',
-    description: 'Serious/intense',
-  },
-  {
-    id: 'expr_laugh',
-    variationType: 'expression',
-    prompt: 'Candid portrait of this person laughing naturally, head tilted slightly back, genuine joy on face, three-quarter view, blurred background, natural daylight, head and shoulders, photorealistic',
-    description: 'Laughing',
-  },
-  {
-    id: 'expr_contemplative',
-    variationType: 'expression',
-    prompt: 'Portrait of this person with a thoughtful contemplative expression, gaze slightly downward, soft half-smile, three-quarter view, neutral background, soft natural window light, head and shoulders, photorealistic',
-    description: 'Contemplative/thoughtful',
-  },
-  {
-    id: 'expr_confident',
-    variationType: 'expression',
-    prompt: 'Portrait of this person with a confident assured expression, chin slightly raised, direct eye contact, subtle knowing smile, front view, clean background, professional lighting, head and shoulders, photorealistic',
-    description: 'Confident',
-  },
-  {
-    id: 'expr_seductive',
-    variationType: 'expression',
-    prompt: 'Portrait of this person with a seductive half-smile, slightly parted lips, heavy-lidded eyes looking at camera, three-quarter view, dark background, warm dramatic side lighting, head and shoulders, photorealistic',
-    description: 'Seductive',
-  },
-
-  // ── LIGHTING (6 prompts) ─────────────────────────────────────
-  {
-    id: 'light_warm_indoor',
-    variationType: 'lighting',
-    prompt: 'Portrait of this person indoors, warm ambient interior lighting, golden hour light through window casting warm tones on face, relaxed natural expression, waist-up, photorealistic',
-    description: 'Warm indoor / golden hour',
-  },
-  {
-    id: 'light_daylight_outdoor',
-    variationType: 'lighting',
-    prompt: 'Portrait of this person outdoors, bright natural daylight, slight overcast for soft shadows, slight squint from sun, natural relaxed pose, waist-up, photorealistic',
-    description: 'Natural daylight outdoor',
-  },
-  {
-    id: 'light_studio_high_key',
-    variationType: 'lighting',
-    prompt: 'Professional studio portrait of this person, high-key bright even lighting, white background, clean and polished look, neutral pleasant expression, head and shoulders, photorealistic',
-    description: 'Studio high-key',
-  },
-  {
-    id: 'light_dramatic_side',
-    variationType: 'lighting',
-    prompt: 'Dramatic portrait of this person, strong side lighting from the left, half the face in deep shadow, moody cinematic atmosphere, serious expression, dark background, head and shoulders, photorealistic',
-    description: 'Dramatic side lighting',
-  },
-  {
-    id: 'light_golden_hour',
-    variationType: 'lighting',
-    prompt: 'Portrait of this person during golden hour, warm golden sunlight on face, lens flare, soft backlit glow, peaceful expression, outdoor setting, waist-up, photorealistic',
-    description: 'Golden hour backlit',
-  },
-  {
-    id: 'light_night_ambient',
-    variationType: 'lighting',
-    prompt: 'Portrait of this person at night, warm amber streetlight illumination, urban background out of focus, casual confident expression, three-quarter view, waist-up, photorealistic',
-    description: 'Night ambient / streetlight',
-  },
-
-  // ── CLOTHING VARIATIONS (6 prompts) ──────────────────────────
-  {
-    id: 'cloth_professional',
+    id: 'nb_head_blazer',
     variationType: 'clothing',
-    prompt: 'Portrait of this person wearing professional business attire, fitted blazer over a blouse, small gold earrings, polished and put-together, office environment blurred in background, warm lighting, waist-up, photorealistic',
-    description: 'Professional / business',
+    source: 'nano-banana',
+    category: 'head-shoulders',
+    prompt: 'Head and shoulders portrait, front view, wearing a professional blazer, neutral composed expression, studio lighting',
+    description: 'Professional blazer',
   },
   {
-    id: 'cloth_casual',
+    id: 'nb_head_casual',
     variationType: 'clothing',
-    prompt: 'Portrait of this person in casual everyday clothes, simple fitted t-shirt, minimal accessories, relaxed natural pose, outdoor park setting blurred, natural daylight, waist-up, photorealistic',
-    description: 'Casual everyday',
+    source: 'nano-banana',
+    category: 'head-shoulders',
+    prompt: 'Head and shoulders portrait, 3/4 angle, wearing a casual fitted top, relaxed smile, warm indoor lighting',
+    description: 'Casual fitted top',
   },
   {
-    id: 'cloth_elegant_evening',
+    id: 'nb_head_offshoulder',
     variationType: 'clothing',
-    prompt: 'Portrait of this person dressed for an evening out, elegant dress or formal top, statement earrings, subtle makeup visible, dimly lit restaurant background, warm candlelight ambience, waist-up, photorealistic',
-    description: 'Elegant evening',
+    source: 'nano-banana',
+    category: 'head-shoulders',
+    prompt: 'Head and shoulders portrait, slight angle, wearing an off-shoulder top, confident expression, golden hour lighting',
+    description: 'Off-shoulder confident',
   },
   {
-    id: 'cloth_athleisure',
+    id: 'nb_head_african_print',
     variationType: 'clothing',
-    prompt: 'Portrait of this person in athletic/workout clothing, sports top or tank, hair pulled back practically, fresh-faced with minimal makeup, gym or outdoor exercise setting blurred, bright lighting, waist-up, photorealistic',
-    description: 'Athletic / sporty',
+    source: 'nano-banana',
+    category: 'head-shoulders',
+    prompt: 'Head and shoulders portrait, front view, wearing a colorful African print top, warm genuine smile, bright daylight',
+    description: 'African print top',
   },
   {
-    id: 'cloth_traditional',
+    id: 'nb_head_white_blouse',
     variationType: 'clothing',
-    prompt: 'Portrait of this person wearing traditional African print fabric, vibrant colors and patterns, proud natural expression, clean background with warm tones, cultural celebration atmosphere, waist-up, photorealistic',
-    description: 'Traditional African attire',
+    source: 'nano-banana',
+    category: 'head-shoulders',
+    prompt: 'Head and shoulders portrait, 3/4 angle looking right, wearing a simple white blouse, pensive expression, soft diffused light',
+    description: 'White blouse pensive',
   },
   {
-    id: 'cloth_sleepwear',
+    id: 'nb_head_jewelry',
     variationType: 'clothing',
-    prompt: 'Portrait of this person in comfortable sleepwear, silk camisole or sleep shirt, hair loose and natural, soft relaxed morning expression, bedroom setting with soft window light, waist-up, photorealistic',
-    description: 'Sleepwear / intimate casual',
-  },
-
-  // ── FRAMING VARIATIONS (6 prompts) ───────────────────────────
-  {
-    id: 'frame_close_face',
-    variationType: 'framing',
-    prompt: 'Extreme close-up portrait of this person, face filling the frame, showing detailed skin texture, pores, natural imperfections, soft neutral expression, shallow depth of field, studio lighting, photorealistic',
-    description: 'Extreme close-up face',
-  },
-  {
-    id: 'frame_head_shoulders',
-    variationType: 'framing',
-    prompt: 'Head and shoulders portrait of this person, standard portrait framing, pleasant natural expression, clean background, professional portrait lighting, photorealistic',
-    description: 'Standard head and shoulders',
-  },
-  {
-    id: 'frame_waist_up',
-    variationType: 'framing',
-    prompt: 'Waist-up portrait of this person, casual confident pose, one hand on hip, looking at camera with slight smile, blurred indoor background, natural light from window, photorealistic',
-    description: 'Waist-up with pose',
-  },
-  {
-    id: 'frame_three_quarter_body',
-    variationType: 'framing',
-    prompt: 'Three-quarter body shot of this person, standing naturally, weight on one leg, relaxed confident posture, arms at sides, blurred neutral background, full studio lighting, photorealistic',
-    description: 'Three-quarter body',
-  },
-  {
-    id: 'frame_full_body',
-    variationType: 'framing',
-    prompt: 'Full body portrait of this person, standing upright, natural relaxed pose, arms comfortably at sides, clean simple background, even studio lighting from head to toe, photorealistic',
-    description: 'Full body standing',
-  },
-  {
-    id: 'frame_seated',
-    variationType: 'framing',
-    prompt: 'Portrait of this person seated in a chair, relaxed posture leaning slightly forward, hands in lap, warm natural expression, three-quarter view, blurred room background, warm interior lighting, waist-up, photorealistic',
-    description: 'Seated pose',
+    source: 'nano-banana',
+    category: 'head-shoulders',
+    prompt: 'Head and shoulders portrait, facing slightly left, wearing gold jewelry and earrings, elegant composed look, warm amber light',
+    description: 'Gold jewelry elegant',
   },
 ];
+
+// ── COMFYUI PROMPTS (body shots — no content restrictions) ──────
+// These use [placeholder] tokens that are replaced with actual character data.
+// Placeholders: [ethnicity], [bodyType], [skinTone], [hairStyle], [hairColor]
+
+const COMFYUI_PROMPTS: DatasetPrompt[] = [
+  // Waist-up (5-7) — body type visible but not full length
+  {
+    id: 'cu_waist_tank',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'waist-up',
+    prompt: 'masterpiece, photorealistic, waist-up portrait, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing fitted tank top, natural standing pose, warm indoor lighting, clean background',
+    description: 'Tank top waist-up',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_waist_wrap_dress',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'waist-up',
+    prompt: 'masterpiece, photorealistic, waist-up portrait, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing wrap dress showing figure, 3/4 angle, golden hour side lighting, simple background',
+    description: 'Wrap dress waist-up',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_waist_jeans_tee',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'waist-up',
+    prompt: 'masterpiece, photorealistic, waist-up portrait, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing casual jeans and fitted t-shirt, relaxed pose, bright natural daylight, clean background',
+    description: 'Casual jeans & tee',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_waist_professional',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'waist-up',
+    prompt: 'masterpiece, photorealistic, waist-up portrait, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing professional blouse, seated pose, soft office lighting, neutral background',
+    description: 'Professional seated',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_waist_evening',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'waist-up',
+    prompt: 'masterpiece, photorealistic, waist-up shot, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing elegant evening dress, slight angle, dramatic warm lighting, dark background',
+    description: 'Evening dress waist-up',
+    checkpoint: 'realvis',
+  },
+
+  // Full body (4-6) — head to feet
+  {
+    id: 'cu_full_crop_top',
+    variationType: 'framing',
+    source: 'comfyui',
+    category: 'full-body',
+    prompt: 'masterpiece, photorealistic, full body standing pose, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing fitted jeans and crop top showing midriff, natural confident stance, studio lighting, clean white background, head to feet visible',
+    description: 'Crop top full body',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_full_bodycon',
+    variationType: 'framing',
+    source: 'comfyui',
+    category: 'full-body',
+    prompt: 'masterpiece, photorealistic, full body pose, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing bodycon dress highlighting curves, walking pose, warm golden light, simple background, full length',
+    description: 'Bodycon dress walking',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_full_workout',
+    variationType: 'framing',
+    source: 'comfyui',
+    category: 'full-body',
+    prompt: 'masterpiece, photorealistic, full body standing, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing workout leggings and sports bra, athletic pose, bright gym lighting, clean background',
+    description: 'Workout gear athletic',
+    checkpoint: 'realvis',
+  },
+  {
+    id: 'cu_full_summer_dress',
+    variationType: 'framing',
+    source: 'comfyui',
+    category: 'full-body',
+    prompt: 'masterpiece, photorealistic, full body shot, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing summer dress, casual standing pose outdoors, natural daylight, simple outdoor background',
+    description: 'Summer dress outdoor',
+    checkpoint: 'realvis',
+  },
+
+  // Body detail / revealing (2-3, NSFW-capable checkpoint)
+  {
+    id: 'cu_detail_lingerie',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'body-detail',
+    prompt: 'masterpiece, photorealistic, waist-up, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing lace lingerie, confident sensual pose, warm bedroom lighting, soft background, intimate atmosphere',
+    description: 'Lingerie waist-up',
+    checkpoint: 'lustify',
+  },
+  {
+    id: 'cu_detail_silk_robe',
+    variationType: 'clothing',
+    source: 'comfyui',
+    category: 'body-detail',
+    prompt: 'masterpiece, photorealistic, full body, [ethnicity] woman, [bodyType], [skinTone] skin, [hairStyle] [hairColor] hair, wearing silk robe partially open, standing in doorway, dramatic side lighting, photorealistic',
+    description: 'Silk robe doorway',
+    checkpoint: 'lustify',
+  },
+];
+
+// ── Exports ─────────────────────────────────────────────────────
+
+export const ALL_PROMPTS: DatasetPrompt[] = [...NANO_BANANA_PROMPTS, ...COMFYUI_PROMPTS];
+
+export function getNanoBananaPrompts(): DatasetPrompt[] {
+  return NANO_BANANA_PROMPTS;
+}
+
+export function getComfyUIPrompts(): DatasetPrompt[] {
+  return COMFYUI_PROMPTS;
+}
 
 // ── Gender Adaptation ───────────────────────────────────────────
 
-const MALE_CLOTHING_SWAPS: Array<[RegExp, string]> = [
-  [/fitted blazer over a blouse/g, 'tailored button-up shirt'],
-  [/small gold earrings, /g, ''],
-  [/elegant dress or formal top, statement earrings, subtle makeup visible/g, 'fitted dark suit, open collar shirt, clean-shaven'],
-  [/sports top or tank, hair pulled back practically, fresh-faced with minimal makeup/g, 'athletic tank top, short cropped hair, clean look'],
-  [/silk camisole or sleep shirt/g, 'plain t-shirt or bare chest'],
-  [/statement earrings/g, ''],
-  [/subtle makeup visible, /g, ''],
-  [/fresh-faced with minimal makeup, /g, ''],
+const FEMALE_TO_MALE_SWAPS: Array<[RegExp, string]> = [
+  // Nano Banana clothing swaps
+  [/wearing a professional blazer/g, 'wearing a tailored button-up shirt'],
+  [/wearing a casual fitted top/g, 'wearing a casual polo shirt'],
+  [/wearing an off-shoulder top/g, 'wearing a fitted henley'],
+  [/wearing gold jewelry and earrings/g, 'wearing a simple watch'],
+  [/elegant composed look/g, 'confident composed look'],
+  [/wearing a simple white blouse/g, 'wearing a crisp white shirt'],
+  // ComfyUI body prompts — swap gendered terms
+  [/\bwoman\b/g, 'man'],
+  [/wearing fitted tank top/g, 'wearing fitted tank top'],
+  [/wearing wrap dress showing figure/g, 'wearing fitted button-down shirt'],
+  [/wearing fitted jeans and crop top showing midriff/g, 'wearing fitted jeans and white t-shirt'],
+  [/wearing bodycon dress highlighting curves/g, 'wearing tailored chinos and fitted shirt'],
+  [/wearing workout leggings and sports bra/g, 'wearing workout shorts and compression shirt'],
+  [/wearing summer dress/g, 'wearing chinos and short-sleeve shirt'],
+  [/wearing lace lingerie/g, 'wearing fitted boxer briefs'],
+  [/wearing silk robe partially open/g, 'wearing cotton robe loosely tied'],
+  [/wearing elegant evening dress/g, 'wearing fitted dark suit with open collar'],
+  [/wearing professional blouse/g, 'wearing professional button-up shirt'],
 ];
 
-/**
- * Adapt a prompt for male characters by swapping female-coded clothing/accessories.
- * Female prompts are used as-is.
- */
 export function adaptPromptForGender(prompt: string, gender: string): string {
   if (gender.toLowerCase() !== 'male') return prompt;
 
   let adapted = prompt;
-  for (const [pattern, replacement] of MALE_CLOTHING_SWAPS) {
+  for (const [pattern, replacement] of FEMALE_TO_MALE_SWAPS) {
     adapted = adapted.replace(pattern, replacement);
   }
   return adapted;
 }
+
+// ── ComfyUI Prompt Interpolation ────────────────────────────────
+
+export function interpolateComfyUIPrompt(
+  template: string,
+  data: { ethnicity: string; bodyType: string; skinTone: string; hairStyle: string; hairColor: string },
+): string {
+  return template
+    .replace(/\[ethnicity\]/g, data.ethnicity)
+    .replace(/\[bodyType\]/g, data.bodyType)
+    .replace(/\[skinTone\]/g, data.skinTone)
+    .replace(/\[hairStyle\]/g, data.hairStyle)
+    .replace(/\[hairColor\]/g, data.hairColor);
+}
+
+// Keep legacy export for backward compatibility with test-pipeline
+export const DATASET_PROMPTS = ALL_PROMPTS;
