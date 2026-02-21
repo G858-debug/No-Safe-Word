@@ -25,7 +25,7 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { prompt: customPrompt, negativePrompt: customNegativePrompt } = body as { prompt?: string; negativePrompt?: string };
+    const { prompt: customPrompt, negativePrompt: customNegativePrompt, seed: customSeed } = body as { prompt?: string; negativePrompt?: string; seed?: number };
 
     console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}`);
 
@@ -123,8 +123,8 @@ export async function POST(
     const classification = classifyScene(prompt, "portrait");
     const resources = selectResources(classification);
 
-    // 7. Fixed generation settings (CFG 6.5, random seed)
-    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    // 7. Fixed generation settings (CFG 6.5, fixed or random seed)
+    const seed = (typeof customSeed === "number" && customSeed > 0) ? customSeed : Math.floor(Math.random() * 2_147_483_647) + 1;
     const cfg = 6.5;
 
     console.log(`[StoryPublisher] Portrait classification:`, JSON.stringify(classification));

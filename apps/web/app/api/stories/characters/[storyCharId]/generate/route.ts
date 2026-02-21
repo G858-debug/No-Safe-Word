@@ -31,6 +31,7 @@ export async function POST(
     let debugLevel: DebugLevel = "full";
     let forceModel: string | undefined;
     let customNegativePrompt: string | undefined;
+    let customSeed: number | undefined;
     try {
       const body = await request.json();
       if (body.debugLevel && ["bare", "model", "loras", "negative", "full"].includes(body.debugLevel)) {
@@ -41,6 +42,9 @@ export async function POST(
       }
       if (body.negativePrompt && typeof body.negativePrompt === "string") {
         customNegativePrompt = body.negativePrompt;
+      }
+      if (typeof body.seed === "number" && body.seed > 0) {
+        customSeed = body.seed;
       }
     } catch {
       // No body or invalid JSON — use default "full"
@@ -98,8 +102,8 @@ export async function POST(
       age: desc.age || "",
     };
 
-    // 4. Generate with a known random seed
-    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    // 4. Generate with a known seed (fixed or random)
+    const seed = customSeed || Math.floor(Math.random() * 2_147_483_647) + 1;
     const prompt = buildPrompt(characterData, PORTRAIT_SCENE);
 
     // --- Debug level resource selection ---

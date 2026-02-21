@@ -67,6 +67,8 @@ interface CharState {
   jobId: string | null;
   pollStartTime: number | null;
   seed: number | null;
+  useFixedSeed: boolean;
+  fixedSeedValue: string;
   runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | null;
 }
 
@@ -295,6 +297,8 @@ export default function CharacterApproval({
         jobId: null,
         pollStartTime: null,
         seed: ch.approved_seed ?? null,
+        useFixedSeed: false,
+        fixedSeedValue: ch.approved_seed ? String(ch.approved_seed) : "",
         runpodStatus: null,
       };
     }
@@ -515,11 +519,12 @@ export default function CharacterApproval({
 
       try {
         const state = charStates[storyCharId];
-        const body: Record<string, string> = {};
+        const body: Record<string, string | number> = {};
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (state?.promptEdited) body.negativePrompt = state.negativePrompt;
+        if (state?.useFixedSeed && state.fixedSeedValue) body.seed = parseInt(state.fixedSeedValue, 10);
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
@@ -562,12 +567,13 @@ export default function CharacterApproval({
       });
 
       try {
-        const body: Record<string, string> = {};
+        const body: Record<string, string | number> = {};
         if (state.promptEdited) body.prompt = state.prompt;
         if (state.promptEdited) body.negativePrompt = state.negativePrompt;
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
+        if (state.useFixedSeed && state.fixedSeedValue) body.seed = parseInt(state.fixedSeedValue, 10);
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
@@ -697,11 +703,12 @@ export default function CharacterApproval({
         updateChar(ch.id, { isGenerating: true, error: null });
 
         const chState = charStates[ch.id];
-        const body: Record<string, string> = {};
+        const body: Record<string, string | number> = {};
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (chState?.promptEdited) body.negativePrompt = chState.negativePrompt;
+        if (chState?.useFixedSeed && chState.fixedSeedValue) body.seed = parseInt(chState.fixedSeedValue, 10);
 
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
@@ -1059,6 +1066,39 @@ export default function CharacterApproval({
                     className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20"
                     disabled={state.isGenerating}
                   />
+                </div>
+
+                {/* Fixed seed option */}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={state.useFixedSeed}
+                      onChange={(e) =>
+                        updateChar(ch.id, { useFixedSeed: e.target.checked })
+                      }
+                      disabled={state.isGenerating}
+                      className="rounded border-muted-foreground/30"
+                    />
+                    Fixed Seed
+                  </label>
+                  {state.useFixedSeed && (
+                    <input
+                      type="number"
+                      value={state.fixedSeedValue}
+                      onChange={(e) =>
+                        updateChar(ch.id, { fixedSeedValue: e.target.value })
+                      }
+                      placeholder="Enter seed..."
+                      disabled={state.isGenerating}
+                      className="w-40 rounded-md border border-muted-foreground/30 bg-muted/30 px-2 py-1 text-xs"
+                    />
+                  )}
+                  {state.seed && !state.useFixedSeed && (
+                    <span className="text-xs text-muted-foreground/50">
+                      Last seed: {state.seed}
+                    </span>
+                  )}
                 </div>
 
                 {/* Action buttons */}
