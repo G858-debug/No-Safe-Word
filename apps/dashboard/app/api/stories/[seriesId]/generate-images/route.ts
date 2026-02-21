@@ -102,12 +102,13 @@ export async function POST(
       return NextResponse.json({ queued: 0, skipped: 0, jobs: [] });
     }
 
-    // 3. Fetch pending image prompts for those posts
+    // 3. Fetch pending/stuck image prompts for those posts
+    //    Include "generating" and "failed" so stuck prompts from previous attempts get retried
     const { data: prompts, error: promptsError } = await supabase
       .from("story_image_prompts")
       .select("id, post_id, image_type, position, character_name, character_id, secondary_character_name, secondary_character_id, prompt")
       .in("post_id", postIds)
-      .eq("status", "pending");
+      .in("status", ["pending", "generating", "failed"]);
 
     if (promptsError) {
       return NextResponse.json(
