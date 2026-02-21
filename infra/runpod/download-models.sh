@@ -124,7 +124,7 @@ if [ -n "${CIVITAI_API_KEY}" ]; then
         "loras" \
         "couples-poses-xl.safetensors"
 else
-    echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl (CIVITAI_API_KEY not set)"
+    echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl, couples-poses-xl (CIVITAI_API_KEY not set)"
 fi
 
 # YOLO face detection — used by UltralyticsDetectorProvider / FaceDetailer
