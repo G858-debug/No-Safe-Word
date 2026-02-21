@@ -59,6 +59,7 @@ interface CharState {
   approved: boolean;
   approvedUrl: string | null;
   prompt: string;
+  negativePrompt: string;
   promptEdited: boolean;
   error: string | null;
   showDescription: boolean;
@@ -202,6 +203,23 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   return parts.filter(Boolean).join(", ");
 }
 
+/** Client-side mirror of the server negative prompt builder for portraits */
+function buildPortraitNegativePrompt(desc: Record<string, unknown>): string {
+  const d = desc as Record<string, string>;
+  let result =
+    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1)";
+
+  // Portraits are always SFW
+  result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), (cleavage:1.2), sexual, explicit, revealing clothing, exposed skin";
+
+  // African feature correction for male characters
+  if (isAfricanMaleDesc(d)) {
+    result += ", European facial features, caucasian features, thin lips, pinched nose, narrow nose bridge";
+  }
+
+  return result;
+}
+
 /** Debug levels for systematic resource testing */
 const DEBUG_LEVELS = [
   { value: "full", label: "Full Pipeline", description: "Normal — all resources active" },
@@ -268,6 +286,7 @@ export default function CharacterApproval({
         approved: ch.approved,
         approvedUrl: ch.approved_image_url || null,
         prompt: buildPortraitPrompt(ch.characters.description || {}),
+        negativePrompt: buildPortraitNegativePrompt(ch.characters.description || {}),
         promptEdited: false,
         error: null,
         showDescription: false,
@@ -1013,6 +1032,19 @@ export default function CharacterApproval({
                     rows={4}
                     className="text-xs leading-relaxed resize-y bg-muted/30"
                     disabled={state.isGenerating}
+                  />
+                </div>
+
+                {/* Negative prompt (read-only) */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-red-400/70 uppercase tracking-wider">
+                    Negative Prompt
+                  </label>
+                  <Textarea
+                    value={state.negativePrompt}
+                    readOnly
+                    rows={3}
+                    className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20 text-muted-foreground"
                   />
                 </div>
 
