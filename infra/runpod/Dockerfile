@@ -53,37 +53,11 @@ print('All HuggingFace LoRAs downloaded.')\
 
 # ---- Build-time CivitAI LoRA Downloads ----
 # These LoRAs require a CivitAI API key. Passed as a build arg from GitHub Actions.
-# If the key is not provided, these are skipped and fall back to runtime download.
+# Uses a separate Python script (not inline) because for/try/with blocks
+# require real newlines — Dockerfile line continuation collapses them.
 ARG CIVITAI_API_KEY=""
-RUN if [ -n "${CIVITAI_API_KEY}" ]; then \
-  python3 -c "\
-import urllib.request, os, sys;\
-key = '${CIVITAI_API_KEY}';\
-loras = [\
-  (f'https://civitai.com/api/download/models/359579?type=Model&format=SafeTensor&token={key}', 'better-bodies-xl.safetensors'),\
-  (f'https://civitai.com/api/download/models/2686970?token={key}', 'cinecolor-harmonizer.safetensors'),\
-  (f'https://civitai.com/api/download/models/435833?token={key}', 'melanin-mix-xl.safetensors'),\
-  (f'https://civitai.com/api/download/models/1543944?token={key}', 'couples-poses-xl.safetensors'),\
-];\
-d = os.environ['COMFY_DIR'] + '/models/loras/';\
-failed = 0;\
-for url, name in loras:\
-    print(f'Downloading {name}...');\
-    try:\
-        req = urllib.request.Request(url);\
-        req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)');\
-        resp = urllib.request.urlopen(req, timeout=300);\
-        with open(d + name, 'wb') as f:\
-            import shutil; shutil.copyfileobj(resp, f);\
-        resp.close();\
-        print(f'  done ({os.path.getsize(d + name) // 1024 // 1024}MB)');\
-    except Exception as e:\
-        print(f'  FAILED: {e}', file=sys.stderr); failed += 1;\
-print(f'CivitAI LoRAs: {len(loras) - failed}/{len(loras)} downloaded.');\
-"; \
-else \
-  echo '[NSW] CIVITAI_API_KEY not provided as build arg — CivitAI LoRAs will be downloaded at runtime'; \
-fi
+COPY download-civitai-loras.py /tmp/download-civitai-loras.py
+RUN CIVITAI_API_KEY="${CIVITAI_API_KEY}" python3 /tmp/download-civitai-loras.py && rm /tmp/download-civitai-loras.py
 
 # ---- Runtime Model Download ----
 # Large models (checkpoint ~6.5GB, SAM ~400MB, YOLO ~50MB) are downloaded
