@@ -67,8 +67,7 @@ interface CharState {
   jobId: string | null;
   pollStartTime: number | null;
   seed: number | null;
-  useFixedSeed: boolean;
-  fixedSeedValue: string;
+  lockSeed: boolean;
   runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | null;
 }
 
@@ -296,8 +295,7 @@ export default function CharacterApproval({
         jobId: null,
         pollStartTime: null,
         seed: ch.approved_seed ?? null,
-        useFixedSeed: false,
-        fixedSeedValue: ch.approved_seed ? String(ch.approved_seed) : "",
+        lockSeed: true,
         runpodStatus: null,
       };
     }
@@ -523,7 +521,7 @@ export default function CharacterApproval({
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (state?.promptEdited) body.negativePrompt = state.negativePrompt;
-        if (state?.useFixedSeed && state.fixedSeedValue) body.seed = parseInt(state.fixedSeedValue, 10);
+        if (state?.lockSeed && state.seed) body.seed = state.seed;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
@@ -572,7 +570,7 @@ export default function CharacterApproval({
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
-        if (state.useFixedSeed && state.fixedSeedValue) body.seed = parseInt(state.fixedSeedValue, 10);
+        if (state.lockSeed && state.seed) body.seed = state.seed;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/regenerate`,
@@ -707,7 +705,6 @@ export default function CharacterApproval({
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (chState?.promptEdited) body.negativePrompt = chState.negativePrompt;
-        if (chState?.useFixedSeed && chState.fixedSeedValue) body.seed = parseInt(chState.fixedSeedValue, 10);
 
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
@@ -1067,37 +1064,38 @@ export default function CharacterApproval({
                   />
                 </div>
 
-                {/* Fixed seed option */}
+                {/* Lock Seed option */}
                 <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <label
+                    className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
+                    title={state.lockSeed
+                      ? "When locked, regeneration keeps the same base appearance. Unlock for a completely new look."
+                      : "Unlocked — regeneration will produce a completely different look."}
+                  >
                     <input
                       type="checkbox"
-                      checked={state.useFixedSeed}
+                      checked={state.lockSeed}
                       onChange={(e) =>
-                        updateChar(ch.id, { useFixedSeed: e.target.checked })
+                        updateChar(ch.id, { lockSeed: e.target.checked })
                       }
                       disabled={state.isGenerating}
                       className="rounded border-muted-foreground/30"
                     />
-                    Fixed Seed
+                    {state.lockSeed ? (
+                      <span>
+                        🔒 Lock Seed{" "}
+                        <span className="text-muted-foreground/50">
+                          {state.isGenerating
+                            ? "(Generating...)"
+                            : state.seed != null
+                              ? `(${state.seed})`
+                              : "(no seed yet)"}
+                        </span>
+                      </span>
+                    ) : (
+                      <span>🔓 Random Seed</span>
+                    )}
                   </label>
-                  {state.useFixedSeed && (
-                    <input
-                      type="number"
-                      value={state.fixedSeedValue}
-                      onChange={(e) =>
-                        updateChar(ch.id, { fixedSeedValue: e.target.value })
-                      }
-                      placeholder="Enter seed..."
-                      disabled={state.isGenerating}
-                      className="w-40 rounded-md border border-muted-foreground/30 bg-muted/30 px-2 py-1 text-xs"
-                    />
-                  )}
-                  {state.seed && !state.useFixedSeed && (
-                    <span className="text-xs text-muted-foreground/50">
-                      Last seed: {state.seed}
-                    </span>
-                  )}
                 </div>
 
                 {/* Action buttons */}
