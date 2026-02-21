@@ -174,7 +174,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const parts: string[] = [
     "masterpiece, best quality, highly detailed",
     "(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)",
-    "(skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)",
+    "(smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)",
   ];
 
   if (d.age) parts.push(d.age);
@@ -235,7 +235,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 function buildFullBodyPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
   const africanMale = isAfricanMaleDesc(d);
-  const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
+  const parts: string[] = ["masterpiece, best quality, highly detailed, (smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)"];
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
@@ -293,7 +293,7 @@ function buildFullBodyPrompt(desc: Record<string, unknown>): string {
 function buildPortraitNegativePrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
   let result =
-    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1)";
+    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1), (skin blemishes:1.3), (acne:1.3), (skin spots:1.2), (pimples:1.3), (moles:1.2), (freckles:1.1), (skin imperfections:1.2)";
 
   // Portraits are always SFW
   result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), explicit, exposed skin";

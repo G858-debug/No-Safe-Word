@@ -121,7 +121,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const parts: string[] = [
     "masterpiece, best quality, highly detailed",
     "(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)",
-    "(skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)",
+    "(smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)",
   ];
   const darkSkin = needsDarkSkinCorrection(d);
 

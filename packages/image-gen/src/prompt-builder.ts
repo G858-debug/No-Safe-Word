@@ -76,9 +76,9 @@ export function buildPrompt(
   if (isPortrait) {
     parts.push("masterpiece, best quality, highly detailed");
     parts.push("(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)");
-    parts.push("(skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
+    parts.push("(smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)");
   } else {
-    parts.push("masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
+    parts.push("masterpiece, best quality, highly detailed, (smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)");
   }
 
   if (character.age) parts.push(character.age);
@@ -186,6 +186,11 @@ export function extractCharacterTags(
   );
   result = result.replace(
     /\(close-up head and shoulders portrait[^)]*\),?\s*\(face in focus[^)]*\),?\s*\(detailed facial features[^)]*\),?\s*/i,
+    ""
+  );
+  // Strip skin quality tags (not character appearance)
+  result = result.replace(
+    /\(smooth clear skin[^)]*\),?\s*\(natural skin[^)]*\),?\s*\(matte skin[^)]*\),?\s*/i,
     ""
   );
 
@@ -461,7 +466,7 @@ export function buildNegativePrompt(
   characterHints?: { africanFeatureCorrection?: boolean }
 ): string {
   const base =
-    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1)";
+    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1), (skin blemishes:1.3), (acne:1.3), (skin spots:1.2), (pimples:1.3), (moles:1.2), (freckles:1.1), (skin imperfections:1.2)";
 
   let result = base;
 
