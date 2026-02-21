@@ -16,9 +16,12 @@ RUN python3 /tmp/diagnose-ipadapter.py && rm /tmp/diagnose-ipadapter.py
 # InsightFace + ONNX Runtime for FaceID face embedding extraction
 # Must pin insightface>=0.7 — default `pip install insightface` installs 0.2.1 (from 2019)
 # which lacks FaceAnalysis.providers support needed by IPAdapter FaceID.
-# Cython is required to build insightface>=0.7 from source (no pre-built wheel for Python 3.12).
-RUN pip install --no-cache-dir Cython && \
-    pip install --no-cache-dir 'insightface>=0.7' onnxruntime-gpu
+# insightface>=0.7 has no pre-built wheel for Python 3.12, so we build from source.
+# Requires: g++ (build-essential) and Cython. Cleaned up after to keep image small.
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
+    pip install --no-cache-dir Cython && \
+    pip install --no-cache-dir 'insightface>=0.7' onnxruntime-gpu && \
+    apt-get purge -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Pre-download InsightFace buffalo_l models (used by IPAdapter FaceID at inference time)
 # Uses a separate Python script to avoid Dockerfile inline syntax issues with `with` statements
