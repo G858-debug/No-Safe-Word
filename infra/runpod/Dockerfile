@@ -6,9 +6,11 @@ FROM runpod/worker-comfyui:5.7.1-base
 RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
 
 # IPAdapter Plus: IPAdapterUnifiedLoaderFaceID, IPAdapterFaceID (face consistency for story images)
-RUN cd /comfyui/custom_nodes && git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git
+# Must use comfy-node-install (not git clone) so the node is registered with ComfyUI's snapshot
+RUN comfy-node-install comfyui_ipadapter_plus
 
 # InsightFace + ONNX Runtime for FaceID face embedding extraction
+# comfy-node-install handles most deps, but we ensure insightface and onnxruntime-gpu are present
 RUN pip install --no-cache-dir insightface onnxruntime-gpu
 
 # Pre-download InsightFace buffalo_l models (used by IPAdapter FaceID at inference time)
