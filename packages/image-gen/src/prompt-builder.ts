@@ -81,7 +81,7 @@ export function buildPrompt(
       // Replace generic "Black South African" with SDXL-friendly terms
       // "African" + specific ethnic group works better than "Black" which
       // CLIP treats as a color adjective
-      parts.push("African");
+      parts.push("(African male:1.3)");
       // Keep the original ethnicity minus the ambiguous "Black" prefix
       const specificEthnicity = character.ethnicity
         .replace(/^Black\s+/i, "")

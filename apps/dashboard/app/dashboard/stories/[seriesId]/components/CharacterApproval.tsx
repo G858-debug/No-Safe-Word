@@ -151,7 +151,7 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
 
   if (d.ethnicity) {
     if (africanMale) {
-      parts.push("African");
+      parts.push("(African male:1.3)");
       const specific = (d.ethnicity || "").replace(/^Black\s+/i, "").trim();
       if (specific && specific.toLowerCase() !== "african") {
         parts.push(specific);
