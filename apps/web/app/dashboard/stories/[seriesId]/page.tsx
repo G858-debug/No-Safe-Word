@@ -180,7 +180,7 @@ export default function SeriesDetailPage() {
 
   // Derived state
   const allCharsApproved =
-    characters.length > 0 && characters.every((c) => c.approved);
+    characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
 
   // ------- Loading state -------
   if (loading) {
@@ -465,11 +465,13 @@ export default function SeriesDetailPage() {
             seriesId={seriesId}
             characters={characters}
             onProceedToImages={() => setActiveTab("images")}
-            onCharacterApproved={(storyCharId, imageUrl, imageId) => {
+            onCharacterApproved={(storyCharId, imageUrl, imageId, type) => {
               setCharacters((prev) =>
                 prev.map((c) =>
                   c.id === storyCharId
-                    ? { ...c, approved: true, approved_image_url: imageUrl, approved_image_id: imageId }
+                    ? type === "fullBody"
+                      ? { ...c, approved_fullbody: true, approved_fullbody_image_url: imageUrl, approved_fullbody_image_id: imageId }
+                      : { ...c, approved: true, approved_image_url: imageUrl, approved_image_id: imageId }
                     : c
                 )
               );

@@ -8,6 +8,8 @@ import type { CharacterData, SceneData } from "@no-safe-word/shared";
 /** Debug levels for systematic resource testing (progressive — each level adds one layer) */
 type DebugLevel = "bare" | "model" | "loras" | "negative" | "full";
 
+type ImageType = "portrait" | "fullBody";
+
 const PORTRAIT_SCENE: SceneData = {
   mode: "sfw",
   setting: "(professional portrait photography:1.2), studio lighting, bokeh background",
@@ -15,6 +17,17 @@ const PORTRAIT_SCENE: SceneData = {
   mood: "professional portrait",
   sfwDescription:
     "head and shoulders portrait, looking at camera, neutral expression, photorealistic",
+  nsfwDescription: "",
+  additionalTags: [],
+};
+
+const FULLBODY_SCENE: SceneData = {
+  mode: "sfw",
+  setting: "(fashion photography:1.2), studio lighting, clean neutral background",
+  lighting: "studio-quality lighting",
+  mood: "fashion photography",
+  sfwDescription:
+    "full body standing pose, full body visible head to feet, standing naturally, photorealistic",
   nsfwDescription: "",
   additionalTags: [],
 };
@@ -36,8 +49,10 @@ export async function POST(
       debugLevel = body.debugLevel;
     }
     const forceModel: string | undefined = (body.forceModel && typeof body.forceModel === "string") ? body.forceModel : undefined;
+    const imageType: ImageType = body.type === "fullBody" ? "fullBody" : "portrait";
+    const scene = imageType === "fullBody" ? FULLBODY_SCENE : PORTRAIT_SCENE;
 
-    console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}, debugLevel: ${debugLevel}`);
+    console.log(`[StoryPublisher] Regenerating ${imageType} for character ${storyCharId}, customPrompt: ${!!customPrompt}, debugLevel: ${debugLevel}`);
 
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
@@ -125,9 +140,9 @@ export async function POST(
     if (customPrompt) {
       prompt = customPrompt;
     } else {
-      prompt = buildPrompt(characterData, PORTRAIT_SCENE);
+      prompt = buildPrompt(characterData, scene);
     }
-    negativePrompt = customNegativePrompt || buildNegativePrompt(PORTRAIT_SCENE, skinHints);
+    negativePrompt = customNegativePrompt || buildNegativePrompt(scene, skinHints);
 
     // 6. Scene intelligence: classify portrait and select LoRAs + negative additions
     const classification = classifyScene(prompt, "portrait");
@@ -167,7 +182,7 @@ export async function POST(
       width: 832,
       height: 1216,
       seed,
-      filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
+      filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
       loras: useLoras ? (resources.loras.length > 0 ? resources.loras : undefined) : [],
       negativePromptAdditions: resources.negativePromptAdditions || undefined,
       checkpointName: modelSelection.checkpointName,
@@ -191,6 +206,7 @@ export async function POST(
           sampler: 'euler_ancestral',
           engine: "runpod-comfyui",
           debugLevel,
+          imageType,
           model: modelSelection.checkpointName,
           loras: resources.loras.map(l => l.filename),
           faceDetailer: useFaceDetailer,
@@ -212,7 +228,7 @@ export async function POST(
       cost: 0,
     });
 
-    console.log(`[StoryPublisher] Portrait regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
+    console.log(`[StoryPublisher] ${imageType === "fullBody" ? "Full body" : "Portrait"} regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
 
     return NextResponse.json({
       jobId: `runpod-${jobId}`,

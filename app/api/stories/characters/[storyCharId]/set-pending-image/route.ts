@@ -10,10 +10,12 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { image_id, image_url } = body as {
+    const { image_id, image_url, type: imageType } = body as {
       image_id: string;
       image_url: string;
+      type?: "portrait" | "fullBody";
     };
+    const isFullBody = imageType === "fullBody";
 
     console.log(`[StoryPublisher] Setting pending image for character ${storyCharId}: imageId=${image_id}, url=${image_url}`);
 
@@ -41,11 +43,17 @@ export async function POST(
     }
 
     // Add pending_image metadata to prose_description JSON
-    const metadata = {
-      _pending_image_id: image_id,
-      _pending_image_url: image_url,
-      _updated_at: new Date().toISOString(),
-    };
+    const metadata = isFullBody
+      ? {
+          _pending_fullbody_image_id: image_id,
+          _pending_fullbody_image_url: image_url,
+          _updated_at: new Date().toISOString(),
+        }
+      : {
+          _pending_image_id: image_id,
+          _pending_image_url: image_url,
+          _updated_at: new Date().toISOString(),
+        };
 
     const { error: updateError } = await supabase
       .from("story_characters")

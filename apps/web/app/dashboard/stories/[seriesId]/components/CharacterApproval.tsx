@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Check,
   Loader2,
@@ -28,6 +27,8 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
+type ImageType = "portrait" | "fullBody";
+
 export interface CharacterFromAPI {
   id: string; // story_character id
   role: string;
@@ -35,24 +36,30 @@ export interface CharacterFromAPI {
   approved: boolean;
   approved_image_id: string | null;
   approved_seed: number | null;
+  approved_fullbody: boolean;
+  approved_fullbody_image_id: string | null;
+  approved_fullbody_seed: number | null;
   characters: {
     id: string;
     name: string;
     description: Record<string, unknown>;
   };
   approved_image_url: string | null;
+  approved_fullbody_image_url: string | null;
   pending_image_id: string | null;
   pending_image_url: string | null;
+  pending_fullbody_image_id: string | null;
+  pending_fullbody_image_url: string | null;
 }
 
 interface CharacterApprovalProps {
   seriesId: string;
   characters: CharacterFromAPI[];
   onProceedToImages?: () => void;
-  onCharacterApproved?: (storyCharId: string, imageUrl: string, imageId: string) => void;
+  onCharacterApproved?: (storyCharId: string, imageUrl: string, imageId: string, type: ImageType) => void;
 }
 
-interface CharState {
+interface ImageSlotState {
   imageUrl: string | null;
   imageId: string | null;
   isGenerating: boolean;
@@ -62,12 +69,17 @@ interface CharState {
   negativePrompt: string;
   promptEdited: boolean;
   error: string | null;
-  showDescription: boolean;
   jobId: string | null;
   pollStartTime: number | null;
   seed: number | null;
   lockSeed: boolean;
   runpodStatus: "IN_QUEUE" | "IN_PROGRESS" | null;
+}
+
+interface CharState {
+  portrait: ImageSlotState;
+  fullBody: ImageSlotState;
+  showDescription: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,11 +107,9 @@ const ROLE_STYLES: Record<string, { label: string; className: string }> = {
 
 /**
  * Ensure the age in a portrait prompt matches the canonical age from character data.
- * If the prompt contains a different age (e.g. manually edited), replace it.
  */
 function ensureCorrectAge(prompt: string, correctAge: string): string {
   if (!correctAge) return prompt;
-  // Age appears right after the quality prefix as a standalone number token
   return prompt.replace(
     /(masterpiece,\s*best quality,\s*highly detailed,\s*)\d{1,3}(\s*years?\s*old)?/,
     `$1${correctAge}`
@@ -204,6 +214,59 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   return parts.filter(Boolean).join(", ");
 }
 
+/** Client-side prompt builder for full-body standing shots */
+function buildFullBodyPrompt(desc: Record<string, unknown>): string {
+  const d = desc as Record<string, string>;
+  const africanMale = isAfricanMaleDesc(d);
+  const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
+
+  if (d.age) parts.push(d.age);
+  if (d.gender) parts.push(d.gender);
+
+  if (d.ethnicity) {
+    if (africanMale) {
+      parts.push("(African male:1.3)");
+      const specific = (d.ethnicity || "").replace(/^Black\s+/i, "").trim();
+      if (specific && specific.toLowerCase() !== "african") {
+        parts.push(specific);
+      }
+    } else {
+      parts.push(d.ethnicity);
+    }
+  }
+
+  // Full body: include FULL bodyType (not simplified) — the whole point is body accuracy
+  if (d.bodyType) {
+    parts.push(`${d.bodyType} body`);
+  }
+
+  if (d.hairColor && d.hairStyle) {
+    const needsSuffix = !/\bhair\b/i.test(d.hairStyle);
+    parts.push(`${d.hairColor} ${d.hairStyle}${needsSuffix ? " hair" : ""}`);
+  } else if (d.hairColor) {
+    parts.push(`${d.hairColor} hair`);
+  } else if (d.hairStyle) {
+    parts.push(/\bhair\b/i.test(d.hairStyle) ? d.hairStyle : `${d.hairStyle} hair`);
+  }
+
+  if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
+  if (d.skinTone) parts.push(`${d.skinTone} skin`);
+
+  if (africanMale) {
+    parts.push("full lips, strong jawline");
+  }
+
+  if (d.distinguishingFeatures) parts.push(d.distinguishingFeatures);
+  if (d.clothing) parts.push(`wearing ${d.clothing}`);
+
+  parts.push("full body standing pose, full body visible head to feet");
+  parts.push("standing naturally, looking at camera");
+  parts.push("studio-quality lighting, clean neutral background");
+  parts.push("fashion photography style, photorealistic");
+
+  return parts.filter(Boolean).join(", ");
+}
+
 /** Client-side mirror of the server negative prompt builder for portraits */
 function buildPortraitNegativePrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
@@ -241,6 +304,33 @@ const MODEL_OPTIONS = [
 const POLL_INTERVAL = 3000;
 const MAX_POLL_ATTEMPTS = 360; // 18 minutes (cold starts with premium model downloads take ~14 min)
 
+function makeSlotState(
+  imageUrl: string | null,
+  imageId: string | null,
+  approved: boolean,
+  approvedUrl: string | null,
+  seed: number | null,
+  prompt: string,
+  negativePrompt: string,
+): ImageSlotState {
+  return {
+    imageUrl,
+    imageId,
+    isGenerating: false,
+    approved,
+    approvedUrl,
+    prompt,
+    negativePrompt,
+    promptEdited: false,
+    error: null,
+    jobId: null,
+    pollStartTime: null,
+    seed,
+    lockSeed: true,
+    runpodStatus: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -268,37 +358,47 @@ export default function CharacterApproval({
         id: ch.id,
         name: ch.characters.name,
         approved: ch.approved,
-        approved_image_id: ch.approved_image_id,
-        approved_image_url: ch.approved_image_url
+        approved_fullbody: ch.approved_fullbody,
+        approved_image_url: ch.approved_image_url,
+        approved_fullbody_image_url: ch.approved_fullbody_image_url,
       }))
     );
 
     const initial: Record<string, CharState> = {};
     for (const ch of characters) {
-      // Use approved image if available, otherwise use pending image
-      const imageUrl = ch.approved_image_url || ch.pending_image_url || null;
-      const imageId = ch.approved_image_id || ch.pending_image_id || null;
+      const desc = ch.characters.description || {};
+
+      // Portrait state
+      const portraitUrl = ch.approved_image_url || ch.pending_image_url || null;
+      const portraitId = ch.approved_image_id || ch.pending_image_id || null;
+
+      // Full body state
+      const fullBodyUrl = ch.approved_fullbody_image_url || ch.pending_fullbody_image_url || null;
+      const fullBodyId = ch.approved_fullbody_image_id || ch.pending_fullbody_image_id || null;
 
       initial[ch.id] = {
-        imageUrl,
-        imageId,
-        isGenerating: false,
-        approved: ch.approved,
-        approvedUrl: ch.approved_image_url || null,
-        prompt: buildPortraitPrompt(ch.characters.description || {}),
-        negativePrompt: buildPortraitNegativePrompt(ch.characters.description || {}),
-        promptEdited: false,
-        error: null,
+        portrait: makeSlotState(
+          portraitUrl,
+          portraitId,
+          ch.approved,
+          ch.approved_image_url || null,
+          ch.approved_seed ?? null,
+          buildPortraitPrompt(desc),
+          buildPortraitNegativePrompt(desc),
+        ),
+        fullBody: makeSlotState(
+          fullBodyUrl,
+          fullBodyId,
+          ch.approved_fullbody ?? false,
+          ch.approved_fullbody_image_url || null,
+          ch.approved_fullbody_seed ?? null,
+          buildFullBodyPrompt(desc),
+          buildPortraitNegativePrompt(desc),
+        ),
         showDescription: false,
-        jobId: null,
-        pollStartTime: null,
-        seed: ch.approved_seed ?? null,
-        lockSeed: true,
-        runpodStatus: null,
       };
     }
     setCharStates(initial);
-    console.log(`[StoryPublisher] Initial character states:`, initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -331,7 +431,9 @@ export default function CharacterApproval({
 
   // Update elapsed time display every second when any character is generating
   useEffect(() => {
-    const anyGenerating = Object.values(charStates).some((s) => s.isGenerating);
+    const anyGenerating = Object.values(charStates).some(
+      (s) => s.portrait.isGenerating || s.fullBody.isGenerating
+    );
     if (!anyGenerating) return;
 
     const interval = setInterval(() => {
@@ -343,8 +445,21 @@ export default function CharacterApproval({
 
   // ------- Helpers -------
 
-  const updateChar = useCallback(
-    (id: string, updates: Partial<CharState>) => {
+  const updateSlot = useCallback(
+    (id: string, type: ImageType, updates: Partial<ImageSlotState>) => {
+      setCharStates((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          [type]: { ...prev[id]?.[type], ...updates },
+        },
+      }));
+    },
+    []
+  );
+
+  const updateCharMeta = useCallback(
+    (id: string, updates: Partial<Pick<CharState, "showDescription">>) => {
       setCharStates((prev) => ({
         ...prev,
         [id]: { ...prev[id], ...updates },
@@ -353,32 +468,36 @@ export default function CharacterApproval({
     []
   );
 
+  // Polling key includes type to allow concurrent portrait + full body polling
+  const pollKey = (storyCharId: string, type: ImageType) => `${storyCharId}-${type}`;
+
   const startPolling = useCallback(
-    (storyCharId: string, jobId: string, imageId: string) => {
-      console.log(`[StoryPublisher] Starting polling for character ${storyCharId}, jobId: ${jobId}, imageId: ${imageId}`);
+    (storyCharId: string, type: ImageType, jobId: string, imageId: string) => {
+      const key = pollKey(storyCharId, type);
+      console.log(`[StoryPublisher] Starting polling for ${key}, jobId: ${jobId}, imageId: ${imageId}`);
 
       // Clear existing poll if any
-      if (pollTimers.current[storyCharId]) {
-        clearInterval(pollTimers.current[storyCharId]);
+      if (pollTimers.current[key]) {
+        clearInterval(pollTimers.current[key]);
       }
-      pollCounts.current[storyCharId] = 0;
+      pollCounts.current[key] = 0;
       const startTime = Date.now();
 
       // Store jobId and start time in state
-      updateChar(storyCharId, {
+      updateSlot(storyCharId, type, {
         jobId,
         pollStartTime: startTime,
       });
 
-      pollTimers.current[storyCharId] = setInterval(async () => {
-        pollCounts.current[storyCharId]++;
+      pollTimers.current[key] = setInterval(async () => {
+        pollCounts.current[key]++;
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
-        if (pollCounts.current[storyCharId] >= MAX_POLL_ATTEMPTS) {
-          console.error(`[StoryPublisher] Generation timed out for character ${storyCharId} after ${elapsed}s`);
-          clearInterval(pollTimers.current[storyCharId]);
-          delete pollTimers.current[storyCharId];
-          updateChar(storyCharId, {
+        if (pollCounts.current[key] >= MAX_POLL_ATTEMPTS) {
+          console.error(`[StoryPublisher] Generation timed out for ${key} after ${elapsed}s`);
+          clearInterval(pollTimers.current[key]);
+          delete pollTimers.current[key];
+          updateSlot(storyCharId, type, {
             isGenerating: false,
             error: "Generation timed out. Click 'Check Status' to retry.",
             pollStartTime: null,
@@ -391,21 +510,17 @@ export default function CharacterApproval({
           const res = await fetch(`/api/status/${jobId}`);
           if (!res.ok) throw new Error("Status check failed");
           const data = await res.json();
-          console.log(`[StoryPublisher] Poll attempt ${pollCounts.current[storyCharId]} for ${storyCharId}:`, {
-            completed: data.completed,
-            hasImageUrl: !!data.imageUrl
-          });
 
           // Track RunPod status for phase-aware progress messages
           if (data.status && !data.completed) {
-            updateChar(storyCharId, { runpodStatus: data.status });
+            updateSlot(storyCharId, type, { runpodStatus: data.status });
           }
 
           if (data.error && !data.completed) {
-            console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, data.error);
-            clearInterval(pollTimers.current[storyCharId]);
-            delete pollTimers.current[storyCharId];
-            updateChar(storyCharId, {
+            console.error(`[StoryPublisher] Generation failed for ${key}:`, data.error);
+            clearInterval(pollTimers.current[key]);
+            delete pollTimers.current[key];
+            updateSlot(storyCharId, type, {
               isGenerating: false,
               error: data.error,
               pollStartTime: null,
@@ -415,9 +530,9 @@ export default function CharacterApproval({
           }
 
           if (data.completed && data.imageUrl) {
-            console.log(`[StoryPublisher] Generation completed for ${storyCharId}, imageUrl: ${data.imageUrl}, seed: ${data.seed}`);
-            clearInterval(pollTimers.current[storyCharId]);
-            delete pollTimers.current[storyCharId];
+            console.log(`[StoryPublisher] Generation completed for ${key}, imageUrl: ${data.imageUrl}, seed: ${data.seed}`);
+            clearInterval(pollTimers.current[key]);
+            delete pollTimers.current[key];
             const completedSeed: number | null = data.seed ?? null;
 
             // Immediately store the image to Supabase Storage to preserve it
@@ -425,9 +540,10 @@ export default function CharacterApproval({
               const character = characters.find((c) => c.id === storyCharId);
               const characterName = character?.characters.name || "character";
               const timestamp = Date.now();
-              const filename = `characters/${characterName.replace(/\s+/g, "-").toLowerCase()}-${timestamp}.jpeg`;
+              const prefix = type === "fullBody" ? "fullbody" : "portrait";
+              const filename = `characters/${characterName.replace(/\s+/g, "-").toLowerCase()}-${prefix}-${timestamp}.jpeg`;
 
-              console.log(`[StoryPublisher] Storing image to Supabase Storage for ${characterName}`);
+              console.log(`[StoryPublisher] Storing image to Supabase Storage for ${characterName} (${type})`);
               const storeRes = await fetch("/api/images/store", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -450,15 +566,16 @@ export default function CharacterApproval({
                     body: JSON.stringify({
                       image_id: imageId,
                       image_url: storeData.stored_url,
+                      type,
                     }),
                   });
-                  console.log(`[StoryPublisher] Pending image persisted to database`);
+                  console.log(`[StoryPublisher] Pending ${type} image persisted to database`);
                 } catch (persistErr) {
                   console.warn(`[StoryPublisher] Failed to persist pending image:`, persistErr);
                 }
 
                 // Use the permanent stored URL instead of the temporary blob URL
-                updateChar(storyCharId, {
+                updateSlot(storyCharId, type, {
                   isGenerating: false,
                   imageUrl: storeData.stored_url,
                   imageId: imageId,
@@ -470,8 +587,7 @@ export default function CharacterApproval({
                 });
               } else {
                 console.warn(`[StoryPublisher] Storage failed, using blob URL as fallback`);
-                // Fallback to blob URL if storage fails
-                updateChar(storyCharId, {
+                updateSlot(storyCharId, type, {
                   isGenerating: false,
                   imageUrl: data.imageUrl,
                   imageId: imageId,
@@ -484,8 +600,7 @@ export default function CharacterApproval({
               }
             } catch (err) {
               console.error(`[StoryPublisher] Error storing image:`, err);
-              // Fallback to blob URL if storage fails
-              updateChar(storyCharId, {
+              updateSlot(storyCharId, type, {
                 isGenerating: false,
                 imageUrl: data.imageUrl,
                 imageId: imageId,
@@ -502,19 +617,20 @@ export default function CharacterApproval({
         }
       }, POLL_INTERVAL);
     },
-    [updateChar, characters]
+    [updateSlot, characters]
   );
 
   // ------- Actions -------
 
   const handleGenerate = useCallback(
-    async (storyCharId: string) => {
-      console.log(`[StoryPublisher] Generating portrait for character ${storyCharId}, debugLevel: ${debugLevel}`);
-      updateChar(storyCharId, { isGenerating: true, error: null });
+    async (storyCharId: string, type: ImageType) => {
+      console.log(`[StoryPublisher] Generating ${type} for character ${storyCharId}, debugLevel: ${debugLevel}`);
+      updateSlot(storyCharId, type, { isGenerating: true, error: null });
 
       try {
-        const state = charStates[storyCharId];
-        const body: Record<string, string | number> = {};
+        const state = charStates[storyCharId]?.[type];
+        const body: Record<string, string | number> = { type };
+
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (state?.promptEdited) body.negativePrompt = state.negativePrompt;
@@ -530,30 +646,29 @@ export default function CharacterApproval({
         );
         if (!res.ok) {
           const err = await res.json();
-          console.error(`[StoryPublisher] Generation failed for ${storyCharId}:`, err);
           const detail = err.details ? ` — ${err.details}` : "";
           throw new Error((err.error || "Generation failed") + detail);
         }
         const data = await res.json();
-        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, debugLevel: ${data.debugLevel}`);
-        startPolling(storyCharId, data.jobId, data.imageId);
+        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, type: ${type}`);
+        startPolling(storyCharId, type, data.jobId, data.imageId);
       } catch (err) {
         console.error(`[StoryPublisher] Error in handleGenerate:`, err);
-        updateChar(storyCharId, {
+        updateSlot(storyCharId, type, {
           isGenerating: false,
           error: err instanceof Error ? err.message : "Generation failed",
         });
       }
     },
-    [charStates, updateChar, startPolling, debugLevel, forceModel]
+    [charStates, updateSlot, startPolling, debugLevel, forceModel]
   );
 
   const handleRegenerate = useCallback(
-    async (storyCharId: string) => {
-      const state = charStates[storyCharId];
+    async (storyCharId: string, type: ImageType) => {
+      const state = charStates[storyCharId]?.[type];
       if (!state) return;
 
-      updateChar(storyCharId, {
+      updateSlot(storyCharId, type, {
         isGenerating: true,
         error: null,
         approved: false,
@@ -561,9 +676,10 @@ export default function CharacterApproval({
       });
 
       try {
-        const body: Record<string, string | number> = {};
+        const body: Record<string, string | number> = { type };
         if (state.promptEdited) body.prompt = state.prompt;
         if (state.promptEdited) body.negativePrompt = state.negativePrompt;
+
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (state.lockSeed && state.seed) body.seed = state.seed;
@@ -582,27 +698,27 @@ export default function CharacterApproval({
           throw new Error((err.error || "Regeneration failed") + detail);
         }
         const data = await res.json();
-        startPolling(storyCharId, data.jobId, data.imageId);
+        startPolling(storyCharId, type, data.jobId, data.imageId);
       } catch (err) {
-        updateChar(storyCharId, {
+        updateSlot(storyCharId, type, {
           isGenerating: false,
           error: err instanceof Error ? err.message : "Regeneration failed",
         });
       }
     },
-    [charStates, updateChar, startPolling, debugLevel, forceModel]
+    [charStates, updateSlot, startPolling, debugLevel, forceModel]
   );
 
   const handleApprove = useCallback(
-    async (storyCharId: string) => {
-      const state = charStates[storyCharId];
+    async (storyCharId: string, type: ImageType) => {
+      const state = charStates[storyCharId]?.[type];
       if (!state?.imageId) {
-        console.error(`[StoryPublisher] Cannot approve - no imageId for character ${storyCharId}`);
+        console.error(`[StoryPublisher] Cannot approve - no imageId for character ${storyCharId} (${type})`);
         return;
       }
 
-      console.log(`[StoryPublisher] Approving character ${storyCharId}, imageId: ${state.imageId}`);
-      updateChar(storyCharId, { error: null });
+      console.log(`[StoryPublisher] Approving ${type} for character ${storyCharId}, imageId: ${state.imageId}`);
+      updateSlot(storyCharId, type, { error: null });
 
       try {
         // Validate prompt age against character data before sending
@@ -617,7 +733,7 @@ export default function CharacterApproval({
             `[StoryPublisher] Age mismatch detected in prompt for ${storyCharId}. ` +
             `Corrected to "${correctAge}" from character data.`
           );
-          updateChar(storyCharId, { prompt: validatedPrompt });
+          updateSlot(storyCharId, type, { prompt: validatedPrompt });
         }
 
         const res = await fetch(
@@ -629,74 +745,82 @@ export default function CharacterApproval({
               image_id: state.imageId,
               seed: state.seed,
               prompt: validatedPrompt,
+              type,
             }),
           }
         );
         if (!res.ok) {
           const err = await res.json();
-          console.error(`[StoryPublisher] Approval failed for ${storyCharId}:`, err);
           throw new Error(err.error || "Approval failed");
         }
         const data = await res.json();
-        console.log(`[StoryPublisher] Approval successful for ${storyCharId}, stored_url: ${data.stored_url}`);
         const finalUrl = data.stored_url || state.imageUrl;
-        updateChar(storyCharId, {
+        updateSlot(storyCharId, type, {
           approved: true,
           approvedUrl: finalUrl,
         });
-        onCharacterApproved?.(storyCharId, finalUrl!, state.imageId!);
+        onCharacterApproved?.(storyCharId, finalUrl!, state.imageId!, type);
       } catch (err) {
         console.error(`[StoryPublisher] Error in handleApprove:`, err);
-        updateChar(storyCharId, {
+        updateSlot(storyCharId, type, {
           error: err instanceof Error ? err.message : "Approval failed",
         });
       }
     },
-    [charStates, updateChar, onCharacterApproved]
+    [charStates, updateSlot, onCharacterApproved, characters]
   );
 
   const handleCheckStatus = useCallback(
-    async (storyCharId: string) => {
-      const state = charStates[storyCharId];
+    async (storyCharId: string, type: ImageType) => {
+      const state = charStates[storyCharId]?.[type];
       if (!state?.jobId || !state?.imageId) {
-        updateChar(storyCharId, {
+        updateSlot(storyCharId, type, {
           error: "No job ID found. Please regenerate.",
         });
         return;
       }
 
-      updateChar(storyCharId, {
+      updateSlot(storyCharId, type, {
         isGenerating: true,
         error: null,
       });
 
       // Re-start polling with the existing jobId and imageId
-      startPolling(storyCharId, state.jobId, state.imageId);
+      startPolling(storyCharId, type, state.jobId, state.imageId);
     },
-    [charStates, updateChar, startPolling]
+    [charStates, updateSlot, startPolling]
   );
 
   const handleGenerateAll = useCallback(async () => {
     setGeneratingAll(true);
     setGenerateAllProgress(null);
 
-    const toGenerate = characters.filter((ch) => {
+    // Build a flat list of (character, type) pairs that need generation
+    const toGenerate: { ch: CharacterFromAPI; type: ImageType }[] = [];
+    for (const ch of characters) {
       const s = charStates[ch.id];
-      return s && !s.imageUrl && !s.isGenerating && !s.approved;
-    });
+      if (!s) continue;
+      if (!s.portrait.imageUrl && !s.portrait.isGenerating && !s.portrait.approved) {
+        toGenerate.push({ ch, type: "portrait" });
+      }
+      if (!s.fullBody.imageUrl && !s.fullBody.isGenerating && !s.fullBody.approved) {
+        toGenerate.push({ ch, type: "fullBody" });
+      }
+    }
 
     for (let i = 0; i < toGenerate.length; i++) {
-      const ch = toGenerate[i];
+      const { ch, type } = toGenerate[i];
       const charName = ch.characters.name;
+      const label = type === "fullBody" ? "full body" : "portrait";
 
-      setGenerateAllProgress(`Generating ${i + 1} of ${toGenerate.length}: ${charName}...`);
+      setGenerateAllProgress(`Generating ${i + 1} of ${toGenerate.length}: ${charName} (${label})...`);
 
       try {
-        // Start generation for this character
-        updateChar(ch.id, { isGenerating: true, error: null });
+        updateSlot(ch.id, type, { isGenerating: true, error: null });
 
-        const chState = charStates[ch.id];
-        const body: Record<string, string | number> = {};
+        const chState = charStates[ch.id]?.[type];
+        const body: Record<string, string | number> = { type };
+
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
         if (chState?.promptEdited) body.negativePrompt = chState.negativePrompt;
@@ -717,20 +841,18 @@ export default function CharacterApproval({
         }
 
         const data = await res.json();
-        startPolling(ch.id, data.jobId, data.imageId);
+        startPolling(ch.id, type, data.jobId, data.imageId);
 
         // Wait 4 seconds before starting the next one to avoid rate limits
         if (i < toGenerate.length - 1) {
           await new Promise((r) => setTimeout(r, 4000));
         }
       } catch (err) {
-        // On error, mark this character as failed but continue with the next
-        updateChar(ch.id, {
+        updateSlot(ch.id, type, {
           isGenerating: false,
           error: err instanceof Error ? err.message : "Generation failed",
         });
 
-        // Still wait before next attempt to avoid hammering the API
         if (i < toGenerate.length - 1) {
           await new Promise((r) => setTimeout(r, 4000));
         }
@@ -739,20 +861,27 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateChar, startPolling, debugLevel, forceModel]);
+  }, [characters, charStates, updateSlot, startPolling, debugLevel, forceModel]);
 
   // ------- Derived state -------
 
+  // A character is "fully approved" when BOTH portrait AND fullBody are approved
   const approvedCount = Object.values(charStates).filter(
-    (s) => s.approved
+    (s) => s.portrait?.approved && s.fullBody?.approved
   ).length;
   const totalCount = characters.length;
   const allApproved = totalCount > 0 && approvedCount === totalCount;
-  const anyGenerating = Object.values(charStates).some((s) => s.isGenerating);
-  const ungeneratedCount = characters.filter((ch) => {
+  const anyGenerating = Object.values(charStates).some(
+    (s) => s.portrait?.isGenerating || s.fullBody?.isGenerating
+  );
+  const ungeneratedCount = characters.reduce((count, ch) => {
     const s = charStates[ch.id];
-    return s && !s.imageUrl && !s.isGenerating && !s.approved;
-  }).length;
+    if (!s) return count;
+    let needs = 0;
+    if (!s.portrait.imageUrl && !s.portrait.isGenerating && !s.portrait.approved) needs++;
+    if (!s.fullBody.imageUrl && !s.fullBody.isGenerating && !s.fullBody.approved) needs++;
+    return count + needs;
+  }, 0);
 
   // ------- Render -------
 
@@ -774,7 +903,7 @@ export default function CharacterApproval({
         <div className="space-y-2 flex-1 mr-4">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">
-              {approvedCount} of {totalCount} characters approved
+              {approvedCount} of {totalCount} characters fully approved
             </span>
             <span className="font-medium">
               {totalCount > 0
@@ -892,24 +1021,21 @@ export default function CharacterApproval({
       )}
 
       {/* Character cards */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-6">
         {characters.map((ch) => {
           const state = charStates[ch.id];
           if (!state) return null;
 
           const role = ROLE_STYLES[ch.role] || ROLE_STYLES.supporting;
-          const hasImage = !!state.imageUrl;
-          const displayUrl = state.approved
-            ? state.approvedUrl || state.imageUrl
-            : state.imageUrl;
+          const fullyApproved = state.portrait.approved && state.fullBody.approved;
 
           return (
             <Card
               key={ch.id}
               className={`transition-colors ${
-                state.approved
+                fullyApproved
                   ? "border-green-500/30"
-                  : hasImage
+                  : (state.portrait.approved || state.fullBody.approved)
                     ? "border-blue-500/30"
                     : ""
               }`}
@@ -923,7 +1049,7 @@ export default function CharacterApproval({
                     <Badge variant="outline" className={role.className}>
                       {role.label}
                     </Badge>
-                    {state.approved && (
+                    {fullyApproved && (
                       <Badge
                         variant="outline"
                         className="bg-green-500/20 text-green-400 border-green-500/30"
@@ -942,7 +1068,7 @@ export default function CharacterApproval({
                   <div>
                     <button
                       onClick={() =>
-                        updateChar(ch.id, {
+                        updateCharMeta(ch.id, {
                           showDescription: !state.showDescription,
                         })
                       }
@@ -963,203 +1089,260 @@ export default function CharacterApproval({
                   </div>
                 )}
 
-                {/* Image display area */}
-                <div className="relative">
-                  {state.isGenerating ? (
-                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 py-16">
-                      <Loader2 className="mb-3 h-8 w-8 animate-spin text-blue-400" />
-                      <p className="text-sm font-medium text-blue-400">
-                        {state.runpodStatus === "IN_QUEUE"
-                          ? "Waiting for GPU worker..."
-                          : state.runpodStatus === "IN_PROGRESS"
-                            ? "Rendering portrait..."
-                            : "Submitting to GPU..."}
-                      </p>
-                      {state.pollStartTime && (() => {
-                        const elapsed = Math.floor((Date.now() - state.pollStartTime) / 1000);
-                        return (
-                          <>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {elapsed < 60
-                                ? `${elapsed}s elapsed`
-                                : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`}
-                            </p>
-                            {elapsed > 60 && state.runpodStatus === "IN_QUEUE" && (
-                              <p className="mt-1 text-xs text-muted-foreground/70">
-                                GPU worker is starting up — this can take a few minutes on first run
-                              </p>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  ) : displayUrl ? (
-                    <div className="relative overflow-hidden rounded-lg">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={displayUrl}
-                        alt={`Portrait of ${ch.characters.name}`}
-                        className="h-full w-full object-cover rounded-lg"
-                        style={{ aspectRatio: "3/4" }}
-                      />
-                      {state.approved && (
-                        <div className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full bg-green-600/90 px-3 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-sm">
-                          <Check className="h-3.5 w-3.5" />
-                          Approved
+                {/* Dual image slots: Portrait + Full Body */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(["portrait", "fullBody"] as const).map((type) => {
+                    const slot = state[type];
+                    const hasImage = !!slot.imageUrl;
+                    const displayUrl = slot.approved
+                      ? slot.approvedUrl || slot.imageUrl
+                      : slot.imageUrl;
+                    const label = type === "portrait" ? "Portrait" : "Full Body";
+                    const aspectClass = type === "portrait" ? "aspect-[3/4]" : "aspect-[5/8]";
+
+                    return (
+                      <div key={type} className="space-y-3">
+                        {/* Slot label */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            {label}
+                          </span>
+                          {slot.approved ? (
+                            <span className="text-xs text-green-400 flex items-center gap-1">
+                              <Check className="h-3 w-3" /> Approved
+                            </span>
+                          ) : hasImage ? (
+                            <span className="text-xs text-blue-400">Generated</span>
+                          ) : slot.isGenerating ? (
+                            <span className="text-xs text-blue-400">Generating...</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/50">Not generated</span>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 py-16">
-                      <User className="mb-3 h-10 w-10 text-muted-foreground/50" />
-                      <p className="text-sm text-muted-foreground">
-                        No portrait generated yet
-                      </p>
-                    </div>
-                  )}
+
+                        {/* Image display area */}
+                        <div className="relative">
+                          {slot.isGenerating ? (
+                            <div className={`flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 ${aspectClass}`}>
+                              <Loader2 className="mb-3 h-8 w-8 animate-spin text-blue-400" />
+                              <p className="text-sm font-medium text-blue-400">
+                                {slot.runpodStatus === "IN_QUEUE"
+                                  ? "Waiting for GPU worker..."
+                                  : slot.runpodStatus === "IN_PROGRESS"
+                                    ? `Rendering ${label.toLowerCase()}...`
+                                    : "Submitting to GPU..."}
+                              </p>
+                              {slot.pollStartTime && (() => {
+                                const elapsed = Math.floor((Date.now() - slot.pollStartTime) / 1000);
+                                return (
+                                  <>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      {elapsed < 60
+                                        ? `${elapsed}s elapsed`
+                                        : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`}
+                                    </p>
+                                    {elapsed > 60 && slot.runpodStatus === "IN_QUEUE" && (
+                                      <p className="mt-1 text-xs text-muted-foreground/70">
+                                        GPU worker is starting up — this can take a few minutes on first run
+                                      </p>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          ) : displayUrl ? (
+                            <div className="relative overflow-hidden rounded-lg">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={displayUrl}
+                                alt={`${label} of ${ch.characters.name}`}
+                                className={`h-full w-full object-cover rounded-lg ${slot.approved ? "ring-2 ring-green-500/50" : ""}`}
+                                style={{ aspectRatio: type === "portrait" ? "3/4" : "5/8" }}
+                              />
+                              {slot.approved && (
+                                <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-sm">
+                                  <Check className="h-3 w-3" />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className={`flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 ${aspectClass}`}>
+                              <User className="mb-2 h-8 w-8 text-muted-foreground/50" />
+                              <p className="text-xs text-muted-foreground">
+                                No {label.toLowerCase()} yet
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Error display */}
+                        {slot.error && (
+                          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+                            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            {slot.error}
+                          </div>
+                        )}
+
+                        {/* Editable prompt */}
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            {label} Prompt
+                          </label>
+                          <Textarea
+                            value={slot.prompt}
+                            onChange={(e) =>
+                              updateSlot(ch.id, type, { prompt: e.target.value, promptEdited: true })
+                            }
+                            rows={3}
+                            className="text-xs leading-relaxed resize-y bg-muted/30"
+                            disabled={slot.isGenerating}
+                          />
+                        </div>
+
+                        {/* Negative prompt */}
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-red-400/70 uppercase tracking-wider">
+                            Negative Prompt
+                          </label>
+                          <Textarea
+                            value={slot.negativePrompt}
+                            onChange={(e) =>
+                              updateSlot(ch.id, type, { negativePrompt: e.target.value, promptEdited: true })
+                            }
+                            rows={2}
+                            className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20"
+                            disabled={slot.isGenerating}
+                          />
+                        </div>
+
+                        {/* Lock Seed option */}
+                        <div className="flex items-center gap-2">
+                          <label
+                            className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
+                            title={slot.lockSeed
+                              ? "When locked, regeneration keeps the same base appearance. Unlock for a completely new look."
+                              : "Unlocked — regeneration will produce a completely different look."}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={slot.lockSeed}
+                              onChange={(e) =>
+                                updateSlot(ch.id, type, { lockSeed: e.target.checked })
+                              }
+                              disabled={slot.isGenerating}
+                              className="rounded border-muted-foreground/30"
+                            />
+                            {slot.lockSeed ? (
+                              <span>
+                                Lock Seed{" "}
+                                <span className="text-muted-foreground/50">
+                                  {slot.isGenerating
+                                    ? "(Generating...)"
+                                    : slot.seed != null
+                                      ? `(${slot.seed})`
+                                      : "(no seed yet)"}
+                                </span>
+                              </span>
+                            ) : (
+                              <span>Random Seed</span>
+                            )}
+                          </label>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {!hasImage && !slot.isGenerating && !slot.error && (
+                            <Button
+                              onClick={() => handleGenerate(ch.id, type)}
+                              disabled={generatingAll}
+                              size="sm"
+                            >
+                              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                              Generate {label}
+                            </Button>
+                          )}
+
+                          {!slot.isGenerating && slot.error && slot.jobId && (
+                            <>
+                              <Button
+                                onClick={() => handleCheckStatus(ch.id, type)}
+                                disabled={generatingAll}
+                                size="sm"
+                                variant="outline"
+                              >
+                                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                                Check Status
+                              </Button>
+                              <Button
+                                onClick={() => handleGenerate(ch.id, type)}
+                                disabled={generatingAll}
+                                size="sm"
+                              >
+                                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                                Generate New
+                              </Button>
+                            </>
+                          )}
+
+                          {!hasImage && !slot.isGenerating && slot.error && !slot.jobId && (
+                            <Button
+                              onClick={() => handleGenerate(ch.id, type)}
+                              disabled={generatingAll}
+                              size="sm"
+                            >
+                              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                              Generate {label}
+                            </Button>
+                          )}
+
+                          {hasImage && !slot.isGenerating && (
+                            <Button
+                              onClick={() => handleRegenerate(ch.id, type)}
+                              variant="outline"
+                              size="sm"
+                            >
+                              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                              Regenerate
+                            </Button>
+                          )}
+
+                          {hasImage && !slot.approved && !slot.isGenerating && (
+                            <Button
+                              onClick={() => handleApprove(ch.id, type)}
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              <Check className="mr-1.5 h-3.5 w-3.5" />
+                              Approve
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {/* Error display */}
-                {state.error && (
-                  <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    {state.error}
-                  </div>
-                )}
-
-                {/* Editable prompt */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Portrait Prompt
-                  </label>
-                  <Textarea
-                    value={state.prompt}
-                    onChange={(e) =>
-                      updateChar(ch.id, { prompt: e.target.value, promptEdited: true })
-                    }
-                    rows={4}
-                    className="text-xs leading-relaxed resize-y bg-muted/30"
-                    disabled={state.isGenerating}
-                  />
-                </div>
-
-                {/* Negative prompt (read-only) */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-red-400/70 uppercase tracking-wider">
-                    Negative Prompt
-                  </label>
-                  <Textarea
-                    value={state.negativePrompt}
-                    onChange={(e) =>
-                      updateChar(ch.id, { negativePrompt: e.target.value, promptEdited: true })
-                    }
-                    rows={3}
-                    className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20"
-                    disabled={state.isGenerating}
-                  />
-                </div>
-
-                {/* Lock Seed option */}
-                <div className="flex items-center gap-3">
-                  <label
-                    className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
-                    title={state.lockSeed
-                      ? "When locked, regeneration keeps the same base appearance. Unlock for a completely new look."
-                      : "Unlocked — regeneration will produce a completely different look."}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={state.lockSeed}
-                      onChange={(e) =>
-                        updateChar(ch.id, { lockSeed: e.target.checked })
-                      }
-                      disabled={state.isGenerating}
-                      className="rounded border-muted-foreground/30"
-                    />
-                    {state.lockSeed ? (
-                      <span>
-                        🔒 Lock Seed{" "}
-                        <span className="text-muted-foreground/50">
-                          {state.isGenerating
-                            ? "(Generating...)"
-                            : state.seed != null
-                              ? `(${state.seed})`
-                              : "(no seed yet)"}
-                        </span>
-                      </span>
+                {/* Combined status line */}
+                <div className="flex items-center gap-3 text-xs text-muted-foreground border-t border-muted/50 pt-3">
+                  <span>
+                    Portrait: {state.portrait.approved ? (
+                      <span className="text-green-400">Approved</span>
+                    ) : state.portrait.imageUrl ? (
+                      <span className="text-blue-400">Pending approval</span>
                     ) : (
-                      <span>🔓 Random Seed</span>
+                      <span className="text-muted-foreground/50">Not generated</span>
                     )}
-                  </label>
-                </div>
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-2">
-                  {!hasImage && !state.isGenerating && !state.error && (
-                    <Button
-                      onClick={() => handleGenerate(ch.id)}
-                      disabled={generatingAll}
-                      size="sm"
-                    >
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Generate Portrait
-                    </Button>
-                  )}
-
-                  {!state.isGenerating && state.error && state.jobId && (
-                    <>
-                      <Button
-                        onClick={() => handleCheckStatus(ch.id)}
-                        disabled={generatingAll}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Check Status
-                      </Button>
-                      <Button
-                        onClick={() => handleGenerate(ch.id)}
-                        disabled={generatingAll}
-                        size="sm"
-                      >
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        Generate New
-                      </Button>
-                    </>
-                  )}
-
-                  {!hasImage && !state.isGenerating && state.error && !state.jobId && (
-                    <Button
-                      onClick={() => handleGenerate(ch.id)}
-                      disabled={generatingAll}
-                      size="sm"
-                    >
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Generate Portrait
-                    </Button>
-                  )}
-
-                  {hasImage && !state.isGenerating && (
-                    <Button
-                      onClick={() => handleRegenerate(ch.id)}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Regenerate
-                    </Button>
-                  )}
-
-                  {hasImage && !state.approved && !state.isGenerating && (
-                    <Button
-                      onClick={() => handleApprove(ch.id)}
-                      size="sm"
-                      className="bg-green-600 hover:bg-green-700"
-                    >
-                      <Check className="mr-2 h-4 w-4" />
-                      Approve
-                    </Button>
-                  )}
+                  </span>
+                  <span className="text-muted-foreground/30">|</span>
+                  <span>
+                    Full Body: {state.fullBody.approved ? (
+                      <span className="text-green-400">Approved</span>
+                    ) : state.fullBody.imageUrl ? (
+                      <span className="text-blue-400">Pending approval</span>
+                    ) : (
+                      <span className="text-muted-foreground/50">Not generated</span>
+                    )}
+                  </span>
                 </div>
               </CardContent>
             </Card>

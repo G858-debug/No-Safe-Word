@@ -8,6 +8,8 @@ import type { CharacterData, SceneData } from "@no-safe-word/shared";
 /** Debug levels for systematic resource testing (progressive — each level adds one layer) */
 type DebugLevel = "bare" | "model" | "loras" | "negative" | "full";
 
+type ImageType = "portrait" | "fullBody";
+
 const PORTRAIT_SCENE: SceneData = {
   mode: "sfw",
   setting: "(professional portrait photography:1.2), studio lighting, bokeh background",
@@ -15,6 +17,17 @@ const PORTRAIT_SCENE: SceneData = {
   mood: "professional portrait",
   sfwDescription:
     "head and shoulders portrait, looking at camera, neutral expression, photorealistic",
+  nsfwDescription: "",
+  additionalTags: [],
+};
+
+const FULLBODY_SCENE: SceneData = {
+  mode: "sfw",
+  setting: "(fashion photography:1.2), studio lighting, clean neutral background",
+  lighting: "studio-quality lighting",
+  mood: "fashion photography",
+  sfwDescription:
+    "full body standing pose, full body visible head to feet, standing naturally, photorealistic",
   nsfwDescription: "",
   additionalTags: [],
 };
@@ -28,11 +41,12 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    // Parse optional debugLevel and forceModel from request body
+    // Parse optional debugLevel, forceModel, type from request body
     let debugLevel: DebugLevel = "full";
     let forceModel: string | undefined;
     let customNegativePrompt: string | undefined;
     let customSeed: number | undefined;
+    let imageType: ImageType = "portrait";
     try {
       const body = await request.json();
       if (body.debugLevel && ["bare", "model", "loras", "negative", "full"].includes(body.debugLevel)) {
@@ -47,11 +61,16 @@ export async function POST(
       if (typeof body.seed === "number" && body.seed > 0) {
         customSeed = body.seed;
       }
+      if (body.type === "fullBody") {
+        imageType = "fullBody";
+      }
     } catch {
-      // No body or invalid JSON — use default "full"
+      // No body or invalid JSON — use defaults
     }
 
-    console.log(`[StoryPublisher] Generating portrait for storyCharId: ${storyCharId}, debugLevel: ${debugLevel}`);
+    const scene = imageType === "fullBody" ? FULLBODY_SCENE : PORTRAIT_SCENE;
+
+    console.log(`[StoryPublisher] Generating ${imageType} for storyCharId: ${storyCharId}, debugLevel: ${debugLevel}`);
 
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
@@ -105,7 +124,7 @@ export async function POST(
 
     // 4. Generate with a known seed (fixed or random)
     const seed = customSeed || Math.floor(Math.random() * 2_147_483_647) + 1;
-    const prompt = buildPrompt(characterData, PORTRAIT_SCENE);
+    const prompt = buildPrompt(characterData, scene);
 
     // --- Debug level resource selection ---
     // bare:     Base model (Juggernaut), no LoRAs, minimal negative, no FaceDetailer
@@ -123,7 +142,7 @@ export async function POST(
     const negativePrompt = customNegativePrompt
       ? customNegativePrompt
       : useFullNegative
-        ? buildNegativePrompt(PORTRAIT_SCENE, {
+        ? buildNegativePrompt(scene, {
             africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
           })
         : "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature";
@@ -152,7 +171,7 @@ export async function POST(
       width: 832,
       height: 1216,
       seed,
-      filenamePrefix: `portrait_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
+      filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
       loras: useLoras ? (resources.loras.length > 0 ? resources.loras : undefined) : [],
       negativePromptAdditions: resources.negativePromptAdditions || undefined,
       checkpointName: modelSelection.checkpointName,
@@ -173,6 +192,7 @@ export async function POST(
           width: 832, height: 1216, steps: 30, cfg: 7.5, seed,
           engine: "runpod-comfyui",
           debugLevel,
+          imageType,
           model: modelSelection.checkpointName,
           loras: resources.loras.map(l => l.filename),
           faceDetailer: useFaceDetailer,
@@ -194,7 +214,7 @@ export async function POST(
       cost: 0,
     });
 
-    console.log(`[StoryPublisher] Portrait job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
+    console.log(`[StoryPublisher] ${imageType === "fullBody" ? "Full body" : "Portrait"} job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
 
     return NextResponse.json({
       jobId: `runpod-${jobId}`,

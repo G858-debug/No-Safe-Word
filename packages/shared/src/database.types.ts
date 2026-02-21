@@ -432,6 +432,10 @@ export interface Database {
           approved_image_id: string | null;
           approved_seed: number | null;
           approved_prompt: string | null;
+          approved_fullbody: boolean;
+          approved_fullbody_image_id: string | null;
+          approved_fullbody_seed: number | null;
+          approved_fullbody_prompt: string | null;
           regen_count: number;
         };
         Insert: {
@@ -444,6 +448,10 @@ export interface Database {
           approved_image_id?: string | null;
           approved_seed?: number | null;
           approved_prompt?: string | null;
+          approved_fullbody?: boolean;
+          approved_fullbody_image_id?: string | null;
+          approved_fullbody_seed?: number | null;
+          approved_fullbody_prompt?: string | null;
           regen_count?: number;
         };
         Update: {
@@ -456,6 +464,10 @@ export interface Database {
           approved_image_id?: string | null;
           approved_seed?: number | null;
           approved_prompt?: string | null;
+          approved_fullbody?: boolean;
+          approved_fullbody_image_id?: string | null;
+          approved_fullbody_seed?: number | null;
+          approved_fullbody_prompt?: string | null;
           regen_count?: number;
         };
         Relationships: [
@@ -476,6 +488,13 @@ export interface Database {
           {
             foreignKeyName: "story_characters_approved_image_id_fkey";
             columns: ["approved_image_id"];
+            isOneToOne: false;
+            referencedRelation: "images";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "story_characters_approved_fullbody_image_id_fkey";
+            columns: ["approved_fullbody_image_id"];
             isOneToOne: false;
             referencedRelation: "images";
             referencedColumns: ["id"];

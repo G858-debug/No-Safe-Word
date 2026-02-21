@@ -16,8 +16,9 @@ export async function GET(
     .select(
       `
       id, role, prose_description, approved, approved_image_id, approved_seed,
+      approved_fullbody, approved_fullbody_image_id, approved_fullbody_seed,
       characters:character_id (id, name, description)
-    `
+`
     )
     .eq("series_id", seriesId);
 
@@ -33,19 +34,19 @@ export async function GET(
 
   console.log(`[StoryPublisher] Found ${storyCharacters.length} characters`);
 
-  // Fetch stored_url for any approved images
-  const approvedImageIds = storyCharacters
-    .map((sc) => sc.approved_image_id)
+  // Fetch stored_url for any approved images (portrait + full body)
+  const allImageIds = storyCharacters
+    .flatMap((sc) => [sc.approved_image_id, sc.approved_fullbody_image_id])
     .filter((id): id is string => id !== null);
 
-  console.log(`[StoryPublisher] Fetching image URLs for ${approvedImageIds.length} approved images`);
+  console.log(`[StoryPublisher] Fetching image URLs for ${allImageIds.length} approved images`);
 
   let imageUrls: Record<string, string> = {};
-  if (approvedImageIds.length > 0) {
+  if (allImageIds.length > 0) {
     const { data: images } = await supabase
       .from("images")
       .select("id, stored_url, sfw_url")
-      .in("id", approvedImageIds);
+      .in("id", allImageIds);
 
     if (images) {
       imageUrls = Object.fromEntries(
@@ -57,22 +58,22 @@ export async function GET(
 
   const characters = storyCharacters.map((sc) => {
     // Check for pending image in prose_description metadata
-    const pendingImageId =
-      typeof sc.prose_description === "object" && sc.prose_description !== null
-        ? (sc.prose_description as Record<string, unknown>)._pending_image_id as string | undefined
-        : undefined;
-    const pendingImageUrl =
-      typeof sc.prose_description === "object" && sc.prose_description !== null
-        ? (sc.prose_description as Record<string, unknown>)._pending_image_url as string | undefined
-        : undefined;
+    const meta = typeof sc.prose_description === "object" && sc.prose_description !== null
+      ? sc.prose_description as Record<string, unknown>
+      : {} as Record<string, unknown>;
 
     return {
       ...sc,
       approved_image_url: sc.approved_image_id
         ? imageUrls[sc.approved_image_id] || null
         : null,
-      pending_image_id: pendingImageId || null,
-      pending_image_url: pendingImageUrl || null,
+      approved_fullbody_image_url: sc.approved_fullbody_image_id
+        ? imageUrls[sc.approved_fullbody_image_id] || null
+        : null,
+      pending_image_id: (meta._pending_image_id as string) || null,
+      pending_image_url: (meta._pending_image_url as string) || null,
+      pending_fullbody_image_id: (meta._pending_fullbody_image_id as string) || null,
+      pending_fullbody_image_url: (meta._pending_fullbody_image_url as string) || null,
     };
   });
 

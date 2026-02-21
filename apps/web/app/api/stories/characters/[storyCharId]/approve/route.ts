@@ -11,13 +11,15 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { image_id, seed, prompt } = body as {
+    const { image_id, seed, prompt, type: imageType } = body as {
       image_id: string;
       seed?: number;
       prompt?: string;
+      type?: "portrait" | "fullBody";
     };
+    const isFullBody = imageType === "fullBody";
 
-    console.log(`[StoryPublisher] Approving character ${storyCharId}, image_id: ${image_id}, seed: ${seed}, prompt: ${prompt ? prompt.substring(0, 80) + '...' : 'NOT PROVIDED'}`);
+    console.log(`[StoryPublisher] Approving ${isFullBody ? "full body" : "portrait"} for character ${storyCharId}, image_id: ${image_id}, seed: ${seed}, prompt: ${prompt ? prompt.substring(0, 80) + '...' : 'NOT PROVIDED'}`);
 
     if (!image_id) {
       console.error(`[StoryPublisher] Approval failed: no image_id provided`);
@@ -120,16 +122,24 @@ export async function POST(
 
     console.log(`[StoryPublisher] Image stored at: ${publicUrl}`);
 
-    // 5. Approve the story character
-    console.log(`[StoryPublisher] Updating story_characters to mark as approved`);
+    // 5. Approve the story character (portrait or full body)
+    console.log(`[StoryPublisher] Updating story_characters to mark ${isFullBody ? "full body" : "portrait"} as approved`);
+    const updateFields = isFullBody
+      ? {
+          approved_fullbody: true,
+          approved_fullbody_image_id: image_id,
+          approved_fullbody_seed: resolvedSeed,
+          approved_fullbody_prompt: prompt ?? null,
+        }
+      : {
+          approved: true,
+          approved_image_id: image_id,
+          approved_seed: resolvedSeed,
+          approved_prompt: prompt ?? null,
+        };
     const { data: updated, error: updateError } = await supabase
       .from("story_characters")
-      .update({
-        approved: true,
-        approved_image_id: image_id,
-        approved_seed: resolvedSeed,
-        approved_prompt: prompt ?? null,
-      })
+      .update(updateFields)
       .eq("id", storyCharId)
       .select("*, series_id")
       .single();
@@ -144,17 +154,17 @@ export async function POST(
 
     console.log(`[StoryPublisher] Character approved successfully: ${storyCharId}`);
 
-    // 6. Check if all characters are now approved and update series status
+    // 6. Check if all characters are now fully approved (both portrait + full body) and update series status
     if (updated) {
       const { data: allChars } = await supabase
         .from("story_characters")
-        .select("id, approved")
+        .select("id, approved, approved_fullbody")
         .eq("series_id", updated.series_id);
 
       if (allChars && allChars.length > 0) {
-        const allApproved = allChars.every((ch) => ch.approved);
-        if (allApproved) {
-          console.log(`[StoryPublisher] All characters approved for series ${updated.series_id}, updating series status`);
+        const allFullyApproved = allChars.every((ch) => ch.approved && ch.approved_fullbody);
+        if (allFullyApproved) {
+          console.log(`[StoryPublisher] All characters fully approved (portrait + full body) for series ${updated.series_id}, updating series status`);
           await supabase
             .from("story_series")
             .update({ status: "images_pending" })
