@@ -14,16 +14,10 @@ RUN pip install --no-cache-dir insightface onnxruntime-gpu
 # Pre-download InsightFace buffalo_l models (used by IPAdapter FaceID at inference time)
 ENV COMFY_DIR=/comfyui
 RUN mkdir -p ${COMFY_DIR}/models/insightface/models && \
-    cd /tmp && \
-    python3 -c "\
-import urllib.request, zipfile, os;\
-url = 'https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip';\
-print('Downloading InsightFace buffalo_l models...');\
-urllib.request.urlretrieve(url, 'buffalo_l.zip');\
-with zipfile.ZipFile('buffalo_l.zip', 'r') as z: z.extractall(os.environ['COMFY_DIR'] + '/models/insightface/models/');\
-os.remove('buffalo_l.zip');\
-print('InsightFace models installed.')\
-"
+    curl -L -o /tmp/buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && \
+    unzip -q /tmp/buffalo_l.zip -d ${COMFY_DIR}/models/insightface/models/ && \
+    rm /tmp/buffalo_l.zip && \
+    echo "InsightFace buffalo_l models installed."
 
 # ---- Build-time LoRA Downloads ----
 # LoRAs are small (~1GB total) and critical for portrait generation.
