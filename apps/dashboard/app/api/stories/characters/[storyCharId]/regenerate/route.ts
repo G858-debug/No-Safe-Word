@@ -26,7 +26,7 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { prompt: customPrompt } = body as { prompt?: string };
+    const { prompt: customPrompt, negativePrompt: customNegativePrompt } = body as { prompt?: string; negativePrompt?: string };
 
     console.log(`[StoryPublisher] Regenerating character ${storyCharId}, customPrompt: ${!!customPrompt}`);
 
@@ -115,11 +115,10 @@ export async function POST(
 
     if (customPrompt) {
       prompt = customPrompt;
-      negativePrompt = buildNegativePrompt(PORTRAIT_SCENE, skinHints);
     } else {
       prompt = buildPrompt(characterData, PORTRAIT_SCENE);
-      negativePrompt = buildNegativePrompt(PORTRAIT_SCENE, skinHints);
     }
+    negativePrompt = customNegativePrompt || buildNegativePrompt(PORTRAIT_SCENE, skinHints);
 
     // 6. Scene intelligence: classify portrait and select LoRAs + negative additions
     const classification = classifyScene(prompt, "portrait");

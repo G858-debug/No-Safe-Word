@@ -30,6 +30,7 @@ export async function POST(
     // Parse optional debugLevel and forceModel from request body
     let debugLevel: DebugLevel = "full";
     let forceModel: string | undefined;
+    let customNegativePrompt: string | undefined;
     try {
       const body = await request.json();
       if (body.debugLevel && ["bare", "model", "loras", "negative", "full"].includes(body.debugLevel)) {
@@ -37,6 +38,9 @@ export async function POST(
       }
       if (body.forceModel && typeof body.forceModel === "string") {
         forceModel = body.forceModel;
+      }
+      if (body.negativePrompt && typeof body.negativePrompt === "string") {
+        customNegativePrompt = body.negativePrompt;
       }
     } catch {
       // No body or invalid JSON — use default "full"
@@ -110,12 +114,14 @@ export async function POST(
     const useModelSelection = debugLevel !== "bare";
     const useFaceDetailer = debugLevel === "full";
 
-    // Negative prompt
-    const negativePrompt = useFullNegative
-      ? buildNegativePrompt(PORTRAIT_SCENE, {
-          africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
-        })
-      : "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature";
+    // Negative prompt (custom override from UI takes priority)
+    const negativePrompt = customNegativePrompt
+      ? customNegativePrompt
+      : useFullNegative
+        ? buildNegativePrompt(PORTRAIT_SCENE, {
+            africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
+          })
+        : "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature";
 
     // Scene classification + resources
     const classification = classifyScene(prompt, "portrait");

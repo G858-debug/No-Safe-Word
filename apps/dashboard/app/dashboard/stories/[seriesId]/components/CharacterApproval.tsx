@@ -514,10 +514,12 @@ export default function CharacterApproval({
       updateChar(storyCharId, { isGenerating: true, error: null });
 
       try {
+        const state = charStates[storyCharId];
         const body: Record<string, string> = {};
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
+        if (state?.promptEdited) body.negativePrompt = state.negativePrompt;
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
@@ -544,7 +546,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [updateChar, startPolling, modelUrn, debugLevel, forceModel]
+    [charStates, updateChar, startPolling, modelUrn, debugLevel, forceModel]
   );
 
   const handleRegenerate = useCallback(
@@ -562,6 +564,7 @@ export default function CharacterApproval({
       try {
         const body: Record<string, string> = {};
         if (state.promptEdited) body.prompt = state.prompt;
+        if (state.promptEdited) body.negativePrompt = state.negativePrompt;
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
@@ -693,10 +696,12 @@ export default function CharacterApproval({
         // Start generation for this character
         updateChar(ch.id, { isGenerating: true, error: null });
 
+        const chState = charStates[ch.id];
         const body: Record<string, string> = {};
         if (modelUrn) body.model_urn = modelUrn;
         if (debugLevel !== "full") body.debugLevel = debugLevel;
         if (forceModel !== "auto") body.forceModel = forceModel;
+        if (chState?.promptEdited) body.negativePrompt = chState.negativePrompt;
 
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
@@ -1047,9 +1052,12 @@ export default function CharacterApproval({
                   </label>
                   <Textarea
                     value={state.negativePrompt}
-                    readOnly
+                    onChange={(e) =>
+                      updateChar(ch.id, { negativePrompt: e.target.value, promptEdited: true })
+                    }
                     rows={3}
-                    className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20 text-muted-foreground"
+                    className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20"
+                    disabled={state.isGenerating}
                   />
                 </div>
 
