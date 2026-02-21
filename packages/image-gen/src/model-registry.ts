@@ -25,8 +25,8 @@ export const MODEL_REGISTRY: ModelEntry[] = [
   {
     name: 'RealVisXL V5.0',
     filename: 'realvisxl-v5.safetensors',
-    tier: 'premium',
-    strengths: ['portrait', 'skin_detail'],
+    tier: 'maximum',
+    strengths: ['portrait', 'skin_detail', 'diversity'],
     fileSizeMb: 6800,
     description: 'Premium model for character portraits. Superior face and skin rendering.',
     installed: true,
@@ -43,7 +43,7 @@ export const MODEL_REGISTRY: ModelEntry[] = [
   {
     name: 'CyberRealistic XL v9.0',
     filename: 'cyberrealistic-xl-v9.safetensors',
-    tier: 'maximum',
+    tier: 'premium',
     strengths: ['portrait', 'skin_detail', 'realism'],
     fileSizeMb: 6800,
     description: 'Maximum quality photorealistic model.',

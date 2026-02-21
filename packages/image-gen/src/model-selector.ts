@@ -67,17 +67,19 @@ export function selectModel(
     }
   }
 
-  // 3. Portrait images prefer premium portrait models
+  // 3. Portrait images prefer the best installed portrait model (maximum > premium)
   if (imageType === 'portrait' || classification.shotType === 'close-up') {
-    const premium = MODEL_REGISTRY.find(
+    const portraitModel = MODEL_REGISTRY.find(
+      (m) => m.installed && m.strengths.includes('portrait') && m.tier === 'maximum'
+    ) || MODEL_REGISTRY.find(
       (m) => m.installed && m.strengths.includes('portrait') && m.tier === 'premium'
     );
-    if (premium) {
+    if (portraitModel) {
       return {
-        checkpointName: premium.filename,
-        model: premium,
+        checkpointName: portraitModel.filename,
+        model: portraitModel,
         fellBack: false,
-        reason: `Portrait/close-up: using premium model ${premium.name}`,
+        reason: `Portrait/close-up: using ${portraitModel.tier} model ${portraitModel.name}`,
         paramOverrides: { cfg: 6.5, steps: 35 },
       };
     }
