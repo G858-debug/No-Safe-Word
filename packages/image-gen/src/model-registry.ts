@@ -1,4 +1,4 @@
-export type ModelTier = 'standard' | 'premium' | 'budget' | 'maximum';
+export type ModelTier = 'standard' | 'premium' | 'maximum';
 export type ModelStrength = 'diversity' | 'portrait' | 'realism' | 'skin_detail';
 
 export interface ModelEntry {
@@ -25,28 +25,19 @@ export const MODEL_REGISTRY: ModelEntry[] = [
   {
     name: 'RealVisXL V5.0',
     filename: 'realvisxl-v5.safetensors',
-    tier: 'maximum',
+    tier: 'premium',
     strengths: ['portrait', 'skin_detail', 'diversity'],
     fileSizeMb: 6800,
     description: 'Premium model for character portraits. Superior face and skin rendering.',
     installed: true,
   },
   {
-    name: 'epiCRealism XL',
-    filename: 'epicrealism-xl.safetensors',
-    tier: 'budget',
-    strengths: ['realism'],
+    name: 'Lustify V5 Endgame',
+    filename: 'lustify-v5-endgame.safetensors',
+    tier: 'maximum',
+    strengths: ['realism', 'skin_detail'],
     fileSizeMb: 6500,
-    description: 'Budget-friendly photorealistic model.',
-    installed: true,
-  },
-  {
-    name: 'CyberRealistic XL v9.0',
-    filename: 'cyberrealistic-xl-v9.safetensors',
-    tier: 'premium',
-    strengths: ['portrait', 'skin_detail', 'realism'],
-    fileSizeMb: 6800,
-    description: 'Maximum quality photorealistic model.',
+    description: 'Purpose-built NSFW photorealism. Superior anatomy, lighting, and skin rendering for intimate scenes.',
     installed: true,
   },
 ];

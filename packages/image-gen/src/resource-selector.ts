@@ -96,11 +96,19 @@ export function selectResources(classification: SceneClassification): ResourceSe
   if (classification.hasDarkSkinSubject) {
     const melaninLora = getLoraFromRegistry('melanin-mix-xl.safetensors');
     if (melaninLora) {
-      candidates.push({ priority: 5, lora: melaninLora });
+      candidates.push({ priority: 2.5, lora: melaninLora });
     }
   }
 
-  // 9. Cap at 6 LoRAs — sort by priority (lower number = higher priority) and take first 6
+  // 9. If scene involves character interaction (dual-character scenes): add couples-poses-xl
+  if (classification.interactionType && classification.interactionType !== 'none' && classification.interactionType !== 'unknown') {
+    const couplesLora = getLoraFromRegistry('couples-poses-xl.safetensors');
+    if (couplesLora) {
+      candidates.push({ priority: 3.5, lora: couplesLora });
+    }
+  }
+
+  // 10. Cap at 6 LoRAs — sort by priority (lower number = higher priority) and take first 6
   candidates.sort((a, b) => a.priority - b.priority);
   const selectedLoras = candidates.slice(0, 6).map((c) => c.lora);
 

@@ -116,6 +116,13 @@ if [ -n "${CIVITAI_API_KEY}" ]; then
         "https://civitai.com/api/download/models/435833?token=${CIVITAI_API_KEY}" \
         "loras" \
         "melanin-mix-xl.safetensors"
+
+    # couples-poses-xl — Dual-character pose composition for SDXL
+    # CivitAI model 1543944
+    download_model \
+        "https://civitai.com/api/download/models/1543944?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "couples-poses-xl.safetensors"
 else
     echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl (CIVITAI_API_KEY not set)"
 fi
@@ -177,19 +184,13 @@ if [ "${INSTALL_PREMIUM_MODELS}" = "true" ]; then
             "checkpoints" \
             "realvisxl-v5.safetensors"
 
-        # epiCRealism XL Pure_fix — budget photorealistic model
-        # Civitai model 277058, version 2514955
+        # Lustify V5 Endgame — NSFW-optimized photorealistic checkpoint
+        # CivitAI model 573152, version 1094291
+        # Purpose-built for photorealistic NSFW with superior anatomy and lighting
         download_model \
-            "https://civitai.com/api/download/models/2514955?token=${CIVITAI_API_KEY}" \
+            "https://civitai.com/api/download/models/1094291?token=${CIVITAI_API_KEY}" \
             "checkpoints" \
-            "epicrealism-xl.safetensors"
-
-        # CyberRealistic XL v9.0 — maximum quality photorealistic model
-        # Civitai model 312530, version 2611295
-        download_model \
-            "https://civitai.com/api/download/models/2611295?token=${CIVITAI_API_KEY}" \
-            "checkpoints" \
-            "cyberrealistic-xl-v9.safetensors"
+            "lustify-v5-endgame.safetensors"
     fi
 else
     echo "[NSW] Skipping premium models (set INSTALL_PREMIUM_MODELS=true to install)"

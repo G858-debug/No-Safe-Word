@@ -237,8 +237,7 @@ const MODEL_OPTIONS = [
   { value: "auto", label: "Auto (pipeline default)" },
   { value: "juggernaut-x-v10.safetensors", label: "Juggernaut XL v10" },
   { value: "realvisxl-v5.safetensors", label: "RealVisXL V5.0" },
-  { value: "epicrealism-xl.safetensors", label: "epiCRealism XL" },
-  { value: "cyberrealistic-xl-v9.safetensors", label: "CyberRealistic XL v9" },
+  { value: "lustify-v5-endgame.safetensors", label: "Lustify V5 Endgame" },
 ] as const;
 
 const POLL_INTERVAL = 3000;

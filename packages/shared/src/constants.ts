@@ -32,10 +32,10 @@ export const MODEL_PRESETS: ModelPreset[] = [
     description: "Exceptional photorealistic people. Best skin textures and portrait lighting.",
   },
   {
-    name: "epiCRealism XL",
-    urn: "urn:air:sdxl:checkpoint:civitai:277058@2514955",
+    name: "Lustify V5 Endgame",
+    urn: "urn:air:sdxl:checkpoint:civitai:573152@1094291",
     type: "SDXL",
-    description: "Top-tier photorealism for SDXL — no early-access cost",
+    description: "Purpose-built NSFW photorealism with superior anatomy and intimate scene rendering.",
   },
 ];
 

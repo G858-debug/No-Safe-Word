@@ -97,6 +97,17 @@ export const LORA_REGISTRY: LoraEntry[] = [
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
   },
+  {
+    name: 'Couples Poses XL',
+    filename: 'couples-poses-xl.safetensors',
+    category: 'style',
+    defaultStrength: 0.6,
+    clipStrength: 0.6,
+    triggerWord: 'couples_pose',
+    description: 'Improved dual-character pose composition — reduces merged limbs and anatomical errors in two-person scenes',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+  },
 ];
 
 export function getLorasByCategory(category: LoraCategory): LoraEntry[] {

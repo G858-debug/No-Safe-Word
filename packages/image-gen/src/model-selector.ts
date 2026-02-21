@@ -62,7 +62,7 @@ export function selectModel(
         model: maxQuality,
         fellBack: false,
         reason: `NSFW content: using maximum quality model ${maxQuality.name}`,
-        paramOverrides: { cfg: 6.0 },
+        paramOverrides: { cfg: 4.0 },
       };
     }
   }

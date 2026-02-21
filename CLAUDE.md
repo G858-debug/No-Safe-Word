@@ -39,8 +39,7 @@ Example (new style — USE THIS):
 ### Model Selection
 - Default: Juggernaut XL Ragnarok (best balance of quality, diversity, and cost)
 - For premium character portraits: RealVisXL V5.0
-- Budget: epiCRealism XL (free/low cost)
-- Maximum quality (expensive): CyberRealistic XL v9.0 or CyberRealistic Flux v2.5
+- For NSFW / intimate scenes: Lustify V5 Endgame (superior anatomy, CFG 3.0-4.5)
 
 ### Self-Contained Prompts (Critical)
 Every image prompt must be fully self-contained. The Civitai API generates each image independently — there is NO context, NO memory, and NO reference to any other image or prompt.
