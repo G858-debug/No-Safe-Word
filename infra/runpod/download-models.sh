@@ -100,7 +100,7 @@ download_model \
 # Requires CIVITAI_API_KEY (same as premium models section)
 if [ -n "${CIVITAI_API_KEY}" ]; then
     download_model \
-        "https://civitai.com/api/download/models/359579?type=Model&format=SafeTensor&token=${CIVITAI_API_KEY}" \
+        "https://civitai.com/api/download/models/177674?token=${CIVITAI_API_KEY}" \
         "loras" \
         "better-bodies-xl.safetensors"
     # cinecolor-harmonizer — Cinematic golden color grading (jarod2212)
@@ -118,9 +118,9 @@ if [ -n "${CIVITAI_API_KEY}" ]; then
         "melanin-mix-xl.safetensors"
 
     # couples-poses-xl — Dual-character pose composition for SDXL
-    # CivitAI model 1543944
+    # CivitAI model 1543944, version 1746981
     download_model \
-        "https://civitai.com/api/download/models/1543944?token=${CIVITAI_API_KEY}" \
+        "https://civitai.com/api/download/models/1746981?token=${CIVITAI_API_KEY}" \
         "loras" \
         "couples-poses-xl.safetensors"
 else

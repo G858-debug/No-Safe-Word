@@ -15,10 +15,10 @@ if not key:
     sys.exit(0)
 
 loras = [
-    (f"https://civitai.com/api/download/models/359579?type=Model&format=SafeTensor&token={key}", "better-bodies-xl.safetensors"),
+    (f"https://civitai.com/api/download/models/177674?token={key}", "better-bodies-xl.safetensors"),
     (f"https://civitai.com/api/download/models/2686970?token={key}", "cinecolor-harmonizer.safetensors"),
     (f"https://civitai.com/api/download/models/435833?token={key}", "melanin-mix-xl.safetensors"),
-    (f"https://civitai.com/api/download/models/1543944?token={key}", "couples-poses-xl.safetensors"),
+    (f"https://civitai.com/api/download/models/1746981?token={key}", "couples-poses-xl.safetensors"),
 ]
 
 lora_dir = os.environ["COMFY_DIR"] + "/models/loras/"
