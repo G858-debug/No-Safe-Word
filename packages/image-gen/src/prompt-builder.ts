@@ -440,7 +440,7 @@ export function buildNegativePrompt(
   let result = base;
 
   if (scene.mode === "sfw") {
-    result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), sexual, explicit, revealing clothing, exposed skin";
+    result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), explicit, exposed skin";
   }
 
   // Counter SDXL's default European facial geometry for African characters
