@@ -6,7 +6,7 @@ import type { CharacterData, SceneData } from "@no-safe-word/shared";
 
 const PORTRAIT_SCENE: SceneData = {
   mode: "sfw",
-  setting: "studio portrait, clean neutral background",
+  setting: "(professional portrait photography:1.2), studio lighting, bokeh background",
   lighting: "soft studio",
   mood: "professional portrait",
   sfwDescription:

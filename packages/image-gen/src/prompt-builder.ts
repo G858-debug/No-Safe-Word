@@ -172,9 +172,9 @@ export function extractCharacterTags(
     ""
   );
 
-  // Strip portrait-scene suffix (everything from "studio portrait" onwards)
+  // Strip portrait-scene suffix (everything from portrait photography/studio portrait onwards)
   result = result.replace(
-    /,\s*studio portrait,\s*clean neutral background.*/i,
+    /,\s*(?:\(professional portrait photography[^)]*\)|studio portrait),\s*(?:studio lighting|clean neutral background).*/i,
     ""
   );
 
@@ -366,24 +366,30 @@ export function buildStoryImagePrompt(
   primaryCharacterTags: string | null,
   secondaryCharacterTags: string | null,
   scenePrompt: string,
-  _mode: "sfw" | "nsfw"
+  mode: "sfw" | "nsfw"
 ): string {
   const cleanedScene = weightGazeDirections(
     stripInlineCharacterDescriptions(scenePrompt)
   );
 
+  const prefix = '(masterpiece, best quality:1.2), highly detailed, (photorealistic:1.3), (sharp focus:1.1)';
+  const modeTag = mode === 'nsfw' ? 'professional erotic photography' : 'professional photography';
+  const suffix = mode === 'nsfw'
+    ? '(cinematic lighting:1.1), (intimate atmosphere:1.1), film grain, shallow depth of field, 8k uhd, dslr'
+    : '(cinematic lighting:1.1), film grain, shallow depth of field, 8k uhd, dslr';
+
   // No linked characters — atmospheric/environmental shot
   if (!primaryCharacterTags) {
-    return `masterpiece, best quality, highly detailed, ${cleanedScene}, photorealistic`;
+    return `${prefix}, ${modeTag}, ${cleanedScene}, ${suffix}`;
   }
 
   // Single character
   if (!secondaryCharacterTags) {
-    return `masterpiece, best quality, highly detailed, ${primaryCharacterTags}, ${cleanedScene}, photorealistic`;
+    return `${prefix}, ${modeTag}, ${primaryCharacterTags}, ${cleanedScene}, ${suffix}`;
   }
 
   // Two characters
-  return `masterpiece, best quality, highly detailed, ${primaryCharacterTags}, second person: ${secondaryCharacterTags}, ${cleanedScene}, photorealistic`;
+  return `${prefix}, ${modeTag}, ${primaryCharacterTags}, second person: ${secondaryCharacterTags}, ${cleanedScene}, ${suffix}`;
 }
 
 /**
@@ -413,11 +419,14 @@ export function cleanScenePrompt(prompt: string): string {
     }
   );
 
-  // Remove trailing "Photorealistic." / "photorealistic" (added by prompt builder)
+  // Remove trailing quality suffix tags (added by prompt builder)
   result = result.replace(/[,.\s]*\b[Pp]hotorealistic\.?\s*$/g, "");
+  result = result.replace(/[,.\s]*\b(?:8k\s*uhd|dslr|film\s*grain|shallow\s*depth\s*of\s*field)\b[,.\s]*/gi, ", ");
 
-  // Remove leading "Photorealistic," / "Photorealistic."
+  // Remove leading quality prefix tags (added by prompt builder)
   result = result.replace(/^\s*[Pp]hotorealistic[.,]\s*/g, "");
+  result = result.replace(/^\s*\(masterpiece[^)]*\)\s*,?\s*/i, "");
+  result = result.replace(/^\s*(?:highly\s+detailed|professional\s+(?:erotic\s+)?photography)\s*,?\s*/gi, "");
 
   // Clean up artifacts: double commas, leading/trailing commas, double spaces
   result = result

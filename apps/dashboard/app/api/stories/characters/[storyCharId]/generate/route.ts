@@ -10,7 +10,7 @@ type DebugLevel = "bare" | "model" | "loras" | "negative" | "full";
 
 const PORTRAIT_SCENE: SceneData = {
   mode: "sfw",
-  setting: "studio portrait, clean neutral background",
+  setting: "(professional portrait photography:1.2), studio lighting, bokeh background",
   lighting: "soft studio",
   mood: "professional portrait",
   sfwDescription:
