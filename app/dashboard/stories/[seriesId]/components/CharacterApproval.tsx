@@ -117,7 +117,12 @@ function simplifyBodyType(raw: string): string {
 /** Client-side mirror of the server prompt builder for portrait shots */
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
-  const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
+  // Framing and face-detail tags go FIRST so CLIP gives them maximum weight
+  const parts: string[] = [
+    "masterpiece, best quality, highly detailed",
+    "(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)",
+    "(skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)",
+  ];
   const darkSkin = needsDarkSkinCorrection(d);
 
   if (d.age) parts.push(d.age);
@@ -156,12 +161,8 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   if (d.pose) parts.push(d.pose);
   if (d.distinguishingFeatures) parts.push(d.distinguishingFeatures);
 
-  parts.push("studio portrait, clean neutral background");
-  parts.push("soft studio lighting");
-  parts.push("professional portrait mood");
-  parts.push(
-    "head and shoulders portrait, looking at camera, neutral expression, photorealistic"
-  );
+  parts.push("(professional portrait photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background");
+  parts.push("looking at camera, neutral expression, photorealistic");
 
   return parts.filter(Boolean).join(", ");
 }

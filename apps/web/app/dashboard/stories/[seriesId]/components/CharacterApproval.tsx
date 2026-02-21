@@ -110,9 +110,10 @@ const ROLE_STYLES: Record<string, { label: string; className: string }> = {
  */
 function ensureCorrectAge(prompt: string, correctAge: string): string {
   if (!correctAge) return prompt;
+  // Match the first standalone age number in the prompt (not inside emphasis weights like :1.3)
   return prompt.replace(
-    /(masterpiece,\s*best quality,\s*highly detailed,\s*)\d{1,3}(\s*years?\s*old)?/,
-    `$1${correctAge}`
+    /(?<=,\s)\d{1,3}(?=\s*(?:years?\s*old)?,)/,
+    correctAge
   );
 }
 
@@ -154,7 +155,12 @@ function isAfricanMaleDesc(d: Record<string, string>): boolean {
 function buildPortraitPrompt(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
   const africanMale = isAfricanMaleDesc(d);
-  const parts: string[] = ["masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)"];
+  // Framing and face-detail tags go FIRST so CLIP gives them maximum weight
+  const parts: string[] = [
+    "masterpiece, best quality, highly detailed",
+    "(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)",
+    "(skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)",
+  ];
 
   if (d.age) parts.push(d.age);
   if (d.gender) parts.push(d.gender);
@@ -204,12 +210,8 @@ function buildPortraitPrompt(desc: Record<string, unknown>): string {
   if (d.pose) parts.push(d.pose);
   if (d.distinguishingFeatures) parts.push(d.distinguishingFeatures);
 
-  parts.push("studio portrait, clean neutral background");
-  parts.push("soft studio lighting");
-  parts.push("professional portrait mood");
-  parts.push(
-    "head and shoulders portrait, looking at camera, neutral expression, photorealistic"
-  );
+  parts.push("(professional portrait photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background");
+  parts.push("looking at camera, neutral expression, photorealistic");
 
   return parts.filter(Boolean).join(", ");
 }
@@ -261,7 +263,7 @@ function buildFullBodyPrompt(desc: Record<string, unknown>): string {
 
   parts.push("full body standing pose, full body visible head to feet");
   parts.push("standing naturally, looking at camera");
-  parts.push("studio-quality lighting, clean neutral background");
+  parts.push("soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background");
   parts.push("fashion photography style, photorealistic");
 
   return parts.filter(Boolean).join(", ");
@@ -275,6 +277,12 @@ function buildPortraitNegativePrompt(desc: Record<string, unknown>): string {
 
   // Portraits are always SFW
   result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), explicit, exposed skin";
+
+  // Reinforce head-and-shoulders framing by penalising wide/full-body compositions
+  result += ", (full body:1.4), (full length:1.4), (wide shot:1.3), (legs:1.2), (feet:1.2)";
+
+  // Enforce uniform studio background — prevent outdoor, textured, or coloured backdrops
+  result += ", (outdoor:1.3), (nature:1.2), (city:1.2), (room:1.2), (textured background:1.2), (patterned background:1.2), (colorful background:1.2)";
 
   // African feature correction for male characters
   if (isAfricanMaleDesc(d)) {
@@ -293,13 +301,12 @@ const DEBUG_LEVELS = [
   { value: "negative", label: "+ Full Negative", description: "Model + LoRAs + full negative prompt, no FaceDetailer" },
 ] as const;
 
-/** Available checkpoint models */
-const MODEL_OPTIONS = [
-  { value: "auto", label: "Auto (pipeline default)" },
-  { value: "juggernaut-x-v10.safetensors", label: "Juggernaut XL v10" },
-  { value: "realvisxl-v5.safetensors", label: "RealVisXL V5.0" },
-  { value: "lustify-v5-endgame.safetensors", label: "Lustify V5 Endgame" },
-] as const;
+/** Gender-based model selection: Lustify for female, RealVisXL for male */
+function getModelForGender(desc: Record<string, unknown>): string {
+  const gender = (desc as Record<string, string>).gender?.toLowerCase();
+  if (gender === "male") return "realvisxl-v5.safetensors";
+  return "lustify-v5-endgame.safetensors"; // female and any other gender
+}
 
 const POLL_INTERVAL = 3000;
 const MAX_POLL_ATTEMPTS = 360; // 18 minutes (cold starts with premium model downloads take ~14 min)
@@ -349,7 +356,6 @@ export default function CharacterApproval({
   const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for elapsed time display
   const [debugLevel, setDebugLevel] = useState("full");
-  const [forceModel, setForceModel] = useState("auto");
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -629,10 +635,12 @@ export default function CharacterApproval({
 
       try {
         const state = charStates[storyCharId]?.[type];
+        const character = characters.find((c) => c.id === storyCharId);
+        const genderModel = character ? getModelForGender(character.characters.description) : "lustify-v5-endgame.safetensors";
         const body: Record<string, string | number> = { type };
 
         if (debugLevel !== "full") body.debugLevel = debugLevel;
-        if (forceModel !== "auto") body.forceModel = forceModel;
+        body.forceModel = genderModel;
         if (state?.promptEdited) body.negativePrompt = state.negativePrompt;
         if (state?.lockSeed && state.seed) body.seed = state.seed;
 
@@ -660,7 +668,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateSlot, startPolling, debugLevel, forceModel]
+    [charStates, characters, updateSlot, startPolling, debugLevel]
   );
 
   const handleRegenerate = useCallback(
@@ -676,12 +684,14 @@ export default function CharacterApproval({
       });
 
       try {
+        const character = characters.find((c) => c.id === storyCharId);
+        const genderModel = character ? getModelForGender(character.characters.description) : "lustify-v5-endgame.safetensors";
         const body: Record<string, string | number> = { type };
         if (state.promptEdited) body.prompt = state.prompt;
         if (state.promptEdited) body.negativePrompt = state.negativePrompt;
 
         if (debugLevel !== "full") body.debugLevel = debugLevel;
-        if (forceModel !== "auto") body.forceModel = forceModel;
+        body.forceModel = genderModel;
         if (state.lockSeed && state.seed) body.seed = state.seed;
 
         const res = await fetch(
@@ -706,7 +716,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, updateSlot, startPolling, debugLevel, forceModel]
+    [charStates, characters, updateSlot, startPolling, debugLevel]
   );
 
   const handleApprove = useCallback(
@@ -819,10 +829,11 @@ export default function CharacterApproval({
         updateSlot(ch.id, type, { isGenerating: true, error: null });
 
         const chState = charStates[ch.id]?.[type];
+        const genderModel = getModelForGender(ch.characters.description);
         const body: Record<string, string | number> = { type };
 
         if (debugLevel !== "full") body.debugLevel = debugLevel;
-        if (forceModel !== "auto") body.forceModel = forceModel;
+        body.forceModel = genderModel;
         if (chState?.promptEdited) body.negativePrompt = chState.negativePrompt;
 
         const res = await fetch(
@@ -861,7 +872,7 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateSlot, startPolling, debugLevel, forceModel]);
+  }, [characters, charStates, updateSlot, startPolling, debugLevel]);
 
   // ------- Derived state -------
 
@@ -972,23 +983,9 @@ export default function CharacterApproval({
           <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
             Model
           </label>
-          <select
-            value={forceModel}
-            onChange={(e) => setForceModel(e.target.value)}
-            className="flex-1 rounded-md border border-yellow-500/30 bg-background px-3 py-1.5 text-sm"
-            disabled={anyGenerating}
-          >
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          {forceModel !== "auto" && (
-            <span className="text-xs text-yellow-400/70 hidden sm:inline">
-              Overrides debug level model selection
-            </span>
-          )}
+          <span className="text-xs text-muted-foreground">
+            Auto: Lustify V5 (female) / RealVisXL V5 (male)
+          </span>
         </div>
       </div>
 

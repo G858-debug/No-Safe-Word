@@ -71,7 +71,15 @@ export function buildPrompt(
   const parts: string[] = [];
   const isAfricanMale = needsAfricanFeatureCorrection(character);
 
-  parts.push("masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
+  // Portrait framing tags go FIRST so CLIP gives them maximum weight
+  const isPortrait = scene.mood === "professional portrait";
+  if (isPortrait) {
+    parts.push("masterpiece, best quality, highly detailed");
+    parts.push("(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)");
+    parts.push("(skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
+  } else {
+    parts.push("masterpiece, best quality, highly detailed, (skin pores:1.1), (natural skin texture:1.2), (matte skin:1.1)");
+  }
 
   if (character.age) parts.push(character.age);
   if (character.gender) parts.push(character.gender);
@@ -166,15 +174,19 @@ export function extractCharacterTags(
   const { stripClothing = true } = options;
   let result = portraitPrompt;
 
-  // Strip quality prefix
+  // Strip quality prefix and portrait framing tags
   result = result.replace(
     /^masterpiece,\s*best quality,\s*highly detailed,\s*/i,
+    ""
+  );
+  result = result.replace(
+    /\(close-up head and shoulders portrait[^)]*\),?\s*\(face in focus[^)]*\),?\s*\(detailed facial features[^)]*\),?\s*/i,
     ""
   );
 
   // Strip portrait-scene suffix (everything from portrait photography/studio portrait onwards)
   result = result.replace(
-    /,\s*(?:\(professional portrait photography[^)]*\)|studio portrait),\s*(?:studio lighting|clean neutral background).*/i,
+    /,\s*(?:\(professional portrait photography[^)]*\)|studio portrait),\s*(?:soft diffused studio lighting|studio lighting|clean neutral background).*/i,
     ""
   );
 
@@ -450,6 +462,13 @@ export function buildNegativePrompt(
 
   if (scene.mode === "sfw") {
     result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), explicit, exposed skin";
+  }
+
+  // Reinforce head-and-shoulders framing for portrait scenes
+  if (scene.mood === "professional portrait") {
+    result += ", (full body:1.4), (full length:1.4), (wide shot:1.3), (legs:1.2), (feet:1.2)";
+    // Enforce uniform studio background
+    result += ", (outdoor:1.3), (nature:1.2), (city:1.2), (room:1.2), (textured background:1.2), (patterned background:1.2), (colorful background:1.2)";
   }
 
   // Counter SDXL's default European facial geometry for African characters

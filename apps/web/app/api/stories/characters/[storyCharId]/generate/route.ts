@@ -11,18 +11,18 @@ type ImageType = "portrait" | "fullBody";
 
 const PORTRAIT_SCENE: SceneData = {
   mode: "sfw",
-  setting: "(professional portrait photography:1.2), studio lighting, bokeh background",
+  setting: "(professional portrait photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background",
   lighting: "soft studio",
   mood: "professional portrait",
   sfwDescription:
-    "head and shoulders portrait, looking at camera, neutral expression, photorealistic",
+    "looking at camera, neutral expression, photorealistic",
   nsfwDescription: "",
   additionalTags: [],
 };
 
 const FULLBODY_SCENE: SceneData = {
   mode: "sfw",
-  setting: "(fashion photography:1.2), studio lighting, clean neutral background",
+  setting: "(fashion photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background",
   lighting: "studio-quality lighting",
   mood: "fashion photography",
   sfwDescription:
