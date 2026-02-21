@@ -109,6 +109,30 @@ download_model \
     "sam_vit_b_01ec64.pth"
 
 # =============================================
+# IPAdapter FaceID models — face consistency for story images
+# These enable the single-character and dual-character workflows
+# that inject the approved portrait's face into story scene images.
+# =============================================
+
+# CLIP Vision ViT-H/14 — required by IPAdapter for image encoding (~2.5GB)
+download_model \
+    "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors" \
+    "clip_vision" \
+    "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+
+# IP-Adapter FaceID Plus V2 SDXL — face embedding adapter model (~100MB)
+download_model \
+    "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl.bin" \
+    "ipadapter" \
+    "ip-adapter-faceid-plusv2_sdxl.bin"
+
+# IP-Adapter FaceID Plus V2 SDXL LoRA — auto-loaded by unified loader (~400MB)
+download_model \
+    "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl_lora.safetensors" \
+    "loras" \
+    "ip-adapter-faceid-plusv2_sdxl_lora.safetensors"
+
+# =============================================
 # Premium models — opt-in via INSTALL_PREMIUM_MODELS=true
 # These are additional checkpoints for model selection intelligence.
 # They require extra disk space (~20GB) so are only downloaded on demand.

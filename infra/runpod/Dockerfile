@@ -5,6 +5,26 @@ FROM runpod/worker-comfyui:5.7.1-base
 # Impact Subpack: UltralyticsDetectorProvider (separated since Impact Pack v8.0)
 RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
 
+# IPAdapter Plus: IPAdapterUnifiedLoaderFaceID, IPAdapterFaceID (face consistency for story images)
+RUN cd /comfyui/custom_nodes && git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git
+
+# InsightFace + ONNX Runtime for FaceID face embedding extraction
+RUN pip install --no-cache-dir insightface onnxruntime-gpu
+
+# Pre-download InsightFace buffalo_l models (used by IPAdapter FaceID at inference time)
+ENV COMFY_DIR=/comfyui
+RUN mkdir -p ${COMFY_DIR}/models/insightface/models && \
+    cd /tmp && \
+    python3 -c "\
+import urllib.request, zipfile, os;\
+url = 'https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip';\
+print('Downloading InsightFace buffalo_l models...');\
+urllib.request.urlretrieve(url, 'buffalo_l.zip');\
+with zipfile.ZipFile('buffalo_l.zip', 'r') as z: z.extractall(os.environ['COMFY_DIR'] + '/models/insightface/models/');\
+os.remove('buffalo_l.zip');\
+print('InsightFace models installed.')\
+"
+
 # ---- Build-time LoRA Downloads ----
 # LoRAs are small (~1GB total) and critical for portrait generation.
 # Baking them into the image guarantees they're available on every worker
