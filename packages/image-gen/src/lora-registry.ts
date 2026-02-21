@@ -63,7 +63,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     clipStrength: 0.5,
     description: 'Anatomical accuracy for NSFW content',
     compatibleWith: ['nsfw'],
-    installed: false,
+    installed: true,
   },
   {
     name: 'Cinematic Lighting XL',

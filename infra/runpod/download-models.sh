@@ -96,6 +96,17 @@ download_model \
     "loras" \
     "cinematic-lighting-xl.safetensors"
 
+# better-bodies-xl — Body anatomy LoRA for NSFW content accuracy (EauDeNoire)
+# Requires CIVITAI_API_KEY (same as premium models section)
+if [ -n "${CIVITAI_API_KEY}" ]; then
+    download_model \
+        "https://civitai.com/api/download/models/359579?type=Model&format=SafeTensor&token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "better-bodies-xl.safetensors"
+else
+    echo "[NSW] ⚠ Skipping better-bodies-xl (CIVITAI_API_KEY not set)"
+fi
+
 # YOLO face detection — used by UltralyticsDetectorProvider / FaceDetailer
 download_model \
     "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt" \
