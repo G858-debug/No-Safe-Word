@@ -1,4 +1,4 @@
-export type LoraCategory = 'detail' | 'skin' | 'eyes' | 'hands' | 'lighting' | 'bodies' | 'style' | 'cinematic' | 'melanin';
+export type LoraCategory = 'detail' | 'skin' | 'eyes' | 'hands' | 'lighting' | 'bodies' | 'style' | 'cinematic' | 'melanin' | 'character';
 export type ContentMode = 'sfw' | 'nsfw';
 
 export interface LoraEntry {
@@ -12,6 +12,38 @@ export interface LoraEntry {
   compatibleWith: ContentMode[];
   /** Whether this LoRA is installed on the RunPod ComfyUI instance */
   installed: boolean;
+}
+
+/** Extended LoRA entry for character-specific LoRAs loaded from the database */
+export interface CharacterLoraEntry extends LoraEntry {
+  characterId: string;
+  characterName: string;
+  /** Supabase Storage URL for RunPod to download at runtime */
+  storageUrl: string;
+}
+
+/** Build a LoraEntry from a character_loras database record */
+export function buildCharacterLoraEntry(dbRecord: {
+  character_id: string;
+  character_name: string;
+  filename: string;
+  trigger_word: string;
+  storage_url: string;
+}): CharacterLoraEntry {
+  return {
+    name: `Character: ${dbRecord.character_name}`,
+    filename: `characters/${dbRecord.filename}`,
+    category: 'character',
+    defaultStrength: 0.8,
+    clipStrength: 0.8,
+    triggerWord: dbRecord.trigger_word,
+    description: `Trained character LoRA for ${dbRecord.character_name}`,
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false, // Downloaded at runtime by RunPod worker
+    characterId: dbRecord.character_id,
+    characterName: dbRecord.character_name,
+    storageUrl: dbRecord.storage_url,
+  };
 }
 
 export const LORA_REGISTRY: LoraEntry[] = [

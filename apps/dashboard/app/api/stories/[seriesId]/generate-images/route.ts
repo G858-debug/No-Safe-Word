@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
 import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel } from "@no-safe-word/image-gen";
-import { augmentComposition } from "@no-safe-word/image-gen";
-import type { ImageType } from "@no-safe-word/image-gen";
+import { augmentComposition, buildCharacterLoraEntry } from "@no-safe-word/image-gen";
+import type { ImageType, CharacterLoraEntry } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 interface QueuedJob {
@@ -29,10 +29,21 @@ export async function POST(
     const { post_id } = body as { post_id?: string };
 
     // 1. Verify all characters in the series are approved
-    const { data: storyChars, error: charsError } = await supabase
+    // Note: active_lora_id is not in auto-generated types yet, so we cast
+    const { data: storyChars, error: charsError } = await (supabase as any)
       .from("story_characters")
-      .select("id, character_id, approved, approved_seed, approved_prompt")
-      .eq("series_id", seriesId);
+      .select("id, character_id, approved, approved_seed, approved_prompt, active_lora_id")
+      .eq("series_id", seriesId) as {
+        data: Array<{
+          id: string;
+          character_id: string;
+          approved: boolean;
+          approved_seed: number | null;
+          approved_prompt: string | null;
+          active_lora_id: string | null;
+        }> | null;
+        error: any;
+      };
 
     if (charsError) {
       return NextResponse.json({ error: charsError.message }, { status: 500 });
@@ -60,8 +71,12 @@ export async function POST(
     // Build character_id → approved_seed and character_id → approved character tags maps
     const seedMap = new Map<string, number | null>();
     const approvedTagsMap = new Map<string, string>();
+    const loraIdMap = new Map<string, string>(); // character_id → active_lora_id
     storyChars.forEach((sc) => {
       seedMap.set(sc.character_id, sc.approved_seed);
+      if (sc.active_lora_id) {
+        loraIdMap.set(sc.character_id, sc.active_lora_id);
+      }
       if (sc.approved_prompt) {
         const tags = extractCharacterTags(sc.approved_prompt);
         if (tags) approvedTagsMap.set(sc.character_id, tags);
@@ -172,6 +187,44 @@ export async function POST(
         }
       }
     });
+
+    // Build character_id → CharacterLoraEntry map for deployed LoRAs
+    const characterLoraMap = new Map<string, CharacterLoraEntry>();
+    if (loraIdMap.size > 0) {
+      const loraIds = Array.from(loraIdMap.values());
+      const { data: loraRecords } = await (supabase as any)
+        .from("character_loras")
+        .select("id, character_id, filename, trigger_word, storage_url")
+        .in("id", loraIds)
+        .eq("status", "deployed") as {
+          data: Array<{
+            id: string;
+            character_id: string;
+            filename: string;
+            trigger_word: string;
+            storage_url: string | null;
+          }> | null;
+        };
+
+      if (loraRecords) {
+        for (const lora of loraRecords) {
+          if (!lora.storage_url) continue;
+          const charData = characterDataMap.get(lora.character_id);
+          const charName = charData?.name || "Unknown";
+          characterLoraMap.set(
+            lora.character_id,
+            buildCharacterLoraEntry({
+              character_id: lora.character_id,
+              character_name: charName,
+              filename: lora.filename,
+              trigger_word: lora.trigger_word,
+              storage_url: lora.storage_url,
+            })
+          );
+          console.log(`[StoryImage] Character LoRA active for ${charName}: ${lora.filename}`);
+        }
+      }
+    }
 
     // Empty character for prompts not linked to a character
     const emptyCharacter: CharacterData = {
@@ -320,10 +373,14 @@ export async function POST(
 
         // Scene intelligence: classify scene and select LoRAs
         const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
-        const resources = selectResources(classification);
+        const primaryCharLora = imgPrompt.character_id ? characterLoraMap.get(imgPrompt.character_id) : undefined;
+        const resources = selectResources(classification, primaryCharLora);
 
         console.log(`[StoryImage][${imgPrompt.id}] Scene classification:`, JSON.stringify(classification));
         console.log(`[StoryImage][${imgPrompt.id}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
+        if (primaryCharLora) {
+          console.log(`[StoryImage][${imgPrompt.id}] Character LoRA injected: ${primaryCharLora.filename}`);
+        }
 
         const modelSelection = selectModel(classification, imgPrompt.image_type as ImageType, {
           contentLevel: classification.contentLevel,

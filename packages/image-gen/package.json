@@ -11,7 +11,11 @@
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
-    "@no-safe-word/shared": "*"
+    "@anthropic-ai/sdk": "^0.40.1",
+    "@no-safe-word/shared": "*",
+    "@types/archiver": "^7.0.0",
+    "archiver": "^7.0.1",
+    "replicate": "^1.4.0"
   },
   "devDependencies": {
     "@types/node": "^20",

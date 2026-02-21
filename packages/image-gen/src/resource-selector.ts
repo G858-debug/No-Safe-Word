@@ -1,5 +1,6 @@
 import type { SceneClassification } from './scene-classifier';
 import { LORA_REGISTRY } from './lora-registry';
+import type { CharacterLoraEntry } from './lora-registry';
 
 export interface SelectedLora {
   filename: string;
@@ -17,6 +18,8 @@ export interface ResourceSelection {
     denoise?: number;
     hiresFixEnabled?: boolean;
   };
+  /** URLs for character LoRAs that RunPod workers need to download at runtime */
+  characterLoraDownloads?: Array<{ filename: string; url: string }>;
 }
 
 // Priority order for LoRA selection when capping at 6
@@ -33,14 +36,35 @@ function getLoraFromRegistry(filename: string): SelectedLora | null {
   };
 }
 
-export function selectResources(classification: SceneClassification): ResourceSelection {
+export function selectResources(
+  classification: SceneClassification,
+  characterLora?: CharacterLoraEntry | null,
+): ResourceSelection {
   const candidates: Array<{ priority: number; lora: SelectedLora }> = [];
   const negativeAdditions: string[] = [];
+  const characterLoraDownloads: Array<{ filename: string; url: string }> = [];
 
   // 1. Always include detail-tweaker-xl
   const detailLora = getLoraFromRegistry('detail-tweaker-xl.safetensors');
   if (detailLora) {
     candidates.push({ priority: 0, lora: detailLora });
+  }
+
+  // 1.5. Character LoRA — identity-critical, must never be bumped
+  if (characterLora) {
+    candidates.push({
+      priority: 1.5,
+      lora: {
+        filename: characterLora.filename,
+        strengthModel: characterLora.defaultStrength,
+        strengthClip: characterLora.clipStrength,
+        triggerWord: characterLora.triggerWord,
+      },
+    });
+    characterLoraDownloads.push({
+      filename: characterLora.filename,
+      url: characterLora.storageUrl,
+    });
   }
 
   // 2. If needsSkinDetail: add realistic-skin-xl
@@ -123,5 +147,6 @@ export function selectResources(classification: SceneClassification): ResourceSe
     paramOverrides: {
       hiresFixEnabled: true,
     },
+    ...(characterLoraDownloads.length > 0 ? { characterLoraDownloads } : {}),
   };
 }
