@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
-import { runPipeline } from '@no-safe-word/image-gen';
+import { runPipeline } from '@no-safe-word/image-gen/server/character-lora';
 import type { CharacterInput } from '@no-safe-word/image-gen';
 
 // POST /api/characters/[characterId]/train-lora

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
-import { getPipelineProgress } from '@no-safe-word/image-gen';
+import { getPipelineProgress } from '@no-safe-word/image-gen/server/character-lora';
 
 // GET /api/characters/[characterId]/lora-status
 // Returns current pipeline progress for the character's most recent LoRA training.

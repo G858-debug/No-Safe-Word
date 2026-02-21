@@ -34,8 +34,10 @@ export type { ModelSelection, ModelSelectionOptions } from './model-selector';
 export { augmentComposition } from './composition-advisor';
 export type { CompositionResult } from './composition-advisor';
 
-// Character LoRA pipeline
-export { runPipeline, getPipelineProgress } from './character-lora/pipeline';
+// Character LoRA pipeline — server-only, import directly:
+//   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'
+// NOT re-exported here because trainer.ts uses Node.js-only deps (archiver, fs)
+// that break webpack client builds.
 export type {
   CharacterInput,
   CharacterLoraRow,
