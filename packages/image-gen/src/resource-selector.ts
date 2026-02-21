@@ -101,7 +101,7 @@ export function selectResources(classification: SceneClassification): ResourceSe
   }
 
   // 9. If scene involves character interaction (dual-character scenes): add couples-poses-xl
-  if (classification.interactionType && classification.interactionType !== 'none' && classification.interactionType !== 'unknown') {
+  if (classification.interactionType && classification.interactionType !== 'unknown') {
     const couplesLora = getLoraFromRegistry('couples-poses-xl.safetensors');
     if (couplesLora) {
       candidates.push({ priority: 3.5, lora: couplesLora });
