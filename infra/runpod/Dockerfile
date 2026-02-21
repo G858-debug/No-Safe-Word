@@ -9,6 +9,48 @@ RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
 # Must use comfy-node-install (not git clone) so the node is registered with ComfyUI's snapshot
 RUN comfy-node-install comfyui_ipadapter_plus
 
+# Diagnostic: verify IPAdapter Plus installation and ComfyUI compatibility
+RUN echo "=== Custom Nodes Directory ===" && \
+    ls -la /comfyui/custom_nodes/ && \
+    echo "=== IPAdapter Files ===" && \
+    (ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/__init__.py 2>/dev/null && echo "Found cubiq style" || echo "No cubiq dir") && \
+    (ls /comfyui/custom_nodes/comfyui-ipadapter/__init__.py 2>/dev/null && echo "Found comfyorg style" || echo "No comfyorg dir") && \
+    echo "=== Pip ipadapter ===" && \
+    (pip list 2>/dev/null | grep -i ipadapter || echo "Not in pip") && \
+    echo "=== ComfyUI Import Check ===" && \
+    cd /comfyui && python3 -c "\
+import sys; sys.path.insert(0, '.'); \
+try: \
+    import node_helpers; print('node_helpers: OK'); \
+except Exception as e: print('node_helpers: FAILED -', e); \
+try: \
+    from comfy.clip_vision import clip_preprocess; print('clip_preprocess: OK'); \
+except Exception as e: print('clip_preprocess: FAILED -', e); \
+try: \
+    from comfy.clip_vision import Output; print('clip_vision.Output: OK'); \
+except Exception as e: print('clip_vision.Output: FAILED -', e); \
+" && \
+    echo "=== Full Node Import Test ===" && \
+    cd /comfyui && python3 -c "\
+import sys, os; sys.path.insert(0, '.'); os.chdir('/comfyui'); \
+for d in os.listdir('custom_nodes'): \
+    init = os.path.join('custom_nodes', d, '__init__.py'); \
+    if os.path.isfile(init) and 'ipadapter' in d.lower(): \
+        print(f'Testing import of {d}...'); \
+        sys.path.insert(0, os.path.join('custom_nodes', d)); \
+        try: \
+            mod = __import__(d); \
+            if hasattr(mod, 'NODE_CLASS_MAPPINGS'): \
+                keys = list(mod.NODE_CLASS_MAPPINGS.keys()); \
+                print(f'  Loaded {len(keys)} nodes'); \
+                faceid = [k for k in keys if 'FaceID' in k]; \
+                print(f'  FaceID nodes: {faceid}'); \
+            else: print('  No NODE_CLASS_MAPPINGS'); \
+        except Exception as e: \
+            print(f'  IMPORT FAILED: {type(e).__name__}: {e}'); \
+            import traceback; traceback.print_exc(); \
+" || true
+
 # InsightFace + ONNX Runtime for FaceID face embedding extraction
 # comfy-node-install handles most deps, but we ensure insightface and onnxruntime-gpu are present
 RUN pip install --no-cache-dir insightface onnxruntime-gpu
