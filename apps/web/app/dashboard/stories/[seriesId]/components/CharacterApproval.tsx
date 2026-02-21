@@ -214,7 +214,7 @@ function buildPortraitNegativePrompt(desc: Record<string, unknown>): string {
 
   // African feature correction for male characters
   if (isAfricanMaleDesc(d)) {
-    result += ", European facial features, caucasian features, thin lips, pinched nose, narrow nose bridge";
+    result += ", European facial features";
   }
 
   return result;

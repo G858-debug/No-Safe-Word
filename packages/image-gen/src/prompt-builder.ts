@@ -445,7 +445,7 @@ export function buildNegativePrompt(
 
   // Counter SDXL's default European facial geometry for African characters
   if (characterHints?.africanFeatureCorrection) {
-    result += ", European facial features, caucasian features, thin lips, pinched nose, narrow nose bridge";
+    result += ", European facial features";
   }
 
   return result;
