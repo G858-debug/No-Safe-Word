@@ -85,8 +85,9 @@ export async function POST(
       supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_fullbody_image_id!).single(),
     ]);
 
-    const portraitUrl = portraitImage.data?.stored_url || portraitImage.data?.sfw_url;
-    const fullBodyUrl = fullBodyImage.data?.stored_url || fullBodyImage.data?.sfw_url;
+    // Prefer sfw_url (original PNG, always exists) over stored_url (JPEG copy, sometimes missing)
+    const portraitUrl = portraitImage.data?.sfw_url || portraitImage.data?.stored_url;
+    const fullBodyUrl = fullBodyImage.data?.sfw_url || fullBodyImage.data?.stored_url;
 
     if (!portraitUrl || !fullBodyUrl) {
       return NextResponse.json(
