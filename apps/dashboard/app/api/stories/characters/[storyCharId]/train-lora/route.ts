@@ -95,18 +95,23 @@ export async function POST(
     }
 
     // 6. Create the character_loras record
-    const { data: loraRecord, error: insertError } = await supabase
+    // Explicitly pass all NOT NULL columns — production DB may lack DEFAULT values
+    const { data: loraRecord, error: insertError } = await (supabase as any)
       .from("character_loras")
       .insert({
         character_id: character.id,
+        filename: "",
+        storage_path: "",
         trigger_word: "tok",
         base_model: "sdxl",
         training_provider: "replicate",
+        training_params: {},
+        dataset_size: 0,
+        training_attempts: 0,
         status: "pending",
-        pipeline_type: "story_character",
       })
       .select("id")
-      .single();
+      .single() as { data: { id: string } | null; error: any };
 
     if (insertError || !loraRecord) {
       return NextResponse.json(

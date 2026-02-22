@@ -106,8 +106,10 @@ export async function POST(
         trigger_word: 'tok',
         base_model: 'sdxl',
         training_provider: 'replicate',
+        training_params: {},
+        dataset_size: 0,
+        training_attempts: 0,
         status: 'pending',
-        pipeline_type: 'story_character',
       })
       .select()
       .single() as { data: { id: string } | null; error: any };
