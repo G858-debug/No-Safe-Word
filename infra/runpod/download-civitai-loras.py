@@ -19,6 +19,7 @@ loras = [
     (f"https://civitai.com/api/download/models/2686970?token={key}", "cinecolor-harmonizer.safetensors"),
     (f"https://civitai.com/api/download/models/435833?token={key}", "melanin-mix-xl.safetensors"),
     (f"https://civitai.com/api/download/models/1746981?token={key}", "couples-poses-xl.safetensors"),
+    (f"https://civitai.com/api/download/models/1449869?token={key}", "curvy-body-sdxl.safetensors"),
 ]
 
 lora_dir = os.environ["COMFY_DIR"] + "/models/loras/"

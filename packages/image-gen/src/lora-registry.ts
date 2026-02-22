@@ -98,6 +98,16 @@ export const LORA_REGISTRY: LoraEntry[] = [
     installed: true,
   },
   {
+    name: 'Curvy Body SDXL',
+    filename: 'curvy-body-sdxl.safetensors',
+    category: 'bodies',
+    defaultStrength: 0.7,
+    clipStrength: 0.7,
+    description: 'Curvy body shape enhancement for realistic proportions',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+  },
+  {
     name: 'Cinematic Lighting XL',
     filename: 'cinematic-lighting-xl.safetensors',
     category: 'lighting',

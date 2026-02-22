@@ -101,6 +101,14 @@ export function selectResources(
     negativeAdditions.push('bad anatomy, distorted proportions');
   }
 
+  // 5b. If body is visible (skin detail or NSFW): add curvy-body-sdxl
+  if (classification.needsSkinDetail || classification.contentLevel === 'nsfw') {
+    const curvyLora = getLoraFromRegistry('curvy-body-sdxl.safetensors');
+    if (curvyLora) {
+      candidates.push({ priority: 3.1, lora: curvyLora });
+    }
+  }
+
   // 6. If dramatic / candlelight / golden_hour lighting: add cinematic-lighting-xl
   const cinematicMoods = ['dramatic', 'candlelight', 'golden_hour'];
   if (cinematicMoods.includes(classification.lightingMood)) {
