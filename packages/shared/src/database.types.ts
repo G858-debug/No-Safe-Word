@@ -437,6 +437,7 @@ export interface Database {
           approved_fullbody_seed: number | null;
           approved_fullbody_prompt: string | null;
           regen_count: number;
+          active_lora_id: string | null;
         };
         Insert: {
           id?: string;
@@ -453,6 +454,7 @@ export interface Database {
           approved_fullbody_seed?: number | null;
           approved_fullbody_prompt?: string | null;
           regen_count?: number;
+          active_lora_id?: string | null;
         };
         Update: {
           id?: string;
@@ -469,6 +471,7 @@ export interface Database {
           approved_fullbody_seed?: number | null;
           approved_fullbody_prompt?: string | null;
           regen_count?: number;
+          active_lora_id?: string | null;
         };
         Relationships: [
           {
@@ -497,6 +500,13 @@ export interface Database {
             columns: ["approved_fullbody_image_id"];
             isOneToOne: false;
             referencedRelation: "images";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "story_characters_active_lora_id_fkey";
+            columns: ["active_lora_id"];
+            isOneToOne: false;
+            referencedRelation: "character_loras";
             referencedColumns: ["id"];
           },
         ];

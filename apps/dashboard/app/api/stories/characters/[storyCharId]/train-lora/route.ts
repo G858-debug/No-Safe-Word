@@ -80,8 +80,8 @@ export async function POST(
 
     // Fetch stored URLs for both approved images
     const [portraitImage, fullBodyImage] = await Promise.all([
-      supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_image_id).single(),
-      supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_fullbody_image_id).single(),
+      supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_image_id!).single(),
+      supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_fullbody_image_id!).single(),
     ]);
 
     const portraitUrl = portraitImage.data?.stored_url || portraitImage.data?.sfw_url;
