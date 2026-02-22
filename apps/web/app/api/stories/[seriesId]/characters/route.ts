@@ -50,7 +50,7 @@ export async function GET(
 
     if (images) {
       imageUrls = Object.fromEntries(
-        images.map((img) => [img.id, img.stored_url || img.sfw_url || ""])
+        images.map((img) => [img.id, img.sfw_url || img.stored_url || ""])
       );
       console.log(`[StoryPublisher] Loaded ${images.length} image URLs:`, imageUrls);
     }
