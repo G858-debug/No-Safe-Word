@@ -10,8 +10,6 @@ import type {
   DatasetGenerationResult,
   LoraDatasetImageRow,
   VariationType,
-  ImageSource,
-  ImageCategory,
 } from './types';
 import { PIPELINE_CONFIG } from './types';
 import {
@@ -197,8 +195,7 @@ async function generateSingleNanoBanana(
     },
   });
 
-  const imageUrl = extractReplicateUrl(output);
-  const imageBuffer = await downloadImage(imageUrl);
+  const imageBuffer = await readReplicateOutput(output);
 
   return saveDatasetImage(imageBuffer, prompt, loraId, deps);
 }
@@ -398,27 +395,39 @@ async function saveDatasetImage(
   return record as LoraDatasetImageRow;
 }
 
-async function downloadImage(url: string): Promise<Buffer> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to download image: ${response.status}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-}
+/**
+ * Read a Replicate FileOutput (ReadableStream) or legacy URL string into a Buffer.
+ * Replicate SDK v1.x returns FileOutput objects from replicate.run() instead of
+ * plain URL strings. FileOutput implements ReadableStream, so we consume the stream
+ * directly — no intermediate URL download needed.
+ */
+async function readReplicateOutput(output: unknown): Promise<Buffer> {
+  // Unwrap arrays (e.g., [FileOutput] or [url])
+  const value = Array.isArray(output) ? output[0] : output;
 
-function extractReplicateUrl(output: unknown): string {
-  if (typeof output === 'string') return output;
-  if (Array.isArray(output)) {
-    const first = output[0];
-    if (typeof first === 'string') return first;
-    if (first && typeof first === 'object' && 'url' in first) return (first as any).url;
+  if (!value) {
+    throw new Error('Replicate returned empty output');
   }
-  if (output && typeof output === 'object') {
-    if ('url' in output) return (output as any).url;
-    const str = String(output);
-    if (str.startsWith('http')) return str;
+
+  // FileOutput is a ReadableStream — read it directly
+  if (typeof value === 'object' && typeof (value as any)[Symbol.asyncIterator] === 'function') {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of value as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
   }
-  throw new Error(`Unexpected Replicate output format: ${JSON.stringify(output)}`);
+
+  // Legacy: plain URL string — download it
+  if (typeof value === 'string' && value.startsWith('http')) {
+    const response = await fetch(value);
+    if (!response.ok) {
+      throw new Error(`Failed to download image: ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  throw new Error(`Unexpected Replicate output format: ${typeof value}`);
 }
 
 function hashCode(str: string): number {
