@@ -169,6 +169,8 @@ export interface CharacterInput {
 export interface DatasetGenerationResult {
   totalGenerated: number;
   imageRecords: LoraDatasetImageRow[];
+  /** Prompts that failed to generate (for inclusion in replacement rounds) */
+  failedPrompts: Array<{ promptTemplate: string; variationType: VariationType; source: ImageSource }>;
 }
 
 export interface EvaluationResult {

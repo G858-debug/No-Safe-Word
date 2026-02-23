@@ -63,7 +63,10 @@ export async function runPipeline(
     }
 
     console.log(
-      `[LoRA Pipeline] Dataset: ${datasetResult.totalGenerated} images generated`
+      `[LoRA Pipeline] Dataset: ${datasetResult.totalGenerated} images generated` +
+      (datasetResult.failedPrompts.length > 0
+        ? ` (${datasetResult.failedPrompts.length} generation failures will be retried)`
+        : '')
     );
 
     // ── STAGE 2: Quality Evaluation (with replacement loop) ──
@@ -77,7 +80,11 @@ export async function runPipeline(
       deps,
     );
 
-    // Replacement rounds if needed
+    // Track generation failures across rounds — these are prompts that never
+    // produced an image and need to be retried alongside evaluation failures.
+    let pendingGenerationFailures = [...datasetResult.failedPrompts];
+
+    // Replacement rounds: retry both evaluation failures AND generation failures
     for (
       let round = 0;
       round < PIPELINE_CONFIG.maxReplacementRounds &&
@@ -85,10 +92,14 @@ export async function runPipeline(
       round++
     ) {
       console.log(
-        `[LoRA Pipeline] Replacement round ${round + 1}: ${evalResult.passed} passed, need ${PIPELINE_CONFIG.targetPassedImages}`
+        `[LoRA Pipeline] Replacement round ${round + 1}: ${evalResult.passed} passed, need ${PIPELINE_CONFIG.targetPassedImages}` +
+        (pendingGenerationFailures.length > 0
+          ? ` (+ ${pendingGenerationFailures.length} generation retries)`
+          : '')
       );
 
-      const failedPromptIds = allImages
+      // Collect evaluation failures (images that were generated but didn't pass)
+      const evalFailures = allImages
         .filter(
           (img) =>
             !evalResult.passedImages.some((p) => p.id === img.id)
@@ -98,6 +109,7 @@ export async function runPipeline(
           variationType: img.variation_type as VariationType,
         }));
 
+      // Mark eval-failed images as 'replaced' in the DB
       for (const img of allImages) {
         if (!evalResult.passedImages.some((p) => p.id === img.id)) {
           await deps.supabase
@@ -107,25 +119,45 @@ export async function runPipeline(
         }
       }
 
+      // Combine evaluation failures + generation failures for replacement
+      const allFailures = [
+        ...evalFailures,
+        ...pendingGenerationFailures.map((f) => ({
+          promptTemplate: f.promptTemplate,
+          variationType: f.variationType,
+        })),
+      ];
+
       const replacements = await generateReplacements(
         character,
         loraId,
-        failedPromptIds,
+        allFailures,
         deps,
       );
 
-      const replacementEval = await evaluateDataset(
-        character.approvedImageUrl,
-        character.fullBodyImageUrl,
-        replacements,
-        deps,
+      // Track which generation failures were resolved this round
+      const generatedTemplates = new Set(
+        replacements.map((r) => r.prompt_template.replace(/_replacement$/, ''))
+      );
+      pendingGenerationFailures = pendingGenerationFailures.filter(
+        (f) => !generatedTemplates.has(f.promptTemplate)
       );
 
-      evalResult.passedImages = [
-        ...evalResult.passedImages,
-        ...replacementEval.passedImages,
-      ];
-      evalResult.passed = evalResult.passedImages.length;
+      if (replacements.length > 0) {
+        const replacementEval = await evaluateDataset(
+          character.approvedImageUrl,
+          character.fullBodyImageUrl,
+          replacements,
+          deps,
+        );
+
+        evalResult.passedImages = [
+          ...evalResult.passedImages,
+          ...replacementEval.passedImages,
+        ];
+        evalResult.passed = evalResult.passedImages.length;
+      }
+
       allImages = [...allImages, ...replacements];
     }
 

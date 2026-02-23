@@ -27,6 +27,8 @@ import {
 } from '../index';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-pro' as const;
+const MAX_GENERATION_RETRIES = 3;
+const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
 interface DatasetGeneratorDeps {
   supabase: {
@@ -50,6 +52,7 @@ export async function generateDataset(
   promptLimit?: number,
 ): Promise<DatasetGenerationResult> {
   const imageRecords: LoraDatasetImageRow[] = [];
+  const failedPrompts: DatasetGenerationResult['failedPrompts'] = [];
 
   // ── Phase 1: Nano Banana Pro (face/head shots) ──────────────
   const nbPrompts = getNanoBananaPrompts().map((p) => ({
@@ -60,8 +63,9 @@ export async function generateDataset(
 
   console.log(`[LoRA Dataset] Phase 1: Generating ${nbLimited.length} face/head images via Nano Banana Pro...`);
 
-  const nbRecords = await generateNanoBananaImages(character, loraId, nbLimited, deps);
-  imageRecords.push(...nbRecords);
+  const nbResult = await generateNanoBananaImages(character, loraId, nbLimited, deps);
+  imageRecords.push(...nbResult.records);
+  failedPrompts.push(...nbResult.failures);
 
   // ── Phase 2: ComfyUI/RunPod (body shots) ────────────────────
   const cuPrompts = getComfyUIPrompts().map((p) => ({
@@ -75,17 +79,20 @@ export async function generateDataset(
 
   console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via ComfyUI/RunPod...`);
 
-  const cuRecords = await generateComfyUIImages(character, loraId, cuLimited, deps);
-  imageRecords.push(...cuRecords);
+  const cuResult = await generateComfyUIImages(character, loraId, cuLimited, deps);
+  imageRecords.push(...cuResult.records);
+  failedPrompts.push(...cuResult.failures);
 
   console.log(
     `[LoRA Dataset] Complete: ${imageRecords.length} images ` +
-    `(${nbRecords.length} Nano Banana + ${cuRecords.length} ComfyUI)`
+    `(${nbResult.records.length} Nano Banana + ${cuResult.records.length} ComfyUI)` +
+    (failedPrompts.length > 0 ? `, ${failedPrompts.length} failed` : '')
   );
 
   return {
     totalGenerated: imageRecords.length,
     imageRecords,
+    failedPrompts,
   };
 }
 
@@ -148,20 +155,48 @@ export async function generateReplacements(
 
 // ── Nano Banana Pro Pipeline ──────────────────────────────────────
 
+interface GenerationBatchResult {
+  records: LoraDatasetImageRow[];
+  failures: DatasetGenerationResult['failedPrompts'];
+}
+
 async function generateNanoBananaImages(
   character: CharacterInput,
   loraId: string,
   prompts: DatasetPrompt[],
   deps: DatasetGeneratorDeps,
-): Promise<LoraDatasetImageRow[]> {
+): Promise<GenerationBatchResult> {
   const records: LoraDatasetImageRow[] = [];
+  const failures: DatasetGenerationResult['failedPrompts'] = [];
 
   for (let i = 0; i < prompts.length; i++) {
-    try {
-      const record = await generateSingleNanoBanana(character, prompts[i], loraId, deps);
-      records.push(record);
-    } catch (error) {
-      console.error(`[LoRA Dataset] NB failed ${prompts[i].id}: ${error}`);
+    let succeeded = false;
+
+    for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
+      try {
+        const record = await generateSingleNanoBanana(character, prompts[i], loraId, deps);
+        records.push(record);
+        succeeded = true;
+      } catch (error) {
+        const isTransient = isTransientError(error);
+        if (attempt < MAX_GENERATION_RETRIES && isTransient) {
+          const delay = RETRY_BASE_DELAY * attempt;
+          console.warn(
+            `[LoRA Dataset] NB ${prompts[i].id} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
+          );
+          await sleep(delay);
+        } else {
+          console.error(`[LoRA Dataset] NB failed ${prompts[i].id} after ${attempt} attempt(s): ${error}`);
+        }
+      }
+    }
+
+    if (!succeeded) {
+      failures.push({
+        promptTemplate: prompts[i].id,
+        variationType: prompts[i].variationType,
+        source: 'nano-banana',
+      });
     }
 
     // Rate limit delay between requests
@@ -170,7 +205,7 @@ async function generateNanoBananaImages(
     }
   }
 
-  return records;
+  return { records, failures };
 }
 
 async function generateSingleNanoBanana(
@@ -207,18 +242,41 @@ async function generateComfyUIImages(
   loraId: string,
   prompts: DatasetPrompt[],
   deps: DatasetGeneratorDeps,
-): Promise<LoraDatasetImageRow[]> {
+): Promise<GenerationBatchResult> {
   // Pre-fetch the portrait image as base64 for IPAdapter reference
   const portraitBase64 = await imageUrlToBase64(character.approvedImageUrl);
 
   const records: LoraDatasetImageRow[] = [];
+  const failures: DatasetGenerationResult['failedPrompts'] = [];
 
   for (let i = 0; i < prompts.length; i++) {
-    try {
-      const record = await generateSingleComfyUI(character, prompts[i], loraId, deps, portraitBase64);
-      records.push(record);
-    } catch (error) {
-      console.error(`[LoRA Dataset] CU failed ${prompts[i].id}: ${error}`);
+    let succeeded = false;
+
+    for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
+      try {
+        const record = await generateSingleComfyUI(character, prompts[i], loraId, deps, portraitBase64);
+        records.push(record);
+        succeeded = true;
+      } catch (error) {
+        const isTransient = isTransientError(error);
+        if (attempt < MAX_GENERATION_RETRIES && isTransient) {
+          const delay = RETRY_BASE_DELAY * attempt;
+          console.warn(
+            `[LoRA Dataset] CU ${prompts[i].id} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
+          );
+          await sleep(delay);
+        } else {
+          console.error(`[LoRA Dataset] CU failed ${prompts[i].id} after ${attempt} attempt(s): ${error}`);
+        }
+      }
+    }
+
+    if (!succeeded) {
+      failures.push({
+        promptTemplate: prompts[i].id,
+        variationType: prompts[i].variationType,
+        source: 'comfyui',
+      });
     }
 
     // Rate limit delay between requests
@@ -227,7 +285,7 @@ async function generateComfyUIImages(
     }
   }
 
-  return records;
+  return { records, failures };
 }
 
 async function generateSingleComfyUI(
@@ -442,4 +500,21 @@ function hashCode(str: string): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Check if an error is transient and worth retrying (API overload, timeouts, network errors). */
+function isTransientError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes('currently unavailable') ||
+    msg.includes('high demand') ||
+    msg.includes('Timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('fetch failed') ||
+    msg.includes('503') ||
+    msg.includes('502') ||
+    msg.includes('429')
+  );
 }
