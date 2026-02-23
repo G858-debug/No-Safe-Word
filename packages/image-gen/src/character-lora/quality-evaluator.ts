@@ -64,6 +64,10 @@ interface QualityEvaluatorDeps {
 /**
  * Evaluate all dataset images against both reference images.
  * Uses category-weighted scoring for PASS/FAIL determination.
+ *
+ * Uses URL-based image sources for the Anthropic API to avoid the 5 MB base64
+ * limit — Nano Banana Pro generates 7-9 MB PNGs that exceed the base64 limit.
+ * URL source supports up to 20 MB with automatic server-side resizing.
  */
 export async function evaluateDataset(
   referencePortraitUrl: string,
@@ -79,10 +83,6 @@ export async function evaluateDataset(
 
   console.log(`[LoRA Eval] Evaluating ${images.length} images...`);
 
-  // Fetch both reference images as base64 once
-  const portraitBase64 = await fetchImageAsBase64(referencePortraitUrl);
-  const fullBodyBase64 = await fetchImageAsBase64(referenceFullBodyUrl);
-
   const passedImages: LoraDatasetImageRow[] = [];
   const failedImages: LoraDatasetImageRow[] = [];
 
@@ -97,7 +97,7 @@ export async function evaluateDataset(
 
     const results = await Promise.allSettled(
       batch.map((image) =>
-        evaluateSingleImage(anthropic, portraitBase64, fullBodyBase64, image, deps)
+        evaluateSingleImage(anthropic, referencePortraitUrl, referenceFullBodyUrl, image, deps)
       )
     );
 
@@ -181,13 +181,14 @@ function computeWeightedScore(details: EvalDetails, category: ImageCategory): nu
 
 async function evaluateSingleImage(
   anthropic: Anthropic,
-  portraitBase64: string,
-  fullBodyBase64: string,
+  portraitUrl: string,
+  fullBodyUrl: string,
   image: LoraDatasetImageRow,
   deps: QualityEvaluatorDeps,
 ): Promise<EvalDetails> {
-  const generatedBase64 = await fetchImageAsBase64(image.image_url);
-
+  // Use URL source type to avoid the 5 MB base64 limit.
+  // Nano Banana Pro generates 7-9 MB PNGs that exceed the base64 limit but
+  // URL sources support up to 20 MB with automatic server-side resizing.
   const response = await anthropic.messages.create({
     model: EVALUATION_MODEL,
     max_tokens: 256,
@@ -199,12 +200,12 @@ async function evaluateSingleImage(
           { type: 'text', text: 'REFERENCE PORTRAIT (approved — face ground truth):' },
           {
             type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: portraitBase64 },
+            source: { type: 'url', url: portraitUrl },
           },
           { type: 'text', text: 'REFERENCE FULL-BODY (approved — body type ground truth):' },
           {
             type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: fullBodyBase64 },
+            source: { type: 'url', url: fullBodyUrl },
           },
           {
             type: 'text',
@@ -212,7 +213,7 @@ async function evaluateSingleImage(
           },
           {
             type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: generatedBase64 },
+            source: { type: 'url', url: image.image_url },
           },
           {
             type: 'text',
@@ -280,15 +281,6 @@ async function evaluateSingleImage(
   );
 
   return evalResult;
-}
-
-async function fetchImageAsBase64(url: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image from ${url}: ${response.status}`);
-  }
-  const buffer = await response.arrayBuffer();
-  return Buffer.from(buffer).toString('base64');
 }
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
