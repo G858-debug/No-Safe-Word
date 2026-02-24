@@ -85,7 +85,7 @@ export interface TrainingParams {
   resolution: number;
   batch_size: number;
   use_face_detection_instead: boolean;
-  lr_scheduler: string;
+  lr_scheduler: 'constant' | 'linear';
   seed: number;
 }
 
@@ -99,7 +99,7 @@ export const DEFAULT_TRAINING_PARAMS: TrainingParams = {
   resolution: 1024,
   batch_size: 1,
   use_face_detection_instead: true,
-  lr_scheduler: 'cosine',
+  lr_scheduler: 'constant',
   seed: 42,
 };
 
@@ -113,7 +113,7 @@ export const PIPELINE_CONFIG = {
   /** Target passed images before proceeding */
   targetPassedImages: 25,
   /** Max rounds of replacement generation for failed images */
-  maxReplacementRounds: 2,
+  maxReplacementRounds: 3,
   /** Max training attempts before failing */
   maxTrainingAttempts: 3,
   /** Delay between Nano Banana requests (ms) */
@@ -130,6 +130,8 @@ export const PIPELINE_CONFIG = {
   minValidationFaceScore: 7,
   /** Minimum test images that must pass validation (out of 6) */
   minValidationPasses: 5,
+  /** Replicate hardware SKU for model creation and training */
+  replicateHardware: 'gpu-t4',
 } as const;
 
 // ── Character Input (Hybrid — dual-image) ───────────────────────

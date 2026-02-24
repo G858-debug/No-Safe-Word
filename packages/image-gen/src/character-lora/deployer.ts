@@ -14,9 +14,12 @@ interface DeployerDeps {
 /**
  * Deploy a trained and validated LoRA.
  *
- * 1. Upload .safetensors to permanent Supabase Storage location
+ * 1. Store the LoRA weights URL (from Replicate training output)
  * 2. Update character_loras: status='deployed', storage_url, deployed_at
  * 3. Update story_characters: active_lora_id for all series using this character
+ *
+ * Note: LoRA .safetensors files are ~150-200MB which exceeds Supabase Storage's
+ * 50MB limit. We store the Replicate delivery URL directly instead.
  */
 export async function deployLora(
   loraBuffer: Buffer,
@@ -25,6 +28,8 @@ export async function deployLora(
   loraId: string,
   datasetSize: number,
   deps: DeployerDeps,
+  loraUrl?: string,
+  fileSizeBytes?: number,
 ): Promise<DeploymentResult> {
   // Generate a clean filename
   const slug = slugify(characterName);
@@ -32,29 +37,35 @@ export async function deployLora(
   const filename = `char_${slug}_${shortId}.safetensors`;
   const storagePath = `character-loras/deployed/${filename}`;
 
-  console.log(`[LoRA Deploy] Uploading ${filename} (${(loraBuffer.length / 1024 / 1024).toFixed(1)}MB)...`);
+  let storageUrl: string;
 
-  // Step 1: Upload to permanent storage
-  const { error: uploadError } = await deps.supabase.storage
-    .from('story-images')
-    .upload(storagePath, loraBuffer, {
-      contentType: 'application/octet-stream',
-      cacheControl: '31536000', // 1 year cache — LoRAs don't change
-      upsert: true,
-    });
+  if (loraUrl) {
+    // Use the Replicate delivery URL directly (LoRA files are too large for Supabase)
+    storageUrl = loraUrl;
+    console.log(`[LoRA Deploy] Using Replicate weights URL for ${filename} (${(loraBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
+  } else {
+    // Try Supabase upload (works for files under 50MB)
+    console.log(`[LoRA Deploy] Uploading ${filename} (${(loraBuffer.length / 1024 / 1024).toFixed(1)}MB)...`);
 
-  if (uploadError) {
-    throw new Error(`Failed to upload LoRA file: ${uploadError.message}`);
+    const { error: uploadError } = await deps.supabase.storage
+      .from('story-images')
+      .upload(storagePath, loraBuffer, {
+        contentType: 'application/octet-stream',
+        cacheControl: '31536000', // 1 year cache — LoRAs don't change
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload LoRA file: ${uploadError.message}`);
+    }
+
+    const { data: urlData } = deps.supabase.storage
+      .from('story-images')
+      .getPublicUrl(storagePath);
+
+    storageUrl = urlData.publicUrl;
+    console.log(`[LoRA Deploy] Uploaded to: ${storagePath}`);
   }
-
-  // Get public URL for RunPod download
-  const { data: urlData } = deps.supabase.storage
-    .from('story-images')
-    .getPublicUrl(storagePath);
-
-  const storageUrl = urlData.publicUrl;
-
-  console.log(`[LoRA Deploy] Uploaded to: ${storagePath}`);
 
   // Step 2: Update character_loras record
   const { error: updateError } = await deps.supabase
@@ -63,7 +74,7 @@ export async function deployLora(
       filename,
       storage_path: storagePath,
       storage_url: storageUrl,
-      file_size_bytes: loraBuffer.length,
+      file_size_bytes: fileSizeBytes || loraBuffer.length,
       dataset_size: datasetSize,
       status: 'deployed',
       deployed_at: new Date().toISOString(),

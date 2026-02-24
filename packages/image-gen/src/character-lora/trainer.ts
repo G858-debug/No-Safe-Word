@@ -4,6 +4,7 @@
 
 import Replicate from 'replicate';
 import archiver from 'archiver';
+import sharp from 'sharp';
 import { PassThrough } from 'stream';
 import type { CaptionResult, TrainingParams, TrainingResult } from './types';
 import { DEFAULT_TRAINING_PARAMS, PIPELINE_CONFIG } from './types';
@@ -37,6 +38,7 @@ export async function trainLora(
   attempt: number,
   deps: TrainerDeps,
   paramsOverrides?: Partial<TrainingParams>,
+  existingZipUrl?: string,
 ): Promise<TrainingResult> {
   const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
@@ -50,37 +52,51 @@ export async function trainLora(
     `[LoRA Train] Starting training for ${characterSlug} (attempt ${attempt}, ${captionedImages.length} images)...`
   );
 
-  // Step 1: Create ZIP of images + captions
-  const zipBuffer = await createTrainingZip(captionedImages);
-  console.log(`[LoRA Train] ZIP created: ${(zipBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+  let zipUrl: string;
 
-  // Step 2: Upload ZIP to Supabase Storage
-  const zipPath = `character-loras/training/${loraId}/dataset_attempt${attempt}.zip`;
-  const { error: uploadError } = await deps.supabase.storage
-    .from('story-images')
-    .upload(zipPath, zipBuffer, {
-      contentType: 'application/zip',
-      upsert: true,
-    });
+  if (existingZipUrl) {
+    // Reuse existing ZIP from a previous run
+    zipUrl = existingZipUrl;
+    console.log(`[LoRA Train] Reusing existing ZIP: ${zipUrl}`);
+  } else {
+    // Step 1: Create ZIP of images + captions
+    const zipBuffer = await createTrainingZip(captionedImages);
+    console.log(`[LoRA Train] ZIP created: ${(zipBuffer.length / 1024 / 1024).toFixed(1)}MB`);
 
-  if (uploadError) {
-    throw new Error(`Failed to upload training ZIP: ${uploadError.message}`);
+    // Step 2: Upload ZIP to Supabase Storage
+    const zipPath = `character-loras/training/${loraId}/dataset_attempt${attempt}.zip`;
+    const { error: uploadError } = await deps.supabase.storage
+      .from('story-images')
+      .upload(zipPath, zipBuffer, {
+        contentType: 'application/zip',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload training ZIP: ${uploadError.message}`);
+    }
+
+    const { data: urlData } = deps.supabase.storage
+      .from('story-images')
+      .getPublicUrl(zipPath);
+
+    zipUrl = urlData.publicUrl;
+    console.log(`[LoRA Train] ZIP uploaded to: ${zipPath}`);
   }
 
-  const { data: urlData } = deps.supabase.storage
-    .from('story-images')
-    .getPublicUrl(zipPath);
+  // Step 3: Create destination model on Replicate (if needed) and start training
+  const replicateOwner = await getReplicateUsername(replicate);
+  const destModel = `lora-${characterSlug}`;
+  const destination = `${replicateOwner}/${destModel}` as `${string}/${string}`;
 
-  const zipUrl = urlData.publicUrl;
-  console.log(`[LoRA Train] ZIP uploaded to: ${zipPath}`);
+  await ensureReplicateModel(replicate, replicateOwner, destModel);
 
-  // Step 3: Start training on Replicate
   const training = await replicate.trainings.create(
     SDXL_TRAINING_OWNER,
     SDXL_TRAINING_MODEL,
     SDXL_TRAINING_VERSION,
     {
-      destination: `no-safe-word/${characterSlug}` as `${string}/${string}`,
+      destination,
       input: {
         input_images: zipUrl,
         token_string: params.token_string,
@@ -209,18 +225,23 @@ async function createTrainingZip(
     archive.on('error', reject);
     archive.pipe(passthrough);
 
-    // Add images and captions in parallel-friendly order
+    // Download + compress images (PNG → JPEG at quality 90 to keep ZIP under
+    // Supabase Storage's 50MB file size limit while preserving training quality)
     const imagePromises = images.map(async (img, idx) => {
       const paddedIdx = String(idx).padStart(3, '0');
-      const imageName = `${paddedIdx}.png`;
+      const imageName = `${paddedIdx}.jpg`;
       const captionName = `${paddedIdx}.txt`;
 
-      // Download the image
       const response = await fetch(img.imageUrl);
       if (!response.ok) {
         throw new Error(`Failed to download ${img.imageUrl}: ${response.status}`);
       }
-      const imageBuffer = Buffer.from(await response.arrayBuffer());
+      const rawBuffer = Buffer.from(await response.arrayBuffer());
+
+      // Convert to JPEG — reduces ~8MB PNGs to ~500KB-1MB JPEGs
+      const imageBuffer = await sharp(rawBuffer)
+        .jpeg({ quality: 90 })
+        .toBuffer();
 
       return { imageName, imageBuffer, captionName, caption: img.caption };
     });
@@ -236,6 +257,38 @@ async function createTrainingZip(
       })
       .catch(reject);
   });
+}
+
+export async function getReplicateUsername(replicate: Replicate): Promise<string> {
+  const resp = await fetch('https://api.replicate.com/v1/account', {
+    headers: { Authorization: `Bearer ${process.env.REPLICATE_API_TOKEN}` },
+  });
+  if (!resp.ok) throw new Error(`Failed to get Replicate account: ${resp.status}`);
+  const data = await resp.json();
+  return data.username;
+}
+
+export async function ensureReplicateModel(
+  replicate: Replicate,
+  owner: string,
+  modelName: string,
+): Promise<void> {
+  // Check if model exists
+  try {
+    await replicate.models.get(owner, modelName);
+    console.log(`[LoRA Train] Destination model ${owner}/${modelName} exists`);
+    return;
+  } catch {
+    // Model doesn't exist — create it
+  }
+
+  console.log(`[LoRA Train] Creating destination model ${owner}/${modelName}...`);
+  await replicate.models.create(owner, modelName, {
+    visibility: 'private',
+    hardware: PIPELINE_CONFIG.replicateHardware,
+    description: `Character LoRA: ${modelName}`,
+  });
+  console.log(`[LoRA Train] Model created`);
 }
 
 function sleep(ms: number): Promise<void> {
