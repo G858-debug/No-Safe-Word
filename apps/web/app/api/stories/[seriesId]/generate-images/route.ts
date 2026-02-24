@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
 import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel } from "@no-safe-word/image-gen";
-import { augmentComposition } from "@no-safe-word/image-gen";
-import type { ImageType } from "@no-safe-word/image-gen";
+import { augmentComposition, buildCharacterLoraEntry } from "@no-safe-word/image-gen";
+import type { ImageType, CharacterLoraEntry } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 interface QueuedJob {
@@ -29,10 +29,21 @@ export async function POST(
     const { post_id } = body as { post_id?: string };
 
     // 1. Verify all characters in the series are approved
-    const { data: storyChars, error: charsError } = await supabase
+    // Note: active_lora_id is not in auto-generated types yet, so we cast
+    const { data: storyChars, error: charsError } = await (supabase as any)
       .from("story_characters")
-      .select("id, character_id, approved, approved_seed, approved_prompt")
-      .eq("series_id", seriesId);
+      .select("id, character_id, approved, approved_seed, approved_prompt, active_lora_id")
+      .eq("series_id", seriesId) as {
+        data: Array<{
+          id: string;
+          character_id: string;
+          approved: boolean;
+          approved_seed: number | null;
+          approved_prompt: string | null;
+          active_lora_id: string | null;
+        }> | null;
+        error: any;
+      };
 
     if (charsError) {
       return NextResponse.json({ error: charsError.message }, { status: 500 });
@@ -60,8 +71,12 @@ export async function POST(
     // Build character_id → approved_seed and character_id → approved character tags maps
     const seedMap = new Map<string, number | null>();
     const approvedTagsMap = new Map<string, string>();
+    const loraIdMap = new Map<string, string>(); // character_id → active_lora_id
     storyChars.forEach((sc) => {
       seedMap.set(sc.character_id, sc.approved_seed);
+      if (sc.active_lora_id) {
+        loraIdMap.set(sc.character_id, sc.active_lora_id);
+      }
       if (sc.approved_prompt) {
         const tags = extractCharacterTags(sc.approved_prompt);
         if (tags) approvedTagsMap.set(sc.character_id, tags);
@@ -173,6 +188,44 @@ export async function POST(
       }
     });
 
+    // Build character_id → CharacterLoraEntry map for deployed LoRAs
+    const characterLoraMap = new Map<string, CharacterLoraEntry>();
+    if (loraIdMap.size > 0) {
+      const loraIds = Array.from(loraIdMap.values());
+      const { data: loraRecords } = await (supabase as any)
+        .from("character_loras")
+        .select("id, character_id, filename, trigger_word, storage_url")
+        .in("id", loraIds)
+        .eq("status", "deployed") as {
+          data: Array<{
+            id: string;
+            character_id: string;
+            filename: string;
+            trigger_word: string;
+            storage_url: string | null;
+          }> | null;
+        };
+
+      if (loraRecords) {
+        for (const lora of loraRecords) {
+          if (!lora.storage_url) continue;
+          const charData = characterDataMap.get(lora.character_id);
+          const charName = charData?.name || "Unknown";
+          characterLoraMap.set(
+            lora.character_id,
+            buildCharacterLoraEntry({
+              character_id: lora.character_id,
+              character_name: charName,
+              filename: lora.filename,
+              trigger_word: lora.trigger_word,
+              storage_url: lora.storage_url,
+            })
+          );
+          console.log(`[StoryImage] Character LoRA active for ${charName}: ${lora.filename}`);
+        }
+      }
+    }
+
     // Empty character for prompts not linked to a character
     const emptyCharacter: CharacterData = {
       name: "",
@@ -246,8 +299,18 @@ export async function POST(
           }
         }
 
+        // Look up character LoRAs (needed for trigger word injection into prompt and workflow selection)
+        const primaryCharLora = imgPrompt.character_id ? characterLoraMap.get(imgPrompt.character_id) : undefined;
+        const secondaryCharLora = imgPrompt.secondary_character_id ? characterLoraMap.get(imgPrompt.secondary_character_id) : undefined;
+
+        // Extract trigger words from character LoRAs for prompt injection
+        const triggerWords = [primaryCharLora, secondaryCharLora]
+          .filter((l): l is CharacterLoraEntry => !!l)
+          .map(l => l.triggerWord)
+          .filter((tw): tw is string => !!tw);
+
         const promptOverride = (primaryTags || secondaryTags)
-          ? buildStoryImagePrompt(primaryTags, secondaryTags, scenePromptForBuild, mode)
+          ? buildStoryImagePrompt(primaryTags, secondaryTags, scenePromptForBuild, mode, triggerWords)
           : undefined;
 
         // Diagnostic logging — trace the prompt pipeline
@@ -259,15 +322,35 @@ export async function POST(
         if (promptOverride) {
           console.log(`[StoryImage][${imgPrompt.id}] Final prompt:`, promptOverride.substring(0, 200));
         }
-        const workflowType = imgPrompt.character_id
-          ? (hasSecondary ? "dual-character" : "single-character")
-          : "portrait";
+        // LoRA-first workflow selection:
+        // If characters have deployed LoRAs, prefer portrait workflow (no IPAdapter)
+        const primaryHasLora = !!primaryCharLora;
+        const secondaryHasLora = !!secondaryCharLora;
+
+        let workflowType: "portrait" | "single-character" | "dual-character";
+        if (!imgPrompt.character_id) {
+          workflowType = "portrait";
+        } else if (primaryHasLora && (!hasSecondary || secondaryHasLora)) {
+          workflowType = "portrait";
+          if (hasSecondary) {
+            console.log(`[StoryImage][${imgPrompt.id}] LoRA-first: both characters have LoRAs, using portrait workflow with dual LoRAs`);
+          } else {
+            console.log(`[StoryImage][${imgPrompt.id}] LoRA-first: primary has LoRA, using portrait workflow (no IPAdapter)`);
+          }
+        } else if (primaryHasLora && hasSecondary && !secondaryHasLora) {
+          workflowType = "single-character";
+          console.log(`[StoryImage][${imgPrompt.id}] LoRA-first: primary has LoRA but secondary does not, using single-character workflow (IPAdapter for secondary ref)`);
+        } else {
+          workflowType = hasSecondary ? "dual-character" : "single-character";
+        }
 
         // Fetch primary character's approved portrait as base64 for IPAdapter
+        // Skip when using portrait workflow (LoRA handles identity)
         const images: Array<{ name: string; image: string }> = [];
         let primaryFacePrompt: string | undefined;
+        const needsIPAdapter = workflowType !== "portrait";
 
-        if (imgPrompt.character_id && workflowType !== "portrait") {
+        if (imgPrompt.character_id && needsIPAdapter) {
           const { data: sc } = await supabase
             .from("story_characters")
             .select("approved_image_id")
@@ -307,6 +390,14 @@ export async function POST(
           secondarySeed = secondaryApprovedSeed ? secondaryApprovedSeed + imgPrompt.position : seed + 1000;
         }
 
+        // Prepend LoRA trigger word to face prompts so FaceDetailer activates the LoRA
+        if (primaryCharLora && primaryFacePrompt) {
+          primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}`;
+        }
+        if (secondaryCharLora && secondaryFacePrompt) {
+          secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
+        }
+
         // Determine dimensions
         const promptLower = imgPrompt.prompt.toLowerCase();
         const isLandscape = promptLower.includes("wide") ||
@@ -320,10 +411,16 @@ export async function POST(
 
         // Scene intelligence: classify scene and select LoRAs
         const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
-        const resources = selectResources(classification);
+        const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt);
 
         console.log(`[StoryImage][${imgPrompt.id}] Scene classification:`, JSON.stringify(classification));
         console.log(`[StoryImage][${imgPrompt.id}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
+        if (primaryCharLora) {
+          console.log(`[StoryImage][${imgPrompt.id}] Character LoRA injected: ${primaryCharLora.filename}`);
+        }
+        if (secondaryCharLora) {
+          console.log(`[StoryImage][${imgPrompt.id}] Secondary character LoRA injected: ${secondaryCharLora.filename}`);
+        }
 
         const modelSelection = selectModel(classification, imgPrompt.image_type as ImageType, {
           contentLevel: classification.contentLevel,
@@ -331,13 +428,13 @@ export async function POST(
         console.log(`[StoryImage][${imgPrompt.id}] Model selected: ${modelSelection.checkpointName} — ${modelSelection.reason}`);
 
         const workflow = buildWorkflow({
-          type: workflowType as "portrait" | "single-character" | "dual-character",
+          type: workflowType,
           positivePrompt: finalPrompt,
           width,
           height,
           seed,
           filenamePrefix: `story_${imgPrompt.id.substring(0, 8)}`,
-          primaryRefImageName: workflowType !== "portrait" ? "primary_ref.png" : undefined,
+          primaryRefImageName: needsIPAdapter ? "primary_ref.png" : undefined,
           primaryFacePrompt,
           ipadapterWeight: hasSecondary ? 0.7 : 0.85,
           secondaryFacePrompt,

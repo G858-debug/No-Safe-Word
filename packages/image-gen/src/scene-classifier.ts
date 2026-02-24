@@ -19,6 +19,10 @@ export interface SceneClassification {
   interactionType: InteractionType;
   /** Whether the prompt or character tags indicate a dark-skinned subject */
   hasDarkSkinSubject: boolean;
+  /** Whether the prompt indicates a female character */
+  hasFemaleCharacter: boolean;
+  /** Whether the prompt indicates a male character */
+  hasMaleCharacter: boolean;
 }
 
 export type ImageType = 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait';
@@ -135,6 +139,19 @@ const DARK_SKIN_KEYWORDS = [
   'melanin', 'medium-brown', 'medium brown',
   'dark brown', 'deep brown', 'dark complexion',
   'brown skin', 'brown-skin',
+];
+
+const FEMALE_KEYWORDS = [
+  'woman', 'female', 'she ', 'her ', 'girl', 'lady',
+  // clothing
+  'dress', 'skirt', 'heels', 'bra', 'lingerie', 'blouse', 'top showing',
+  // body descriptors
+  'curvaceous', 'breasts', 'cleavage',
+];
+
+const MALE_KEYWORDS = [
+  'man', 'male', 'he ', 'his ', 'guy',
+  'muscular', 'broad shoulders',
 ];
 
 const COMPOSITION_CUE_KEYWORDS = [
@@ -296,6 +313,10 @@ export function classifyScene(
   // Dark skin subject detection (for melanin enhancement LoRA)
   const hasDarkSkinSubject = hasKeyword(lower, DARK_SKIN_KEYWORDS);
 
+  // Gender detection
+  const hasFemaleCharacter = hasKeyword(lower, FEMALE_KEYWORDS);
+  const hasMaleCharacter = hasKeyword(lower, MALE_KEYWORDS);
+
   // Interaction type detection (for dual-character composition intelligence)
   let interactionType: InteractionType = 'unknown';
   if (hasKeyword(lower, INTIMATE_INTERACTION_KEYWORDS) || hasIntimateContent) {
@@ -332,5 +353,7 @@ export function classifyScene(
     hasCompositionCues,
     interactionType,
     hasDarkSkinSubject,
+    hasFemaleCharacter,
+    hasMaleCharacter,
   };
 }

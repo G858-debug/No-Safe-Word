@@ -15,6 +15,8 @@ Scene prompts should follow this structure:
 
 [action/pose], [expression/gaze with weight], [scene-specific clothing], [setting with South African details], [specific light source], [atmosphere], [composition — shot type, camera angle, depth of field]
 
+**Clothing guidance for female characters:** Default to form-fitting, revealing, or glamorous clothing choices (fitted tops, low necklines, mini skirts, heels, bodycon dresses, etc.). The pipeline enhances attractiveness automatically — scene clothing should complement this, not fight it. Only use loose/baggy/modest clothing when it's a deliberate creative choice for a specific scene (e.g., character is intentionally dressed down, in sleepwear, or the narrative calls for it). Never leave clothing unspecified — the model will default to generic unflattering choices.
+
 Example (old style — DO NOT USE):
 "A stunning young Black South African woman (24, oval face, high cheekbones, neat braids in low bun, slim curvaceous figure, fitted low-cut top showing tasteful cleavage, gold earrings), leaning forward with a sharp seductive half-smile..."
 
@@ -65,3 +67,17 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
 - Describe the secondary character by role and clothing, not by physical features
 - Give spatial composition instructions: "woman in foreground left, man behind right shoulder"
 - For critical couple shots, consider generating each character separately
+
+### LoRA-First Workflow Selection
+1. When characters have deployed LoRAs (trained identity models), the pipeline uses the `portrait` workflow type — LoRAs handle character consistency directly in the base generation, making IPAdapter unnecessary.
+2. IPAdapter (reference image-based identity) is only used as a fallback when characters lack trained LoRAs.
+3. For dual-character scenes where both characters have LoRAs, both are loaded into the portrait workflow simultaneously.
+4. **Trigger words are critical:** LoRAs only activate when their trigger word (typically "tok") appears in the positive prompt. The pipeline injects trigger words automatically via `buildStoryImagePrompt()` — they appear after the quality prefix but before character tags.
+5. FaceDetailer face prompts also include the trigger word so the LoRA activates during the face refinement pass, not just the base generation.
+
+### Female Character Enhancement
+1. Female characters always receive attractiveness emphasis tags in the positive prompt: beautiful face, perfect makeup, curvaceous figure, hourglass body, form-fitting clothing.
+2. Curvaceous body descriptors (large breasts, wide hips, slim waist, thick thighs) are always present with appropriate emphasis weight — higher for NSFW, moderate for SFW.
+3. The `curvy-body-sdxl` LoRA is always loaded for any scene with a detected female character, regardless of content level or skin visibility. This ensures the intended body type renders consistently.
+4. Negative prompts actively prevent the model from rendering unflattering body types: flat chest, boyish figure, shapeless body, frumpy/unflattering clothing.
+5. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and skips the enhancement.

@@ -36,9 +36,44 @@ function getLoraFromRegistry(filename: string): SelectedLora | null {
   };
 }
 
+/**
+ * Build context-aware negative prompt terms based on the scene prompt and
+ * classification. Targets the most common failure modes: unprompted accessories,
+ * wrong person count, and ethnicity drift on African characters.
+ */
+function buildContextualNegatives(
+  classification: SceneClassification,
+  promptHint?: string,
+): string[] {
+  const negatives: string[] = [];
+
+  // 1. Unprompted head accessories — the model loves adding headbands/wraps
+  //    Only negate if the scene prompt doesn't explicitly request them
+  if (promptHint && !/\b(?:headband|headwrap|head wrap|bandana|doek|turban|head scarf|headscarf)\b/i.test(promptHint)) {
+    negatives.push('headband, headwrap, bandana, hair accessory on forehead');
+  }
+
+  // 2. Person count enforcement
+  if (classification.characterCount === 1) {
+    negatives.push('(two people, second person, couple, extra person:1.3)');
+  } else if (classification.characterCount === 2) {
+    negatives.push('(three people, crowd, group, third person:1.4)');
+  }
+
+  // 3. Ethnicity preservation for African/Black characters
+  if (promptHint && /\b(?:African|Black South African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga|dark.?skin|medium.?brown skin|deep brown skin|rich brown skin)\b/i.test(promptHint)) {
+    negatives.push('(asian features, european features, light skin, pale skin, white skin:1.2)');
+  }
+
+  return negatives;
+}
+
 export function selectResources(
   classification: SceneClassification,
   characterLora?: CharacterLoraEntry | null,
+  secondaryCharacterLora?: CharacterLoraEntry | null,
+  /** Final prompt text — used to detect female subjects for negative prompt tuning */
+  promptHint?: string,
 ): ResourceSelection {
   const candidates: Array<{ priority: number; lora: SelectedLora }> = [];
   const negativeAdditions: string[] = [];
@@ -64,6 +99,23 @@ export function selectResources(
     characterLoraDownloads.push({
       filename: characterLora.filename,
       url: characterLora.storageUrl,
+    });
+  }
+
+  // 1.6. Secondary character LoRA — same priority tier as primary
+  if (secondaryCharacterLora) {
+    candidates.push({
+      priority: 1.6,
+      lora: {
+        filename: secondaryCharacterLora.filename,
+        strengthModel: secondaryCharacterLora.defaultStrength,
+        strengthClip: secondaryCharacterLora.clipStrength,
+        triggerWord: secondaryCharacterLora.triggerWord,
+      },
+    });
+    characterLoraDownloads.push({
+      filename: secondaryCharacterLora.filename,
+      url: secondaryCharacterLora.storageUrl,
     });
   }
 
@@ -101,8 +153,8 @@ export function selectResources(
     negativeAdditions.push('bad anatomy, distorted proportions');
   }
 
-  // 5b. If body is visible (skin detail or NSFW): add curvy-body-sdxl
-  if (classification.needsSkinDetail || classification.contentLevel === 'nsfw') {
+  // 5b. If female character present, body visible, or NSFW: add curvy-body-sdxl
+  if (classification.hasFemaleCharacter || classification.needsSkinDetail || classification.contentLevel === 'nsfw') {
     const curvyLora = getLoraFromRegistry('curvy-body-sdxl.safetensors');
     if (curvyLora) {
       candidates.push({ priority: 3.1, lora: curvyLora });
@@ -148,6 +200,15 @@ export function selectResources(
   if (classification.hasIntimateContent && classification.contentLevel !== 'nsfw') {
     negativeAdditions.push('explicit, graphic');
   }
+
+  // Female figure reinforcement: push anti-patterns into the negative prompt
+  // when the prompt contains female-indicating terms
+  if (promptHint && /\b(?:female|woman|girl|lady|she|her)\b/i.test(promptHint)) {
+    negativeAdditions.push('flat chest, small breasts, boyish figure, shapeless body, frumpy, unflattering clothing, no makeup, plain');
+  }
+
+  // Contextual negatives: unprompted accessories, person count, ethnicity drift
+  negativeAdditions.push(...buildContextualNegatives(classification, promptHint));
 
   return {
     loras: selectedLoras,

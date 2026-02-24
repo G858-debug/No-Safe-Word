@@ -203,9 +203,11 @@ export function extractCharacterTags(
   // Split into individual tags for filtering and deduplication
   const tags = result.split(",").map((s) => s.trim()).filter(Boolean);
 
-  // Physical-feature keywords that signal the END of a clothing run
+  // Physical-feature keywords that signal the END of a clothing run.
+  // Body shape descriptors (breasts, hips, waist, curvy, etc.) must be preserved
+  // so that figure information survives clothing stripping.
   const appearancePattern =
-    /\b(?:eyes|skin|shoulders|hands|face|cheekbone|jawline|smile|dimple|freckle|scar|tattoo|beard|stubble|goatee|muscular|athletic|slim|petite|slender|build|frame|figure|physique|confidence|presence)\b/i;
+    /\b(?:eyes|skin|shoulders|hands|face|cheekbone|jawline|smile|dimple|freckle|scar|tattoo|beard|stubble|goatee|muscular|athletic|slim|petite|slender|build|frame|figure|physique|confidence|presence|breasts|bust|hips|waist|thighs|curvy|curvaceous|voluptuous|full[- ]figured)\b/i;
 
   const filtered: string[] = [];
   let inClothingRun = false;
@@ -312,10 +314,17 @@ export function weightGazeDirections(scenePrompt: string): string {
   // Already-weighted gaze instructions (contains :1.N) — skip
   // Only process unweighted gaze patterns
 
-  // "looking directly at camera/viewer" → "(looking directly at camera:1.3)"
+  // "looking directly at camera/viewer" → "(looking directly at camera:1.4)"
+  // This is the single most impactful element for engaging images — weight aggressively
   result = result.replace(
     /(?<!\()looking\s+directly\s+at\s+(?:camera|viewer|the\s+camera|the\s+viewer)(?![\w:]*\))/gi,
-    "(looking directly at camera:1.3)"
+    "(looking directly at camera:1.4)"
+  );
+
+  // "eye contact" → "(eye contact:1.3)"
+  result = result.replace(
+    /(?<!\()eye\s+contact(?![\w:]*\))/gi,
+    "(eye contact:1.3)"
   );
 
   // "eyes closed" → "(eyes closed:1.3)"
@@ -364,6 +373,86 @@ export function weightGazeDirections(scenePrompt: string): string {
 }
 
 /**
+ * Helper: wrap a matched phrase in SD emphasis syntax, skipping if already wrapped.
+ * Returns the replacement string for use inside .replace() callbacks.
+ */
+function wrapEmphasis(match: string, weight: string): string {
+  return `(${match}:${weight})`;
+}
+
+/**
+ * Emphasize commonly-ignored scene details (clothing, accessories, poses,
+ * multi-person cues) so the model actually renders them.
+ *
+ * Only wraps phrases that are NOT already inside SD emphasis parens.
+ * The negative-lookbehind `(?<!\()` and negative-lookahead `(?![\w:]*\))`
+ * pattern from weightGazeDirections is reused here.
+ */
+export function emphasizeSceneDetails(scenePrompt: string): string {
+  let result = scenePrompt;
+
+  // --- Two-person reinforcement (most critical — models often drop the second person) ---
+  result = result.replace(
+    /(?<!\()(?:two people|two persons|couple|man and woman|woman and man)(?![\w:]*\))/gi,
+    (m) => `(${m}, two people in frame:1.3)`
+  );
+
+  // --- Clothing items — wrap specific garments at 1.2 ---
+  // Match multi-word clothing phrases (e.g. "off-shoulder top", "white t-shirt")
+  // Pattern: optional color/adjective + garment noun
+  const clothingPattern = new RegExp(
+    '(?<!\\()' +
+    '(?:' +
+      // Specific multi-word garments
+      '(?:off[- ]shoulder|crop|halter|button[- ]down|low[- ]cut|v[- ]neck)\\s+(?:top|shirt|blouse|dress)' +
+      '|' +
+      // Color/adjective + garment
+      '(?:(?:white|black|red|blue|green|pink|gold|silver|sheer|silk|lace|leather|denim|fitted|tight|mini|maxi|long|short)\\s+)?' +
+      '(?:t-shirt|tee|tank top|blouse|blazer|jacket|overalls|dress|skirt|jeans|shorts|pants|trousers|lingerie|bodysuit|corset|robe|kimono|sundress|gown|heels|high heels|stilettos|boots|sneakers|sandals|stockings|thigh[- ]highs)' +
+    ')' +
+    '(?![\\w:]*\\))',
+    'gi'
+  );
+  result = result.replace(clothingPattern, (m) => wrapEmphasis(m, '1.2'));
+
+  // --- Accessories at 1.15 ---
+  const accessoryPattern = new RegExp(
+    '(?<!\\()' +
+    '(?:' +
+      '(?:(?:gold|silver|diamond|pearl|beaded|leather|delicate|chunky|thin|thick)\\s+)?' +
+      '(?:earrings|necklace|bracelet|anklet|watch|ring|choker|pendant|chain|sunglasses|glasses|hat|headband|hair clip|nose ring|belly ring)' +
+    ')' +
+    '(?![\\w:]*\\))',
+    'gi'
+  );
+  result = result.replace(accessoryPattern, (m) => wrapEmphasis(m, '1.15'));
+
+  // --- Specific actions/poses at 1.2 ---
+  const actionPattern = new RegExp(
+    '(?<!\\()' +
+    '(?:' +
+      'biting (?:her |his )?(?:lower )?lip' +
+      '|hands? on (?:her |his )?hips?' +
+      '|hand on (?:her |his )?(?:chest|chin|neck|thigh|knee|waist)' +
+      '|leaning (?:against|on|forward|back)' +
+      '|arms? crossed' +
+      '|hand(?:s)? running through (?:her |his )?hair' +
+      '|touching (?:her |his )?(?:face|neck|hair|shoulder|lip)' +
+      '|finger(?:s)? (?:on|to|touching) (?:her |his )?lips?' +
+      '|straddling' +
+      '|sitting on (?:his )?lap' +
+      '|legs? crossed' +
+      '|hand(?:s)? behind (?:her |his )?(?:head|back|neck)' +
+    ')' +
+    '(?![\\w:]*\\))',
+    'gi'
+  );
+  result = result.replace(actionPattern, (m) => wrapEmphasis(m, '1.2'));
+
+  return result;
+}
+
+/**
  * Replace the age in extracted character tags with the correct age from character data.
  * The age is typically the first token, e.g. "35, male, athletic body, ..." → "26, male, ...".
  */
@@ -371,6 +460,41 @@ export function replaceTagsAge(tags: string, correctAge: string): string {
   if (!correctAge) return tags;
   // Match a leading number optionally followed by "years old" / "year old"
   return tags.replace(/^\d{1,3}(\s*years?\s*old)?/, correctAge);
+}
+
+/**
+ * Detect whether character tags describe a female character.
+ * Checks for explicit female indicators or absence of male indicators.
+ */
+function isFemaleCharacter(tags: string): boolean {
+  const lower = tags.toLowerCase();
+  if (/\b(?:female|woman|girl|lady)\b/.test(lower)) return true;
+  if (/\b(?:male|man|boy|guy|gentleman)\b/.test(lower)) return false;
+  // Default to female when ambiguous (most characters in this project are female)
+  return true;
+}
+
+/**
+ * Inject attractiveness and figure enhancement tags for female characters.
+ * Placed after character tags and before the scene description so CLIP
+ * treats them as character-level attributes rather than scene-level.
+ *
+ * Skipped when the scene prompt deliberately specifies loose/baggy clothing,
+ * which signals a creative choice that shouldn't be overridden.
+ */
+function injectFemaleEnhancement(scenePrompt: string, mode: 'sfw' | 'nsfw'): string {
+  // Respect deliberate creative choices for loose clothing
+  if (/\b(?:baggy|loose|oversized)\b/i.test(scenePrompt)) return '';
+
+  const bodyWeight = mode === 'nsfw' ? '1.25' : '1.15';
+
+  const parts = [
+    '(beautiful face, perfect makeup, full lips, alluring eyes:1.2)',
+    `(curvaceous figure, hourglass body, large breasts, wide hips, slim waist, thick thighs:${bodyWeight})`,
+    '(form-fitting clothing, showing cleavage, dressed up, glamorous:1.1)',
+  ];
+
+  return parts.join(', ');
 }
 
 /**
@@ -388,10 +512,13 @@ export function buildStoryImagePrompt(
   primaryCharacterTags: string | null,
   secondaryCharacterTags: string | null,
   scenePrompt: string,
-  mode: "sfw" | "nsfw"
+  mode: "sfw" | "nsfw",
+  triggerWords?: string[]
 ): string {
-  const cleanedScene = weightGazeDirections(
-    stripInlineCharacterDescriptions(scenePrompt)
+  const cleanedScene = emphasizeSceneDetails(
+    weightGazeDirections(
+      stripInlineCharacterDescriptions(scenePrompt)
+    )
   );
 
   const prefix = '(masterpiece, best quality:1.2), highly detailed, (photorealistic:1.3), (sharp focus:1.1)';
@@ -400,18 +527,43 @@ export function buildStoryImagePrompt(
     ? '(cinematic lighting:1.1), (intimate atmosphere:1.1), film grain, shallow depth of field, 8k uhd, dslr'
     : '(cinematic lighting:1.1), film grain, shallow depth of field, 8k uhd, dslr';
 
+  // Deduplicate trigger words (e.g. both characters use "tok")
+  const uniqueTriggers = triggerWords?.length
+    ? triggerWords.filter((w, i) => triggerWords.indexOf(w) === i).join(', ')
+    : '';
+
   // No linked characters — atmospheric/environmental shot
   if (!primaryCharacterTags) {
     return `${prefix}, ${modeTag}, ${cleanedScene}, ${suffix}`;
   }
 
+  // Female enhancement: inject attractiveness tags after character tags
+  const primaryEnhancement = isFemaleCharacter(primaryCharacterTags)
+    ? injectFemaleEnhancement(scenePrompt, mode)
+    : '';
+  const secondaryEnhancement = secondaryCharacterTags && isFemaleCharacter(secondaryCharacterTags)
+    ? injectFemaleEnhancement(scenePrompt, mode)
+    : '';
+
+  // Trigger word prefix (placed before character tags so CLIP associates them)
+  const twPrefix = uniqueTriggers ? `${uniqueTriggers}, ` : '';
+
   // Single character
   if (!secondaryCharacterTags) {
-    return `${prefix}, ${modeTag}, ${primaryCharacterTags}, ${cleanedScene}, ${suffix}`;
+    const charBlock = primaryEnhancement
+      ? `${primaryCharacterTags}, ${primaryEnhancement}`
+      : primaryCharacterTags;
+    return `${prefix}, ${modeTag}, ${twPrefix}${charBlock}, ${cleanedScene}, ${suffix}`;
   }
 
   // Two characters
-  return `${prefix}, ${modeTag}, ${primaryCharacterTags}, second person: ${secondaryCharacterTags}, ${cleanedScene}, ${suffix}`;
+  const primaryBlock = primaryEnhancement
+    ? `${primaryCharacterTags}, ${primaryEnhancement}`
+    : primaryCharacterTags;
+  const secondaryBlock = secondaryEnhancement
+    ? `${secondaryCharacterTags}, ${secondaryEnhancement}`
+    : secondaryCharacterTags;
+  return `${prefix}, ${modeTag}, ${twPrefix}${primaryBlock}, second person: ${secondaryBlock}, ${cleanedScene}, ${suffix}`;
 }
 
 /**

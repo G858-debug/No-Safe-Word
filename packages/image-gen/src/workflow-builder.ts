@@ -57,10 +57,10 @@ interface DualCharacterWorkflowParams extends SceneWorkflowParams {
 }
 
 const DEFAULT_NEGATIVE_PROMPT =
-  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, extra fingers, missing fingers, extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like, (overexposed:1.2), (underexposed:1.2), (oversaturated:1.2), flat lighting, harsh shadows, amateur photography';
+  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, (wrong number of fingers, extra fingers, missing fingers:1.2), extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like, (overexposed:1.2), (underexposed:1.2), (oversaturated:1.2), flat lighting, harsh shadows, amateur photography, (extra people:1.3), wrong ethnicity, wrong race';
 
 const DEFAULT_NEGATIVE_PROMPT_DUAL =
-  DEFAULT_NEGATIVE_PROMPT + ', three people, crowd, group';
+  DEFAULT_NEGATIVE_PROMPT + ', (three people, crowd, group, third person:1.4)';
 
 /** Node IDs for up to 6 chained LoRA loaders */
 const LORA_NODE_IDS = ['2', '2a', '2b', '2c', '2d', '2e'] as const;

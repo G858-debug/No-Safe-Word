@@ -299,8 +299,18 @@ export async function POST(
           }
         }
 
+        // Look up character LoRAs (needed for trigger word injection into prompt and workflow selection)
+        const primaryCharLora = imgPrompt.character_id ? characterLoraMap.get(imgPrompt.character_id) : undefined;
+        const secondaryCharLora = imgPrompt.secondary_character_id ? characterLoraMap.get(imgPrompt.secondary_character_id) : undefined;
+
+        // Extract trigger words from character LoRAs for prompt injection
+        const triggerWords = [primaryCharLora, secondaryCharLora]
+          .filter((l): l is CharacterLoraEntry => !!l)
+          .map(l => l.triggerWord)
+          .filter((tw): tw is string => !!tw);
+
         const promptOverride = (primaryTags || secondaryTags)
-          ? buildStoryImagePrompt(primaryTags, secondaryTags, scenePromptForBuild, mode)
+          ? buildStoryImagePrompt(primaryTags, secondaryTags, scenePromptForBuild, mode, triggerWords)
           : undefined;
 
         // Diagnostic logging — trace the prompt pipeline
@@ -312,15 +322,41 @@ export async function POST(
         if (promptOverride) {
           console.log(`[StoryImage][${imgPrompt.id}] Final prompt:`, promptOverride.substring(0, 200));
         }
-        const workflowType = imgPrompt.character_id
-          ? (hasSecondary ? "dual-character" : "single-character")
-          : "portrait";
+        // LoRA-first workflow selection:
+        // If characters have deployed LoRAs, prefer portrait workflow (no IPAdapter)
+        const primaryHasLora = !!primaryCharLora;
+        const secondaryHasLora = !!secondaryCharLora;
+
+        let workflowType: "portrait" | "single-character" | "dual-character";
+        if (!imgPrompt.character_id) {
+          // No character linked — plain portrait
+          workflowType = "portrait";
+        } else if (primaryHasLora && (!hasSecondary || secondaryHasLora)) {
+          // Primary has LoRA, and either no secondary or secondary also has LoRA
+          // → portrait workflow (LoRAs handle identity, no IPAdapter needed)
+          workflowType = "portrait";
+          if (hasSecondary) {
+            console.log(`[StoryImage][${imgPrompt.id}] LoRA-first: both characters have LoRAs, using portrait workflow with dual LoRAs`);
+          } else {
+            console.log(`[StoryImage][${imgPrompt.id}] LoRA-first: primary has LoRA, using portrait workflow (no IPAdapter)`);
+          }
+        } else if (primaryHasLora && hasSecondary && !secondaryHasLora) {
+          // Primary has LoRA but secondary doesn't — need IPAdapter for secondary only
+          // Use single-character workflow (IPAdapter for identity reference)
+          workflowType = "single-character";
+          console.log(`[StoryImage][${imgPrompt.id}] LoRA-first: primary has LoRA but secondary does not, using single-character workflow (IPAdapter for secondary ref)`);
+        } else {
+          // Primary has NO LoRA — fall back to current IPAdapter behavior
+          workflowType = hasSecondary ? "dual-character" : "single-character";
+        }
 
         // Fetch primary character's approved portrait as base64 for IPAdapter
+        // Skip when using portrait workflow (LoRA handles identity)
         const images: Array<{ name: string; image: string }> = [];
         let primaryFacePrompt: string | undefined;
+        const needsIPAdapter = workflowType !== "portrait";
 
-        if (imgPrompt.character_id && workflowType !== "portrait") {
+        if (imgPrompt.character_id && needsIPAdapter) {
           const { data: sc } = await supabase
             .from("story_characters")
             .select("approved_image_id")
@@ -360,6 +396,14 @@ export async function POST(
           secondarySeed = secondaryApprovedSeed ? secondaryApprovedSeed + imgPrompt.position : seed + 1000;
         }
 
+        // Prepend LoRA trigger word to face prompts so FaceDetailer activates the LoRA
+        if (primaryCharLora && primaryFacePrompt) {
+          primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}`;
+        }
+        if (secondaryCharLora && secondaryFacePrompt) {
+          secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
+        }
+
         // Determine dimensions
         const promptLower = imgPrompt.prompt.toLowerCase();
         const isLandscape = promptLower.includes("wide") ||
@@ -373,13 +417,15 @@ export async function POST(
 
         // Scene intelligence: classify scene and select LoRAs
         const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
-        const primaryCharLora = imgPrompt.character_id ? characterLoraMap.get(imgPrompt.character_id) : undefined;
-        const resources = selectResources(classification, primaryCharLora);
+        const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt);
 
         console.log(`[StoryImage][${imgPrompt.id}] Scene classification:`, JSON.stringify(classification));
         console.log(`[StoryImage][${imgPrompt.id}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
         if (primaryCharLora) {
           console.log(`[StoryImage][${imgPrompt.id}] Character LoRA injected: ${primaryCharLora.filename}`);
+        }
+        if (secondaryCharLora) {
+          console.log(`[StoryImage][${imgPrompt.id}] Secondary character LoRA injected: ${secondaryCharLora.filename}`);
         }
 
         const modelSelection = selectModel(classification, imgPrompt.image_type as ImageType, {
@@ -388,13 +434,13 @@ export async function POST(
         console.log(`[StoryImage][${imgPrompt.id}] Model selected: ${modelSelection.checkpointName} — ${modelSelection.reason}`);
 
         const workflow = buildWorkflow({
-          type: workflowType as "portrait" | "single-character" | "dual-character",
+          type: workflowType,
           positivePrompt: finalPrompt,
           width,
           height,
           seed,
           filenamePrefix: `story_${imgPrompt.id.substring(0, 8)}`,
-          primaryRefImageName: workflowType !== "portrait" ? "primary_ref.png" : undefined,
+          primaryRefImageName: needsIPAdapter ? "primary_ref.png" : undefined,
           primaryFacePrompt,
           ipadapterWeight: hasSecondary ? 0.7 : 0.85,
           secondaryFacePrompt,
