@@ -123,8 +123,15 @@ if [ -n "${CIVITAI_API_KEY}" ]; then
         "https://civitai.com/api/download/models/1746981?token=${CIVITAI_API_KEY}" \
         "loras" \
         "couples-poses-xl.safetensors"
+
+    # curvy-body-sdxl — Curvy body shape enhancement for realistic proportions
+    # CivitAI model 1295038, version 1449869
+    download_model \
+        "https://civitai.com/api/download/models/1449869?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "curvy-body-sdxl.safetensors"
 else
-    echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl, couples-poses-xl (CIVITAI_API_KEY not set)"
+    echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl, couples-poses-xl, curvy-body-sdxl (CIVITAI_API_KEY not set)"
 fi
 
 # YOLO face detection — used by UltralyticsDetectorProvider / FaceDetailer
