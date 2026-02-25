@@ -447,7 +447,7 @@ export async function POST(
         });
 
         // Submit async job to RunPod
-        const { jobId } = await submitRunPodJob(workflow, images.length > 0 ? images : undefined);
+        const { jobId } = await submitRunPodJob(workflow, images.length > 0 ? images : undefined, resources.characterLoraDownloads);
 
         // Create image record
         const { data: imageRow, error: imgError } = await supabase

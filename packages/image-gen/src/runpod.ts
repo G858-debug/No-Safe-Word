@@ -5,10 +5,18 @@ interface RunPodImage {
   image: string; // base64 encoded, with or without data URI prefix
 }
 
+/** Character LoRA download instruction for the RunPod worker */
+export interface CharacterLoraDownload {
+  filename: string; // e.g. "characters/char_zanele_abc123.safetensors"
+  url: string;      // Supabase Storage URL to download from
+}
+
 interface RunPodRequest {
   input: {
     workflow: Record<string, any>;
     images?: RunPodImage[];
+    /** Character LoRAs to download before workflow execution */
+    character_lora_downloads?: CharacterLoraDownload[];
   };
 }
 
@@ -35,7 +43,8 @@ interface RunPodResponse {
  */
 export async function submitRunPodJob(
   workflow: Record<string, any>,
-  images?: RunPodImage[]
+  images?: RunPodImage[],
+  characterLoraDownloads?: CharacterLoraDownload[]
 ): Promise<{ jobId: string }> {
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   const apiKey = process.env.RUNPOD_API_KEY;
@@ -48,6 +57,7 @@ export async function submitRunPodJob(
     input: {
       workflow,
       ...(images && images.length > 0 ? { images } : {}),
+      ...(characterLoraDownloads && characterLoraDownloads.length > 0 ? { character_lora_downloads: characterLoraDownloads } : {}),
     },
   };
 
@@ -102,7 +112,8 @@ export async function getRunPodJobStatus(jobId: string): Promise<RunPodResponse>
  */
 export async function submitRunPodSync(
   workflow: Record<string, any>,
-  images?: RunPodImage[]
+  images?: RunPodImage[],
+  characterLoraDownloads?: CharacterLoraDownload[]
 ): Promise<{ imageBase64: string; executionTime: number }> {
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   const apiKey = process.env.RUNPOD_API_KEY;
@@ -115,6 +126,7 @@ export async function submitRunPodSync(
     input: {
       workflow,
       ...(images && images.length > 0 ? { images } : {}),
+      ...(characterLoraDownloads && characterLoraDownloads.length > 0 ? { character_lora_downloads: characterLoraDownloads } : {}),
     },
   };
 

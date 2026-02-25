@@ -357,7 +357,7 @@ export async function POST(
       hiresFixEnabled: resources.paramOverrides?.hiresFixEnabled ?? true,
     });
 
-    const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined);
+    const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined, resources.characterLoraDownloads);
 
     // Create image record
     const { data: imageRow, error: imgError } = await supabase

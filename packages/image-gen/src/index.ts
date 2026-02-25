@@ -8,6 +8,7 @@ export {
   imageUrlToBase64,
   base64ToBuffer,
 } from './runpod';
+export type { CharacterLoraDownload } from './runpod';
 
 export {
   buildPortraitWorkflow,

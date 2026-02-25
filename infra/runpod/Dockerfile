@@ -66,6 +66,14 @@ RUN CIVITAI_API_KEY="${CIVITAI_API_KEY}" python3 /tmp/download-civitai-loras.py 
 COPY download-models.sh /usr/local/bin/download-models.sh
 RUN chmod +x /usr/local/bin/download-models.sh
 
+# ---- Character LoRA Runtime Download Handler ----
+# Wraps the base handler.py to download per-character LoRAs on demand.
+# The wrapper intercepts `character_lora_downloads` from the input payload,
+# downloads LoRAs to /comfyui/models/loras/characters/ before the workflow
+# executes, then delegates to the original handler.
+RUN mv /handler.py /handler_original.py
+COPY handler_wrapper.py /handler.py
+
 # Wrap the base image's /start.sh to download models first.
 # We rename the original and replace it with our wrapper, rather than
 # using ENTRYPOINT, which breaks RunPod serverless deployment.
