@@ -16,8 +16,10 @@ import logging
 import os
 import shutil
 import sys
+import time
 import urllib.request
 
+import requests
 import runpod
 
 # Load the original handler module from its renamed location
@@ -82,6 +84,36 @@ def download_character_loras(downloads):
             raise RuntimeError(f"Failed to download character LoRA {filename}: {e}")
 
 
+COMFY_HOST = "127.0.0.1:8188"
+
+
+def refresh_comfyui_model_cache():
+    """
+    Tell ComfyUI to clear its cached list of available LoRAs so newly
+    downloaded character LoRA files pass workflow validation.
+
+    Uses our nsw_refresh_models custom extension endpoint. Also touches
+    the loras directory as a belt-and-suspenders approach for ComfyUI
+    versions that use mtime-based cache invalidation.
+    """
+    # Touch loras dir to update mtime (invalidates mtime-based caches)
+    try:
+        os.utime(LORAS_DIR, None)
+        logger.info("[NSW] Touched %s to update mtime", LORAS_DIR)
+    except Exception as e:
+        logger.warning("[NSW] Failed to touch loras dir: %s", e)
+
+    # Call our custom extension to explicitly clear the cache
+    try:
+        resp = requests.post(f"http://{COMFY_HOST}/api/nsw/refresh-models", timeout=10)
+        if resp.status_code == 200:
+            logger.info("[NSW] ComfyUI model cache refreshed successfully")
+        else:
+            logger.warning("[NSW] ComfyUI refresh returned %d: %s", resp.status_code, resp.text)
+    except Exception as e:
+        logger.warning("[NSW] Failed to call ComfyUI refresh endpoint: %s", e)
+
+
 def wrapped_handler(job):
     """
     Pre-process job input to download character LoRAs, then delegate
@@ -97,6 +129,7 @@ def wrapped_handler(job):
             len(character_lora_downloads),
         )
         download_character_loras(character_lora_downloads)
+        refresh_comfyui_model_cache()
         logger.info("[NSW] All character LoRAs ready.")
 
     return handler_original.handler(job)

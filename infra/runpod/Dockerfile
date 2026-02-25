@@ -71,6 +71,11 @@ RUN chmod +x /usr/local/bin/download-models.sh
 # The wrapper intercepts `character_lora_downloads` from the input payload,
 # downloads LoRAs to /comfyui/models/loras/characters/ before the workflow
 # executes, then delegates to the original handler.
+#
+# nsw_refresh_models: tiny ComfyUI extension that adds POST /api/nsw/refresh-models
+# to clear the folder_paths filename cache. Without this, ComfyUI rejects
+# newly downloaded LoRAs because its cached file list is stale from startup.
+COPY nsw_refresh_models/ ${COMFY_DIR}/custom_nodes/nsw_refresh_models/
 RUN mv /handler.py /handler_original.py
 COPY handler_wrapper.py /handler.py
 
