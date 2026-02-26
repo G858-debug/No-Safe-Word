@@ -10,12 +10,28 @@ PATCH_CODE = r'''
 # ---- NSW Character LoRA Download Patch ----
 import os as _nsw_os
 import shutil as _nsw_shutil
+import tarfile as _nsw_tarfile
+import tempfile as _nsw_tempfile
 import urllib.request as _nsw_urllib_request
 import requests as _nsw_requests
 
 _nsw_COMFY_DIR = _nsw_os.environ.get("COMFY_DIR", "/comfyui")
 _nsw_LORAS_DIR = _nsw_os.path.join(_nsw_COMFY_DIR, "models", "loras")
 _nsw_COMFY_HOST = "127.0.0.1:8188"
+
+def _nsw_extract_safetensors_from_tar(tar_path, dest_path):
+    """Extract lora.safetensors from a Replicate tar archive."""
+    with _nsw_tarfile.open(tar_path, "r") as tar:
+        for member in tar.getmembers():
+            if member.name.endswith(".safetensors"):
+                print(f"[NSW] Extracting {member.name} from tar")
+                src = tar.extractfile(member)
+                if src is None:
+                    raise RuntimeError(f"Could not extract {member.name} from tar")
+                with open(dest_path, "wb") as dst:
+                    _nsw_shutil.copyfileobj(src, dst)
+                return
+    raise RuntimeError("No .safetensors file found in tar archive")
 
 def _nsw_download_character_loras(downloads):
     """Download character LoRAs to ComfyUI loras dir if not cached."""
@@ -42,7 +58,19 @@ def _nsw_download_character_loras(downloads):
             with open(tmp, "wb") as f:
                 _nsw_shutil.copyfileobj(resp, f)
             resp.close()
-            _nsw_os.rename(tmp, dest)
+            # If the downloaded file is a tar archive, extract the safetensors from it
+            is_tar = url.endswith(".tar")
+            if not is_tar:
+                try:
+                    is_tar = _nsw_tarfile.is_tarfile(tmp)
+                except Exception:
+                    is_tar = False
+            if is_tar:
+                print(f"[NSW] Detected tar archive, extracting safetensors...")
+                _nsw_extract_safetensors_from_tar(tmp, dest)
+                _nsw_os.remove(tmp)
+            else:
+                _nsw_os.rename(tmp, dest)
             sz = _nsw_os.path.getsize(dest) / (1024 * 1024)
             print(f"[NSW] Downloaded: {filename} ({sz:.1f} MB)")
         except Exception as e:
