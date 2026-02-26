@@ -1,12 +1,15 @@
-name: Build RunPod ComfyUI Image
+name: Build RunPod Base Image
 
-# Thin app layer (~1-2 min). Builds on top of the pre-built base image.
-# Triggers on any infra/runpod/ change. Base-only file changes will also
-# trigger this (harmlessly) to ensure the app image stays in sync.
+# Heavy base image (~45 min). Only rebuild when models, custom nodes, or
+# dependencies change. The app image (Dockerfile) layers on top of this.
 on:
   push:
     paths:
-      - 'infra/runpod/**'
+      - 'infra/runpod/Dockerfile.base'
+      - 'infra/runpod/download-models.sh'
+      - 'infra/runpod/download-civitai-loras.py'
+      - 'infra/runpod/download-insightface.py'
+      - 'infra/runpod/diagnose-ipadapter.py'
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -14,14 +17,10 @@ on:
         description: 'Image version tag (e.g. v1.0.0)'
         required: false
         default: ''
-      base_image:
-        description: 'Base image override (e.g. ghcr.io/g858-debug/nsw-comfyui-base:sha-abc1234)'
-        required: false
-        default: ''
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: g858-debug/nsw-comfyui-worker
+  IMAGE_NAME: g858-debug/nsw-comfyui-base
 
 jobs:
   build-and-push:
@@ -31,6 +30,16 @@ jobs:
       packages: write
 
     steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
       - uses: actions/checkout@v4
 
       - uses: docker/login-action@v3
@@ -53,22 +62,13 @@ jobs:
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
-      - name: Determine base image
-        id: base
-        run: |
-          if [ -n "${{ github.event.inputs.base_image }}" ]; then
-            echo "image=${{ github.event.inputs.base_image }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "image=ghcr.io/g858-debug/nsw-comfyui-base:latest" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: docker/build-push-action@v6
         with:
           context: ./infra/runpod
-          file: ./infra/runpod/Dockerfile
+          file: ./infra/runpod/Dockerfile.base
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha,scope=runpod-app
-          cache-to: type=gha,mode=min,scope=runpod-app
+          cache-from: type=gha,scope=runpod-base
+          cache-to: type=gha,mode=min,scope=runpod-base
           build-args: |
-            BASE_IMAGE=${{ steps.base.outputs.image }}
+            CIVITAI_API_KEY=${{ secrets.CIVITAI_API_KEY }}
