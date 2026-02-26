@@ -1,6 +1,8 @@
 name: Build RunPod ComfyUI Image
 
-# Thin app layer (~1-2 min). Builds on top of the pre-built base image.
+# Thin app layer on top of the pre-built base image.
+# Still needs free-disk-space because pulling the large base image (~20GB+)
+# can exhaust the runner's disk.
 # Triggers on any infra/runpod/ change. Base-only file changes will also
 # trigger this (harmlessly) to ensure the app image stays in sync.
 on:
@@ -31,6 +33,16 @@ jobs:
       packages: write
 
     steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
       - uses: actions/checkout@v4
 
       - uses: docker/login-action@v3
