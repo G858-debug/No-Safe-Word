@@ -67,17 +67,19 @@ COPY download-models.sh /usr/local/bin/download-models.sh
 RUN chmod +x /usr/local/bin/download-models.sh
 
 # ---- Character LoRA Runtime Download Handler ----
-# Wraps the base handler.py to download per-character LoRAs on demand.
-# The wrapper intercepts `character_lora_downloads` from the input payload,
-# downloads LoRAs to /comfyui/models/loras/characters/ before the workflow
-# executes, then delegates to the original handler.
+# Injects character LoRA download support into the base handler.py.
+# At build time, patch_handler.py prepends a monkey-patch to the original
+# handler that intercepts `character_lora_downloads` from job input,
+# downloads LoRAs to /comfyui/models/loras/characters/, refreshes
+# ComfyUI's model cache, then delegates to the original handler.
 #
 # nsw_refresh_models: tiny ComfyUI extension that adds POST /api/nsw/refresh-models
 # to clear the folder_paths filename cache. Without this, ComfyUI rejects
 # newly downloaded LoRAs because its cached file list is stale from startup.
 COPY nsw_refresh_models/ ${COMFY_DIR}/custom_nodes/nsw_refresh_models/
 RUN mv /handler.py /handler_original.py
-COPY handler_wrapper.py /handler.py
+COPY patch_handler.py /tmp/patch_handler.py
+RUN python3 /tmp/patch_handler.py && rm /tmp/patch_handler.py /handler_original.py
 
 # Wrap the base image's /start.sh to download models first.
 # We rename the original and replace it with our wrapper, rather than
