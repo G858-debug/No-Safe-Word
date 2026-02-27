@@ -14,6 +14,7 @@ export {
   buildPortraitWorkflow,
   buildSingleCharacterWorkflow,
   buildDualCharacterWorkflow,
+  buildMultiPassWorkflow,
   buildWorkflow,
 } from './workflow-builder';
 
