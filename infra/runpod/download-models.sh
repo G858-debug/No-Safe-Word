@@ -130,8 +130,36 @@ if [ -n "${CIVITAI_API_KEY}" ]; then
         "https://civitai.com/api/download/models/1449869?token=${CIVITAI_API_KEY}" \
         "loras" \
         "curvy-body-sdxl.safetensors"
+
+    # touch-of-realism-v2 — Real photography lens effects (shallow DOF, bokeh, light flares)
+    # CivitAI version 1929965
+    download_model \
+        "https://civitai.com/api/download/models/1929965?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "touch-of-realism-v2.safetensors"
+
+    # high-fashion-xl — Fashion photography clothing and fabric detail enhancement
+    # CivitAI version 481296
+    download_model \
+        "https://civitai.com/api/download/models/481296?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "high-fashion-xl.safetensors"
+
+    # interior-design-xl — Indoor scene enhancement (light/shadow, spatial depth)
+    # CivitAI version 551510
+    download_model \
+        "https://civitai.com/api/download/models/551510?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "interior-design-xl.safetensors"
+
+    # braids-cornrows-xl — Braided hairstyle detail (cornrows, side braids, African styles)
+    # CivitAI version 482948
+    download_model \
+        "https://civitai.com/api/download/models/482948?token=${CIVITAI_API_KEY}" \
+        "loras" \
+        "braids-cornrows-xl.safetensors"
 else
-    echo "[NSW] ⚠ Skipping better-bodies-xl, cinecolor-harmonizer, melanin-mix-xl, couples-poses-xl, curvy-body-sdxl (CIVITAI_API_KEY not set)"
+    echo "[NSW] ⚠ Skipping CivitAI LoRAs (CIVITAI_API_KEY not set)"
 fi
 
 # YOLO face detection — used by UltralyticsDetectorProvider / FaceDetailer
