@@ -26,7 +26,7 @@ interface WorkflowParams {
   negativePromptAdditions?: string;
   /** Checkpoint model filename. Defaults to DEFAULT_MODEL (Juggernaut XL v10). */
   checkpointName?: string;
-  /** Override CFG scale (default 7.5) */
+  /** Override CFG scale (default 8.5 portrait/single, 8.0 dual) */
   cfg?: number;
   /** Override sampler name (default 'dpmpp_2m') */
   samplerName?: string;
@@ -170,7 +170,7 @@ export function buildPortraitWorkflow(params: WorkflowParams): Record<string, an
   const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'portrait';
   const ckpt = params.checkpointName || DEFAULT_MODEL;
-  const cfg = params.cfg || 7.5;
+  const cfg = params.cfg || 8.5;
   const sampler = params.samplerName || 'dpmpp_2m';
 
   const workflow: Record<string, any> = {
@@ -297,7 +297,7 @@ export function buildSingleCharacterWorkflow(params: SceneWorkflowParams): Recor
   const prefix = params.filenamePrefix || 'scene';
   const ipaWeight = params.ipadapterWeight ?? 0.85;
   const ckpt = params.checkpointName || DEFAULT_MODEL;
-  const cfg = params.cfg || 7.5;
+  const cfg = params.cfg || 8.5;
   const sampler = params.samplerName || 'dpmpp_2m';
 
   const workflow: Record<string, any> = {
@@ -438,9 +438,13 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
   const neg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT_DUAL;
   const prefix = params.filenamePrefix || 'scene';
   const ipaWeight = params.ipadapterWeight ?? 0.7;
+  // Dual-character scenes use slightly lower CFG (8.0) because the prompt is
+  // more complex (two character descriptions + scene) and needs room to breathe.
+  const dualCfg = params.cfg || 8.0;
 
   const workflow = buildSingleCharacterWorkflow({
     ...params,
+    cfg: dualCfg,
     negativePrompt: neg,
     ipadapterWeight: ipaWeight,
     filenamePrefix: prefix,
@@ -476,7 +480,7 @@ export function buildDualCharacterWorkflow(params: DualCharacterWorkflowParams):
       max_size: 1024,
       seed: params.secondarySeed,
       steps: 25,
-      cfg: params.cfg || 7.5,
+      cfg: dualCfg,
       sampler_name: params.samplerName || 'dpmpp_2m',
       scheduler: 'karras',
       denoise: 0.4,

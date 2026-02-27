@@ -397,7 +397,7 @@ export function emphasizeSceneDetails(scenePrompt: string): string {
     (m) => `(${m}, two people in frame:1.3)`
   );
 
-  // --- Clothing items — wrap specific garments at 1.2 ---
+  // --- Clothing items — wrap specific garments at 1.25 ---
   // Match multi-word clothing phrases (e.g. "off-shoulder top", "white t-shirt")
   // Pattern: optional color/adjective + garment noun
   const clothingPattern = new RegExp(
@@ -406,14 +406,30 @@ export function emphasizeSceneDetails(scenePrompt: string): string {
       // Specific multi-word garments
       '(?:off[- ]shoulder|crop|halter|button[- ]down|low[- ]cut|v[- ]neck)\\s+(?:top|shirt|blouse|dress)' +
       '|' +
-      // Color/adjective + garment
-      '(?:(?:white|black|red|blue|green|pink|gold|silver|sheer|silk|lace|leather|denim|fitted|tight|mini|maxi|long|short)\\s+)?' +
-      '(?:t-shirt|tee|tank top|blouse|blazer|jacket|overalls|dress|skirt|jeans|shorts|pants|trousers|lingerie|bodysuit|corset|robe|kimono|sundress|gown|heels|high heels|stilettos|boots|sneakers|sandals|stockings|thigh[- ]highs)' +
+      // Color/adjective + garment (adj required for ambiguous words like "top", "shirt", "vest")
+      '(?:(?:white|black|red|blue|green|pink|gold|silver|sheer|silk|lace|leather|denim|fitted|tight|mini|maxi|long|short|sleeveless|cropped|unbuttoned|unzipped)\\s+)' +
+      '(?:top|shirt|vest|camisole|t-shirt|tee|tank top|blouse|blazer|jacket|overalls|dress|skirt|jeans|shorts|pants|trousers|lingerie|bodysuit|corset|robe|kimono|sundress|gown|heels|high heels|stilettos|boots|sneakers|sandals|stockings|thigh[- ]highs)' +
+      '|' +
+      // Unambiguous garment nouns (safe without adjective)
+      '(?:t-shirt|tank top|blouse|blazer|overalls|lingerie|bodysuit|corset|kimono|sundress|gown|stilettos|stockings|thigh[- ]highs|camisole|high heels)' +
     ')' +
     '(?![\\w:]*\\))',
     'gi'
   );
-  result = result.replace(clothingPattern, (m) => wrapEmphasis(m, '1.2'));
+  result = result.replace(clothingPattern, (m) => wrapEmphasis(m, '1.25'));
+
+  // --- Clothing + exposure phrases — "showing cleavage", "revealing neckline" at 1.25 ---
+  const clothingExposurePattern = new RegExp(
+    '(?<!\\()' +
+    '(?:' +
+      'showing\\s+(?:tasteful\\s+)?cleavage' +
+      '|revealing\\s+(?:neckline|outfit|cleavage)' +
+      '|(?:unzipped|unbuttoned)\\s+(?:to\\s+(?:the\\s+)?waist|halfway)' +
+    ')' +
+    '(?![\\w:]*\\))',
+    'gi'
+  );
+  result = result.replace(clothingExposurePattern, (m) => wrapEmphasis(m, '1.25'));
 
   // --- Accessories at 1.15 ---
   const accessoryPattern = new RegExp(

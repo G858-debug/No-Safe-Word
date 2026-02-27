@@ -1,4 +1,4 @@
-import type { SceneClassification } from './scene-classifier';
+import type { SceneClassification, ImageType } from './scene-classifier';
 import { LORA_REGISTRY } from './lora-registry';
 import type { CharacterLoraEntry } from './lora-registry';
 
@@ -74,6 +74,8 @@ export function selectResources(
   secondaryCharacterLora?: CharacterLoraEntry | null,
   /** Final prompt text — used to detect female subjects for negative prompt tuning */
   promptHint?: string,
+  /** Image type — used for SFW clothing preservation negatives */
+  imageType?: ImageType,
 ): ResourceSelection {
   const candidates: Array<{ priority: number; lora: SelectedLora }> = [];
   const negativeAdditions: string[] = [];
@@ -205,6 +207,16 @@ export function selectResources(
   // when the prompt contains female-indicating terms
   if (promptHint && /\b(?:female|woman|girl|lady|she|her)\b/i.test(promptHint)) {
     negativeAdditions.push('flat chest, small breasts, boyish figure, shapeless body, frumpy, unflattering clothing, no makeup, plain');
+  }
+
+  // SFW clothing preservation: when the scene prompt mentions specific clothing
+  // and this is a facebook_sfw image, strongly negate nudity to prevent the
+  // body enhancement tags from stripping clothing off the character.
+  if (imageType === 'facebook_sfw' && promptHint) {
+    const clothingMentioned = /\b(?:top|shirt|t-shirt|blouse|dress|vest|camisole|overalls|jacket|blazer|skirt|jeans|pants|shorts|bodysuit|corset|lingerie|sundress|gown|robe|kimono|tank top)\b/i.test(promptHint);
+    if (clothingMentioned) {
+      negativeAdditions.push('(nude, topless, naked, bare breasts, exposed:1.3)');
+    }
   }
 
   // Contextual negatives: unprompted accessories, person count, ethnicity drift

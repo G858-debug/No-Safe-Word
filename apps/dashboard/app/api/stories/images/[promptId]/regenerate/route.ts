@@ -237,22 +237,31 @@ export async function POST(
     let workflowType: "portrait" | "single-character" | "dual-character";
     if (!imgPrompt.character_id) {
       workflowType = "portrait";
-    } else if (primaryHasLora && (!hasSecondary || secondaryHasLora)) {
+    } else if (primaryHasLora && !hasSecondary) {
+      // Single character with LoRA → portrait (LoRA handles identity)
       workflowType = "portrait";
-      if (hasSecondary) {
-        console.log(`[StoryImage][${promptId}] LoRA-first: both characters have LoRAs, using portrait workflow with dual LoRAs`);
-      } else {
-        console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA, using portrait workflow (no IPAdapter)`);
+      console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA, using portrait workflow (no IPAdapter)`);
+    } else if (hasSecondary) {
+      // ANY dual-character scene → always use dual-character workflow
+      // Even with LoRAs, we need:
+      //   - Spatial composition from the dual-character workflow
+      //   - Separate FaceDetailer passes for each face
+      //   - IPAdapter reference for at least the primary character
+      // LoRAs are still loaded in the chain and help, but dual workflow
+      // provides the structural scaffolding for two distinct people.
+      workflowType = "dual-character";
+      if (primaryHasLora || secondaryHasLora) {
+        console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow with LoRAs + IPAdapter for structural composition`);
       }
-    } else if (primaryHasLora && hasSecondary && !secondaryHasLora) {
-      workflowType = "single-character";
-      console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA but secondary does not, using single-character workflow (IPAdapter for secondary ref)`);
     } else {
-      workflowType = hasSecondary ? "dual-character" : "single-character";
+      // Primary has NO LoRA, single character → IPAdapter fallback
+      workflowType = "single-character";
     }
 
     // Fetch primary character's approved portrait as base64 for IPAdapter
-    // Skip when using portrait workflow (LoRA handles identity)
+    // For dual-character scenes: ALWAYS fetch, even with LoRAs — IPAdapter provides
+    // face-specific anchoring while LoRAs handle general identity in base generation.
+    // Only skip for portrait workflow (single char with LoRA, or no character).
     const refImages: Array<{ name: string; image: string }> = [];
     let primaryFacePrompt: string | undefined;
     const needsIPAdapter = workflowType !== "portrait";
@@ -322,7 +331,7 @@ export async function POST(
 
     // Scene intelligence: classify scene and select LoRAs
     const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
-    const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt);
+    const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType);
 
     console.log(`[StoryImage][${promptId}] Scene classification:`, JSON.stringify(classification));
     console.log(`[StoryImage][${promptId}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
