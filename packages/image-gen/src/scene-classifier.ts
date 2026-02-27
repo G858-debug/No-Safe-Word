@@ -201,12 +201,20 @@ function hasKeyword(prompt: string, keywords: string[]): boolean {
 }
 
 function countCharacterReferences(prompt: string): 0 | 1 | 2 {
+  // If both male and female descriptors present, likely two characters
+  const hasMale = MALE_KEYWORDS.some((kw) => prompt.includes(kw));
+  const hasFemale = FEMALE_KEYWORDS.some((kw) => prompt.includes(kw));
+  if (hasMale && hasFemale) return 2;
+
   // Look for dual-character indicators
   const dualPatterns = [
     'two people', 'two figures', 'couple', 'both',
     'him and her', 'her and him', 'man and woman', 'woman and man',
     'primary character', 'secondary character',
     'foreground.*background',
+    'two-shot', 'two shot',
+    'a man and a woman', 'a woman and a man',
+    'his .* her', 'her .* his',
   ];
 
   for (const pattern of dualPatterns) {

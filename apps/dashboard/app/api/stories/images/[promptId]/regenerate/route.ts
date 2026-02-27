@@ -234,25 +234,26 @@ export async function POST(
     const primaryHasLora = !!primaryCharLora;
     const secondaryHasLora = !!secondaryCharLora;
 
+    // Detect if the prompt describes multiple characters even without secondary_character_id
+    const promptCharCount = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType).characterCount;
+
     let workflowType: "portrait" | "single-character" | "dual-character";
     if (!imgPrompt.character_id) {
       workflowType = "portrait";
-    } else if (primaryHasLora && !hasSecondary) {
-      // Single character with LoRA → portrait (LoRA handles identity)
-      workflowType = "portrait";
-      console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA, using portrait workflow (no IPAdapter)`);
     } else if (hasSecondary) {
-      // ANY dual-character scene → always use dual-character workflow
-      // Even with LoRAs, we need:
-      //   - Spatial composition from the dual-character workflow
-      //   - Separate FaceDetailer passes for each face
-      //   - IPAdapter reference for at least the primary character
-      // LoRAs are still loaded in the chain and help, but dual workflow
-      // provides the structural scaffolding for two distinct people.
+      // Explicit dual-character — always use dual workflow
       workflowType = "dual-character";
       if (primaryHasLora || secondaryHasLora) {
         console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow with LoRAs + IPAdapter for structural composition`);
       }
+    } else if (promptCharCount >= 2) {
+      // Prompt describes two people but no secondary_character_id linked
+      workflowType = "dual-character";
+      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters but no secondary_character_id — using dual-character workflow with single face reference`);
+    } else if (primaryHasLora) {
+      // Single character with LoRA → portrait (LoRA handles identity)
+      workflowType = "portrait";
+      console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA, using portrait workflow`);
     } else {
       // Primary has NO LoRA, single character → IPAdapter fallback
       workflowType = "single-character";
@@ -319,18 +320,31 @@ export async function POST(
       secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
     }
 
-    // Determine dimensions
-    const promptLower = imgPrompt.prompt.toLowerCase();
-    const isLandscape = promptLower.includes("wide") ||
-      promptLower.includes("establishing") ||
-      promptLower.includes("panoram");
-    const width = isLandscape ? 1216 : 832;
-    const height = isLandscape ? 832 : 1216;
-
     const finalPrompt = promptOverride || imgPrompt.prompt;
 
-    // Scene intelligence: classify scene and select LoRAs
+    // Scene intelligence: classify scene early so we can use it for dimensions
     const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+
+    // Scene-aware dimension selection
+    const isDualCharacter = !!imgPrompt.secondary_character_id || classification.characterCount >= 2;
+    const promptLower = (promptOverride || imgPrompt.prompt).toLowerCase();
+    const hasLandscapeKeywords = /\b(wide|establishing|panoram|two-shot|two shot)\b/.test(promptLower);
+
+    let width: number;
+    let height: number;
+
+    if (hasLandscapeKeywords || isDualCharacter) {
+      width = 1216;
+      height = 832;
+    } else if (/\b(detail shot|extreme close|macro)\b/.test(promptLower)) {
+      width = 1024;
+      height = 1024;
+    } else {
+      width = 832;
+      height = 1216;
+    }
+
+    console.log(`[StoryImage] Dimensions: ${width}x${height} (dual=${isDualCharacter}, landscape_kw=${hasLandscapeKeywords})`);
     const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType);
 
     console.log(`[StoryImage][${promptId}] Scene classification:`, JSON.stringify(classification));
