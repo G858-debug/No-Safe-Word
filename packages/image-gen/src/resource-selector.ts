@@ -209,14 +209,12 @@ export function selectResources(
     negativeAdditions.push('flat chest, small breasts, boyish figure, shapeless body, frumpy, unflattering clothing, no makeup, plain');
   }
 
-  // SFW clothing preservation: when the scene prompt mentions specific clothing
-  // and this is a facebook_sfw image, strongly negate nudity to prevent the
-  // body enhancement tags from stripping clothing off the character.
-  if (imageType === 'facebook_sfw' && promptHint) {
-    const clothingMentioned = /\b(?:top|shirt|t-shirt|blouse|dress|vest|camisole|overalls|jacket|blazer|skirt|jeans|pants|shorts|bodysuit|corset|lingerie|sundress|gown|robe|kimono|tank top)\b/i.test(promptHint);
-    if (clothingMentioned) {
-      negativeAdditions.push('(nude, topless, naked, bare breasts, exposed:1.3)');
-    }
+  // SFW clothing preservation: for facebook_sfw images, ALWAYS add strong
+  // anti-nudity negatives. The body enhancement tags (large breasts, curvaceous
+  // figure, showing cleavage) push the model toward removing clothing — these
+  // high-weight negatives counteract that.
+  if (imageType === 'facebook_sfw') {
+    negativeAdditions.push('(nude:1.5), (topless:1.5), (naked:1.5), (bare breasts:1.5), (exposed nipples:1.5), (no clothes:1.4), (undressed:1.4)');
   }
 
   // Contextual negatives: unprompted accessories, person count, ethnicity drift

@@ -564,12 +564,17 @@ export function buildStoryImagePrompt(
   // Trigger word prefix (placed before character tags so CLIP associates them)
   const twPrefix = uniqueTriggers ? `${uniqueTriggers}, ` : '';
 
+  // SFW clothing reinforcement: positive signal to keep clothes ON.
+  // Placed right before the scene description so it's spatially close to
+  // scene-specific clothing instructions, reinforcing them.
+  const sfwClothing = mode === 'sfw' ? '(wearing clothes, fully dressed, clothed:1.3), ' : '';
+
   // Single character
   if (!secondaryCharacterTags) {
     const charBlock = primaryEnhancement
       ? `${primaryCharacterTags}, ${primaryEnhancement}`
       : primaryCharacterTags;
-    return `${prefix}, ${modeTag}, ${twPrefix}${charBlock}, ${cleanedScene}, ${suffix}`;
+    return `${prefix}, ${modeTag}, ${twPrefix}${charBlock}, ${sfwClothing}${cleanedScene}, ${suffix}`;
   }
 
   // Two characters
@@ -579,7 +584,7 @@ export function buildStoryImagePrompt(
   const secondaryBlock = secondaryEnhancement
     ? `${secondaryCharacterTags}, ${secondaryEnhancement}`
     : secondaryCharacterTags;
-  return `${prefix}, ${modeTag}, ${twPrefix}${primaryBlock}, second person: ${secondaryBlock}, ${cleanedScene}, ${suffix}`;
+  return `${prefix}, ${modeTag}, ${twPrefix}${primaryBlock}, second person: ${secondaryBlock}, ${sfwClothing}${cleanedScene}, ${suffix}`;
 }
 
 /**
