@@ -261,35 +261,63 @@ export function extractCharacterTags(
  * Strip inline parenthetical character descriptions from a scene prompt.
  * These are blocks like "(24, oval face, high cheekbones, neat braids in low bun, slim curvaceous figure)"
  * that duplicate appearance info already captured in the approved character tags.
+ *
+ * IMPORTANT: Only strips descriptions for LINKED characters (whose identity comes
+ * from character tags). Preserves descriptions of non-character people — "Her friend",
+ * "older woman", "the waiter" — because those inline descriptions are the ONLY source
+ * of appearance info for non-character people in the scene.
+ *
  * Preserves SD emphasis parens like (tag:1.3) which are short single-item groups.
  */
 export function stripInlineCharacterDescriptions(scenePrompt: string): string {
   let result = scenePrompt;
 
   // Remove parenthetical blocks starting with an age number followed by
-  // comma-separated physical descriptors (the dominant pattern from story generation)
-  result = result.replace(/\(\s*\d{1,3}\s*,[^)]{10,}\)/g, "");
+  // comma-separated physical descriptors (the dominant pattern from story generation
+  // for linked character descriptions). BUT preserve if preceded by a
+  // non-character intro like "friend", "woman in background", etc.
+  result = result.replace(/(\S+\s+)?\(\s*\d{1,3}\s*,[^)]{10,}\)/g, (match, preceding) => {
+    // If preceded by a word suggesting a non-character person, keep it
+    if (preceding && /\b(?:friend|waiter|waitress|stranger|person|figure|woman|man|lady|guy|girl|boy|mother|father|sister|brother|aunt|uncle|boss|colleague|bartender|driver|guard|nurse|doctor|chef|vendor|passerby)\s*$/i.test(preceding)) {
+      return match;
+    }
+    // Otherwise strip the parenthetical (it's a linked character description)
+    return preceding || '';
+  });
 
   // Remove parenthetical blocks containing multiple comma-separated physical descriptors
   // even without a leading age number (e.g. "(round face, warm smile, full figure)")
-  result = result.replace(/\([^)]*(?:,\s*[^)]*){2,}\)/g, (match) => {
+  // BUT preserve if preceded by non-character context (friend, secondary person, etc.)
+  result = result.replace(/(\S+\s+)?\([^)]*(?:,\s*[^)]*){2,}\)/g, (match, preceding) => {
     const physicalTerms =
       /\b(?:face|cheekbone|jawline|hair|braid|bun|ponytail|figure|body|skin|complexion|build|frame|curvaceous|muscular|athletic|slim|petite|slender|toned|oval|round|square|freckles|dimples|stubble|beard|goatee)\b/i;
-    return physicalTerms.test(match) ? "" : match;
+
+    // Not physical — keep regardless
+    if (!physicalTerms.test(match)) return match;
+
+    // Physical but preceded by non-character intro — keep (it's describing someone inline)
+    if (preceding && /\b(?:friend|waiter|waitress|stranger|person|figure|woman|man|lady|guy|girl|boy|mother|father|sister|brother|aunt|uncle|boss|colleague|bartender|driver|guard|nurse|doctor|chef|vendor|passerby)\s*$/i.test(preceding)) {
+      return match;
+    }
+
+    // Physical and preceded by character intro or nothing — strip
+    return preceding || '';
   });
 
   // Remove leading character intro phrases like:
   // "A stunning young Black South African woman"
   // "A muscular young Black South African man"
   // "A beautiful Black South African couple"
+  // These are LINKED character intros (ethnicity-specific). Non-character people
+  // are described with simpler phrases ("older woman", "her friend") which are preserved.
   result = result.replace(
     /\b[Aa]n?\s+(?:\w+\s+){0,3}(?:Black\s+)?(?:South\s+)?African\s+(?:woman|man|couple|lady|girl|guy)\b/g,
     ""
   );
 
-  // Also strip "Her friend" / "His friend" intro patterns before parenthetical blocks
-  // (the parenthetical itself is already removed above)
-  result = result.replace(/\b(?:Her|His)\s+friend\b/gi, "");
+  // NOTE: "Her friend" / "His friend" intros are now PRESERVED because they
+  // introduce non-character people whose inline description is the only source
+  // of appearance info in the prompt.
 
   // Clean up artifacts left after removals
   result = result
@@ -479,6 +507,59 @@ export function replaceTagsAge(tags: string, correctAge: string): string {
 }
 
 /**
+ * Condense full character tags to essential identity markers only.
+ * Keeps: gender, ethnicity, skin tone, hair (color + style), eye color.
+ * Strips: body type, clothing, expression, distinguishing features, age qualifiers,
+ * African feature corrections (full lips, strong jawline), and skin quality tags.
+ *
+ * This keeps the identity footprint to ~15 tokens instead of ~40+, freeing
+ * CLIP attention budget for the scene content that follows.
+ */
+export function condensedCharacterTags(fullTags: string): string {
+  const tags = fullTags.split(',').map(s => s.trim()).filter(Boolean);
+  const kept: string[] = [];
+
+  // Patterns for tags we KEEP (identity-critical)
+  const keepPatterns = [
+    /^\d{1,3}$/, // age number
+    /^\d{1,3}\s*years?\s*old$/i, // "25 years old"
+    /^(?:female|male|woman|man|girl|boy|guy|lady|gentleman)$/i, // gender
+    /\b(?:African|Black|South African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga|Coloured|Indian|White|European|Asian|Mixed[- ]race|Biracial|Latino|Latina|Hispanic|Caribbean|Nigerian|Ethiopian|Kenyan|Brazilian|Middle[- ]?Eastern|Arab)\b/i, // ethnicity
+    /\bskin\b/i, // skin tone ("medium-brown skin", "dark skin")
+    /\bhair\b/i, // hair ("black braids hair", "short natural hair")
+    /\b(?:braid|braids|braided|dreadlocks|dreads|afro|cornrow|locs|twists|fade|buzz[- ]?cut|bald|shaved)\b/i, // hair styles without "hair" word
+    /\beyes?\b/i, // eye color ("dark brown eyes")
+    /\bbeard\b|\bstubble\b|\bgoatee\b|\bmustache\b/i, // facial hair (identity-critical)
+  ];
+
+  // Patterns for tags we explicitly STRIP (body, clothing, expression, features)
+  const stripPatterns = [
+    /\b(?:body|build|frame|figure|physique)\b/i, // body type
+    /\b(?:curvaceous|voluptuous|curvy|full[- ]figured|hourglass|athletic|muscular|toned|slim|slender|petite|stocky|heavyset)\b/i, // body descriptors
+    /\b(?:breasts?|bust|hips?|waist|thighs?)\b/i, // body parts
+    /\b(?:wearing|dressed|outfit|clothing|clothes)\b/i, // clothing
+    /\b(?:expression|smile|smiling|grin|gaze|look|frown|confident|warm|fierce|gentle|intense|stoic|playful|serious)\b/i, // expression
+    /\b(?:scar|tattoo|dimple|freckle|mole|birthmark|piercing)\b/i, // distinguishing features
+    /\b(?:presence|confidence|charisma|commanding)\b/i, // personality descriptors
+    /\b(?:full lips|strong jawline|high cheekbones?)\b/i, // facial feature corrections (LoRA handles this)
+    /\b(?:shoulders|hands?|arms?|legs?|chest|neck)\b/i, // body part mentions
+  ];
+
+  for (const tag of tags) {
+    // Check explicit strip first
+    if (stripPatterns.some(p => p.test(tag))) continue;
+    // Check explicit keep
+    if (keepPatterns.some(p => p.test(tag))) {
+      kept.push(tag);
+      continue;
+    }
+    // Ambiguous — skip to keep it lean
+  }
+
+  return kept.join(', ');
+}
+
+/**
  * Detect whether character tags describe a female character.
  * Only returns true when there's a POSITIVE female indicator in the tags.
  * Never infers gender from absence — a male character whose tags lack
@@ -498,8 +579,12 @@ function isFemaleCharacter(tags: string): boolean {
 
 /**
  * Inject attractiveness and figure enhancement tags for female characters.
- * Placed after character tags and before the scene description so CLIP
- * treats them as character-level attributes rather than scene-level.
+ * Placed AFTER the scene description (low token position) so it doesn't
+ * compete with scene content for CLIP attention. The body LoRAs already
+ * handle curvaceousness — these text tags just reinforce.
+ *
+ * For SFW: lightweight — no body specifics, no cleavage.
+ * For NSFW: full enhancement with body descriptors.
  *
  * Skipped when the scene prompt deliberately specifies loose/baggy clothing,
  * which signals a creative choice that shouldn't be overridden.
@@ -508,24 +593,43 @@ function injectFemaleEnhancement(scenePrompt: string, mode: 'sfw' | 'nsfw'): str
   // Respect deliberate creative choices for loose clothing
   if (/\b(?:baggy|loose|oversized)\b/i.test(scenePrompt)) return '';
 
-  const bodyWeight = mode === 'nsfw' ? '1.25' : '1.15';
+  if (mode === 'sfw') {
+    // SFW: body LoRAs handle figure — only add face + feminine vibe
+    return '(attractive, well-dressed, feminine:1.1)';
+  }
 
+  // NSFW: full body enhancement
   const parts = [
-    '(beautiful face, perfect makeup, full lips, alluring eyes:1.2)',
-    `(curvaceous figure, hourglass body, large breasts, wide hips, slim waist, thick thighs:${bodyWeight})`,
-    '(form-fitting clothing, showing cleavage, dressed up, glamorous:1.1)',
+    '(beautiful face, perfect makeup, alluring eyes:1.2)',
+    '(curvaceous figure, hourglass body, large breasts, wide hips, slim waist, thick thighs:1.25)',
+    '(showing cleavage, glamorous:1.1)',
   ];
 
   return parts.join(', ');
 }
 
 /**
+ * Emphasize the first clothing mention in a scene prompt for SFW mode.
+ * Wraps the first detected garment phrase with (garment:1.3) so it sits
+ * in a high-attention position and counteracts body-enhancement LoRAs
+ * pulling toward nudity.
+ */
+function emphasizeFirstClothing(scene: string): string {
+  // Match the first clothing item (color/adj + garment or unambiguous garment)
+  const clothingRe = /(?<!\()(?:(?:(?:white|black|red|blue|green|pink|gold|silver|sheer|silk|lace|leather|denim|fitted|tight|mini|maxi|long|short|sleeveless|cropped|unbuttoned|unzipped|low[- ]cut|off[- ]shoulder|v[- ]neck|halter|button[- ]down|crop)\s+)?(?:top|shirt|blouse|dress|skirt|jeans|shorts|pants|trousers|lingerie|bodysuit|corset|robe|kimono|sundress|gown|blazer|jacket|overalls|camisole|vest)|(?:t-shirt|tank top|blouse|blazer|overalls|lingerie|bodysuit|corset|kimono|sundress|gown|stilettos|stockings|thigh[- ]highs|camisole|high heels))(?![\w:]*\))/i;
+  return scene.replace(clothingRe, (m) => `(${m}:1.3)`);
+}
+
+/**
  * Build the final prompt for a story image.
  *
- * Supports single-character and dual-character scenes. Character tags
- * (ground truth for appearance from approved portraits) are placed first,
- * then the scene prompt with inline character descriptions stripped and
- * gaze directions emphasized.
+ * Prompt structure optimized for CLIP's 77-token attention window:
+ *   [short quality prefix], [trigger word], [condensed identity tags],
+ *   [SFW clothing signal], [SCENE PROMPT], [female enhancement], [quality suffix]
+ *
+ * Scene content is placed in the HIGH-ATTENTION zone (tokens ~10-50) so the
+ * model actually follows action, pose, composition, and second-character cues.
+ * Female enhancement and quality suffix go last — LoRAs handle most of that.
  *
  * For prompts with NO linked characters (atmospheric/environmental shots),
  * the scene prompt is used as-is with quality prefix/suffix.
@@ -543,11 +647,11 @@ export function buildStoryImagePrompt(
     )
   );
 
-  const prefix = '(masterpiece, best quality:1.2), highly detailed, (photorealistic:1.3), (sharp focus:1.1)';
-  const modeTag = mode === 'nsfw' ? 'professional erotic photography' : 'professional photography';
+  // Short quality prefix — saves ~15 tokens vs the old verbose version
+  const prefix = '(photorealistic:1.3), (masterpiece:1.1)';
   const suffix = mode === 'nsfw'
-    ? '(cinematic lighting:1.1), (intimate atmosphere:1.1), film grain, shallow depth of field, 8k uhd, dslr'
-    : '(cinematic lighting:1.1), film grain, shallow depth of field, 8k uhd, dslr';
+    ? '(cinematic lighting:1.1), (intimate atmosphere:1.1), 8k uhd'
+    : '(cinematic lighting:1.1), 8k uhd';
 
   // Deduplicate trigger words (e.g. both characters use "tok")
   const uniqueTriggers = triggerWords?.length
@@ -556,10 +660,17 @@ export function buildStoryImagePrompt(
 
   // No linked characters — atmospheric/environmental shot
   if (!primaryCharacterTags) {
-    return `${prefix}, ${modeTag}, ${cleanedScene}, ${suffix}`;
+    return `${prefix}, ${cleanedScene}, ${suffix}`;
   }
 
-  // Female enhancement: inject attractiveness tags after character tags
+  // Condense character tags to essential identity markers (~15 tokens each)
+  const primaryCondensed = condensedCharacterTags(primaryCharacterTags);
+  const secondaryCondensed = secondaryCharacterTags
+    ? condensedCharacterTags(secondaryCharacterTags)
+    : null;
+
+  // Female enhancement: placed AFTER scene content (low attention position)
+  // LoRAs do the heavy lifting; these are just reinforcement
   const primaryEnhancement = isFemaleCharacter(primaryCharacterTags)
     ? injectFemaleEnhancement(scenePrompt, mode)
     : '';
@@ -567,30 +678,28 @@ export function buildStoryImagePrompt(
     ? injectFemaleEnhancement(scenePrompt, mode)
     : '';
 
-  // Trigger word prefix (placed before character tags so CLIP associates them)
+  // Trigger word prefix (placed before character tags so LoRA activates)
   const twPrefix = uniqueTriggers ? `${uniqueTriggers}, ` : '';
 
-  // SFW clothing reinforcement: positive signal to keep clothes ON.
-  // Placed right before the scene description so it's spatially close to
-  // scene-specific clothing instructions, reinforcing them.
-  const sfwClothing = mode === 'sfw' ? '(wearing clothes, fully dressed, clothed:1.3), ' : '';
+  // SFW clothing reinforcement: placed right after identity tags (high position)
+  // so it's in the CLIP attention zone alongside scene clothing
+  const sfwClothing = mode === 'sfw' ? '(wearing clothes:1.3), ' : '';
+
+  // For SFW, also emphasize the first clothing mention in the scene
+  const sceneForAssembly = mode === 'sfw' ? emphasizeFirstClothing(cleanedScene) : cleanedScene;
+
+  // --- Assembly: [prefix], [trigger], [identity], [sfw clothing], [SCENE], [enhancement], [suffix] ---
 
   // Single character
-  if (!secondaryCharacterTags) {
-    const charBlock = primaryEnhancement
-      ? `${primaryCharacterTags}, ${primaryEnhancement}`
-      : primaryCharacterTags;
-    return `${prefix}, ${modeTag}, ${twPrefix}${charBlock}, ${sfwClothing}${cleanedScene}, ${suffix}`;
+  if (!secondaryCondensed) {
+    const enhancementSuffix = primaryEnhancement ? `, ${primaryEnhancement}` : '';
+    return `${prefix}, ${twPrefix}${primaryCondensed}, ${sfwClothing}${sceneForAssembly}${enhancementSuffix}, ${suffix}`;
   }
 
-  // Two characters
-  const primaryBlock = primaryEnhancement
-    ? `${primaryCharacterTags}, ${primaryEnhancement}`
-    : primaryCharacterTags;
-  const secondaryBlock = secondaryEnhancement
-    ? `${secondaryCharacterTags}, ${secondaryEnhancement}`
-    : secondaryCharacterTags;
-  return `${prefix}, ${modeTag}, ${twPrefix}${primaryBlock}, second person: ${secondaryBlock}, ${sfwClothing}${cleanedScene}, ${suffix}`;
+  // Two characters — secondary identity goes inside scene area for spatial association
+  const primaryEnhSuffix = primaryEnhancement ? `, ${primaryEnhancement}` : '';
+  const secondaryEnhSuffix = secondaryEnhancement ? `, ${secondaryEnhancement}` : '';
+  return `${prefix}, ${twPrefix}${primaryCondensed}, ${sfwClothing}${sceneForAssembly}, second person: ${secondaryCondensed}${secondaryEnhSuffix}${primaryEnhSuffix}, ${suffix}`;
 }
 
 /**
