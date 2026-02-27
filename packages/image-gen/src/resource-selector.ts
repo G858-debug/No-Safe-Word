@@ -204,8 +204,11 @@ export function selectResources(
   }
 
   // Female figure reinforcement: push anti-patterns into the negative prompt
-  // when the prompt contains female-indicating terms
-  if (promptHint && /\b(?:female|woman|girl|lady|she|her)\b/i.test(promptHint)) {
+  // ONLY when the scene has a female character and NO male character.
+  // In mixed-gender scenes (dual character), these negatives ("flat chest" etc.)
+  // would push the male character toward having breasts. Use the classifier's
+  // gender flags which are derived from character tags + scene keywords.
+  if (classification.hasFemaleCharacter && !classification.hasMaleCharacter) {
     negativeAdditions.push('flat chest, small breasts, boyish figure, shapeless body, frumpy, unflattering clothing, no makeup, plain');
   }
 

@@ -480,14 +480,20 @@ export function replaceTagsAge(tags: string, correctAge: string): string {
 
 /**
  * Detect whether character tags describe a female character.
- * Checks for explicit female indicators or absence of male indicators.
+ * Only returns true when there's a POSITIVE female indicator in the tags.
+ * Never infers gender from absence — a male character whose tags lack
+ * explicit "male" must NOT receive female body enhancement.
  */
 function isFemaleCharacter(tags: string): boolean {
   const lower = tags.toLowerCase();
-  if (/\b(?:female|woman|girl|lady)\b/.test(lower)) return true;
+  // Explicit male indicators → definitely not female
   if (/\b(?:male|man|boy|guy|gentleman)\b/.test(lower)) return false;
-  // Default to female when ambiguous (most characters in this project are female)
-  return true;
+  // Explicit female indicators → yes
+  if (/\b(?:female|woman|girl|lady)\b/.test(lower)) return true;
+  // Ambiguous — do NOT default to female. Body enhancement on a male
+  // character produces terrible results. Better to skip enhancement
+  // than to wrongly apply it.
+  return false;
 }
 
 /**
