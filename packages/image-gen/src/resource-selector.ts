@@ -22,8 +22,8 @@ export interface ResourceSelection {
   characterLoraDownloads?: Array<{ filename: string; url: string }>;
 }
 
-// Priority order for LoRA selection when capping at 6
-const PRIORITY_ORDER = ['detail', 'skin', 'eyes', 'bodies', 'cinematic', 'melanin', 'lighting', 'hands'] as const;
+// Priority order for LoRA selection when capping at 10
+const PRIORITY_ORDER = ['detail', 'skin', 'eyes', 'bodies', 'cinematic', 'melanin', 'lighting', 'style', 'hands'] as const;
 
 function getLoraFromRegistry(filename: string): SelectedLora | null {
   const entry = LORA_REGISTRY.find((l) => l.filename === filename && l.installed);
@@ -194,9 +194,39 @@ export function selectResources(
     }
   }
 
-  // 10. Cap at 6 LoRAs — sort by priority (lower number = higher priority) and take first 6
+  // 10. Always include touch-of-realism-v2 for real photography lens effects
+  const realismLora = getLoraFromRegistry('touch-of-realism-v2.safetensors');
+  if (realismLora) {
+    candidates.push({ priority: 4.5, lora: realismLora });
+  }
+
+  // 11. If clothing mentioned in prompt: add high-fashion-xl for garment detail
+  if (promptHint && /\b(?:dress|top|shirt|vest|overalls|jeans|camisole|blazer|skirt|lingerie|bra|underwear|gown|outfit|blouse|pants|trousers|jacket|hoodie|uniform|apron)\b/i.test(promptHint)) {
+    const fashionLora = getLoraFromRegistry('high-fashion-xl.safetensors');
+    if (fashionLora) {
+      candidates.push({ priority: 0.5, lora: fashionLora });
+    }
+  }
+
+  // 12. If interior setting detected: add interior-design-xl for spatial depth
+  if (promptHint && /\b(?:restaurant|bedroom|kitchen|bathroom|living room|office|workshop|studio|bar|caf[eé]|club|lounge|hotel|apartment|house|indoor|interior|room)\b/i.test(promptHint)) {
+    const interiorLora = getLoraFromRegistry('interior-design-xl.safetensors');
+    if (interiorLora) {
+      candidates.push({ priority: 4.8, lora: interiorLora });
+    }
+  }
+
+  // 13. If braided hairstyle detected in prompt or character tags: add braids-cornrows-xl
+  if (promptHint && /\b(?:braids?|braided|cornrows?|cornrow|twists|locs|dreadlocks|box braids|neat braids)\b/i.test(promptHint)) {
+    const braidsLora = getLoraFromRegistry('braids-cornrows-xl.safetensors');
+    if (braidsLora) {
+      candidates.push({ priority: 2.2, lora: braidsLora });
+    }
+  }
+
+  // 14. Cap at 10 LoRAs — sort by priority (lower number = higher priority) and take first 10
   candidates.sort((a, b) => a.priority - b.priority);
-  const selectedLoras = candidates.slice(0, 6).map((c) => c.lora);
+  const selectedLoras = candidates.slice(0, 10).map((c) => c.lora);
 
   // Build negative prompt additions based on classification
   if (classification.hasIntimateContent && classification.contentLevel !== 'nsfw') {

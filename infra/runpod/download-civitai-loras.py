@@ -20,6 +20,10 @@ loras = [
     (f"https://civitai.com/api/download/models/435833?token={key}", "melanin-mix-xl.safetensors"),
     (f"https://civitai.com/api/download/models/1746981?token={key}", "couples-poses-xl.safetensors"),
     (f"https://civitai.com/api/download/models/1449869?token={key}", "curvy-body-sdxl.safetensors"),
+    (f"https://civitai.com/api/download/models/1929965?token={key}", "touch-of-realism-v2.safetensors"),
+    (f"https://civitai.com/api/download/models/481296?token={key}", "high-fashion-xl.safetensors"),
+    (f"https://civitai.com/api/download/models/551510?token={key}", "interior-design-xl.safetensors"),
+    (f"https://civitai.com/api/download/models/482948?token={key}", "braids-cornrows-xl.safetensors"),
 ]
 
 lora_dir = os.environ["COMFY_DIR"] + "/models/loras/"
