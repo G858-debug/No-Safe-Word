@@ -24,6 +24,13 @@ RUN mv /handler.py /handler_original.py
 COPY patch_handler.py /tmp/patch_handler.py
 RUN python3 /tmp/patch_handler.py && rm /tmp/patch_handler.py /handler_original.py
 
+# ---- Override runtime model download script ----
+# The base image ships download-models.sh, but we may update it more
+# frequently (e.g. adding new LoRAs). Re-copy here so the app image
+# always has the latest version without rebuilding the heavy base.
+COPY download-models.sh /usr/local/bin/download-models.sh
+RUN chmod +x /usr/local/bin/download-models.sh
+
 # Wrap the base image's /start.sh to download models first.
 # We rename the original and replace it with our wrapper, rather than
 # using ENTRYPOINT, which breaks RunPod serverless deployment.
