@@ -477,6 +477,22 @@ export async function POST(
             finalPrompt = optimized.optimizedFullPrompt;
             decomposed = optimized.optimizedDecomposed;
             console.log(`[StoryImage][${imgPrompt.id}] AI prompt optimization applied (${optimized.durationMs}ms): ${optimized.notes.join('; ')}`);
+            // Detailed per-field logging (each on its own line to avoid Railway truncation)
+            const d = optimized.optimizedDecomposed;
+            console.log(`[Optimizer][${imgPrompt.id}] Phase1 fullPrompt:`);
+            console.log(`  ${optimized.optimizedFullPrompt}`);
+            console.log(`[Optimizer][${imgPrompt.id}] Phase2 scenePrompt:`);
+            console.log(`  ${d.scenePrompt}`);
+            console.log(`[Optimizer][${imgPrompt.id}] Phase2 primaryIdentityPrompt:`);
+            console.log(`  ${d.primaryIdentityPrompt}`);
+            console.log(`[Optimizer][${imgPrompt.id}] Phase2 secondaryIdentityPrompt:`);
+            console.log(`  ${d.secondaryIdentityPrompt ?? 'NULL'}`);
+            console.log(`[Optimizer][${imgPrompt.id}] Phase2 sharedScenePrompt:`);
+            console.log(`  ${d.sharedScenePrompt ?? 'NULL'}`);
+            console.log(`[Optimizer][${imgPrompt.id}] Phase2 primaryRegionPrompt:`);
+            console.log(`  ${d.primaryRegionPrompt ?? 'NULL'}`);
+            console.log(`[Optimizer][${imgPrompt.id}] Phase2 secondaryRegionPrompt:`);
+            console.log(`  ${d.secondaryRegionPrompt ?? 'NULL'}`);
           } else {
             console.log(`[StoryImage][${imgPrompt.id}] AI prompt optimization skipped: ${optimized.notes.join('; ')}`);
           }
