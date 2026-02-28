@@ -34,6 +34,10 @@ export { selectModel } from './model-selector';
 export type { ModelSelection, ModelSelectionOptions } from './model-selector';
 
 
+// Prompt decomposition for multi-pass workflow
+export { decomposePrompt } from './prompt-decomposer';
+export type { DecomposedPrompt } from './prompt-decomposer';
+
 // Composition intelligence
 export { augmentComposition } from './composition-advisor';
 export type { CompositionResult } from './composition-advisor';
