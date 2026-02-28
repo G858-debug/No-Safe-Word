@@ -415,11 +415,17 @@ export async function POST(
         }
 
         // Prepend LoRA trigger word to face prompts so FaceDetailer activates the LoRA
+        // Append eye quality tags for sharper, more realistic eyes in face refinement
+        const eyeQualityTags = ', (detailed eyes:1.3), (sharp focused eyes:1.2), (realistic iris:1.1)';
         if (primaryCharLora && primaryFacePrompt) {
-          primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}`;
+          primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}${eyeQualityTags}`;
+        } else if (primaryFacePrompt) {
+          primaryFacePrompt = `${primaryFacePrompt}${eyeQualityTags}`;
         }
         if (secondaryCharLora && secondaryFacePrompt) {
-          secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
+          secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}${eyeQualityTags}`;
+        } else if (secondaryFacePrompt) {
+          secondaryFacePrompt = `${secondaryFacePrompt}${eyeQualityTags}`;
         }
 
         // Use promptOverride if available, otherwise raw prompt
@@ -501,7 +507,7 @@ export async function POST(
           secondaryFacePrompt,
           secondarySeed,
           loras: workflowType === 'multi-pass' ? resources.neutralLoras : resources.loras,
-          negativePromptAdditions: resources.negativePromptAdditions,
+          negativePromptAdditions: negativeAdditions,
           checkpointName: modelSelection.checkpointName,
           cfg: modelSelection.paramOverrides?.cfg,
           hiresFixEnabled: resources.paramOverrides?.hiresFixEnabled ?? true,
