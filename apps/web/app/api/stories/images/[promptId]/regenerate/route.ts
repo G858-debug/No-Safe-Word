@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt } from "@no-safe-word/image-gen";
-import type { ImageType, CharacterLoraEntry, DecomposedPrompt } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
+import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
@@ -315,7 +315,7 @@ export async function POST(
       secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
     }
 
-    const finalPrompt = promptOverride || imgPrompt.prompt;
+    let finalPrompt = promptOverride || imgPrompt.prompt;
 
     // Scene intelligence: classify scene for dimensions and resources
     const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
@@ -329,6 +329,45 @@ export async function POST(
       console.log(`[StoryImage][${promptId}]   primaryIdentity: ${decomposed.primaryIdentityPrompt.substring(0, 100)}`);
       if (decomposed.secondaryIdentityPrompt) {
         console.log(`[StoryImage][${promptId}]   secondaryIdentity: ${decomposed.secondaryIdentityPrompt.substring(0, 100)}`);
+      }
+    }
+
+    // AI prompt optimization — restructure for optimal SDXL generation
+    const characters: CharacterContext[] = [];
+    if (imgPrompt.character_id && charData.name) {
+      characters.push({
+        name: charData.name,
+        gender: (charData.gender as 'male' | 'female') || 'female',
+        role: 'primary',
+        identityTags: approvedCharacterTags || undefined,
+      });
+    }
+    if (imgPrompt.secondary_character_id) {
+      characters.push({
+        name: imgPrompt.secondary_character_name || 'Unknown',
+        gender: secondaryGender || 'female',
+        role: 'secondary',
+        identityTags: secondaryCharacterTags || undefined,
+      });
+    }
+
+    if (shouldOptimize(characters, imgPrompt.image_type) && decomposed) {
+      const optimized = await optimizePrompts(
+        {
+          fullPrompt: finalPrompt,
+          rawScenePrompt: imgPrompt.prompt,
+          characters,
+          mode,
+          imageType: imgPrompt.image_type as 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait',
+        },
+        decomposed,
+      );
+      if (optimized.wasOptimized) {
+        finalPrompt = optimized.optimizedFullPrompt;
+        decomposed = optimized.optimizedDecomposed;
+        console.log(`[StoryImage][${promptId}] AI prompt optimization applied (${optimized.durationMs}ms): ${optimized.notes.join('; ')}`);
+      } else {
+        console.log(`[StoryImage][${promptId}] AI prompt optimization skipped: ${optimized.notes.join('; ')}`);
       }
     }
 

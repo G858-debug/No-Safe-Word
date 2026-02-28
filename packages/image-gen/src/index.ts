@@ -42,6 +42,14 @@ export type { DecomposedPrompt } from './prompt-decomposer';
 export { augmentComposition } from './composition-advisor';
 export type { CompositionResult } from './composition-advisor';
 
+// Prompt optimization (AI-powered)
+export { optimizePrompts, shouldOptimize } from './prompt-optimizer';
+export type { OptimizationInput, OptimizedPrompts, CharacterContext } from './prompt-optimizer';
+
+// Debug mode for multi-pass workflow
+export { buildDebugPassInfo, injectDebugSaveNodes } from './debug-workflow';
+export type { DebugPassInfo } from './debug-workflow';
+
 // Character LoRA pipeline — server-only, import directly:
 //   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'
 // NOT re-exported here because trainer.ts uses Node.js-only deps (archiver, fs)

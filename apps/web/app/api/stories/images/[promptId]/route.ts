@@ -1,6 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
+// GET /api/stories/images/[promptId] — Fetch full image prompt data
+export async function GET(
+  _request: NextRequest,
+  props: { params: Promise<{ promptId: string }> }
+) {
+  const params = await props.params;
+  const { promptId } = params;
+
+  try {
+    const { data: imgPrompt, error } = await supabase
+      .from("story_image_prompts")
+      .select("*")
+      .eq("id", promptId)
+      .single();
+
+    if (error || !imgPrompt) {
+      return NextResponse.json(
+        { error: "Image prompt not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(imgPrompt);
+  } catch (err) {
+    console.error("Failed to fetch image prompt:", err);
+    return NextResponse.json(
+      {
+        error: "Fetch failed",
+        details: err instanceof Error ? err.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
+}
+
 // PATCH /api/stories/images/[promptId] — Update the prompt text for a story image prompt
 export async function PATCH(
   request: NextRequest,
