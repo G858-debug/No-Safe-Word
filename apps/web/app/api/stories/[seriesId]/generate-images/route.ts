@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt } from "@no-safe-word/image-gen";
 import { augmentComposition, buildCharacterLoraEntry } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
@@ -423,28 +423,10 @@ export async function POST(
         const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
 
         // Scene-aware dimension selection
-        const isDualCharacter = !!imgPrompt.secondary_character_id || classification.characterCount >= 2;
-        const promptLower = (promptOverride || imgPrompt.prompt).toLowerCase();
-        const hasLandscapeKeywords = /\b(wide|establishing|panoram|two-shot|two shot)\b/.test(promptLower);
-
-        let width: number;
-        let height: number;
-
-        if (hasLandscapeKeywords || isDualCharacter) {
-          // Landscape for two-character scenes and wide/establishing shots
-          width = 1216;
-          height = 832;
-        } else if (/\b(detail shot|extreme close|macro)\b/.test(promptLower)) {
-          // Square-ish for detail/macro shots
-          width = 1024;
-          height = 1024;
-        } else {
-          // Portrait for single-character and standard scenes
-          width = 832;
-          height = 1216;
-        }
-
-        console.log(`[StoryImage] Dimensions: ${width}x${height} (dual=${isDualCharacter}, landscape_kw=${hasLandscapeKeywords})`);
+        const dimensions = selectDimensionsFromPrompt(classification, imgPrompt.image_type as ImageType, hasSecondary, finalPrompt);
+        const width = dimensions.width;
+        const height = dimensions.height;
+        console.log(`[StoryImage] Dimensions: ${dimensions.name} (${width}x${height})`);
         const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType);
 
         console.log(`[StoryImage][${imgPrompt.id}] Scene classification:`, JSON.stringify(classification));

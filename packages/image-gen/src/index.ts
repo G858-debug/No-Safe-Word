@@ -20,6 +20,8 @@ export {
 
 export { classifyScene } from './scene-classifier';
 export type { SceneClassification, ImageType, InteractionType } from './scene-classifier';
+export { selectDimensionsFromPrompt, DIMENSION_PRESETS } from './dimension-presets';
+export type { DimensionPreset } from './dimension-presets';
 export { selectResources } from './resource-selector';
 export type { ResourceSelection, SelectedLora } from './resource-selector';
 export { LORA_REGISTRY, getLorasByCategory, getLoraByFilename, buildCharacterLoraEntry } from './lora-registry';
