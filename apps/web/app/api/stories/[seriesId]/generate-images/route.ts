@@ -155,9 +155,15 @@ export async function POST(
       if (characters) {
         for (const char of characters) {
           const desc = char.description as Record<string, string>;
+          const resolvedGender = (['male', 'female', 'non-binary', 'other'].includes(desc.gender) ? desc.gender : 'female') as CharacterData["gender"];
+          if (!desc.gender || desc.gender !== resolvedGender) {
+            console.warn(`[StoryImage] Character ${char.name} (${char.id}): desc.gender=${JSON.stringify(desc.gender)}, resolved to "${resolvedGender}"`);
+          } else {
+            console.log(`[StoryImage] Character ${char.name} (${char.id}): gender="${resolvedGender}"`);
+          }
           characterDataMap.set(char.id, {
             name: char.name,
-            gender: (desc.gender as CharacterData["gender"]) || "female",
+            gender: resolvedGender,
             ethnicity: desc.ethnicity || "",
             bodyType: desc.bodyType || "",
             hairColor: desc.hairColor || "",

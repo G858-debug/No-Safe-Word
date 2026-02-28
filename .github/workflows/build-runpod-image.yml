@@ -80,7 +80,7 @@ jobs:
           file: ./infra/runpod/Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha,scope=runpod-app
-          cache-to: type=gha,mode=min,scope=runpod-app
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=min
           build-args: |
             BASE_IMAGE=${{ steps.base.outputs.image }}

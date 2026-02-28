@@ -107,7 +107,7 @@ export async function POST(
     const desc = character.description as Record<string, string>;
     const characterData: CharacterData = {
       name: character.name,
-      gender: (desc.gender as CharacterData["gender"]) || "female",
+      gender: (['male', 'female', 'non-binary', 'other'].includes(desc.gender) ? desc.gender as CharacterData["gender"] : 'female') as CharacterData["gender"],
       ethnicity: desc.ethnicity || "",
       bodyType: desc.bodyType || "",
       hairColor: desc.hairColor || "",
