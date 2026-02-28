@@ -624,7 +624,7 @@ function buildPassLoraChain(
  *   100s = Pass 1 (composition)
  *   200s = Pass 2 (character identity)
  *   300s = Pass 3 (quality refinement)
- *   400s = Pass 4 (person inpainting — 410-414 primary, 415-422 secondary)
+ *   400s = Pass 4 (person inpainting — 404-412 primary, 416-432 secondary)
  *   500s = Pass 5 (face refinement — 510-511 primary, 520-521 secondary)
  *   600  = SaveImage
  */
@@ -856,14 +856,16 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   // --- Pass 4b: Secondary character person inpaint (dual-character only) ---
   let pass4bModel: string | undefined;
 
-  if (hasDualCharacter && params.secondaryGenderLoras) {
+  if (hasDualCharacter) {
     const pass4bLoras: LoraInput[] = [
       ...(params.characterLoras?.slice(1, 2) || []),  // Secondary char LoRA only
       ...(params.secondaryGenderLoras || []),
     ];
     pass4bModel = buildPassLoraChain(workflow, CKPT_NODE, 416, pass4bLoras);
 
-    workflow['420'] = {
+    // Fixed nodes start at 430 to avoid collision with LoRA chain (416+N)
+    // when 5+ LoRAs are loaded (char LoRA + 4 female gender LoRAs in NSFW)
+    workflow['430'] = {
       class_type: 'CLIPTextEncode',
       inputs: {
         text: params.secondaryIdentityPrompt
@@ -872,20 +874,20 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
         clip: [pass4bModel, 1],
       },
     };
-    workflow['421'] = {
+    workflow['431'] = {
       class_type: 'CLIPTextEncode',
       inputs: { text: negFull, clip: [pass4bModel, 1] },
     };
 
-    workflow['422'] = {
+    workflow['432'] = {
       class_type: 'FaceDetailer',
       inputs: {
         image: ['412', 0],
         model: [pass4bModel, 0],
         clip: [pass4bModel, 1],
         vae: ['100', 2],
-        positive: ['420', 0],
-        negative: ['421', 0],
+        positive: ['430', 0],
+        negative: ['431', 0],
         bbox_detector: ['401', 0],
         sam_model_opt: ['402', 0],
         guide_size: 768,
@@ -917,7 +919,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       },
     };
 
-    lastPersonNode = '422';
+    lastPersonNode = '432';
   }
 
   // =========================================================================
@@ -1089,6 +1091,20 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       filename_prefix: prefix,
     },
   };
+
+  // Validate all node references point to existing nodes
+  const nodeIds = new Set(Object.keys(workflow));
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    if (!node.inputs) continue;
+    for (const [inputName, inputVal] of Object.entries(node.inputs)) {
+      if (Array.isArray(inputVal) && inputVal.length === 2 && typeof inputVal[0] === 'string') {
+        const refId = inputVal[0] as string;
+        if (!nodeIds.has(refId)) {
+          console.error(`[MultiPass] BROKEN REFERENCE: Node ${nodeId} (${node.class_type}).${inputName} → node ${refId} does not exist`);
+        }
+      }
+    }
+  }
 
   return workflow;
 }
