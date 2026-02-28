@@ -577,13 +577,6 @@ function isFemaleCharacter(tags: string): boolean {
   return false;
 }
 
-function isMaleCharacter(tags: string): boolean {
-  const lower = tags.toLowerCase();
-  if (/\b(?:female|woman|girl|lady)\b/.test(lower)) return false;
-  if (/\b(?:male|man|boy|guy|gentleman)\b/.test(lower)) return true;
-  return false;
-}
-
 /**
  * Inject attractiveness and figure enhancement tags for female characters.
  * Placed AFTER the scene description (low token position) so it doesn't
@@ -613,17 +606,6 @@ function injectFemaleEnhancement(scenePrompt: string, mode: 'sfw' | 'nsfw'): str
   ];
 
   return parts.join(', ');
-}
-
-/**
- * Inject masculine reinforcement tags for male characters.
- * Counterbalances female-leaning cues that may appear in scene prompts
- * (e.g. when a secondary female character is described inline).
- * Placed AFTER scene content (low attention) — the character LoRA handles
- * most of the identity work, these just reinforce gender.
- */
-function injectMaleEnhancement(): string {
-  return '(masculine, male, handsome man:1.2), (masculine face, strong jawline:1.1)';
 }
 
 /**
@@ -687,13 +669,11 @@ export function buildStoryImagePrompt(
     ? condensedCharacterTags(secondaryCharacterTags)
     : null;
 
-  // Gender enhancement: placed AFTER scene content (low attention position)
+  // Female enhancement: placed AFTER scene content (low attention position)
   // LoRAs do the heavy lifting; these are just reinforcement
   const primaryEnhancement = isFemaleCharacter(primaryCharacterTags)
     ? injectFemaleEnhancement(scenePrompt, mode)
-    : isMaleCharacter(primaryCharacterTags)
-      ? injectMaleEnhancement()
-      : '';
+    : '';
   const secondaryEnhancement = secondaryCharacterTags && isFemaleCharacter(secondaryCharacterTags)
     ? injectFemaleEnhancement(scenePrompt, mode)
     : '';

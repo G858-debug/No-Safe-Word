@@ -57,7 +57,7 @@ interface DualCharacterWorkflowParams extends SceneWorkflowParams {
 }
 
 const DEFAULT_NEGATIVE_PROMPT =
-  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, (wrong number of fingers, extra fingers, missing fingers:1.2), extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like, (overexposed:1.2), (underexposed:1.2), (oversaturated:1.2), flat lighting, harsh shadows, amateur photography, (extra people:1.3), wrong ethnicity, wrong race, (film grain:1.1), (noise:1.1), (grainy:1.1), (noisy skin:1.1), (bad eyes:1.2), (asymmetric eyes:1.2), (uneven eyes:1.1), (dead eyes:1.1), (unfocused eyes:1.1), (wonky eyes:1.1)';
+  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, (wrong number of fingers, extra fingers, missing fingers:1.2), extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like, (overexposed:1.2), (underexposed:1.2), (oversaturated:1.2), flat lighting, harsh shadows, amateur photography, (extra people:1.3), wrong ethnicity, wrong race, (film grain:1.1), (noise:1.1), (grainy:1.1), (noisy skin:1.1)';
 
 const DEFAULT_NEGATIVE_PROMPT_DUAL =
   DEFAULT_NEGATIVE_PROMPT + ', (three people, crowd, group, third person:1.4)';
@@ -638,13 +638,6 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     : (params.negativePrompt || DEFAULT_NEGATIVE_PROMPT);
   const negFull = buildNeg(negBase, params.negativePromptAdditions);
 
-  // Male primary character: add anti-feminization negatives for passes that
-  // render the primary character (Pass 2, Pass 4a). NOT added globally because
-  // Pass 4b/5b need to render a female secondary character.
-  const negPrimary = params.primaryGender === 'male'
-    ? negFull + ', (feminine, female, woman, breasts, cleavage, feminine face, lipstick, makeup:1.3)'
-    : negFull;
-
   // Composition resolution: reduced for fast layout generation
   const compWidth = Math.round(params.width / 1.6);
   const compHeight = Math.round(params.height / 1.6);
@@ -732,7 +725,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   };
   workflow['211'] = {
     class_type: 'CLIPTextEncode',
-    inputs: { text: negPrimary, clip: [pass2Model, 1] },
+    inputs: { text: negFull, clip: [pass2Model, 1] },
   };
   workflow['213'] = {
     class_type: 'KSampler',
@@ -819,7 +812,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   };
   workflow['411'] = {
     class_type: 'CLIPTextEncode',
-    inputs: { text: negPrimary, clip: [pass4aModel, 1] },
+    inputs: { text: negFull, clip: [pass4aModel, 1] },
   };
 
   // Primary person inpainting via FaceDetailer with person detection model
