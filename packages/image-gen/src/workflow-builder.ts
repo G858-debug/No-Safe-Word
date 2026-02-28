@@ -567,35 +567,27 @@ interface MultiPassWorkflowParams {
 
 /**
  * Build a LoRA chain at custom node IDs for multi-pass workflows.
- * Each pass needs its own checkpoint + LoRA chain because different passes
- * load different LoRA stacks.
+ * Different passes load different LoRA stacks but share a single checkpoint
+ * to avoid VRAM exhaustion from multiple ~6.5GB model copies.
  *
  * @param workflow - The workflow graph object to mutate
- * @param checkpointNodeId - Node ID for the CheckpointLoaderSimple
+ * @param sharedCheckpointNodeId - Node ID of the shared CheckpointLoaderSimple (must already exist in workflow)
  * @param loraNodeIdPrefix - Numeric prefix for LoRA node IDs (e.g. 101 → "101","102",...)
  * @param loras - LoRA stack to load (empty array = no LoRAs, connect directly to checkpoint)
- * @param checkpointName - Model filename
  * @returns The node ID that downstream nodes should reference for model/clip
  */
 function buildPassLoraChain(
   workflow: Record<string, any>,
-  checkpointNodeId: string,
+  sharedCheckpointNodeId: string,
   loraNodeIdPrefix: number,
   loras: LoraInput[],
-  checkpointName: string,
 ): string {
-  // Checkpoint loader for this pass
-  workflow[checkpointNodeId] = {
-    class_type: 'CheckpointLoaderSimple',
-    inputs: { ckpt_name: checkpointName },
-  };
-
   if (loras.length === 0) {
-    return checkpointNodeId;
+    return sharedCheckpointNodeId;
   }
 
   const capped = loras.slice(0, 6);
-  let lastNodeId = checkpointNodeId;
+  let lastNodeId = sharedCheckpointNodeId;
 
   for (let i = 0; i < capped.length; i++) {
     const nodeId = String(loraNodeIdPrefix + i);
@@ -652,6 +644,14 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   const workflow: Record<string, any> = {};
 
+  // Single shared checkpoint — all passes reference this node for model/clip/vae.
+  // This avoids loading 6+ copies of the ~6.5GB checkpoint into VRAM.
+  const CKPT_NODE = '100';
+  workflow[CKPT_NODE] = {
+    class_type: 'CheckpointLoaderSimple',
+    inputs: { ckpt_name: ckpt },
+  };
+
   // =========================================================================
   // PASS 1 — COMPOSITION
   // Scene-only prompt, detail-tweaker only, full generation from noise
@@ -659,7 +659,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   const detailTweakerOnly: LoraInput[] = [
     { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
   ];
-  const pass1Model = buildPassLoraChain(workflow, '100', 101, detailTweakerOnly, ckpt);
+  const pass1Model = buildPassLoraChain(workflow, CKPT_NODE, 101, detailTweakerOnly);
 
   workflow['110'] = {
     class_type: 'CLIPTextEncode',
@@ -694,7 +694,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   // Upscale to target res, apply ONLY character LoRAs (no body/gender LoRAs)
   // =========================================================================
   const pass2Loras = params.characterLoras || [];
-  const pass2Model = buildPassLoraChain(workflow, '200', 201, pass2Loras, ckpt);
+  const pass2Model = buildPassLoraChain(workflow, CKPT_NODE, 201, pass2Loras);
 
   workflow['212'] = {
     class_type: 'LatentUpscale',
@@ -744,7 +744,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   // cinecolor, eyes-detail, etc. NO curvy-body, NO braids, NO better-bodies.
   // =========================================================================
   const pass3Loras = params.loras || detailTweakerOnly;
-  const pass3Model = buildPassLoraChain(workflow, '300', 301, pass3Loras, ckpt);
+  const pass3Model = buildPassLoraChain(workflow, CKPT_NODE, 301, pass3Loras);
 
   workflow['310'] = {
     class_type: 'CLIPTextEncode',
@@ -780,7 +780,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   // VAE decode Pass 3 latent → pixel space for person detection
   workflow['400'] = {
     class_type: 'VAEDecode',
-    inputs: { samples: ['313', 0], vae: ['200', 2] },
+    inputs: { samples: ['313', 0], vae: ['100', 2] },
   };
 
   // Person detection model (full body, not just face)
@@ -799,7 +799,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     ...(params.characterLoras?.slice(0, 1) || []),  // Primary char LoRA only
     ...(params.primaryGenderLoras || []),
   ];
-  const pass4aModel = buildPassLoraChain(workflow, '403', 404, pass4aLoras, ckpt);
+  const pass4aModel = buildPassLoraChain(workflow, CKPT_NODE, 404, pass4aLoras);
 
   workflow['410'] = {
     class_type: 'CLIPTextEncode',
@@ -817,7 +817,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       image: ['400', 0],
       model: [pass4aModel, 0],
       clip: [pass4aModel, 1],
-      vae: ['200', 2],
+      vae: ['100', 2],
       positive: ['410', 0],
       negative: ['411', 0],
       bbox_detector: ['401', 0],
@@ -861,7 +861,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       ...(params.characterLoras?.slice(1, 2) || []),  // Secondary char LoRA only
       ...(params.secondaryGenderLoras || []),
     ];
-    pass4bModel = buildPassLoraChain(workflow, '415', 416, pass4bLoras, ckpt);
+    pass4bModel = buildPassLoraChain(workflow, CKPT_NODE, 416, pass4bLoras);
 
     workflow['420'] = {
       class_type: 'CLIPTextEncode',
@@ -883,7 +883,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
         image: ['412', 0],
         model: [pass4bModel, 0],
         clip: [pass4bModel, 1],
-        vae: ['200', 2],
+        vae: ['100', 2],
         positive: ['420', 0],
         negative: ['421', 0],
         bbox_detector: ['401', 0],
@@ -947,7 +947,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       image: [lastPersonNode, 0],
       model: [pass4aModel, 0],
       clip: [pass4aModel, 1],
-      vae: ['200', 2],
+      vae: ['100', 2],
       positive: ['510', 0],
       negative: ['411', 0],
       bbox_detector: ['500', 0],
@@ -997,7 +997,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
         image: ['511', 0],
         model: [secondaryModelForFace, 0],
         clip: [secondaryModelForFace, 1],
-        vae: ['200', 2],
+        vae: ['100', 2],
         positive: ['520', 0],
         negative: ['211', 0],
         bbox_detector: ['500', 0],
@@ -1040,32 +1040,29 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   // any grain or noise accumulated across earlier passes without altering
   // composition, identity, or detail.
   // =========================================================================
-  workflow['700'] = {
-    class_type: 'CheckpointLoaderSimple',
-    inputs: { ckpt_name: ckpt },
-  };
+  // Reuse shared checkpoint (CKPT_NODE) — no extra model load needed
   workflow['701'] = {
     class_type: 'CLIPTextEncode',
     inputs: {
       text: 'photorealistic, sharp focus, clean skin, professional photography, 8k uhd',
-      clip: ['700', 1],
+      clip: [CKPT_NODE, 1],
     },
   };
   workflow['702'] = {
     class_type: 'CLIPTextEncode',
     inputs: {
       text: '(film grain:1.3), (noise:1.3), (grainy:1.3), (noisy skin:1.3), blurry, jpeg artifacts, low quality',
-      clip: ['700', 1],
+      clip: [CKPT_NODE, 1],
     },
   };
   workflow['703'] = {
     class_type: 'VAEEncode',
-    inputs: { pixels: [finalImageNode, 0], vae: ['700', 2] },
+    inputs: { pixels: [finalImageNode, 0], vae: [CKPT_NODE, 2] },
   };
   workflow['704'] = {
     class_type: 'KSampler',
     inputs: {
-      model: ['700', 0],
+      model: [CKPT_NODE, 0],
       positive: ['701', 0],
       negative: ['702', 0],
       latent_image: ['703', 0],
@@ -1079,7 +1076,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   };
   workflow['705'] = {
     class_type: 'VAEDecode',
-    inputs: { samples: ['704', 0], vae: ['700', 2] },
+    inputs: { samples: ['704', 0], vae: [CKPT_NODE, 2] },
   };
 
   // =========================================================================
