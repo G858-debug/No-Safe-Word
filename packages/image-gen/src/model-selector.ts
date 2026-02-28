@@ -50,9 +50,13 @@ export function selectModel(
     };
   }
 
-  // 2. NSFW content prefers maximum quality model
+  // 2. Explicit intimate content prefers maximum quality model (Lustify)
+  //    Suggestive/intimate-but-not-explicit scenes use Juggernaut for cleaner output
   const contentLevel = options.contentLevel || classification.contentLevel;
-  if (contentLevel === 'nsfw') {
+  const needsExplicitModel = contentLevel === 'nsfw'
+    && classification.hasIntimateContent
+    && classification.interactionType === 'intimate';
+  if (needsExplicitModel) {
     const maxQuality = MODEL_REGISTRY.find(
       (m) => m.installed && m.tier === 'maximum'
     );
@@ -61,7 +65,7 @@ export function selectModel(
         checkpointName: maxQuality.filename,
         model: maxQuality,
         fellBack: false,
-        reason: `NSFW content: using maximum quality model ${maxQuality.name}`,
+        reason: `Explicit intimate content: using maximum quality model ${maxQuality.name}`,
         paramOverrides: { cfg: 4.0 },
       };
     }

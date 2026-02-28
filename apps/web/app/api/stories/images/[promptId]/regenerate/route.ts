@@ -78,6 +78,7 @@ export async function POST(
     let secondaryCharacterTags: string | null = null;
     let primaryCharLora: CharacterLoraEntry | undefined;
     let secondaryCharLora: CharacterLoraEntry | undefined;
+    let secondaryGender: 'male' | 'female' | undefined;
 
     // Fetch series info via post
     const { data: post } = await supabase
@@ -157,8 +158,17 @@ export async function POST(
           }
         }
 
-        // Look up secondary character's approved tags and LoRA if linked
+        // Look up secondary character's gender, approved tags, and LoRA if linked
         if (imgPrompt.secondary_character_id) {
+          const { data: secChar } = await supabase
+            .from("characters")
+            .select("description")
+            .eq("id", imgPrompt.secondary_character_id)
+            .single();
+          if (secChar?.description) {
+            secondaryGender = (secChar.description as Record<string, string>).gender as 'male' | 'female' | undefined;
+          }
+
           const { data: secondaryStoryChar } = await (supabase as any)
             .from("story_characters")
             .select("approved_prompt, active_lora_id")
@@ -358,6 +368,29 @@ export async function POST(
     });
     console.log(`[StoryImage][${promptId}] Model selected: ${modelSelection.checkpointName} — ${modelSelection.reason}`);
 
+    // Build per-character gender LoRA stacks for multi-pass person inpainting
+    const primaryGender = charData?.gender as 'male' | 'female' | undefined;
+
+    const primaryGenderLoras = primaryGender === 'female'
+      ? resources.femaleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
+      : primaryGender === 'male'
+        ? resources.maleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
+        : [];
+
+    const secondaryGenderLoras = secondaryGender === 'female'
+      ? resources.femaleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
+      : secondaryGender === 'male'
+        ? resources.maleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
+        : [];
+
+    if (workflowType === 'multi-pass') {
+      console.log(`[StoryImage][${promptId}] Pass 3 neutral LoRAs: ${resources.neutralLoras.map(l => l.filename).join(', ')}`);
+      console.log(`[StoryImage][${promptId}] Pass 4a gender LoRAs (${primaryGender}): ${primaryGenderLoras.map(l => l.filename).join(', ') || 'none'}`);
+      if (hasSecondary) {
+        console.log(`[StoryImage][${promptId}] Pass 4b gender LoRAs (${secondaryGender}): ${secondaryGenderLoras.map(l => l.filename).join(', ') || 'none'}`);
+      }
+    }
+
     const workflow = buildWorkflow({
       type: workflowType,
       positivePrompt: finalPrompt,
@@ -370,7 +403,7 @@ export async function POST(
       ipadapterWeight: hasSecondary ? 0.7 : 0.85,
       secondaryFacePrompt,
       secondarySeed,
-      loras: resources.loras,
+      loras: workflowType === 'multi-pass' ? resources.neutralLoras : resources.loras,
       negativePromptAdditions: resources.negativePromptAdditions,
       checkpointName: modelSelection.checkpointName,
       cfg: modelSelection.paramOverrides?.cfg,
@@ -387,6 +420,10 @@ export async function POST(
           strengthModel: l.defaultStrength,
           strengthClip: l.clipStrength,
         })),
+      primaryGenderLoras,
+      secondaryGenderLoras,
+      primaryGender,
+      secondaryGender,
     });
 
     const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined, resources.characterLoraDownloads);

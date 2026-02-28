@@ -168,6 +168,13 @@ download_model \
     "ultralytics/bbox" \
     "face_yolov8m.pt"
 
+# YOLO person detection — used by PersonDetailer / per-character body inpainting
+# person_yolov8m-seg is specifically trained on full human bodies (not just faces)
+download_model \
+    "https://huggingface.co/Bingsu/adetailer/resolve/main/person_yolov8m-seg.pt" \
+    "ultralytics/bbox" \
+    "person_yolov8m-seg.pt"
+
 # SAM ViT-B — Segment Anything Model for face masking
 download_model \
     "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth" \

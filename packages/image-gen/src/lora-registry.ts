@@ -12,6 +12,9 @@ export interface LoraEntry {
   compatibleWith: ContentMode[];
   /** Whether this LoRA is installed on the RunPod ComfyUI instance */
   installed: boolean;
+  /** Gender relevance: 'female' LoRAs only apply to female characters,
+   *  'male' only to male, 'neutral' applies to all. Defaults to 'neutral'. */
+  genderCategory?: 'male' | 'female' | 'neutral';
 }
 
 /** Extended LoRA entry for character-specific LoRAs loaded from the database */
@@ -56,6 +59,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Overall sharpness and detail enhancement, always on',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Realistic Skin XL',
@@ -66,6 +70,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Photorealistic skin texture for close-up and medium shots (Skin Texture Style v4 by EauDeNoire)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Eyes Detail XL',
@@ -76,6 +81,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Better eyes and gaze accuracy for eye contact shots (DetailedEyes v3 by bdsqlsz)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Hands XL',
@@ -86,6 +92,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Reduce hand artifacts, use only when hands are visible (Hands XL v2.1 by EauDeNoire)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Better Bodies XL',
@@ -96,6 +103,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Anatomical accuracy for NSFW content',
     compatibleWith: ['nsfw'],
     installed: true,
+    genderCategory: 'female',
   },
   {
     name: 'Curvy Body SDXL',
@@ -106,6 +114,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Curvy body shape enhancement for realistic proportions',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'female',
   },
   {
     name: 'Cinematic Lighting XL',
@@ -116,6 +125,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Enhanced dramatic lighting for cinematic scenes (ntc-ai slider)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'CineColor Harmonizer',
@@ -127,6 +137,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Warm golden color grading with cinematic contrast — pure palette modifier, no anatomy changes (jarod2212)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Melanin Mix XL',
@@ -138,6 +149,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Dark skin tone and texture enhancement trained on 1000+ Black influencer photos (Ggrue)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Couples Poses XL',
@@ -149,6 +161,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Improved dual-character pose composition — reduces merged limbs and anatomical errors in two-person scenes',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Touch of Realism V2',
@@ -160,6 +173,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Real photography lens effects — shallow DOF, bokeh, light flares, natural depth separation (trained on Sony A7III photos by Huslyo)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'High Fashion SDXL',
@@ -170,6 +184,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Fashion photography clothing and fabric detail enhancement — improves garment rendering, fabric textures, and clothing accuracy',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'female',
   },
   {
     name: 'Interior Design Universal SDXL',
@@ -181,6 +196,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Indoor scene enhancement — improves restaurants, bedrooms, kitchens, workshops with better light/shadow and spatial depth (by AresWei)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'neutral',
   },
   {
     name: 'Braids & Cornrows SDXL',
@@ -192,6 +208,7 @@ export const LORA_REGISTRY: LoraEntry[] = [
     description: 'Braided hairstyle detail enhancement — cornrows, side braids, African braided styles (by staffy)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: true,
+    genderCategory: 'female',
   },
 ];
 

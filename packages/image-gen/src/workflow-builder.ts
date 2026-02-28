@@ -57,7 +57,7 @@ interface DualCharacterWorkflowParams extends SceneWorkflowParams {
 }
 
 const DEFAULT_NEGATIVE_PROMPT =
-  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, (wrong number of fingers, extra fingers, missing fingers:1.2), extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like, (overexposed:1.2), (underexposed:1.2), (oversaturated:1.2), flat lighting, harsh shadows, amateur photography, (extra people:1.3), wrong ethnicity, wrong race';
+  'ugly, deformed, noisy, blurry, low contrast, cartoon, anime, sketch, painting, watermark, text, bad anatomy, bad hands, (wrong number of fingers, extra fingers, missing fingers:1.2), extra limbs, disfigured, mutation, poorly drawn face, poorly drawn hands, distorted face, cross-eyed, out of frame, cropped, worst quality, low quality, jpeg artifacts, airbrushed skin, plastic skin, smooth skin, artificial skin, waxy skin, doll-like, (overexposed:1.2), (underexposed:1.2), (oversaturated:1.2), flat lighting, harsh shadows, amateur photography, (extra people:1.3), wrong ethnicity, wrong race, (film grain:1.1), (noise:1.1), (grainy:1.1), (noisy skin:1.1)';
 
 const DEFAULT_NEGATIVE_PROMPT_DUAL =
   DEFAULT_NEGATIVE_PROMPT + ', (three people, crowd, group, third person:1.4)';
@@ -529,11 +529,21 @@ interface MultiPassWorkflowParams {
   /** For dual-character scenes: identity prompt for the second character */
   secondaryIdentityPrompt?: string;
 
-  // Pass 3 — Detail & Beauty Refinement
+  // Pass 3 — Quality Refinement (gender-neutral LoRAs only)
   /** Full assembled prompt with quality prefix, all tags, enhancement */
   fullPrompt: string;
 
-  // Pass 4 — Face Refinement
+  // Pass 4 — Per-Character Person Inpainting
+  /** Gender-specific LoRAs for primary character's person inpainting pass */
+  primaryGenderLoras?: LoraInput[];
+  /** Gender-specific LoRAs for secondary character's person inpainting pass */
+  secondaryGenderLoras?: LoraInput[];
+  /** Primary character's gender — controls inpainting prompt adjustments */
+  primaryGender?: 'male' | 'female';
+  /** Secondary character's gender */
+  secondaryGender?: 'male' | 'female';
+
+  // Pass 5 — Face Refinement
   /** Face-specific prompt for primary character's FaceDetailer */
   primaryFacePrompt: string;
   /** Face-specific prompt for secondary character's FaceDetailer */
@@ -547,7 +557,7 @@ interface MultiPassWorkflowParams {
   height: number;
   seed: number;
   filenamePrefix?: string;
-  /** Quality/beauty LoRAs for Pass 3 (full stack from selectResources) */
+  /** Gender-neutral quality LoRAs for Pass 3 */
   loras?: LoraInput[];
   /** Character LoRAs for Pass 2 */
   characterLoras?: LoraInput[];
@@ -608,76 +618,61 @@ function buildPassLoraChain(
 }
 
 /**
- * Build a multi-pass workflow for story scene images.
+ * Build a 6-pass multi-pass workflow for story scene images.
  *
- * 4 sequential passes in a single ComfyUI graph (one RunPod job):
- *
- * Pass 1 — COMPOSITION: scene-only prompt at low resolution (512×768).
- *   Gets the layout, poses, objects, and spatial composition right without
- *   character identity noise competing for CLIP attention.
- *
- * Pass 2 — CHARACTER IDENTITY: LatentUpscale to target res → img2img with
- *   character LoRAs + condensed identity tags. Burns the character's face
- *   and body into the composed scene.
- *
- * Pass 3 — DETAIL & BEAUTY REFINEMENT: img2img with full LoRA stack and
- *   complete prompt including enhancement tags. Adds skin detail, eyes,
- *   cinematic lighting, body refinement.
- *
- * Pass 4 — FACE REFINEMENT: FaceDetailer pass(es) using the character-LoRA
- *   model from Pass 2 for LoRA-aware face inpainting.
+ * Pass 1 — COMPOSITION: scene-only prompt at low resolution.
+ * Pass 2 — CHARACTER IDENTITY: upscale + character LoRAs (no body/gender LoRAs).
+ * Pass 3 — QUALITY REFINEMENT: gender-neutral LoRAs only.
+ * Pass 4a — PRIMARY PERSON INPAINT: person detection → inpaint with primary char LoRA + gender LoRAs.
+ * Pass 4b — SECONDARY PERSON INPAINT (dual-character only): same for secondary character.
+ * Pass 5a — PRIMARY FACE: FaceDetailer with primary char LoRA.
+ * Pass 5b — SECONDARY FACE (dual-character only): FaceDetailer with secondary char LoRA.
  *
  * Node ID scheme:
  *   100s = Pass 1 (composition)
  *   200s = Pass 2 (character identity)
- *   300s = Pass 3 (detail refinement)
- *   400s = Pass 4 (face refinement)
- *   500  = SaveImage
+ *   300s = Pass 3 (quality refinement)
+ *   400s = Pass 4 (person inpainting — 410-414 primary, 415-422 secondary)
+ *   500s = Pass 5 (face refinement — 510-511 primary, 520-521 secondary)
+ *   600  = SaveImage
  */
 export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<string, any> {
   const ckpt = params.checkpointName || DEFAULT_MODEL;
-  const baseNeg = params.negativePrompt || DEFAULT_NEGATIVE_PROMPT;
-  const neg = buildNeg(baseNeg, params.negativePromptAdditions);
   const prefix = params.filenamePrefix || 'multipass';
   const hasDualCharacter = !!params.secondaryIdentityPrompt;
 
-  // Use dual-character negative for two-person scenes
   const negBase = hasDualCharacter
     ? (params.negativePrompt || DEFAULT_NEGATIVE_PROMPT_DUAL)
     : (params.negativePrompt || DEFAULT_NEGATIVE_PROMPT);
   const negFull = buildNeg(negBase, params.negativePromptAdditions);
 
-  // Composition resolution: half-resolution for fast layout generation
-  const compWidth = Math.round(params.width / 1.6);   // 832→520, 1216→760
-  const compHeight = Math.round(params.height / 1.6);  // 1216→760, 832→520
+  // Composition resolution: reduced for fast layout generation
+  const compWidth = Math.round(params.width / 1.6);
+  const compHeight = Math.round(params.height / 1.6);
 
   const workflow: Record<string, any> = {};
 
   // =========================================================================
   // PASS 1 — COMPOSITION
-  // Scene-only prompt, detail-tweaker LoRA only, full generation from noise
+  // Scene-only prompt, detail-tweaker only, full generation from noise
   // =========================================================================
   const detailTweakerOnly: LoraInput[] = [
     { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
   ];
   const pass1Model = buildPassLoraChain(workflow, '100', 101, detailTweakerOnly, ckpt);
 
-  // Pass 1 positive: scene-only, no character tags
   workflow['110'] = {
     class_type: 'CLIPTextEncode',
     inputs: { text: params.scenePrompt, clip: [pass1Model, 1] },
   };
-  // Pass 1 negative
   workflow['111'] = {
     class_type: 'CLIPTextEncode',
-    inputs: { text: neg + ', (bad anatomy, extra limbs:1.2)', clip: [pass1Model, 1] },
+    inputs: { text: negFull + ', (bad anatomy, extra limbs:1.2)', clip: [pass1Model, 1] },
   };
-  // Empty latent at composition resolution
   workflow['112'] = {
     class_type: 'EmptyLatentImage',
     inputs: { width: compWidth, height: compHeight, batch_size: 1 },
   };
-  // KSampler — full generation
   workflow['113'] = {
     class_type: 'KSampler',
     inputs: {
@@ -696,14 +691,11 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   // =========================================================================
   // PASS 2 — CHARACTER IDENTITY
-  // Upscale to target resolution, apply character LoRAs via img2img
+  // Upscale to target res, apply ONLY character LoRAs (no body/gender LoRAs)
   // =========================================================================
-
-  // Character LoRAs + melanin/skin (caller separates these from the quality stack)
   const pass2Loras = params.characterLoras || [];
   const pass2Model = buildPassLoraChain(workflow, '200', 201, pass2Loras, ckpt);
 
-  // Latent upscale: bislerp from composition res to target res
   workflow['212'] = {
     class_type: 'LatentUpscale',
     inputs: {
@@ -715,10 +707,8 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     },
   };
 
-  // Pass 2 positive: trigger words + condensed identity + scene prompt
   let pass2PositiveText: string;
   if (hasDualCharacter && params.secondaryIdentityPrompt) {
-    // Spatial prompting for dual characters
     pass2PositiveText = `on the left side of image: ${params.primaryIdentityPrompt}. on the right side of image: ${params.secondaryIdentityPrompt}. ${params.scenePrompt}`;
   } else {
     pass2PositiveText = `${params.primaryIdentityPrompt}, ${params.scenePrompt}`;
@@ -732,8 +722,6 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     class_type: 'CLIPTextEncode',
     inputs: { text: negFull, clip: [pass2Model, 1] },
   };
-
-  // KSampler — img2img on upscaled Pass 1 latent
   workflow['213'] = {
     class_type: 'KSampler',
     inputs: {
@@ -742,23 +730,22 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       negative: ['211', 0],
       latent_image: ['212', 0],
       seed: params.seed + 1,
-      steps: 30,
+      steps: 35,
       cfg: 8.5,
       sampler_name: 'dpmpp_2m',
       scheduler: 'karras',
-      denoise: 0.5,
+      denoise: 0.55,
     },
   };
 
   // =========================================================================
-  // PASS 3 — DETAIL & BEAUTY REFINEMENT
-  // Full LoRA stack, full assembled prompt, low denoise
+  // PASS 3 — QUALITY REFINEMENT
+  // Gender-NEUTRAL LoRAs only: detail-tweaker, realistic-skin, melanin-mix,
+  // cinecolor, eyes-detail, etc. NO curvy-body, NO braids, NO better-bodies.
   // =========================================================================
-
   const pass3Loras = params.loras || detailTweakerOnly;
   const pass3Model = buildPassLoraChain(workflow, '300', 301, pass3Loras, ckpt);
 
-  // Pass 3 positive: full assembled prompt with everything
   workflow['310'] = {
     class_type: 'CLIPTextEncode',
     inputs: { text: params.fullPrompt, clip: [pass3Model, 1] },
@@ -767,8 +754,6 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     class_type: 'CLIPTextEncode',
     inputs: { text: negFull, clip: [pass3Model, 1] },
   };
-
-  // KSampler — img2img refinement on Pass 2 output
   workflow['313'] = {
     class_type: 'KSampler',
     inputs: {
@@ -778,56 +763,199 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       latent_image: ['213', 0],
       seed: params.seed + 2,
       steps: 25,
-      cfg: 7.5,
+      cfg: 7.0,
       sampler_name: 'dpmpp_2m',
       scheduler: 'karras',
-      denoise: 0.3,
+      denoise: 0.25,
     },
   };
 
   // =========================================================================
-  // PASS 4 — FACE REFINEMENT (FaceDetailer)
-  // Uses the Pass 2 model (character LoRAs active) for LoRA-aware inpainting
+  // PASS 4 — PER-CHARACTER PERSON INPAINTING
+  // Uses person detection (full body bbox) to isolate each character,
+  // then inpaints with that character's LoRA + gender-specific body LoRAs.
+  // This ensures female LoRAs only touch female characters and vice versa.
   // =========================================================================
 
-  // VAE decode Pass 3 latent → pixel space for FaceDetailer
+  // VAE decode Pass 3 latent → pixel space for person detection
   workflow['400'] = {
     class_type: 'VAEDecode',
     inputs: { samples: ['313', 0], vae: ['200', 2] },
   };
 
-  // Shared face detection models
+  // Person detection model (full body, not just face)
   workflow['401'] = {
     class_type: 'UltralyticsDetectorProvider',
-    inputs: { model_name: 'bbox/face_yolov8m.pt' },
+    inputs: { model_name: 'bbox/person_yolov8m-seg.pt' },
   };
+  // SAM for precise masking
   workflow['402'] = {
     class_type: 'SAMLoader',
     inputs: { model_name: 'sam_vit_b_01ec64.pth', device_mode: 'AUTO' },
   };
 
-  // Primary face prompt CLIP encode (uses Pass 2 model for LoRA-aware encoding)
+  // --- Pass 4a: Primary character person inpaint ---
+  const pass4aLoras: LoraInput[] = [
+    ...(params.characterLoras?.slice(0, 1) || []),  // Primary char LoRA only
+    ...(params.primaryGenderLoras || []),
+  ];
+  const pass4aModel = buildPassLoraChain(workflow, '403', 404, pass4aLoras, ckpt);
+
   workflow['410'] = {
     class_type: 'CLIPTextEncode',
-    inputs: { text: params.primaryFacePrompt, clip: [pass2Model, 1] },
+    inputs: { text: `${params.primaryIdentityPrompt}, ${params.scenePrompt}`, clip: [pass4aModel, 1] },
+  };
+  workflow['411'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: negFull, clip: [pass4aModel, 1] },
   };
 
-  // Primary FaceDetailer
-  workflow['411'] = {
+  // Primary person inpainting via FaceDetailer with person detection model
+  workflow['412'] = {
     class_type: 'FaceDetailer',
     inputs: {
       image: ['400', 0],
-      model: [pass2Model, 0],
-      clip: [pass2Model, 1],
+      model: [pass4aModel, 0],
+      clip: [pass4aModel, 1],
       vae: ['200', 2],
       positive: ['410', 0],
-      negative: ['211', 0],  // reuse Pass 2 negative
+      negative: ['411', 0],
       bbox_detector: ['401', 0],
       sam_model_opt: ['402', 0],
+      guide_size: 768,
+      guide_size_for: true,
+      max_size: 1024,
+      seed: params.seed + 3,
+      steps: 25,
+      cfg: 7.5,
+      sampler_name: 'dpmpp_2m',
+      scheduler: 'karras',
+      denoise: 0.30,
+      feather: 8,
+      noise_mask: true,
+      force_inpaint: true,
+      bbox_threshold: 0.5,
+      bbox_dilation: 15,
+      bbox_crop_factor: 1.5,
+      sam_detection_hint: 'center-1',
+      sam_dilation: 0,
+      sam_threshold: 0.93,
+      sam_bbox_expansion: 0,
+      sam_mask_hint_threshold: 0.7,
+      sam_mask_hint_use_negative: 'False',
+      drop_size: 20,
+      wildcard: '',
+      cycle: 1,
+      inpaint_model: false,
+      noise_mask_feather: 20,
+    },
+  };
+
+  let lastPersonNode = '412';
+
+  // --- Pass 4b: Secondary character person inpaint (dual-character only) ---
+  let pass4bModel: string | undefined;
+
+  if (hasDualCharacter && params.secondaryGenderLoras) {
+    const pass4bLoras: LoraInput[] = [
+      ...(params.characterLoras?.slice(1, 2) || []),  // Secondary char LoRA only
+      ...(params.secondaryGenderLoras || []),
+    ];
+    pass4bModel = buildPassLoraChain(workflow, '415', 416, pass4bLoras, ckpt);
+
+    workflow['420'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: {
+        text: params.secondaryIdentityPrompt
+          ? `${params.secondaryIdentityPrompt}, ${params.scenePrompt}`
+          : params.scenePrompt,
+        clip: [pass4bModel, 1],
+      },
+    };
+    workflow['421'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: negFull, clip: [pass4bModel, 1] },
+    };
+
+    workflow['422'] = {
+      class_type: 'FaceDetailer',
+      inputs: {
+        image: ['412', 0],
+        model: [pass4bModel, 0],
+        clip: [pass4bModel, 1],
+        vae: ['200', 2],
+        positive: ['420', 0],
+        negative: ['421', 0],
+        bbox_detector: ['401', 0],
+        sam_model_opt: ['402', 0],
+        guide_size: 768,
+        guide_size_for: true,
+        max_size: 1024,
+        seed: params.secondarySeed ?? params.seed + 100,
+        steps: 25,
+        cfg: 7.5,
+        sampler_name: 'dpmpp_2m',
+        scheduler: 'karras',
+        denoise: 0.30,
+        feather: 8,
+        noise_mask: true,
+        force_inpaint: true,
+        bbox_threshold: 0.5,
+        bbox_dilation: 15,
+        bbox_crop_factor: 1.5,
+        sam_detection_hint: 'center-1',
+        sam_dilation: 0,
+        sam_threshold: 0.93,
+        sam_bbox_expansion: 0,
+        sam_mask_hint_threshold: 0.7,
+        sam_mask_hint_use_negative: 'False',
+        drop_size: 20,
+        wildcard: '',
+        cycle: 1,
+        inpaint_model: false,
+        noise_mask_feather: 20,
+      },
+    };
+
+    lastPersonNode = '422';
+  }
+
+  // =========================================================================
+  // PASS 5 — FACE REFINEMENT (FaceDetailer)
+  // Uses face detection (not person) for tight face-only inpainting.
+  // Each character gets their own FaceDetailer pass with their character LoRA.
+  // =========================================================================
+
+  workflow['500'] = {
+    class_type: 'UltralyticsDetectorProvider',
+    inputs: { model_name: 'bbox/face_yolov8m.pt' },
+  };
+  workflow['501'] = {
+    class_type: 'SAMLoader',
+    inputs: { model_name: 'sam_vit_b_01ec64.pth', device_mode: 'AUTO' },
+  };
+
+  // --- Pass 5a: Primary face ---
+  // Reuse Pass 4a's model (has primary character LoRA loaded)
+  workflow['510'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: params.primaryFacePrompt, clip: [pass4aModel, 1] },
+  };
+  workflow['511'] = {
+    class_type: 'FaceDetailer',
+    inputs: {
+      image: [lastPersonNode, 0],
+      model: [pass4aModel, 0],
+      clip: [pass4aModel, 1],
+      vae: ['200', 2],
+      positive: ['510', 0],
+      negative: ['411', 0],
+      bbox_detector: ['500', 0],
+      sam_model_opt: ['501', 0],
       guide_size: 512,
       guide_size_for: true,
       max_size: 1024,
-      seed: params.seed,
+      seed: params.seed + 4,
       steps: 25,
       cfg: 8.5,
       sampler_name: 'dpmpp_2m',
@@ -853,28 +981,27 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     },
   };
 
-  // For dual-character: second FaceDetailer chained after the first
-  let finalImageNode = '411';
+  let finalImageNode = '511';
 
+  // --- Pass 5b: Secondary face (dual-character only) ---
   if (hasDualCharacter && params.secondaryFacePrompt) {
-    // Secondary face prompt
-    workflow['420'] = {
-      class_type: 'CLIPTextEncode',
-      inputs: { text: params.secondaryFacePrompt, clip: [pass2Model, 1] },
-    };
+    const secondaryModelForFace = pass4bModel || pass2Model;
 
-    // Secondary FaceDetailer — takes output from primary FaceDetailer
-    workflow['421'] = {
+    workflow['520'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: params.secondaryFacePrompt, clip: [secondaryModelForFace, 1] },
+    };
+    workflow['521'] = {
       class_type: 'FaceDetailer',
       inputs: {
-        image: ['411', 0],   // chain from primary FaceDetailer output
-        model: [pass2Model, 0],
-        clip: [pass2Model, 1],
+        image: ['511', 0],
+        model: [secondaryModelForFace, 0],
+        clip: [secondaryModelForFace, 1],
         vae: ['200', 2],
-        positive: ['420', 0],
+        positive: ['520', 0],
         negative: ['211', 0],
-        bbox_detector: ['401', 0],
-        sam_model_opt: ['402', 0],
+        bbox_detector: ['500', 0],
+        sam_model_opt: ['501', 0],
         guide_size: 512,
         guide_size_for: true,
         max_size: 1024,
@@ -904,16 +1031,64 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       },
     };
 
-    finalImageNode = '421';
+    finalImageNode = '521';
   }
+
+  // =========================================================================
+  // PASS 7 — CLEANUP / DENOISE
+  // Ultra-low denoise pass with base checkpoint only (zero LoRAs) to smooth
+  // any grain or noise accumulated across earlier passes without altering
+  // composition, identity, or detail.
+  // =========================================================================
+  workflow['700'] = {
+    class_type: 'CheckpointLoaderSimple',
+    inputs: { ckpt_name: ckpt },
+  };
+  workflow['701'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: 'photorealistic, sharp focus, clean skin, professional photography, 8k uhd',
+      clip: ['700', 1],
+    },
+  };
+  workflow['702'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: '(film grain:1.3), (noise:1.3), (grainy:1.3), (noisy skin:1.3), blurry, jpeg artifacts, low quality',
+      clip: ['700', 1],
+    },
+  };
+  workflow['703'] = {
+    class_type: 'VAEEncode',
+    inputs: { pixels: [finalImageNode, 0], vae: ['700', 2] },
+  };
+  workflow['704'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: ['700', 0],
+      positive: ['701', 0],
+      negative: ['702', 0],
+      latent_image: ['703', 0],
+      seed: params.seed + 10,
+      steps: 15,
+      cfg: 5.0,
+      sampler_name: 'dpmpp_2m',
+      scheduler: 'karras',
+      denoise: 0.06,
+    },
+  };
+  workflow['705'] = {
+    class_type: 'VAEDecode',
+    inputs: { samples: ['704', 0], vae: ['700', 2] },
+  };
 
   // =========================================================================
   // OUTPUT
   // =========================================================================
-  workflow['500'] = {
+  workflow['600'] = {
     class_type: 'SaveImage',
     inputs: {
-      images: [finalImageNode, 0],
+      images: ['705', 0],
       filename_prefix: prefix,
     },
   };
@@ -965,6 +1140,14 @@ export function buildWorkflow(config: {
   fullPrompt?: string;
   /** Character LoRAs for Pass 2 (separate from quality LoRAs) */
   characterLoras?: LoraInput[];
+  /** Gender-specific LoRAs for primary character's person inpainting pass */
+  primaryGenderLoras?: LoraInput[];
+  /** Gender-specific LoRAs for secondary character's person inpainting pass */
+  secondaryGenderLoras?: LoraInput[];
+  /** Primary character's gender */
+  primaryGender?: 'male' | 'female';
+  /** Secondary character's gender */
+  secondaryGender?: 'male' | 'female';
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -1057,6 +1240,10 @@ export function buildWorkflow(config: {
         characterLoras: config.characterLoras,
         negativePromptAdditions: config.negativePromptAdditions,
         checkpointName: config.checkpointName,
+        primaryGenderLoras: config.primaryGenderLoras,
+        secondaryGenderLoras: config.secondaryGenderLoras,
+        primaryGender: config.primaryGender,
+        secondaryGender: config.secondaryGender,
       });
 
     default:

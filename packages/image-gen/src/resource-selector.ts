@@ -1,5 +1,5 @@
 import type { SceneClassification, ImageType } from './scene-classifier';
-import { LORA_REGISTRY } from './lora-registry';
+import { LORA_REGISTRY, getLoraByFilename } from './lora-registry';
 import type { CharacterLoraEntry } from './lora-registry';
 
 export interface SelectedLora {
@@ -11,6 +11,12 @@ export interface SelectedLora {
 
 export interface ResourceSelection {
   loras: SelectedLora[];
+  /** Gender-neutral LoRAs for Pass 3 (quality refinement — no gender bias) */
+  neutralLoras: SelectedLora[];
+  /** Female-specific LoRAs for Pass 4 person inpainting */
+  femaleLoras: SelectedLora[];
+  /** Male-specific LoRAs for Pass 4 person inpainting (currently empty, future use) */
+  maleLoras: SelectedLora[];
   negativePromptAdditions: string;
   paramOverrides?: {
     steps?: number;
@@ -253,8 +259,56 @@ export function selectResources(
   // Contextual negatives: unprompted accessories, person count, ethnicity drift
   negativeAdditions.push(...buildContextualNegatives(classification, promptHint));
 
+  // Split LoRAs by gender category for multi-pass per-character inpainting
+  const neutralLoras = selectedLoras.filter(l => {
+    // Character LoRAs (in characters/ dir) are not in the registry — handled separately
+    if (l.filename.startsWith('characters/')) return false;
+    const entry = getLoraByFilename(l.filename);
+    return !entry?.genderCategory || entry.genderCategory === 'neutral';
+  });
+
+  const femaleLoras = selectedLoras.filter(l => {
+    const entry = getLoraByFilename(l.filename);
+    return entry?.genderCategory === 'female';
+  });
+
+  const maleLoras = selectedLoras.filter(l => {
+    const entry = getLoraByFilename(l.filename);
+    return entry?.genderCategory === 'male';
+  });
+
+  // Cap total LoRA strength to prevent noise accumulation
+  // Each LoRA adds noise proportional to its strength.
+  // Budget: ~3.0 total model strength for the neutral stack
+  const MAX_NEUTRAL_STRENGTH = 3.0;
+  const totalNeutralStrength = neutralLoras.reduce((sum, l) => sum + l.strengthModel, 0);
+  if (totalNeutralStrength > MAX_NEUTRAL_STRENGTH) {
+    const scale = MAX_NEUTRAL_STRENGTH / totalNeutralStrength;
+    neutralLoras.forEach(l => {
+      l.strengthModel = Math.round(l.strengthModel * scale * 100) / 100;
+      l.strengthClip = Math.round(l.strengthClip * scale * 100) / 100;
+    });
+    console.log(`[ResourceSelector] Scaled neutral LoRA strengths by ${scale.toFixed(2)} to stay within budget`);
+  }
+
+  // Same for gender LoRAs — budget ~1.5 since there are fewer
+  const MAX_GENDER_STRENGTH = 1.5;
+  for (const genderStack of [femaleLoras, maleLoras]) {
+    const totalGenderStrength = genderStack.reduce((sum, l) => sum + l.strengthModel, 0);
+    if (totalGenderStrength > MAX_GENDER_STRENGTH) {
+      const scale = MAX_GENDER_STRENGTH / totalGenderStrength;
+      genderStack.forEach(l => {
+        l.strengthModel = Math.round(l.strengthModel * scale * 100) / 100;
+        l.strengthClip = Math.round(l.strengthClip * scale * 100) / 100;
+      });
+    }
+  }
+
   return {
     loras: selectedLoras,
+    neutralLoras,
+    femaleLoras,
+    maleLoras,
     negativePromptAdditions: negativeAdditions.join(', '),
     paramOverrides: {
       hiresFixEnabled: true,

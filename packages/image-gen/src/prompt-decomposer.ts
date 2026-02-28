@@ -17,10 +17,10 @@ export interface DecomposedPrompt {
  * quality tags independently.
  */
 const QUALITY_PATTERNS = [
-  /^\(photorealistic[^)]*\)\s*,?\s*/i,
-  /^\(masterpiece[^)]*\)\s*,?\s*/i,
-  /\(cinematic lighting[^)]*\)\s*,?\s*/gi,
-  /\(intimate atmosphere[^)]*\)\s*,?\s*/gi,
+  /\(photorealistic(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(masterpiece(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(cinematic lighting(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(intimate atmosphere(?::\d+\.?\d*)?\)\s*,?\s*/gi,
   /\b8k\s*uhd\b\s*,?\s*/gi,
   /\bmasterpiece\b\s*,?\s*/gi,
   /\bbest quality\b\s*,?\s*/gi,
@@ -42,11 +42,11 @@ const TRIGGER_WORD_PATTERN = /\btok\b\s*,?\s*/gi;
  * These belong in Pass 3 (full prompt), not the scene prompt.
  */
 const ENHANCEMENT_PATTERNS = [
-  /\(beautiful face[^)]*\)\s*,?\s*/gi,
-  /\(curvaceous figure[^)]*\)\s*,?\s*/gi,
-  /\(showing cleavage[^)]*\)\s*,?\s*/gi,
-  /\(attractive[^)]*\)\s*,?\s*/gi,
-  /\(wearing clothes[^)]*\)\s*,?\s*/gi,
+  /\(beautiful face(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(curvaceous figure(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(showing cleavage(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(attractive(?::\d+\.?\d*)?\)\s*,?\s*/gi,
+  /\(wearing clothes(?::\d+\.?\d*)?\)\s*,?\s*/gi,
 ];
 
 /**
@@ -112,6 +112,11 @@ export function decomposePrompt(
     const escaped = escapeRegex(secondaryCondensed);
     scene = scene.replace(new RegExp(escaped + '\\s*,?\\s*', 'i'), ' ');
   }
+
+  // Clean orphaned weight syntax left after word stripping: "( :1.1)" or "(:1.3)"
+  scene = scene.replace(/\(\s*:[\d.]+\)\s*,?\s*/g, '');
+  // Clean empty parentheses
+  scene = scene.replace(/\(\s*\)\s*,?\s*/g, '');
 
   // Clean up artifacts from stripping
   scene = scene
