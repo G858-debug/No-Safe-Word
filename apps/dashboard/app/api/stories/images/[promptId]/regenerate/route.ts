@@ -237,47 +237,30 @@ export async function POST(
     // Detect if the prompt describes multiple characters even without secondary_character_id
     const promptCharCount = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType).characterCount;
 
-    // Pre-classify scene for multi-pass criteria
-    const preClassify = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType);
-
-    // Multi-pass criteria: dual-character scene with at least one LoRA
-    const useMultiPass = hasSecondary
-      && (primaryHasLora || secondaryHasLora)
-      && !!imgPrompt.character_id
-      && (
-        (primaryHasLora && secondaryHasLora)
-        || preClassify.interactionType === 'intimate'
-        || preClassify.shotType === 'wide'
-        || preClassify.hasCompositionCues
-      );
+    // Multi-pass criteria: any scene where the primary character has a deployed LoRA.
+    // Multi-pass separates composition from identity from detail, preventing LoRA
+    // identity tags from competing with scene description for CLIP attention.
+    // This applies to both single-character and dual-character scenes.
+    const useMultiPass = !!imgPrompt.character_id && primaryHasLora;
 
     let workflowType: "portrait" | "single-character" | "dual-character" | "multi-pass";
     if (!imgPrompt.character_id) {
       workflowType = "portrait";
     } else if (useMultiPass) {
+      // Primary character has a LoRA — use multi-pass for best quality
       workflowType = "multi-pass";
-      console.log(`[StoryImage][${promptId}] Using multi-pass workflow (primaryLoRA=${primaryHasLora}, secondaryLoRA=${secondaryHasLora})`);
+      console.log(`[StoryImage][${promptId}] Using multi-pass workflow (primaryLoRA=${primaryHasLora}, secondaryLoRA=${secondaryHasLora}, hasSecondary=${hasSecondary})`);
     } else if (hasSecondary) {
-      // Explicit dual-character — use dual workflow (no LoRAs or doesn't meet multi-pass criteria)
+      // Dual-character but no LoRAs — use IPAdapter-based dual workflow
       workflowType = "dual-character";
-      if (primaryHasLora || secondaryHasLora) {
-        console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow with LoRAs + IPAdapter for structural composition`);
-      }
-    } else if (promptCharCount >= 2 && !primaryHasLora) {
-      // Prompt describes two people but no secondary character linked
-      // Use single-character workflow (IPAdapter) — dual-character would crash
+      console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow (IPAdapter, no LoRAs)`);
+    } else if (promptCharCount >= 2) {
+      // Prompt describes two people but no secondary character linked and no LoRA
+      // Use single-character workflow (IPAdapter)
       workflowType = "single-character";
-      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters but no secondary_character_id — using single-character workflow (landscape dims still apply)`);
-    } else if (promptCharCount >= 2 && primaryHasLora) {
-      // Has LoRA but no secondary character data — fall back to portrait
-      workflowType = "portrait";
-      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters, primary has LoRA but no secondary data — using portrait workflow with landscape dims`);
-    } else if (primaryHasLora) {
-      // Single character with LoRA → portrait (LoRA handles identity)
-      workflowType = "portrait";
-      console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA, using portrait workflow`);
+      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters but no secondary_character_id and no LoRA — using single-character workflow`);
     } else {
-      // Primary has NO LoRA, single character → IPAdapter fallback
+      // Single character, no LoRA — IPAdapter fallback
       workflowType = "single-character";
     }
 
