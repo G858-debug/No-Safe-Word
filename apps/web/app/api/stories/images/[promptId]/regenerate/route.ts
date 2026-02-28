@@ -73,7 +73,6 @@ export async function POST(
       age: "",
     };
 
-    let seed = -1;
     let approvedCharacterTags: string | null = null;
     let secondaryCharacterTags: string | null = null;
     let primaryCharLora: CharacterLoraEntry | undefined;
@@ -117,16 +116,12 @@ export async function POST(
       if (post) {
         const { data: storyChar } = await (supabase as any)
           .from("story_characters")
-          .select("approved_seed, approved_prompt, active_lora_id")
+          .select("approved_prompt, active_lora_id")
           .eq("series_id", post.series_id)
           .eq("character_id", imgPrompt.character_id)
           .single() as {
-            data: { approved_seed: number | null; approved_prompt: string | null; active_lora_id: string | null } | null;
+            data: { approved_prompt: string | null; active_lora_id: string | null } | null;
           };
-
-        if (storyChar?.approved_seed != null && storyChar.approved_seed > 0) {
-          seed = storyChar.approved_seed + imgPrompt.position;
-        }
 
         if (storyChar?.approved_prompt) {
           approvedCharacterTags = extractCharacterTags(storyChar.approved_prompt);
@@ -234,9 +229,10 @@ export async function POST(
     }
 
     // 7. Generate via RunPod
-    if (seed === -1) {
-      seed = Math.floor(Math.random() * 2_147_483_647) + 1;
-    }
+    // Always use a random seed for regeneration — the whole point of clicking
+    // "Regenerate" is to get a different result. The deterministic seed
+    // (approved_seed + position) is only for the initial batch generation.
+    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
     const hasSecondary = !!imgPrompt.secondary_character_id;
 
@@ -308,18 +304,7 @@ export async function POST(
 
     if (hasSecondary && imgPrompt.secondary_character_id) {
       secondaryFacePrompt = secondaryCharacterTags || "person, photorealistic";
-
-      if (post) {
-        const { data: secStoryChar } = await supabase
-          .from("story_characters")
-          .select("approved_seed")
-          .eq("series_id", post.series_id)
-          .eq("character_id", imgPrompt.secondary_character_id)
-          .single();
-        secondarySeed = secStoryChar?.approved_seed ? secStoryChar.approved_seed + imgPrompt.position : seed + 1000;
-      } else {
-        secondarySeed = seed + 1000;
-      }
+      secondarySeed = seed + 1000;
     }
 
     // Prepend LoRA trigger word to face prompts so FaceDetailer activates the LoRA
@@ -425,6 +410,20 @@ export async function POST(
       primaryGender,
       secondaryGender,
     });
+
+    // ---- Workflow structure validation logging ----
+    const wfNodes = Object.entries(workflow);
+    const nodesByPass: Record<string, string[]> = {};
+    for (const [nodeId, node] of wfNodes) {
+      const n = Number(nodeId);
+      const pass = n < 200 ? 'Pass1-Base' : n < 300 ? 'Pass2-Hires' : n < 400 ? 'Pass3-LoRA' : n < 500 ? 'Pass4-Person' : n < 600 ? 'Pass5-Face' : n < 700 ? 'Pass6-Save' : 'Pass7-Final';
+      if (!nodesByPass[pass]) nodesByPass[pass] = [];
+      nodesByPass[pass].push(`${nodeId}:${(node as any).class_type}`);
+    }
+    console.log(`[MultiPass][${promptId}] Workflow summary: ${wfNodes.length} nodes, type=${workflowType}`);
+    for (const [pass, nodes] of Object.entries(nodesByPass).sort()) {
+      console.log(`[MultiPass][${promptId}]   ${pass}: ${nodes.join(', ')}`);
+    }
 
     const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined, resources.characterLoraDownloads);
 

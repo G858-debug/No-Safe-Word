@@ -339,12 +339,13 @@ export default function ImageGeneration({
   // ---- Actions ----
 
   const handleBatchGenerate = useCallback(
-    async (postId?: string) => {
+    async (postId?: string, regenerate?: boolean) => {
       setBatchGenerating(true);
 
       try {
-        const body: Record<string, string> = {};
+        const body: Record<string, string | boolean> = {};
         if (postId) body.post_id = postId;
+        if (regenerate) body.regenerate = true;
 
         const res = await fetch(
           `/api/stories/${seriesId}/generate-images`,
@@ -590,6 +591,22 @@ export default function ImageGeneration({
               ? "Submitting..."
               : `Generate All Images (${counts.pending + counts.failed})`}
           </Button>
+
+          {/* Regenerate All — re-generates already-generated images */}
+          {counts.generated > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => handleBatchGenerate(undefined, true)}
+              disabled={batchGenerating}
+            >
+              {batchGenerating ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Regenerate All ({counts.generated})
+            </Button>
+          )}
 
           {/* Generate Chapter */}
           <div className="flex items-center gap-2">

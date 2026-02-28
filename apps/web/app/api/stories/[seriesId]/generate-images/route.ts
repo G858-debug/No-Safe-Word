@@ -26,7 +26,7 @@ export async function POST(
 
   try {
     const body = await request.json().catch(() => ({}));
-    const { post_id } = body as { post_id?: string };
+    const { post_id, regenerate } = body as { post_id?: string; regenerate?: boolean };
 
     // 1. Verify all characters in the series are approved
     // Note: active_lora_id is not in auto-generated types yet, so we cast
@@ -115,6 +115,16 @@ export async function POST(
 
     if (postIds.length === 0) {
       return NextResponse.json({ queued: 0, skipped: 0, jobs: [] });
+    }
+
+    // 3a. If regenerate flag is set, reset "generated" prompts back to "pending"
+    //     so they get picked up by the batch generation below.
+    if (regenerate) {
+      await supabase
+        .from("story_image_prompts")
+        .update({ status: "pending", image_id: null })
+        .in("post_id", postIds)
+        .eq("status", "generated");
     }
 
     // 3. Fetch pending/stuck image prompts for those posts
@@ -512,6 +522,20 @@ export async function POST(
           primaryGender,
           secondaryGender,
         });
+
+        // ---- Workflow structure validation logging ----
+        const wfNodes = Object.entries(workflow);
+        const nodesByPass: Record<string, string[]> = {};
+        for (const [nodeId, node] of wfNodes) {
+          const n = Number(nodeId);
+          const pass = n < 200 ? 'Pass1-Base' : n < 300 ? 'Pass2-Hires' : n < 400 ? 'Pass3-LoRA' : n < 500 ? 'Pass4-Person' : n < 600 ? 'Pass5-Face' : n < 700 ? 'Pass6-Save' : 'Pass7-Final';
+          if (!nodesByPass[pass]) nodesByPass[pass] = [];
+          nodesByPass[pass].push(`${nodeId}:${(node as any).class_type}`);
+        }
+        console.log(`[MultiPass][${imgPrompt.id}] Workflow summary: ${wfNodes.length} nodes, type=${workflowType}`);
+        for (const [pass, nodes] of Object.entries(nodesByPass).sort()) {
+          console.log(`[MultiPass][${imgPrompt.id}]   ${pass}: ${nodes.join(', ')}`);
+        }
 
         // Submit async job to RunPod
         const { jobId } = await submitRunPodJob(workflow, images.length > 0 ? images : undefined, resources.characterLoraDownloads);
