@@ -57,6 +57,10 @@ export function buildDebugPassInfo(config: {
   primaryGenderLoras?: Array<{ filename: string }>;
   secondaryGenderLoras?: Array<{ filename: string }>;
   hasDualCharacter: boolean;
+  // Regional prompts for Attention Couple
+  sharedScenePrompt?: string;
+  primaryRegionPrompt?: string;
+  secondaryRegionPrompt?: string;
 }): DebugPassInfo[] {
   const passes: DebugPassInfo[] = [];
   const prefix = config.filenamePrefix || "debug";
@@ -64,12 +68,20 @@ export function buildDebugPassInfo(config: {
   const compHeight = Math.round(config.height / 1.6);
 
   // Pass 1 — Composition
+  const useAttentionCouple = config.hasDualCharacter
+    && !!config.sharedScenePrompt
+    && !!config.primaryRegionPrompt
+    && !!config.secondaryRegionPrompt;
+
   passes.push({
     pass: 1,
-    name: "Composition",
-    description:
-      "Scene layout at reduced resolution. Only detail-tweaker LoRA. No character identity — just spatial layout, poses, and setting.",
-    prompt: config.scenePrompt,
+    name: useAttentionCouple ? "Composition (Attention Couple)" : "Composition",
+    description: useAttentionCouple
+      ? "Scene layout at reduced resolution with AttentionCouplePPM regional conditioning. Shared background applied to full canvas. Primary character prompt routed to left ~55% region. Secondary character prompt routed to right ~55% region (10% overlap for natural blending). Detail-tweaker LoRA only."
+      : "Scene layout at reduced resolution. Only detail-tweaker LoRA. No character identity — just spatial layout, poses, and setting.",
+    prompt: useAttentionCouple
+      ? `[SHARED] ${config.sharedScenePrompt}\n[LEFT REGION] ${config.primaryRegionPrompt}\n[RIGHT REGION] ${config.secondaryRegionPrompt}`
+      : config.scenePrompt,
     loras: ["detail-tweaker-xl.safetensors"],
     params: {
       seed: config.seed,

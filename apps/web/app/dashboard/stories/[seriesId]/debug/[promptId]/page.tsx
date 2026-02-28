@@ -77,6 +77,11 @@ interface DebugData {
       primary: string;
       secondary: string | null;
     };
+    regional?: {
+      shared: string | null;
+      primaryRegion: string | null;
+      secondaryRegion: string | null;
+    };
   };
   optimization: {
     wasOptimized: boolean;
@@ -537,6 +542,38 @@ export default function DebugPage() {
                     debugData.prompts.decomposed.optimized.secondaryIdentityPrompt || ""
                   }
                 />
+              )}
+
+              {/* Regional Prompts (Attention Couple) */}
+              {debugData.prompts.regional?.shared && (
+                <div className="mt-4 rounded-lg border border-amber-900/30 bg-amber-950/10 p-3 space-y-3">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                    <Zap className="h-3 w-3" />
+                    Attention Couple — Regional Prompts
+                  </h4>
+                  <div className="space-y-2">
+                    <div>
+                      <span className="mb-1 block text-[10px] font-medium text-zinc-500">SHARED BACKGROUND (full canvas)</span>
+                      <pre className="whitespace-pre-wrap rounded bg-zinc-950 p-2 text-xs text-zinc-400 leading-relaxed">
+                        {debugData.prompts.regional.shared}
+                      </pre>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="mb-1 block text-[10px] font-medium text-blue-400/70">PRIMARY REGION (left ~55%)</span>
+                        <pre className="whitespace-pre-wrap rounded bg-zinc-950 p-2 text-xs text-blue-300/70 leading-relaxed">
+                          {debugData.prompts.regional.primaryRegion}
+                        </pre>
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-[10px] font-medium text-pink-400/70">SECONDARY REGION (right ~55%)</span>
+                        <pre className="whitespace-pre-wrap rounded bg-zinc-950 p-2 text-xs text-pink-300/70 leading-relaxed">
+                          {debugData.prompts.regional.secondaryRegion}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </CollapsibleSection>

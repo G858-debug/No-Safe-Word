@@ -20,6 +20,9 @@ ENV COMFY_DIR=/comfyui
 # to clear the folder_paths filename cache. Without this, ComfyUI rejects
 # newly downloaded LoRAs because its cached file list is stale from startup.
 COPY nsw_refresh_models/ ${COMFY_DIR}/custom_nodes/nsw_refresh_models/
+# NSW Region Masks: custom node for creating horizontal region masks
+# Used by Attention Couple integration in multi-pass workflow
+COPY nsw_region_masks/ ${COMFY_DIR}/custom_nodes/nsw_region_masks/
 RUN mv /handler.py /handler_original.py
 COPY patch_handler.py /tmp/patch_handler.py
 RUN python3 /tmp/patch_handler.py && rm /tmp/patch_handler.py /handler_original.py

@@ -530,6 +530,13 @@ export async function POST(
           }
         }
 
+        if (decomposed?.sharedScenePrompt && decomposed?.primaryRegionPrompt && decomposed?.secondaryRegionPrompt) {
+          console.log(`[StoryImage][${imgPrompt.id}] Attention Couple enabled:`);
+          console.log(`[StoryImage][${imgPrompt.id}]   shared: ${decomposed.sharedScenePrompt.substring(0, 100)}`);
+          console.log(`[StoryImage][${imgPrompt.id}]   primaryRegion: ${decomposed.primaryRegionPrompt.substring(0, 100)}`);
+          console.log(`[StoryImage][${imgPrompt.id}]   secondaryRegion: ${decomposed.secondaryRegionPrompt.substring(0, 100)}`);
+        }
+
         const workflow = buildWorkflow({
           type: workflowType,
           positivePrompt: finalPrompt,
@@ -552,6 +559,9 @@ export async function POST(
           primaryIdentityPrompt: decomposed?.primaryIdentityPrompt,
           secondaryIdentityPrompt: decomposed?.secondaryIdentityPrompt,
           fullPrompt: decomposed?.fullPrompt,
+          sharedScenePrompt: decomposed?.sharedScenePrompt,
+          primaryRegionPrompt: decomposed?.primaryRegionPrompt,
+          secondaryRegionPrompt: decomposed?.secondaryRegionPrompt,
           characterLoras: [primaryCharLora, secondaryCharLora]
             .filter((l): l is CharacterLoraEntry => !!l)
             .map(l => ({

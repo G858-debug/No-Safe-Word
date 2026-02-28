@@ -335,6 +335,9 @@ export async function POST(
       primaryIdentityPrompt: decomposed.primaryIdentityPrompt,
       secondaryIdentityPrompt: decomposed.secondaryIdentityPrompt,
       fullPrompt: decomposed.fullPrompt,
+      sharedScenePrompt: decomposed.sharedScenePrompt,
+      primaryRegionPrompt: decomposed.primaryRegionPrompt,
+      secondaryRegionPrompt: decomposed.secondaryRegionPrompt,
       characterLoras,
       primaryGenderLoras,
       secondaryGenderLoras,
@@ -362,6 +365,9 @@ export async function POST(
       primaryGenderLoras,
       secondaryGenderLoras,
       hasDualCharacter: hasSecondary,
+      sharedScenePrompt: decomposed.sharedScenePrompt,
+      primaryRegionPrompt: decomposed.primaryRegionPrompt,
+      secondaryRegionPrompt: decomposed.secondaryRegionPrompt,
     });
 
     // 16. Submit to RunPod
@@ -405,6 +411,11 @@ export async function POST(
         facePrompts: {
           primary: primaryFacePrompt,
           secondary: secondaryFacePrompt || null,
+        },
+        regional: {
+          shared: decomposed.sharedScenePrompt || null,
+          primaryRegion: decomposed.primaryRegionPrompt || null,
+          secondaryRegion: decomposed.secondaryRegionPrompt || null,
         },
       },
       optimization: {

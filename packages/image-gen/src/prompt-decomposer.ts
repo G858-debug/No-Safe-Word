@@ -9,6 +9,17 @@ export interface DecomposedPrompt {
   secondaryIdentityPrompt?: string;
   /** Pass 3: Full assembled prompt (same as what's already being used) */
   fullPrompt: string;
+
+  // --- Regional Prompting (Attention Couple) ---
+  // These are populated by the AI optimizer for dual-character scenes.
+  // When present, Pass 1 uses AttentionCouplePPM instead of single conditioning.
+
+  /** Shared background: setting, lighting, atmosphere, camera angle — no character-specific content */
+  sharedScenePrompt?: string;
+  /** Primary character's spatial region: their gender, pose, action, clothing, position */
+  primaryRegionPrompt?: string;
+  /** Secondary character's spatial region: their gender, pose, action, clothing, position */
+  secondaryRegionPrompt?: string;
 }
 
 /**

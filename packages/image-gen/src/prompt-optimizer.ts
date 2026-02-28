@@ -105,11 +105,30 @@ PASS 3 — FULL PROMPT (fullPrompt):
 - Should be well-structured with clear section separation
 - Quality tags and enhancement tags are handled by the pipeline — focus on content
 
+REGIONAL PROMPTS (Dual-Character Scenes Only):
+When the scene has two characters, you MUST also produce three regional prompt components that split the scene spatially for the Attention Couple node:
+
+- sharedScenePrompt: ONLY the background, setting, lighting, atmosphere, camera angle, composition. NO character descriptions, NO actions, NO clothing, NO body parts. This is what the entire canvas shares.
+
+- primaryRegionPrompt: The PRIMARY character's gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.3), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
+
+- secondaryRegionPrompt: The SECONDARY character's gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.3), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man, right side"
+
+CRITICAL RULES for regional prompts:
+- Each region prompt must be self-contained — no references to the other character
+- Gender tags are MANDATORY at the start of each region prompt
+- Shared scene prompt must have ZERO character-specific content
+- Actions must be clearly assigned to their character's region
+- Keep each region prompt under ~40 tokens for optimal CLIP processing
+
 You will receive JSON with the current decomposed prompts and character metadata. Return JSON with the optimized versions.
 
 OUTPUT FORMAT:
 Return ONLY valid JSON with this structure (no markdown, no code fences):
-{"scenePrompt": "...", "primaryIdentityPrompt": "...", "secondaryIdentityPrompt": "..." or null, "fullPrompt": "..."}`;
+{"scenePrompt": "...", "primaryIdentityPrompt": "...", "secondaryIdentityPrompt": "..." or null, "fullPrompt": "...", "sharedScenePrompt": "..." or null, "primaryRegionPrompt": "..." or null, "secondaryRegionPrompt": "..." or null}
+
+For single-character scenes, set all three regional fields to null.
+For dual-character scenes, ALL THREE regional fields are REQUIRED (non-null).`;
 
 // ── Core Functions ──────────────────────────────────────────────
 
@@ -258,6 +277,9 @@ Optimize each component for its specific pass requirements.`;
       primaryIdentityPrompt: string;
       secondaryIdentityPrompt: string | null;
       fullPrompt: string;
+      sharedScenePrompt: string | null;
+      primaryRegionPrompt: string | null;
+      secondaryRegionPrompt: string | null;
     };
 
     // Validate the parsed response has required fields
@@ -279,12 +301,24 @@ Optimize each component for its specific pass requirements.`;
 
     notes.push("Phase 2: AI optimization applied to decomposed prompts");
 
+    // Regional prompts for Attention Couple (dual-character only)
+    const hasDualCharacter = input.characters.length >= 2;
+    if (hasDualCharacter && parsed.sharedScenePrompt && parsed.primaryRegionPrompt && parsed.secondaryRegionPrompt) {
+      notes.push('Phase 2: Regional prompts generated for Attention Couple');
+    } else if (hasDualCharacter) {
+      notes.push('Phase 2 WARNING: Dual-character scene but regional prompts missing from AI response');
+    }
+
     return {
       optimized: {
         scenePrompt: parsed.scenePrompt,
         primaryIdentityPrompt: parsed.primaryIdentityPrompt,
         secondaryIdentityPrompt: parsed.secondaryIdentityPrompt || undefined,
         fullPrompt: parsed.fullPrompt,
+        // Regional prompts (Attention Couple)
+        sharedScenePrompt: parsed.sharedScenePrompt || undefined,
+        primaryRegionPrompt: parsed.primaryRegionPrompt || undefined,
+        secondaryRegionPrompt: parsed.secondaryRegionPrompt || undefined,
       },
       notes,
     };

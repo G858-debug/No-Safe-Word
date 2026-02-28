@@ -563,6 +563,14 @@ interface MultiPassWorkflowParams {
   characterLoras?: LoraInput[];
   negativePromptAdditions?: string;
   checkpointName?: string;
+
+  // Regional prompts for Attention Couple (dual-character scenes)
+  /** Shared background/setting prompt — no character content. Used as KSampler positive. */
+  sharedScenePrompt?: string;
+  /** Primary character's region prompt — gender, pose, action, clothing. */
+  primaryRegionPrompt?: string;
+  /** Secondary character's region prompt — gender, pose, action, clothing. */
+  secondaryRegionPrompt?: string;
 }
 
 /**
@@ -654,40 +662,126 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   // =========================================================================
   // PASS 1 — COMPOSITION
-  // Scene-only prompt, detail-tweaker only, full generation from noise
+  // Scene-only prompt, detail-tweaker only, full generation from noise.
+  // For dual-character scenes with regional prompts: use Attention Couple
+  // to route each character's description to their spatial region.
   // =========================================================================
   const detailTweakerOnly: LoraInput[] = [
     { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
   ];
   const pass1Model = buildPassLoraChain(workflow, CKPT_NODE, 101, detailTweakerOnly);
 
-  workflow['110'] = {
-    class_type: 'CLIPTextEncode',
-    inputs: { text: params.scenePrompt, clip: [pass1Model, 1] },
-  };
-  workflow['111'] = {
-    class_type: 'CLIPTextEncode',
-    inputs: { text: negFull + ', (bad anatomy, extra limbs:1.2)', clip: [pass1Model, 1] },
-  };
-  workflow['112'] = {
-    class_type: 'EmptyLatentImage',
-    inputs: { width: compWidth, height: compHeight, batch_size: 1 },
-  };
-  workflow['113'] = {
-    class_type: 'KSampler',
-    inputs: {
-      model: [pass1Model, 0],
-      positive: ['110', 0],
-      negative: ['111', 0],
-      latent_image: ['112', 0],
-      seed: params.seed,
-      steps: 20,
-      cfg: 11,
-      sampler_name: 'dpmpp_2m',
-      scheduler: 'karras',
-      denoise: 1.0,
-    },
-  };
+  const useAttentionCouple = hasDualCharacter
+    && !!params.sharedScenePrompt
+    && !!params.primaryRegionPrompt
+    && !!params.secondaryRegionPrompt;
+
+  if (useAttentionCouple) {
+    // --- Attention Couple path (dual-character) ---
+    // Shared scene/background conditioning (applied to full canvas via KSampler positive)
+    workflow['110'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: params.sharedScenePrompt, clip: [pass1Model, 1] },
+    };
+    // Negative conditioning
+    workflow['111'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: negFull + ', (bad anatomy, extra limbs:1.2)', clip: [pass1Model, 1] },
+    };
+    // Empty latent
+    workflow['112'] = {
+      class_type: 'EmptyLatentImage',
+      inputs: { width: compWidth, height: compHeight, batch_size: 1 },
+    };
+
+    // Regional conditionings
+    workflow['120'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: params.primaryRegionPrompt, clip: [pass1Model, 1] },
+    };
+    workflow['121'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: params.secondaryRegionPrompt, clip: [pass1Model, 1] },
+    };
+
+    // Region masks using our custom NSW mask node
+    // Base mask: full canvas (for the shared scene conditioning)
+    workflow['122'] = {
+      class_type: 'NSWCreateSoftRegionMask',
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 1.0, feather_pct: 0.0 },
+    };
+    // Left region: primary character (0% to 55% with 10% feather)
+    workflow['123'] = {
+      class_type: 'NSWCreateSoftRegionMask',
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 0.55, feather_pct: 0.1 },
+    };
+    // Right region: secondary character (45% to 100% with 10% feather)
+    workflow['124'] = {
+      class_type: 'NSWCreateSoftRegionMask',
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.45, end_pct: 1.0, feather_pct: 0.1 },
+    };
+
+    // AttentionCouplePPM: patches the model to route attention per-region
+    workflow['125'] = {
+      class_type: 'AttentionCouplePPM',
+      inputs: {
+        model: [pass1Model, 0],
+        base_mask: ['122', 0],
+        cond_1: ['120', 0],
+        mask_1: ['123', 0],
+        cond_2: ['121', 0],
+        mask_2: ['124', 0],
+      },
+    };
+
+    // KSampler with attention-patched model
+    workflow['113'] = {
+      class_type: 'KSampler',
+      inputs: {
+        model: ['125', 0],      // Patched model from AttentionCouple
+        positive: ['110', 0],   // Shared scene conditioning
+        negative: ['111', 0],
+        latent_image: ['112', 0],
+        seed: params.seed,
+        steps: 20,
+        cfg: 11,
+        sampler_name: 'dpmpp_2m',
+        scheduler: 'karras',
+        denoise: 1.0,
+      },
+    };
+
+    console.log('[MultiPass] Pass 1: Using AttentionCouplePPM for dual-character regional prompting');
+  } else {
+    // --- Standard path (single character or no regional prompts) ---
+    workflow['110'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: params.scenePrompt, clip: [pass1Model, 1] },
+    };
+    workflow['111'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: negFull + ', (bad anatomy, extra limbs:1.2)', clip: [pass1Model, 1] },
+    };
+    workflow['112'] = {
+      class_type: 'EmptyLatentImage',
+      inputs: { width: compWidth, height: compHeight, batch_size: 1 },
+    };
+    workflow['113'] = {
+      class_type: 'KSampler',
+      inputs: {
+        model: [pass1Model, 0],
+        positive: ['110', 0],
+        negative: ['111', 0],
+        latent_image: ['112', 0],
+        seed: params.seed,
+        steps: 20,
+        cfg: 11,
+        sampler_name: 'dpmpp_2m',
+        scheduler: 'karras',
+        denoise: 1.0,
+      },
+    };
+  }
 
   // =========================================================================
   // PASS 2 — CHARACTER IDENTITY
@@ -1166,6 +1260,13 @@ export function buildWorkflow(config: {
   primaryGender?: 'male' | 'female';
   /** Secondary character's gender */
   secondaryGender?: 'male' | 'female';
+  // Regional prompts for Attention Couple (dual-character scenes)
+  /** Shared background/setting prompt — no character content */
+  sharedScenePrompt?: string;
+  /** Primary character's region prompt — gender, pose, action, clothing */
+  primaryRegionPrompt?: string;
+  /** Secondary character's region prompt — gender, pose, action, clothing */
+  secondaryRegionPrompt?: string;
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -1262,6 +1363,9 @@ export function buildWorkflow(config: {
         secondaryGenderLoras: config.secondaryGenderLoras,
         primaryGender: config.primaryGender,
         secondaryGender: config.secondaryGender,
+        sharedScenePrompt: config.sharedScenePrompt,
+        primaryRegionPrompt: config.primaryRegionPrompt,
+        secondaryRegionPrompt: config.secondaryRegionPrompt,
       });
 
     default:
