@@ -1,42 +1,30 @@
 FROM runpod/worker-comfyui:5.7.1-base
 
-# ---- Custom Nodes ----
+# ---- Custom Nodes + InsightFace (single layer to reduce intermediate disk) ----
 # Impact Pack: FaceDetailer, SAMLoader
 # Impact Subpack: UltralyticsDetectorProvider (separated since Impact Pack v8.0)
-RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
-
-# IPAdapter Plus: IPAdapterUnifiedLoaderFaceID, IPAdapterFaceID (face consistency for story images)
-# Must use comfy-node-install (not git clone) so the node is registered with ComfyUI's snapshot
-RUN comfy-node-install comfyui_ipadapter_plus
-
-# Diagnostic: verify IPAdapter Plus installation and ComfyUI compatibility
-COPY diagnose-ipadapter.py /tmp/diagnose-ipadapter.py
-RUN python3 /tmp/diagnose-ipadapter.py && rm /tmp/diagnose-ipadapter.py
-
+# IPAdapter Plus: IPAdapterUnifiedLoaderFaceID, IPAdapterFaceID
 # InsightFace + ONNX Runtime for FaceID face embedding extraction
-# Must pin insightface>=0.7 — default `pip install insightface` installs 0.2.1 (from 2019)
-# which lacks FaceAnalysis.providers support needed by IPAdapter FaceID.
 # insightface>=0.7 has no pre-built wheel for Python 3.12, so we build from source.
-# Requires: g++ (build-essential) and Cython. Cleaned up after to keep image small.
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && \
+COPY diagnose-ipadapter.py /tmp/diagnose-ipadapter.py
+COPY download-insightface.py /tmp/download-insightface.py
+RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack && \
+    comfy-node-install comfyui_ipadapter_plus && \
+    python3 /tmp/diagnose-ipadapter.py && \
+    apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && \
     pip install --no-cache-dir Cython && \
     pip install --no-cache-dir 'insightface>=0.7' onnxruntime-gpu && \
-    apt-get purge -y build-essential python3-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+    apt-get purge -y build-essential python3-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* && \
+    python3 /tmp/download-insightface.py && \
+    rm /tmp/diagnose-ipadapter.py /tmp/download-insightface.py
 
-# Pre-download InsightFace buffalo_l models (used by IPAdapter FaceID at inference time)
-# Uses a separate Python script to avoid Dockerfile inline syntax issues with `with` statements
-ENV COMFY_DIR=/comfyui
-COPY download-insightface.py /tmp/download-insightface.py
-RUN python3 /tmp/download-insightface.py && rm /tmp/download-insightface.py
-
-# ---- Build-time LoRA Downloads ----
-# LoRAs are small (~1GB total) and critical for portrait generation.
-# Baking them into the image guarantees they're available on every worker
-# regardless of runtime network conditions.
+# ---- All LoRA Downloads (single layer) ----
+# HuggingFace + CivitAI LoRAs combined into one RUN to minimize layers.
 # Uses Python urllib (not wget) because wget decodes percent-encoded chars
 # in redirect URLs, breaking AWS S3 signatures for files with spaces.
-# All downloads are in a single RUN layer to minimize disk usage on CI runners.
+ARG CIVITAI_API_KEY=""
 ENV COMFY_DIR=/comfyui
+COPY download-civitai-loras.py /tmp/download-civitai-loras.py
 RUN mkdir -p ${COMFY_DIR}/models/loras && python3 -c "\
 import urllib.request, os;\
 loras = [\
@@ -49,15 +37,9 @@ loras = [\
 d = os.environ['COMFY_DIR'] + '/models/loras/';\
 [print(f'Downloading {name}...') or urllib.request.urlretrieve(url, d + name) or print(f'  done') for url, name in loras];\
 print('All HuggingFace LoRAs downloaded.')\
-"
-
-# ---- Build-time CivitAI LoRA Downloads ----
-# These LoRAs require a CivitAI API key. Passed as a build arg from GitHub Actions.
-# Uses a separate Python script (not inline) because for/try/with blocks
-# require real newlines — Dockerfile line continuation collapses them.
-ARG CIVITAI_API_KEY=""
-COPY download-civitai-loras.py /tmp/download-civitai-loras.py
-RUN CIVITAI_API_KEY="${CIVITAI_API_KEY}" python3 /tmp/download-civitai-loras.py && rm /tmp/download-civitai-loras.py
+" && \
+    CIVITAI_API_KEY="${CIVITAI_API_KEY}" python3 /tmp/download-civitai-loras.py && \
+    rm /tmp/download-civitai-loras.py
 
 # ---- Runtime Model Download ----
 # Large models (checkpoint ~6.5GB, SAM ~400MB, YOLO ~50MB) are downloaded
