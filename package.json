@@ -8,10 +8,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@no-safe-word/dashboard",
+    "dev": "npm run dev --workspace=@no-safe-word/web",
     "build": "turbo run build",
-    "build:dashboard": "npm run build --workspace=@no-safe-word/dashboard",
-    "start": "npm run start --workspace=@no-safe-word/dashboard",
+    "build:web": "npm run build --workspace=@no-safe-word/web",
+    "start": "npm run start --workspace=@no-safe-word/web",
     "lint": "turbo run lint --continue",
     "test": "npm run test --workspaces --if-present"
   },

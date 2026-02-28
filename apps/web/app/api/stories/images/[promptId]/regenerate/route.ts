@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry } from "@no-safe-word/image-gen";
-import type { ImageType, CharacterLoraEntry } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt } from "@no-safe-word/image-gen";
+import type { ImageType, CharacterLoraEntry, DecomposedPrompt } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
@@ -230,38 +230,28 @@ export async function POST(
 
     const hasSecondary = !!imgPrompt.secondary_character_id;
 
-    // LoRA-first workflow selection
     const primaryHasLora = !!primaryCharLora;
     const secondaryHasLora = !!secondaryCharLora;
 
-    // Detect if the prompt describes multiple characters even without secondary_character_id
-    const promptCharCount = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType).characterCount;
+    // Multi-pass: any scene where the primary character has a deployed LoRA
+    const useMultiPass = !!imgPrompt.character_id && primaryHasLora;
 
-    let workflowType: "portrait" | "single-character" | "dual-character";
+    let workflowType: "portrait" | "single-character" | "dual-character" | "multi-pass";
     if (!imgPrompt.character_id) {
+      // No character linked — plain portrait (atmospheric/detail shots)
       workflowType = "portrait";
+    } else if (useMultiPass) {
+      // Primary character has a LoRA — use multi-pass for best quality
+      workflowType = "multi-pass";
+      console.log(`[StoryImage][${promptId}] Using multi-pass workflow (primaryLoRA=${primaryHasLora}, secondaryLoRA=${secondaryHasLora}, hasSecondary=${hasSecondary})`);
     } else if (hasSecondary) {
-      // Explicit dual-character — always use dual workflow
+      // Dual-character but primary has no LoRA — use IPAdapter-based dual workflow
       workflowType = "dual-character";
-      if (primaryHasLora || secondaryHasLora) {
-        console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow with LoRAs + IPAdapter for structural composition`);
-      }
-    } else if (promptCharCount >= 2 && !primaryHasLora) {
-      // Prompt describes two people but no secondary character linked
-      // Use single-character workflow (IPAdapter) — dual-character would crash
-      workflowType = "single-character";
-      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters but no secondary_character_id — using single-character workflow (landscape dims still apply)`);
-    } else if (promptCharCount >= 2 && primaryHasLora) {
-      // Has LoRA but no secondary character data — fall back to portrait
-      workflowType = "portrait";
-      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters, primary has LoRA but no secondary data — using portrait workflow with landscape dims`);
-    } else if (primaryHasLora) {
-      // Single character with LoRA → portrait (LoRA handles identity)
-      workflowType = "portrait";
-      console.log(`[StoryImage][${promptId}] LoRA-first: primary has LoRA, using portrait workflow`);
+      console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow (IPAdapter, no primary LoRA)`);
     } else {
-      // Primary has NO LoRA, single character → IPAdapter fallback
+      // Single character, no LoRA — IPAdapter fallback
       workflowType = "single-character";
+      console.log(`[StoryImage][${promptId}] Single-character scene: using single-character workflow (IPAdapter, no LoRA)`);
     }
 
     // Fetch primary character's approved portrait as base64 for IPAdapter
@@ -270,7 +260,8 @@ export async function POST(
     // Only skip for portrait workflow (single char with LoRA, or no character).
     const refImages: Array<{ name: string; image: string }> = [];
     let primaryFacePrompt: string | undefined;
-    const needsIPAdapter = workflowType !== "portrait";
+    const needsIPAdapter = workflowType !== "portrait" && workflowType !== "multi-pass";
+    const needsFacePrompt = needsIPAdapter || workflowType === "multi-pass";
 
     if (imgPrompt.character_id && needsIPAdapter && post) {
       const { data: sc } = await supabase
@@ -292,7 +283,11 @@ export async function POST(
           refImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
         }
       }
+    }
 
+    // Build face prompt from approved tags or character data
+    // Needed for IPAdapter workflows AND multi-pass (Pass 4 FaceDetailer)
+    if (imgPrompt.character_id && needsFacePrompt) {
       primaryFacePrompt = approvedCharacterTags ||
         `portrait of ${charData.name}, ${charData.ethnicity}, ${charData.skinTone} skin, ${charData.hairStyle} ${charData.hairColor} hair, ${charData.eyeColor} eyes, photorealistic`;
     }
@@ -327,8 +322,20 @@ export async function POST(
 
     const finalPrompt = promptOverride || imgPrompt.prompt;
 
-    // Scene intelligence: classify scene early so we can use it for dimensions
+    // Scene intelligence: classify scene for dimensions and resources
     const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+
+    // Multi-pass prompt decomposition
+    let decomposed: DecomposedPrompt | undefined;
+    if (workflowType === 'multi-pass') {
+      decomposed = decomposePrompt(finalPrompt, approvedCharacterTags, secondaryCharacterTags);
+      console.log(`[StoryImage][${promptId}] Multi-pass decomposition:`);
+      console.log(`[StoryImage][${promptId}]   scenePrompt: ${decomposed.scenePrompt.substring(0, 150)}`);
+      console.log(`[StoryImage][${promptId}]   primaryIdentity: ${decomposed.primaryIdentityPrompt.substring(0, 100)}`);
+      if (decomposed.secondaryIdentityPrompt) {
+        console.log(`[StoryImage][${promptId}]   secondaryIdentity: ${decomposed.secondaryIdentityPrompt.substring(0, 100)}`);
+      }
+    }
 
     // Scene-aware dimension selection
     const dimensions = selectDimensionsFromPrompt(classification, imgPrompt.image_type as ImageType, hasSecondary, finalPrompt);
@@ -368,6 +375,18 @@ export async function POST(
       checkpointName: modelSelection.checkpointName,
       cfg: modelSelection.paramOverrides?.cfg,
       hiresFixEnabled: resources.paramOverrides?.hiresFixEnabled ?? true,
+      // Multi-pass specific fields
+      scenePrompt: decomposed?.scenePrompt,
+      primaryIdentityPrompt: decomposed?.primaryIdentityPrompt,
+      secondaryIdentityPrompt: decomposed?.secondaryIdentityPrompt,
+      fullPrompt: decomposed?.fullPrompt,
+      characterLoras: [primaryCharLora, secondaryCharLora]
+        .filter((l): l is CharacterLoraEntry => !!l)
+        .map(l => ({
+          filename: l.filename,
+          strengthModel: l.defaultStrength,
+          strengthClip: l.clipStrength,
+        })),
     });
 
     const { jobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined, resources.characterLoraDownloads);
