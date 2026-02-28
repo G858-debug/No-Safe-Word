@@ -246,10 +246,15 @@ export async function POST(
       if (primaryHasLora || secondaryHasLora) {
         console.log(`[StoryImage][${promptId}] Dual-character scene: using dual-character workflow with LoRAs + IPAdapter for structural composition`);
       }
-    } else if (promptCharCount >= 2) {
-      // Prompt describes two people but no secondary_character_id linked
-      workflowType = "dual-character";
-      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters but no secondary_character_id — using dual-character workflow with single face reference`);
+    } else if (promptCharCount >= 2 && !primaryHasLora) {
+      // Prompt describes two people but no secondary character linked
+      // Use single-character workflow (IPAdapter) — dual-character would crash
+      workflowType = "single-character";
+      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters but no secondary_character_id — using single-character workflow (landscape dims still apply)`);
+    } else if (promptCharCount >= 2 && primaryHasLora) {
+      // Has LoRA but no secondary character data — fall back to portrait
+      workflowType = "portrait";
+      console.log(`[StoryImage][${promptId}] Prompt describes ${promptCharCount} characters, primary has LoRA but no secondary data — using portrait workflow with landscape dims`);
     } else if (primaryHasLora) {
       // Single character with LoRA → portrait (LoRA handles identity)
       workflowType = "portrait";
