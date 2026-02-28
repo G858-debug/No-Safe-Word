@@ -786,7 +786,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   // Person detection model (full body, not just face)
   workflow['401'] = {
     class_type: 'UltralyticsDetectorProvider',
-    inputs: { model_name: 'bbox/person_yolov8m-seg.pt' },
+    inputs: { model_name: 'segm/person_yolov8m-seg.pt' },
   };
   // SAM for precise masking
   workflow['402'] = {

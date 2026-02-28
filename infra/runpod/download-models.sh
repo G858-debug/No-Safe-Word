@@ -172,7 +172,7 @@ download_model \
 # person_yolov8m-seg is specifically trained on full human bodies (not just faces)
 download_model \
     "https://huggingface.co/Bingsu/adetailer/resolve/main/person_yolov8m-seg.pt" \
-    "ultralytics/bbox" \
+    "ultralytics/segm" \
     "person_yolov8m-seg.pt"
 
 # SAM ViT-B — Segment Anything Model for face masking
