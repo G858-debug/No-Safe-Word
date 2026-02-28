@@ -188,6 +188,7 @@ export interface ImportResult {
   posts_created: number;
   characters_linked: number;
   image_prompts_queued: number;
+  auto_detected_secondary: number;
 }
 
 export interface SeriesWithDetails extends StorySeriesRow {

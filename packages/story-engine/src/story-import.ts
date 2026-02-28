@@ -7,6 +7,7 @@ import {
   type CharacterImport,
 } from "@no-safe-word/shared";
 import { cleanScenePrompt } from "@no-safe-word/image-gen";
+import { detectSecondaryCharacters } from "./detect-secondary-character";
 
 /**
  * Import a complete story payload into the database.
@@ -78,6 +79,7 @@ export async function importStory(
 
   // 4. Create posts and their image prompts
   let totalImagePrompts = 0;
+  const postIds: string[] = [];
 
   for (const post of payload.posts) {
     // Create the post
@@ -104,6 +106,7 @@ export async function importStory(
     }
 
     const postId = postRow.id;
+    postIds.push(postId);
 
     // Create image prompts — Facebook SFW
     const sfwPromptIds = new Map<number, string>(); // position → prompt id
@@ -212,12 +215,52 @@ export async function importStory(
     }
   }
 
+  // 5. Auto-detect secondary characters in prompts that don't have one linked
+  let autoDetectedSecondary = 0;
+
+  if (postIds.length > 0) {
+    const { data: allPrompts } = await supabase
+      .from("story_image_prompts")
+      .select("id, prompt, character_id, secondary_character_id")
+      .in("post_id", postIds)
+      .is("secondary_character_id", null);
+
+    if (allPrompts && allPrompts.length > 0) {
+      const detections = detectSecondaryCharacters(
+        allPrompts,
+        payload.characters,
+        characterMap
+      );
+
+      for (const detection of detections) {
+        await supabase
+          .from("story_image_prompts")
+          .update({
+            secondary_character_name: detection.detectedCharacterName,
+            secondary_character_id: detection.detectedCharacterId,
+          })
+          .eq("id", detection.promptId);
+      }
+
+      autoDetectedSecondary = detections.length;
+      console.log(
+        `[Import] Auto-detected ${detections.length} secondary characters in ${allPrompts.length} prompts`
+      );
+      for (const d of detections) {
+        console.log(
+          `[Import]   ${d.promptId.substring(0, 8)}: ${d.detectedCharacterName} (${d.confidence}) — ${d.reason}`
+        );
+      }
+    }
+  }
+
   return {
     series_id: seriesId,
     slug,
     posts_created: payload.posts.length,
     characters_linked: payload.characters.length,
     image_prompts_queued: totalImagePrompts,
+    auto_detected_secondary: autoDetectedSecondary,
   };
 }
 
