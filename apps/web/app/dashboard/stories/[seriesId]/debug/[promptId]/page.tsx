@@ -384,6 +384,61 @@ export default function DebugPage() {
     }
   }, [promptId, fetchPromptData]);
 
+  // Auto-resume polling: if debug_data has a jobId but no intermediate images,
+  // the job may have completed while we weren't polling. Try to fetch results.
+  useEffect(() => {
+    const dd = promptData?.debug_data;
+    if (!dd || !dd.jobId) return;
+    // Already have images or already polling
+    if (Object.keys(dd.intermediateImages || {}).length > 0 || pollInterval || generating) return;
+
+    // Check if job is completed and fetch images
+    const checkAndFetch = async () => {
+      try {
+        const statusRes = await fetch(
+          `/api/stories/images/${promptId}/debug-status?jobId=${dd.jobId}`,
+        );
+        if (!statusRes.ok) return;
+        const statusData = await statusRes.json();
+
+        if (statusData.status === "completed" && Object.keys(statusData.intermediateImages || {}).length > 0) {
+          // Images were fetched and saved — reload data
+          fetchPromptData();
+        } else if (statusData.status === "generating" || statusData.status === "queued") {
+          // Job still running — start polling
+          setGenerating(true);
+          const interval = setInterval(async () => {
+            try {
+              const res = await fetch(
+                `/api/stories/images/${promptId}/debug-status?jobId=${dd.jobId}`,
+              );
+              if (!res.ok) return;
+              const data = await res.json();
+              if (data.status === "completed") {
+                clearInterval(interval);
+                setPollInterval(null);
+                setGenerating(false);
+                fetchPromptData();
+              } else if (data.status === "failed") {
+                clearInterval(interval);
+                setPollInterval(null);
+                setGenerating(false);
+                setError(data.error || "Generation failed on RunPod");
+              }
+            } catch {
+              // Keep polling on transient errors
+            }
+          }, 3000);
+          setPollInterval(interval);
+        }
+      } catch {
+        // Silently fail — user can retry manually
+      }
+    };
+
+    checkAndFetch();
+  }, [promptData?.debug_data, pollInterval, generating, promptId, fetchPromptData]);
+
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
