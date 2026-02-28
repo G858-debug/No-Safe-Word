@@ -18,7 +18,8 @@ RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack && \
     python3 /tmp/download-insightface.py && \
     rm /tmp/diagnose-ipadapter.py /tmp/download-insightface.py && \
     cd /comfyui/custom_nodes && \
-    git clone https://github.com/pamparamm/ComfyUI-ppm.git
+    git clone https://github.com/pamparamm/ComfyUI-ppm.git && \
+    cd ComfyUI-ppm && git checkout ebb35c7
 
 # ---- All LoRA Downloads (single layer) ----
 # HuggingFace + CivitAI LoRAs combined into one RUN to minimize layers.

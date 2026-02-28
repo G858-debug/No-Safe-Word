@@ -722,10 +722,13 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     };
 
     // AttentionCouplePPM: patches the model to route attention per-region
+    // base_cond = shared scene conditioning (applied to full canvas)
+    // cond_1/mask_1 = primary character region, cond_2/mask_2 = secondary character region
     workflow['125'] = {
       class_type: 'AttentionCouplePPM',
       inputs: {
         model: [pass1Model, 0],
+        base_cond: ['110', 0],
         base_mask: ['122', 0],
         cond_1: ['120', 0],
         mask_1: ['123', 0],
