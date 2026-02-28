@@ -40,12 +40,12 @@ jobs:
           large-packages: true
           swap-storage: true
 
-      # Remove ALL pre-loaded Docker images to reclaim ~6-8GB
+      # Remove ALL pre-loaded Docker images to reclaim extra space
       - name: Remove Docker images
         run: docker image prune -af && docker system prune -af
 
       - name: Check available disk
-        run: df -h / && echo "---" && df -h
+        run: df -h /
 
       - uses: actions/checkout@v4
 
@@ -55,29 +55,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-buildx-action@v3
-
       - name: Determine tags
         id: tags
         run: |
-          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          SHA_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-$(echo '${{ github.sha }}' | cut -c1-7)"
           if [ -n "${{ github.event.inputs.version }}" ]; then
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.version }}"
-          else
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}"
+            SHA_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.version }}"
           fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: ./infra/runpod
-          file: ./infra/runpod/Dockerfile.base
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          provenance: false
-          sbom: false
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=min
-          build-args: |
-            CIVITAI_API_KEY=${{ secrets.CIVITAI_API_KEY }}
+      # Use plain docker build (not buildx) to avoid the docker-container driver
+      # which duplicates storage and exhausts disk on ubuntu-latest runners.
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg CIVITAI_API_KEY="${{ secrets.CIVITAI_API_KEY }}" \
+            -f ./infra/runpod/Dockerfile.base \
+            -t ${{ steps.tags.outputs.latest }} \
+            -t ${{ steps.tags.outputs.sha }} \
+            ./infra/runpod
+
+      - name: Check disk after build
+        run: df -h /
+
+      - name: Push image
+        run: |
+          docker push ${{ steps.tags.outputs.latest }}
+          docker push ${{ steps.tags.outputs.sha }}
