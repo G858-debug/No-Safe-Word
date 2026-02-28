@@ -691,9 +691,11 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   // =========================================================================
   // PASS 2 — CHARACTER IDENTITY
-  // Upscale to target res, apply ONLY character LoRAs (no body/gender LoRAs)
+  // Upscale to target res, apply ONLY the PRIMARY character LoRA.
+  // Secondary character LoRA is deferred to Pass 4b/5b to avoid
+  // cross-contamination (e.g. female LoRA overpowering male character).
   // =========================================================================
-  const pass2Loras = params.characterLoras || [];
+  const pass2Loras = params.characterLoras?.slice(0, 1) || [];
   const pass2Model = buildPassLoraChain(workflow, CKPT_NODE, 201, pass2Loras);
 
   workflow['212'] = {
@@ -708,8 +710,11 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   };
 
   let pass2PositiveText: string;
-  if (hasDualCharacter && params.secondaryIdentityPrompt) {
-    pass2PositiveText = `on the left side of image: ${params.primaryIdentityPrompt}. on the right side of image: ${params.secondaryIdentityPrompt}. ${params.scenePrompt}`;
+  if (hasDualCharacter) {
+    // Only embed primary character identity in Pass 2.
+    // Secondary character is described generically here to reserve spatial
+    // placement; their LoRA activates later in Pass 4b/5b.
+    pass2PositiveText = `${params.primaryIdentityPrompt}, ${params.scenePrompt}, two people in scene`;
   } else {
     pass2PositiveText = `${params.primaryIdentityPrompt}, ${params.scenePrompt}`;
   }

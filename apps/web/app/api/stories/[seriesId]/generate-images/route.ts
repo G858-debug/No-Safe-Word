@@ -537,6 +537,16 @@ export async function POST(
           console.log(`[MultiPass][${imgPrompt.id}]   ${pass}: ${nodes.join(', ')}`);
         }
 
+        // Log character LoRA downloads being sent to RunPod
+        if (resources.characterLoraDownloads && resources.characterLoraDownloads.length > 0) {
+          console.log(`[MultiPass][${imgPrompt.id}] Character LoRA downloads for RunPod worker:`);
+          for (const dl of resources.characterLoraDownloads) {
+            console.log(`[MultiPass][${imgPrompt.id}]   ${dl.filename} → ${dl.url.substring(0, 100)}...`);
+          }
+        } else {
+          console.warn(`[MultiPass][${imgPrompt.id}] WARNING: No character LoRA downloads — worker won't have LoRA files!`);
+        }
+
         // Submit async job to RunPod
         const { jobId } = await submitRunPodJob(workflow, images.length > 0 ? images : undefined, resources.characterLoraDownloads);
 
