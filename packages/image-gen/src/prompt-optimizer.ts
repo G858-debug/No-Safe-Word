@@ -301,8 +301,16 @@ Optimize each component for its specific pass requirements.`;
 
     notes.push("Phase 2: AI optimization applied to decomposed prompts");
 
-    // Regional prompts for Attention Couple (dual-character only)
+    // Safety: Single-character scenes must NOT have regional prompts or secondary identity.
+    // The AI sometimes hallucinates these fields — enforce programmatically.
     const hasDualCharacter = input.characters.length >= 2;
+    if (!hasDualCharacter) {
+      parsed.secondaryIdentityPrompt = null;
+      parsed.sharedScenePrompt = null;
+      parsed.primaryRegionPrompt = null;
+      parsed.secondaryRegionPrompt = null;
+    }
+
     if (hasDualCharacter && parsed.sharedScenePrompt && parsed.primaryRegionPrompt && parsed.secondaryRegionPrompt) {
       notes.push('Phase 2: Regional prompts generated for Attention Couple');
     } else if (hasDualCharacter) {

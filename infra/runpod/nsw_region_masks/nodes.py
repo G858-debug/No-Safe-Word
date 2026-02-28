@@ -71,17 +71,17 @@ class CreateSoftRegionMask:
         if core_start < core_end:
             mask[:, :, core_start:core_end] = 1.0
 
-        # Left feather (ramp up from 0 to 1)
+        # Left feather (ramp up). Use (i+1) so the first pixel is never 0.
         for i in range(feather_px):
             px = start_px + i
             if 0 <= px < width and px < core_start:
-                mask[:, :, px] = i / feather_px
+                mask[:, :, px] = (i + 1) / (feather_px + 1)
 
-        # Right feather (ramp down from 1 to 0)
+        # Right feather (ramp down). Use (i+1) so the last pixel is never 0.
         for i in range(feather_px):
             px = core_end + i
             if 0 <= px < width and px < end_px:
-                mask[:, :, px] = 1.0 - (i / feather_px)
+                mask[:, :, px] = 1.0 - (i + 1) / (feather_px + 1)
 
         return (mask,)
 
