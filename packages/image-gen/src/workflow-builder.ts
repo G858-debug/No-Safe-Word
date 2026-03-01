@@ -684,100 +684,72 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   }
 
   if (useAttentionCouple) {
-    // --- Regional Conditioning path (dual-character) ---
-    // Uses built-in ComfyUI nodes: ConditioningSetMask + ConditioningCombine
-    // to route each character's prompt to their spatial canvas region.
-    // No custom nodes required (except NSWCreateSoftRegionMask for masks).
-
-    // Negative conditioning (shared)
+    // --- AttentionCouplePPM path (dual-character) ---
+    // Shared scene/background conditioning (full canvas — also used as base_cond)
+    workflow['110'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: params.sharedScenePrompt, clip: [pass1Model, 1] },
+    };
+    // Negative conditioning
     workflow['111'] = {
       class_type: 'CLIPTextEncode',
       inputs: { text: negFull + ', (bad anatomy, extra limbs:1.2)', clip: [pass1Model, 1] },
     };
-
     // Empty latent
     workflow['112'] = {
       class_type: 'EmptyLatentImage',
       inputs: { width: compWidth, height: compHeight, batch_size: 1 },
     };
 
-    // --- Shared background conditioning (full canvas) ---
+    // Primary character conditioning
     workflow['120'] = {
-      class_type: 'CLIPTextEncode',
-      inputs: { text: params.sharedScenePrompt, clip: [pass1Model, 1] },
-    };
-
-    // --- Primary character conditioning (left region) ---
-    workflow['121'] = {
       class_type: 'CLIPTextEncode',
       inputs: { text: params.primaryRegionPrompt, clip: [pass1Model, 1] },
     };
-
-    // Create left region mask (0% to 55%)
-    workflow['122'] = {
-      class_type: 'NSWCreateSoftRegionMask',
-      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 0.55, feather_pct: 0.1 },
-    };
-
-    // Apply mask to primary character conditioning
-    workflow['123'] = {
-      class_type: 'ConditioningSetMask',
-      inputs: {
-        conditioning: ['121', 0],
-        mask: ['122', 0],
-        strength: 1.0,
-        set_cond_area: 'default',
-      },
-    };
-
-    // --- Secondary character conditioning (right region) ---
-    workflow['124'] = {
+    // Secondary character conditioning
+    workflow['121'] = {
       class_type: 'CLIPTextEncode',
       inputs: { text: params.secondaryRegionPrompt, clip: [pass1Model, 1] },
     };
 
-    // Create right region mask (45% to 100%)
-    workflow['125'] = {
+    // Base mask: full canvas (1.0 everywhere)
+    workflow['122'] = {
+      class_type: 'NSWCreateSoftRegionMask',
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 1.0, feather_pct: 0.0 },
+    };
+    // Left region: primary character (0% to 55% with 10% feather)
+    workflow['123'] = {
+      class_type: 'NSWCreateSoftRegionMask',
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 0.55, feather_pct: 0.1 },
+    };
+    // Right region: secondary character (45% to 100% with 10% feather)
+    workflow['124'] = {
       class_type: 'NSWCreateSoftRegionMask',
       inputs: { width: compWidth, height: compHeight, start_pct: 0.45, end_pct: 1.0, feather_pct: 0.1 },
     };
 
-    // Apply mask to secondary character conditioning
-    workflow['126'] = {
-      class_type: 'ConditioningSetMask',
+    // AttentionCouplePPM: patches the model to route attention per-region
+    // CRITICAL: base_cond is REQUIRED (added in commit 6c7d422)
+    // It must be the same conditioning used as KSampler positive
+    workflow['125'] = {
+      class_type: 'AttentionCouplePPM',
       inputs: {
-        conditioning: ['124', 0],
-        mask: ['125', 0],
-        strength: 1.0,
-        set_cond_area: 'default',
+        model: [pass1Model, 0],
+        base_cond: ['110', 0],    // Required since commit 6c7d422
+        base_mask: ['122', 0],
+        cond_1: ['120', 0],
+        mask_1: ['123', 0],
+        cond_2: ['121', 0],
+        mask_2: ['124', 0],
       },
     };
 
-    // --- Combine all conditionings ---
-    // Step 1: Combine shared background + masked primary character
-    workflow['127'] = {
-      class_type: 'ConditioningCombine',
-      inputs: {
-        conditioning_1: ['120', 0],
-        conditioning_2: ['123', 0],
-      },
-    };
-
-    // Step 2: Add masked secondary character
-    workflow['128'] = {
-      class_type: 'ConditioningCombine',
-      inputs: {
-        conditioning_1: ['127', 0],
-        conditioning_2: ['126', 0],
-      },
-    };
-
-    // KSampler uses the combined regional conditioning
+    // KSampler with attention-patched model
     workflow['113'] = {
       class_type: 'KSampler',
       inputs: {
-        model: [pass1Model, 0],       // Unpatched model (no AttentionCouple needed)
-        positive: ['128', 0],          // Combined: shared + left character + right character
+        model: ['125', 0],       // Patched model from AttentionCouplePPM
+        positive: ['110', 0],    // Shared scene conditioning (same as base_cond)
         negative: ['111', 0],
         latent_image: ['112', 0],
         seed: params.seed,
@@ -789,7 +761,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       },
     };
 
-    console.log('[MultiPass] Pass 1: Using ConditioningSetMask + ConditioningCombine for regional prompting (built-in nodes)');
+    console.log('[MultiPass] Pass 1: AttentionCouplePPM — base_cond=110, regions: primary=120/123(left), secondary=121/124(right)');
   } else {
     // --- Standard path (single character or no regional prompts) ---
     workflow['110'] = {
@@ -1235,7 +1207,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   );
   console.log(`[MultiPass] Workflow class_types: ${Array.from(classTypes).sort().join(', ')}`);
   if (useAttentionCouple) {
-    console.log('[MultiPass] WARNING: Workflow uses ConditioningSetMask + ConditioningCombine (built-in) + NSWCreateSoftRegionMask (custom) for regional conditioning');
+    console.log('[MultiPass] WARNING: Workflow uses AttentionCouplePPM + NSWCreateSoftRegionMask — ensure these custom nodes are installed on the worker');
   }
 
   // Validate all node references point to existing nodes
