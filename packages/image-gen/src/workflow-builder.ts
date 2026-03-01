@@ -1194,6 +1194,15 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     },
   };
 
+  // Log all node class_types for debugging custom node availability
+  const classTypes = new Set(
+    Object.values(workflow).map((n: any) => n.class_type as string)
+  );
+  console.log(`[MultiPass] Workflow class_types: ${[...classTypes].sort().join(', ')}`);
+  if (useAttentionCouple) {
+    console.log('[MultiPass] WARNING: Workflow uses AttentionCouplePPM + NSWCreateSoftRegionMask — ensure these custom nodes are installed on the worker');
+  }
+
   // Validate all node references point to existing nodes
   const nodeIds = new Set(Object.keys(workflow));
   for (const [nodeId, node] of Object.entries(workflow)) {
