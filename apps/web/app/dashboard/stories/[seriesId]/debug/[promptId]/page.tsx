@@ -95,6 +95,10 @@ interface DebugData {
     characterLoras?: string[];
     negativeAdditions: string;
   };
+  negativePrompt?: {
+    originalAdditions: string;
+    optimizedAdditions: string | null;
+  };
   passes: DebugPassInfo[];
   intermediateImages: Record<string, string>;
 }
@@ -653,6 +657,15 @@ export default function DebugPage() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* Negative Prompt Optimization */}
+              {debugData.negativePrompt && (
+                <PromptDiff
+                  label="Negative Prompt Additions"
+                  original={debugData.negativePrompt.originalAdditions}
+                  optimized={debugData.negativePrompt.optimizedAdditions || debugData.negativePrompt.originalAdditions}
+                />
               )}
             </div>
           </CollapsibleSection>

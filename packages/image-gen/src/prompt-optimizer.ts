@@ -40,6 +40,8 @@ export interface OptimizationInput {
   mode: "sfw" | "nsfw";
   /** Image type for context */
   imageType: "facebook_sfw" | "website_nsfw_paired" | "website_only" | "portrait";
+  /** Current negative prompt additions. AI may adjust based on scene context. */
+  negativePromptAdditions?: string;
 }
 
 export interface OptimizedPrompts {
@@ -49,6 +51,8 @@ export interface OptimizedPrompts {
   optimizedDecomposed: DecomposedPrompt;
   /** Whether AI optimization was applied (false = fallback to original) */
   wasOptimized: boolean;
+  /** AI-optimized negative prompt additions. When present, replaces the original. */
+  optimizedNegativeAdditions?: string;
   /** Optimization notes for logging/debugging */
   notes: string[];
   /** Time taken in ms */
@@ -121,14 +125,29 @@ CRITICAL RULES for regional prompts:
 - Actions must be clearly assigned to their character's region
 - Keep each region prompt under ~40 tokens for optimal CLIP processing
 
+NEGATIVE PROMPT OPTIMIZATION:
+You will also receive the current negative prompt additions. Analyze them in the context of this specific scene and return an optimized version.
+Rules for negative prompt adjustment:
+- DUAL-CHARACTER scenes: REMOVE any terms that suppress multiple people ("two people", "second person", "couple", "extra person"). These directly prevent the second character from generating. Instead ADD "(three people:1.2), (crowd:1.1), (group photo:1.1)" to prevent unwanted THIRD people.
+- SINGLE-CHARACTER scenes: KEEP terms that suppress extra people. They prevent hallucinated phantom figures.
+- MIXED-GENDER scenes (1 male + 1 female): ADD "(androgynous:1.1), (gender ambiguous:1.1)" to reinforce gender distinction.
+- MALE-ONLY scenes: ADD "(feminine features:1.2), (breasts:1.3), (female body:1.2)" to prevent feminization (common SDXL issue with LoRA cross-contamination).
+- NSFW mode: REMOVE nudity suppression terms ("nude", "naked", "topless", "bare breasts", "exposed nipples", "no clothes", "undressed") since these contradict the intended content.
+- SFW mode: KEEP all nudity suppression terms.
+- ALWAYS KEEP: skin tone protection terms ("asian features", "european features", "light skin", "pale skin", "white skin") — these protect character ethnicity consistency.
+- ALWAYS KEEP: quality negatives ("bad anatomy", "extra limbs", "blurry", etc.)
+- NEVER add terms that contradict the scene description or character actions.
+- Return the COMPLETE optimized additions string, not just the changes.
+
 You will receive JSON with the current decomposed prompts and character metadata. Return JSON with the optimized versions.
 
 OUTPUT FORMAT:
 Return ONLY valid JSON with this structure (no markdown, no code fences):
-{"scenePrompt": "...", "primaryIdentityPrompt": "...", "secondaryIdentityPrompt": "..." or null, "fullPrompt": "...", "sharedScenePrompt": "..." or null, "primaryRegionPrompt": "..." or null, "secondaryRegionPrompt": "..." or null}
+{"scenePrompt": "...", "primaryIdentityPrompt": "...", "secondaryIdentityPrompt": "..." or null, "fullPrompt": "...", "sharedScenePrompt": "..." or null, "primaryRegionPrompt": "..." or null, "secondaryRegionPrompt": "..." or null, "negativePromptAdditions": "..." or null}
 
 For single-character scenes, set all three regional fields to null.
-For dual-character scenes, ALL THREE regional fields are REQUIRED (non-null).`;
+For dual-character scenes, ALL THREE regional fields are REQUIRED (non-null).
+For negativePromptAdditions: return the COMPLETE optimized additions string based on the rules above, or null to keep the original unchanged.`;
 
 // ── Core Functions ──────────────────────────────────────────────
 
@@ -225,7 +244,7 @@ Restructure this for optimal SDXL generation. Keep the exact same visual scene �
 async function optimizeDecomposed(
   decomposed: DecomposedPrompt,
   input: OptimizationInput,
-): Promise<{ optimized: DecomposedPrompt; notes: string[] }> {
+): Promise<{ optimized: DecomposedPrompt; optimizedNegativeAdditions?: string; notes: string[] }> {
   const notes: string[] = [];
   const client = getClient();
 
@@ -253,7 +272,10 @@ ${JSON.stringify(
     2,
   )}
 
-Optimize each component for its specific pass requirements.`;
+Current negative prompt additions:
+${input.negativePromptAdditions || "(none)"}
+
+Optimize each component for its specific pass requirements. Return the JSON.`;
 
   try {
     const response = await client.messages.create({
@@ -280,6 +302,7 @@ Optimize each component for its specific pass requirements.`;
       sharedScenePrompt: string | null;
       primaryRegionPrompt: string | null;
       secondaryRegionPrompt: string | null;
+      negativePromptAdditions: string | null;
     };
 
     // Validate the parsed response has required fields
@@ -317,6 +340,17 @@ Optimize each component for its specific pass requirements.`;
       notes.push('Phase 2 WARNING: Dual-character scene but regional prompts missing from AI response');
     }
 
+    // Negative prompt optimization
+    let optimizedNegativeAdditions: string | undefined;
+    if (parsed.negativePromptAdditions && typeof parsed.negativePromptAdditions === 'string') {
+      optimizedNegativeAdditions = parsed.negativePromptAdditions;
+      if (input.negativePromptAdditions !== optimizedNegativeAdditions) {
+        notes.push('Phase 2: Negative prompt adjusted by AI');
+      } else {
+        notes.push('Phase 2: Negative prompt unchanged');
+      }
+    }
+
     return {
       optimized: {
         scenePrompt: parsed.scenePrompt,
@@ -328,6 +362,7 @@ Optimize each component for its specific pass requirements.`;
         primaryRegionPrompt: parsed.primaryRegionPrompt || undefined,
         secondaryRegionPrompt: parsed.secondaryRegionPrompt || undefined,
       },
+      optimizedNegativeAdditions,
       notes,
     };
   } catch (error) {
@@ -408,6 +443,7 @@ export async function optimizePrompts(
       optimizedFullPrompt: phase1Result.optimized,
       optimizedDecomposed: phase2Result.optimized,
       wasOptimized: true,
+      optimizedNegativeAdditions: phase2Result.optimizedNegativeAdditions,
       notes: allNotes,
       durationMs: Date.now() - startTime,
     };

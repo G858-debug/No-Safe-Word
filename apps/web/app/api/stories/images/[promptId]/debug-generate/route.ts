@@ -245,6 +245,12 @@ export async function POST(
     // Store original decomposed for comparison
     const originalDecomposed = { ...decomposed };
 
+    // 10. Dimensions and resources (select early so negatives can be passed to AI optimizer)
+    const dimensions = selectDimensionsFromPrompt(classification, imgPrompt.image_type as ImageType, hasSecondary, finalPrompt);
+    const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType, hasSecondary);
+    let negativePromptAdditions = resources.negativePromptAdditions;
+    const originalNegativeAdditions = negativePromptAdditions;
+
     if (shouldOptimize(characters, imgPrompt.image_type)) {
       const optimResult = await optimizePrompts(
         {
@@ -253,6 +259,7 @@ export async function POST(
           characters,
           mode,
           imageType: imgPrompt.image_type as 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait',
+          negativePromptAdditions,
         },
         decomposed,
       );
@@ -261,15 +268,16 @@ export async function POST(
         finalPrompt = optimResult.optimizedFullPrompt;
         decomposed = optimResult.optimizedDecomposed;
         optimizationApplied = true;
+        if (optimResult.optimizedNegativeAdditions !== undefined) {
+          negativePromptAdditions = optimResult.optimizedNegativeAdditions;
+          console.log(`[DebugGen][${promptId}] Negative prompt optimized by AI`);
+          console.log(`[DebugGen][${promptId}]   negative: ${negativePromptAdditions.substring(0, 150)}`);
+        }
       }
       optimizationNotes = optimResult.notes;
       optimizationDurationMs = optimResult.durationMs;
       console.log(`[DebugGen][${promptId}] AI optimization: ${optimResult.wasOptimized ? 'applied' : 'skipped'} (${optimResult.durationMs}ms)`);
     }
-
-    // 10. Dimensions and resources
-    const dimensions = selectDimensionsFromPrompt(classification, imgPrompt.image_type as ImageType, hasSecondary, finalPrompt);
-    const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType);
     const modelSelection = selectModel(classification, imgPrompt.image_type as ImageType, {
       contentLevel: classification.contentLevel,
     });
@@ -328,7 +336,7 @@ export async function POST(
       secondaryFacePrompt,
       secondarySeed,
       loras: resources.neutralLoras,
-      negativePromptAdditions: resources.negativePromptAdditions,
+      negativePromptAdditions,
       checkpointName: modelSelection.checkpointName,
       cfg: modelSelection.paramOverrides?.cfg,
       scenePrompt: decomposed.scenePrompt,
@@ -427,7 +435,11 @@ export async function POST(
       resources: {
         loras: resources.neutralLoras.map(l => `${l.filename} (${l.strengthModel})`),
         characterLoras: characterLoras.map(l => `${l.filename} (${l.strengthModel})`),
-        negativeAdditions: resources.negativePromptAdditions,
+        negativeAdditions: negativePromptAdditions,
+      },
+      negativePrompt: {
+        originalAdditions: originalNegativeAdditions,
+        optimizedAdditions: negativePromptAdditions !== originalNegativeAdditions ? negativePromptAdditions : null,
       },
       passes: debugPasses,
       intermediateImages: {} as Record<string, string>,

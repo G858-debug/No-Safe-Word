@@ -82,6 +82,8 @@ export function selectResources(
   promptHint?: string,
   /** Image type — used for SFW clothing preservation negatives */
   imageType?: ImageType,
+  /** Whether the scene has a secondary character (overrides heuristic classifier count) */
+  hasSecondaryCharacter?: boolean,
 ): ResourceSelection {
   const candidates: Array<{ priority: number; lora: SelectedLora }> = [];
   const negativeAdditions: string[] = [];
@@ -257,7 +259,13 @@ export function selectResources(
   }
 
   // Contextual negatives: unprompted accessories, person count, ethnicity drift
-  negativeAdditions.push(...buildContextualNegatives(classification, promptHint));
+  // Override character count if we definitively know from the database (classifier is heuristic
+  // and often detects 1 for dual-character scenes, which causes "two people" to be negated)
+  const actualCharacterCount = hasSecondaryCharacter ? 2 : classification.characterCount;
+  const adjustedClassification = actualCharacterCount !== classification.characterCount
+    ? { ...classification, characterCount: actualCharacterCount as 0 | 1 | 2 }
+    : classification;
+  negativeAdditions.push(...buildContextualNegatives(adjustedClassification, promptHint));
 
   // Split LoRAs by gender category for multi-pass per-character inpainting
   const neutralLoras = selectedLoras.filter(l => {

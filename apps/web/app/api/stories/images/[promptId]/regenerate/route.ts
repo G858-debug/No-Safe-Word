@@ -351,6 +351,10 @@ export async function POST(
       });
     }
 
+    // Select resources early so negative additions can be passed to the AI optimizer
+    const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType, hasSecondary);
+    let negativePromptAdditions = resources.negativePromptAdditions;
+
     if (shouldOptimize(characters, imgPrompt.image_type) && decomposed) {
       const optimized = await optimizePrompts(
         {
@@ -359,12 +363,18 @@ export async function POST(
           characters,
           mode,
           imageType: imgPrompt.image_type as 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait',
+          negativePromptAdditions,
         },
         decomposed,
       );
       if (optimized.wasOptimized) {
         finalPrompt = optimized.optimizedFullPrompt;
         decomposed = optimized.optimizedDecomposed;
+        if (optimized.optimizedNegativeAdditions !== undefined) {
+          negativePromptAdditions = optimized.optimizedNegativeAdditions;
+          console.log(`[StoryImage][${promptId}] Negative prompt optimized by AI`);
+          console.log(`[StoryImage][${promptId}]   negative: ${negativePromptAdditions.substring(0, 150)}`);
+        }
         console.log(`[StoryImage][${promptId}] AI prompt optimization applied (${optimized.durationMs}ms): ${optimized.notes.join('; ')}`);
         const d = optimized.optimizedDecomposed;
         console.log(`[Optimizer][${promptId}] Phase1 fullPrompt:`);
@@ -391,7 +401,6 @@ export async function POST(
     const width = dimensions.width;
     const height = dimensions.height;
     console.log(`[StoryImage] Dimensions: ${dimensions.name} (${width}x${height})`);
-    const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType);
 
     console.log(`[StoryImage][${promptId}] Scene classification:`, JSON.stringify(classification));
     console.log(`[StoryImage][${promptId}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
@@ -450,7 +459,7 @@ export async function POST(
       secondaryFacePrompt,
       secondarySeed,
       loras: workflowType === 'multi-pass' ? resources.neutralLoras : resources.loras,
-      negativePromptAdditions: resources.negativePromptAdditions,
+      negativePromptAdditions,
       checkpointName: modelSelection.checkpointName,
       cfg: modelSelection.paramOverrides?.cfg,
       hiresFixEnabled: resources.paramOverrides?.hiresFixEnabled ?? true,
