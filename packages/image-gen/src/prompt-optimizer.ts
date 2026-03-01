@@ -135,8 +135,8 @@ CRITICAL RULES for regional prompts:
 - Gender tags are MANDATORY at the start of each region prompt
 - Shared scene prompt must have ZERO character-specific content
 - Actions must be clearly assigned to their character's region
-- CLOTHING ISOLATION: Each character's clothing MUST only appear in THEIR region prompt. Never let one character's clothing terms leak into the other's region. If the man wears overalls, 'overalls' must ONLY be in his region. If the woman wears an off-shoulder top, that must ONLY be in her region. Add (NOT wearing [other character's clothing]:1.1) if clothing bleed is likely.
-- BODY TYPE: When character data describes body shape (curvaceous, large breasts, round hips, muscular build), include these in the character's region prompt with weight 1.2: (curvaceous body:1.2), (large breasts:1.2), (wide hips:1.2). Female characters should have their body type emphasized to ensure it renders.
+- CLOTHING ISOLATION: Each character's clothing MUST only appear in THEIR region prompt. Never let one character's clothing terms leak into the other's region. If the man wears overalls, 'overalls' must ONLY appear in his region prompt. If the woman wears an off-shoulder top, that must ONLY appear in her region prompt. NEVER use negation like 'NOT wearing X' in any prompt — SDXL interprets negation as emphasis and will render the unwanted item. Simply OMIT the other character's clothing entirely.
+- BODY TYPE (MANDATORY): Female characters MUST have body shape descriptors in their region prompt. Pull these from the character's identity tags or structured data. Include with weight 1.2-1.3: (curvaceous body:1.2), (large breasts:1.2), (large butt:1.2), (wide hips:1.2), (defined waist:1.2). Male characters include (muscular build:1.2), (broad shoulders:1.2). These go IMMEDIATELY after the gender tag, before pose/action.
 - Keep each region prompt under ~40 tokens for optimal CLIP processing
 
 LIGHTING AND TIME-OF-DAY EMPHASIS:
