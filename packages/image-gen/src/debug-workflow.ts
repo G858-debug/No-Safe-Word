@@ -307,5 +307,5 @@ export function injectDebugSaveNodes(
 
   // Pass 7 (final cleanup) output: node 705 is VAEDecode — already decoded
   // The main SaveImage (node 600) already saves this, but we add a debug-prefixed copy
-  addDebugSave(814, "705", false, "pass7_cleanup_final");
+  addDebugSave(814, "705", false, "pass7_cleanup");
 }

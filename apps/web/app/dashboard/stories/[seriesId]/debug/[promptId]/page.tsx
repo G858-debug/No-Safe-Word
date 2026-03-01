@@ -24,6 +24,7 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  X,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -195,10 +196,12 @@ function PassCard({
   passInfo,
   imageUrl,
   isLoading,
+  onClickImage,
 }: {
   passInfo: DebugPassInfo;
   imageUrl?: string;
   isLoading: boolean;
+  onClickImage?: (url: string, label: string) => void;
 }) {
   const [showPrompt, setShowPrompt] = useState(false);
 
@@ -215,7 +218,8 @@ function PassCard({
           <img
             src={imageUrl}
             alt={`Pass ${passInfo.pass}: ${passInfo.name}`}
-            className="h-full w-full object-contain"
+            className="h-full w-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
+            onClick={() => onClickImage?.(imageUrl, `Pass ${passInfo.pass}: ${passInfo.name}`)}
           />
         ) : (
           <div className="flex flex-col items-center gap-2 text-zinc-700">
@@ -302,6 +306,8 @@ export default function DebugPage() {
   const [error, setError] = useState<string | null>(null);
   // Store images from polling response directly (avoids DB round-trip for large base64 data)
   const [polledImages, setPolledImages] = useState<Record<string, string>>({});
+  // Lightbox state for enlarged image view
+  const [lightbox, setLightbox] = useState<{ url: string; label: string } | null>(null);
 
   // Fetch prompt data (including debug_data if available)
   const fetchPromptData = useCallback(async () => {
@@ -453,6 +459,16 @@ export default function DebugPage() {
       if (pollInterval) clearInterval(pollInterval);
     };
   }, [pollInterval]);
+
+  // Close lightbox on Escape
+  useEffect(() => {
+    if (!lightbox) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [lightbox]);
 
   const debugData = promptData?.debug_data;
 
@@ -655,6 +671,7 @@ export default function DebugPage() {
                   passInfo={passInfo}
                   imageUrl={polledImages[passInfo.filenamePrefix] || debugData.intermediateImages[passInfo.filenamePrefix]}
                   isLoading={generating}
+                  onClickImage={(url, label) => setLightbox({ url, label })}
                 />
               ))}
             </div>
@@ -775,6 +792,30 @@ export default function DebugPage() {
           <p className="mt-1 text-xs text-zinc-600">
             Click &quot;Generate Debug&quot; to run the multi-pass workflow with intermediate image captures.
           </p>
+        </div>
+      )}
+
+      {/* Lightbox overlay */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            onClick={() => setLightbox(null)}
+            className="absolute right-4 top-4 rounded-full bg-zinc-800/80 p-2 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-zinc-900/80 px-4 py-1.5 text-sm text-zinc-300 backdrop-blur-sm">
+            {lightbox.label}
+          </div>
+          <img
+            src={lightbox.url}
+            alt={lightbox.label}
+            className="max-h-[90vh] max-w-[90vw] object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>
