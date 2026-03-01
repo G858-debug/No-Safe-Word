@@ -845,7 +845,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       cfg: 8.5,
       sampler_name: 'dpmpp_2m',
       scheduler: 'karras',
-      denoise: 0.42,
+      denoise: 0.55,
     },
   };
 
