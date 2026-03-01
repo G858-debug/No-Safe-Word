@@ -685,10 +685,12 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   if (useAttentionCouple) {
     // --- AttentionCouplePPM path (dual-character) ---
-    // Shared scene/background conditioning (full canvas — also used as base_cond)
+    // Full scene prompt as base_cond — includes "(1man, 1woman:1.3)" and both
+    // character descriptions so the global composition establishes two people.
+    // Regional prompts (nodes 120, 121) then refine which character goes where.
     workflow['110'] = {
       class_type: 'CLIPTextEncode',
-      inputs: { text: params.sharedScenePrompt, clip: [pass1Model, 1] },
+      inputs: { text: params.scenePrompt, clip: [pass1Model, 1] },
     };
     // Negative conditioning
     workflow['111'] = {
@@ -761,7 +763,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       },
     };
 
-    console.log('[MultiPass] Pass 1: AttentionCouplePPM — base_cond=110, regions: primary=120/123(left), secondary=121/124(right)');
+    console.log('[MultiPass] Pass 1: AttentionCouplePPM — base_cond=110(scenePrompt), regions: primary=120/123(left), secondary=121/124(right)');
   } else {
     // --- Standard path (single character or no regional prompts) ---
     workflow['110'] = {
