@@ -212,8 +212,13 @@ async function main() {
   // ── INTERMEDIATE IMAGES ──
   if (debug.intermediateImages && Object.keys(debug.intermediateImages).length) {
     section("INTERMEDIATE IMAGES");
-    for (const [key, url] of Object.entries(debug.intermediateImages)) {
-      console.log(`  ${key}: ${url}`);
+    for (const [key, val] of Object.entries(debug.intermediateImages)) {
+      const url = val as string;
+      if (url.startsWith("data:")) {
+        console.log(`  ${key}: [base64, ${Math.round(url.length / 1024)}KB]`);
+      } else {
+        console.log(`  ${key}: ${url}`);
+      }
     }
   }
 }
