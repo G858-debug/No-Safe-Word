@@ -352,6 +352,8 @@ export async function POST(
       secondaryGenderLoras,
       primaryGender,
       secondaryGender,
+      hasDualCharacter: hasSecondary,
+      fallbackSecondaryIdentityPrompt: originalDecomposed.secondaryIdentityPrompt,
     });
 
     // 14. Inject debug SaveImage nodes

@@ -572,6 +572,14 @@ interface MultiPassWorkflowParams {
   primaryRegionPrompt?: string;
   /** Secondary character's region prompt — gender, pose, action, clothing. */
   secondaryRegionPrompt?: string;
+
+  /** Explicit dual-character flag derived from character data (secondary_character_id presence).
+   *  When provided, this overrides the !!secondaryIdentityPrompt derivation so a null optimizer
+   *  response cannot silently kill dual-character mode. */
+  hasDualCharacter?: boolean;
+  /** Pre-optimizer decomposed secondary identity prompt. Used as fallback when the AI optimizer
+   *  returns null for secondaryIdentityPrompt but hasDualCharacter is true. */
+  fallbackSecondaryIdentityPrompt?: string;
 }
 
 /**
@@ -640,7 +648,23 @@ function buildPassLoraChain(
 export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<string, any> {
   const ckpt = params.checkpointName || DEFAULT_MODEL;
   const prefix = params.filenamePrefix || 'multipass';
-  const hasDualCharacter = !!params.secondaryIdentityPrompt;
+
+  // Derive hasDualCharacter from explicit flag (source of truth: character data),
+  // falling back to secondaryIdentityPrompt presence for backward compatibility.
+  const hasDualCharacter = params.hasDualCharacter ?? !!params.secondaryIdentityPrompt;
+
+  // Guard: if caller says dual-character but optimizer returned null secondaryIdentityPrompt,
+  // fall back to the pre-optimizer decomposed identity prompt.
+  if (hasDualCharacter && !params.secondaryIdentityPrompt) {
+    if (params.fallbackSecondaryIdentityPrompt) {
+      console.warn('[WorkflowBuilder] WARNING: hasDualCharacter=true but secondaryIdentityPrompt is null — optimizer may have dropped secondary character. Falling back to decomposed identity prompt.');
+      params.secondaryIdentityPrompt = params.fallbackSecondaryIdentityPrompt;
+    } else {
+      console.warn('[WorkflowBuilder] WARNING: hasDualCharacter=true but secondaryIdentityPrompt is null and no fallback available — dual-character mode will be incomplete.');
+    }
+  }
+
+  console.log(`[WorkflowBuilder] hasDualCharacter=${hasDualCharacter}, useAttentionCouple=${!!(!!params.sharedScenePrompt && !!params.primaryRegionPrompt && !!params.secondaryRegionPrompt)}, hasSharedScene=${!!params.sharedScenePrompt}, hasRegions=${!!params.primaryRegionPrompt && !!params.secondaryRegionPrompt}`);
 
   const negBase = hasDualCharacter
     ? (params.negativePrompt || DEFAULT_NEGATIVE_PROMPT_DUAL)
@@ -1325,6 +1349,10 @@ export function buildWorkflow(config: {
   primaryRegionPrompt?: string;
   /** Secondary character's region prompt — gender, pose, action, clothing */
   secondaryRegionPrompt?: string;
+  /** Explicit dual-character flag from character data (overrides secondaryIdentityPrompt derivation) */
+  hasDualCharacter?: boolean;
+  /** Pre-optimizer fallback for secondary identity prompt */
+  fallbackSecondaryIdentityPrompt?: string;
 }): Record<string, any> {
   switch (config.type) {
     case 'portrait':
@@ -1424,6 +1452,8 @@ export function buildWorkflow(config: {
         sharedScenePrompt: config.sharedScenePrompt,
         primaryRegionPrompt: config.primaryRegionPrompt,
         secondaryRegionPrompt: config.secondaryRegionPrompt,
+        hasDualCharacter: config.hasDualCharacter,
+        fallbackSecondaryIdentityPrompt: config.fallbackSecondaryIdentityPrompt,
       });
 
     default:

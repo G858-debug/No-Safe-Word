@@ -214,8 +214,10 @@ export async function POST(
 
     // Multi-pass prompt decomposition
     let decomposed: DecomposedPrompt | undefined;
+    let originalDecomposed: DecomposedPrompt | undefined;
     if (workflowType === 'multi-pass') {
       decomposed = decomposePrompt(finalPrompt, approvedCharacterTags, secondaryCharacterTags);
+      originalDecomposed = { ...decomposed };
     }
 
     // AI prompt optimization
@@ -371,6 +373,8 @@ export async function POST(
       secondaryGenderLoras,
       primaryGender,
       secondaryGender,
+      hasDualCharacter: hasSecondary,
+      fallbackSecondaryIdentityPrompt: originalDecomposed?.secondaryIdentityPrompt,
     });
 
     const { jobId: runpodJobId } = await submitRunPodJob(workflow, refImages.length > 0 ? refImages : undefined, resources.characterLoraDownloads);

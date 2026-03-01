@@ -431,8 +431,10 @@ export async function POST(
 
         // Multi-pass prompt decomposition
         let decomposed: DecomposedPrompt | undefined;
+        let originalDecomposed: DecomposedPrompt | undefined;
         if (workflowType === 'multi-pass') {
           decomposed = decomposePrompt(finalPrompt, primaryTags, secondaryTags);
+          originalDecomposed = { ...decomposed };
           console.log(`[StoryImage][${imgPrompt.id}] Multi-pass decomposition:`);
           console.log(`[StoryImage][${imgPrompt.id}]   scenePrompt: ${decomposed.scenePrompt.substring(0, 150)}`);
           console.log(`[StoryImage][${imgPrompt.id}]   primaryIdentity: ${decomposed.primaryIdentityPrompt.substring(0, 100)}`);
@@ -599,6 +601,8 @@ export async function POST(
           secondaryGenderLoras,
           primaryGender,
           secondaryGender,
+          hasDualCharacter: hasSecondary,
+          fallbackSecondaryIdentityPrompt: originalDecomposed?.secondaryIdentityPrompt,
         });
 
         // ---- Workflow structure validation logging ----
