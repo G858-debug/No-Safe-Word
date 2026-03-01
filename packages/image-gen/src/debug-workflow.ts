@@ -75,9 +75,9 @@ export function buildDebugPassInfo(config: {
 
   passes.push({
     pass: 1,
-    name: useAttentionCouple ? "Composition (Attention Couple)" : "Composition",
+    name: useAttentionCouple ? "Composition (Regional Conditioning)" : "Composition",
     description: useAttentionCouple
-      ? "Scene layout at reduced resolution with AttentionCouplePPM regional conditioning. Shared background applied to full canvas. Primary character prompt routed to left ~55% region. Secondary character prompt routed to right ~55% region (10% overlap for natural blending). Detail-tweaker LoRA only."
+      ? "Scene layout at reduced resolution with ConditioningSetMask regional conditioning. Shared background applied to full canvas. Primary character prompt masked to left ~55% region. Secondary character prompt masked to right ~55% region (10% overlap for natural blending). Detail-tweaker LoRA only."
       : "Scene layout at reduced resolution. Only detail-tweaker LoRA. No character identity — just spatial layout, poses, and setting.",
     prompt: useAttentionCouple
       ? `[SHARED] ${config.sharedScenePrompt}\n[LEFT REGION] ${config.primaryRegionPrompt}\n[RIGHT REGION] ${config.secondaryRegionPrompt}`

@@ -10,9 +10,9 @@ export interface DecomposedPrompt {
   /** Pass 3: Full assembled prompt (same as what's already being used) */
   fullPrompt: string;
 
-  // --- Regional Prompting (Attention Couple) ---
+  // --- Regional Prompting (ConditioningSetMask) ---
   // These are populated by the AI optimizer for dual-character scenes.
-  // When present, Pass 1 uses AttentionCouplePPM instead of single conditioning.
+  // When present, Pass 1 uses ConditioningSetMask + ConditioningCombine for regional conditioning.
 
   /** Shared background: setting, lighting, atmosphere, camera angle — no character-specific content */
   sharedScenePrompt?: string;
