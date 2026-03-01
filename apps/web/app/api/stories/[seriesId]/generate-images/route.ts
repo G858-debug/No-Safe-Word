@@ -307,7 +307,7 @@ export async function POST(
         // Composition intelligence: augment dual-character scenes with spatial cues
         let scenePromptForBuild = imgPrompt.prompt;
         if (hasSecondary) {
-          const preClassification = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType);
+          const preClassification = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType, 2);
           const compositionResult = augmentComposition(imgPrompt.prompt, preClassification);
           if (compositionResult.wasAugmented) {
             scenePromptForBuild = compositionResult.augmentedPrompt;
@@ -426,7 +426,8 @@ export async function POST(
         let finalPrompt = promptOverride || imgPrompt.prompt;
 
         // Scene intelligence: classify scene for dimensions and resources
-        const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+        const knownCharCount = hasSecondary ? 2 : 1;
+        const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType, knownCharCount);
 
         // Multi-pass prompt decomposition
         let decomposed: DecomposedPrompt | undefined;

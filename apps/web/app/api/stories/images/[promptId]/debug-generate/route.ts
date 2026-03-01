@@ -214,7 +214,8 @@ export async function POST(
     let finalPrompt = assembledPrompt;
 
     // 7. Scene classification
-    const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+    const knownCharCount = imgPrompt.secondary_character_id ? 2 : 1;
+    const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType, knownCharCount);
 
     // 8. Decompose the prompt
     let decomposed = decomposePrompt(finalPrompt, approvedCharacterTags, secondaryCharacterTags);

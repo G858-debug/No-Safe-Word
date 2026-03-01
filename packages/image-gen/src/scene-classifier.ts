@@ -235,6 +235,7 @@ function countCharacterReferences(prompt: string): 0 | 1 | 2 {
 export function classifyScene(
   prompt: string,
   imageType: ImageType,
+  knownCharacterCount?: number,
 ): SceneClassification {
   const lower = prompt.toLowerCase();
 
@@ -281,8 +282,9 @@ export function classifyScene(
     contentLevel = 'suggestive';
   }
 
-  // Character count
-  const characterCount = countCharacterReferences(lower);
+  // Character count — prefer known count from character metadata over heuristic text parsing
+  const parsedCount = countCharacterReferences(lower);
+  const characterCount = Math.max(parsedCount, knownCharacterCount ?? 0) as 0 | 1 | 2;
 
   // Hands visible — portraits are head-and-shoulders shots where hands may appear
   const hasHandsVisible = imageType === 'portrait' || hasKeyword(lower, HAND_KEYWORDS);

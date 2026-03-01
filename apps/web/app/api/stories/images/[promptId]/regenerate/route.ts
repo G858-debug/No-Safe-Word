@@ -318,7 +318,8 @@ export async function POST(
     let finalPrompt = promptOverride || imgPrompt.prompt;
 
     // Scene intelligence: classify scene for dimensions and resources
-    const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType);
+    const knownCharCount = imgPrompt.secondary_character_id ? 2 : 1;
+    const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType, knownCharCount);
 
     // Multi-pass prompt decomposition
     let decomposed: DecomposedPrompt | undefined;
