@@ -81,6 +81,13 @@ SDXL PROMPT RULES:
 9. Keep lighting, composition, and camera angle instructions intact but convert to tag format
 10. Do NOT add quality tags (photorealistic, masterpiece, 8k) — those are handled separately
 
+POSE AND ACTION EMPHASIS:
+- When the original prompt describes specific character actions or poses, preserve them with emphasis weights (1.2-1.4)
+- Physical interactions with objects are especially important: (leaning over:1.2), (hand on:1.2), (pressed against:1.2)
+- Facial expressions that convey emotion: (biting lower lip:1.2), (eyes closed:1.2), (looking up:1.3)
+- Clothing states that convey sensuality: (unzipped:1.2), (slipped off shoulder:1.2), (unbuttoned:1.2)
+- These weighted action details should appear early in the prompt, before setting/atmosphere descriptions
+
 OUTPUT FORMAT:
 Return ONLY the optimized prompt text. No explanations, no markdown, no quotes. Just the prompt.`;
 
@@ -124,6 +131,16 @@ CRITICAL RULES for regional prompts:
 - Shared scene prompt must have ZERO character-specific content
 - Actions must be clearly assigned to their character's region
 - Keep each region prompt under ~40 tokens for optimal CLIP processing
+
+ACTION AND POSE PRESERVATION (CRITICAL):
+- Identify all specific action verbs, poses, body positions, and facial expressions in the original prompt
+- These MUST be preserved with emphasis weights in BOTH the scenePrompt AND the relevant regional prompts
+- Apply weight 1.2-1.4 to specific actions: (leaning over car engine:1.3), (forearm flexed on engine block:1.2), (overalls unzipped to waist revealing white t-shirt:1.3)
+- Apply weight 1.2-1.3 to specific expressions: (biting lower lip:1.2), (looking up with calm knowing eyes:1.3)
+- Apply weight 1.2 to specific clothing states: (overalls unzipped to waist:1.2), (off-shoulder top slipped down:1.2)
+- NEVER simplify actions to generic poses. "leaning over car engine with forearm flexed" must NOT become just "standing near car"
+- Props and interactive elements get weight 1.2: (open car hood:1.2), (engine visible:1.2)
+- In regional prompts, each character's specific actions MUST be in their region, not just their gender tag
 
 NEGATIVE PROMPT OPTIMIZATION:
 You will also receive the current negative prompt additions. Analyze them in the context of this specific scene and return an optimized version.
