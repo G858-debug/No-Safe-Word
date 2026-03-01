@@ -64,8 +64,8 @@ export function buildDebugPassInfo(config: {
 }): DebugPassInfo[] {
   const passes: DebugPassInfo[] = [];
   const prefix = config.filenamePrefix || "debug";
-  const compWidth = Math.round(config.width / 1.6);
-  const compHeight = Math.round(config.height / 1.6);
+  const compWidth = Math.round(config.width * 0.75);
+  const compHeight = Math.round(config.height * 0.75);
 
   // Pass 1 — Composition
   const useAttentionCouple = config.hasDualCharacter

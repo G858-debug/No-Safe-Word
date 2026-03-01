@@ -72,7 +72,7 @@ const PHASE1_SYSTEM = `You are an expert at optimizing text prompts for SDXL (St
 SDXL PROMPT RULES:
 1. CLIP processes ~77 tokens with decreasing attention. Front-load the most important elements.
 2. Use comma-separated tags, not prose sentences. Convert "A man leaning over a car engine" to "man leaning over car engine, forearm flexed on engine block"
-3. For dual-character scenes, ALWAYS start with explicit gender count: "(1man, 1woman:1.3)" or "(2women:1.3)"
+3. For dual-character scenes, ALWAYS start with explicit gender count: "(1man, 1woman:1.5)" or "(2women:1.5)"
 4. Each character's actions must be CLEARLY associated with their gender tag. Don't let actions float ambiguously.
 5. Use emphasis weights sparingly: (important element:1.2-1.4) for critical features
 6. Spatial positioning should be explicit: "man foreground left", "woman right side"
@@ -91,7 +91,7 @@ POSE AND ACTION EMPHASIS:
 LIGHTING AND TIME-OF-DAY EMPHASIS:
 - When the original prompt specifies a time of day (night, evening, dawn, golden hour), apply weight 1.2-1.3 to reinforce it: (night scene:1.3), (dark sky:1.2)
 - When a specific light source is named, apply weight 1.3: (single amber streetlight:1.3), (candlelight:1.3), (neon glow:1.3)
-- Lighting descriptors should appear early in the prompt, but AFTER character count and gender indicators like (1man, 1woman:1.3). Character count must always be the first weighted element.
+- Lighting descriptors should appear early in the prompt, but AFTER character count and gender indicators like (1man, 1woman:1.5). Character count must always be the first weighted element.
 
 OUTPUT FORMAT:
 Return ONLY the optimized prompt text. No explanations, no markdown, no quotes. Just the prompt.`;
@@ -102,7 +102,7 @@ const PHASE2_SYSTEM = `You are an expert at optimizing decomposed prompts for a 
 
 PASS 1 — SCENE COMPOSITION (scenePrompt):
 - Purpose: Establish spatial layout, poses, and setting at LOW resolution
-- MUST start with gender count tags: "(1man, 1woman:1.3)" for mixed-gender scenes
+- MUST start with gender count tags: "(1man, 1woman:1.5)" for mixed-gender scenes
 - NO character identity details (skin tone, hair style, eye color) — those come later
 - Focus on: actions, poses, spatial positions, setting, lighting, camera angle, atmosphere
 - Use clear subject-action association: "man foreground leaning over engine" not just "leaning over engine"
@@ -126,9 +126,9 @@ When the scene has two characters, you MUST also produce three regional prompt c
 
 - sharedScenePrompt: ONLY the background, setting, lighting, atmosphere, camera angle, composition. NO character descriptions, NO actions, NO clothing, NO body parts. This is what the entire canvas shares.
 
-- primaryRegionPrompt: The PRIMARY character's gender tag, body type, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.3), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
+- primaryRegionPrompt: The PRIMARY character's gender tag, body type, pose, action, clothing, and spatial position. Start with "(1[gender]:1.4)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.4), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
 
-- secondaryRegionPrompt: The SECONDARY character's body type, gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.3), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man, right side"
+- secondaryRegionPrompt: The SECONDARY character's body type, gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.4)". Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.4), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man, right side"
 
 CRITICAL RULES for regional prompts:
 - Each region prompt must be self-contained — no references to the other character
@@ -220,8 +220,8 @@ async function optimizeFullPrompt(
 CHARACTERS IN SCENE:
 ${characterDesc}
 
-${hasMixedGender ? "CRITICAL: This is a MIXED-GENDER dual-character scene. You MUST start with (1man, 1woman:1.3) and clearly associate each character's actions with their gender." : ""}
-${isDualCharacter && !hasMixedGender ? `CRITICAL: This is a dual-character scene with ${input.characters[0].gender === "female" ? "two women" : "two men"}. Start with (2${input.characters[0].gender === "female" ? "women" : "men"}:1.3).` : ""}
+${hasMixedGender ? "CRITICAL: This is a MIXED-GENDER dual-character scene. You MUST start with (1man, 1woman:1.5) and clearly associate each character's actions with their gender." : ""}
+${isDualCharacter && !hasMixedGender ? `CRITICAL: This is a dual-character scene with ${input.characters[0].gender === "female" ? "two women" : "two men"}. Start with (2${input.characters[0].gender === "female" ? "women" : "men"}:1.5).` : ""}
 
 MODE: ${input.mode.toUpperCase()}
 IMAGE TYPE: ${input.imageType}
@@ -255,7 +255,7 @@ Restructure this for optimal SDXL generation. Keep the exact same visual scene �
       notes.push(
         "Phase 1 WARNING: AI response missing gender count tags, prepending",
       );
-      return { optimized: `(1man, 1woman:1.3), ${text}`, notes };
+      return { optimized: `(1man, 1woman:1.5), ${text}`, notes };
     }
 
     return { optimized: text, notes };

@@ -646,9 +646,9 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     : (params.negativePrompt || DEFAULT_NEGATIVE_PROMPT);
   const negFull = buildNeg(negBase, params.negativePromptAdditions);
 
-  // Composition resolution: reduced for fast layout generation
-  const compWidth = Math.round(params.width / 1.6);
-  const compHeight = Math.round(params.height / 1.6);
+  // Composition resolution: 0.75x target for better dual-figure establishment
+  const compWidth = Math.round(params.width * 0.75);
+  const compHeight = Math.round(params.height * 0.75);
 
   const workflow: Record<string, any> = {};
 
