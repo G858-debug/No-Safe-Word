@@ -358,7 +358,7 @@ export async function POST(
     injectDebugSaveNodes(workflow, filenamePrefix, hasSecondary);
 
     // 15. Build debug pass info metadata
-    const debugPasses = buildDebugPassInfo({
+    const debugMetadata = buildDebugPassInfo({
       scenePrompt: decomposed.scenePrompt,
       primaryIdentityPrompt: decomposed.primaryIdentityPrompt,
       secondaryIdentityPrompt: decomposed.secondaryIdentityPrompt,
@@ -374,6 +374,8 @@ export async function POST(
       primaryGenderLoras,
       secondaryGenderLoras,
       hasDualCharacter: hasSecondary,
+      primaryGender: primaryGender as 'male' | 'female' | undefined,
+      secondaryGender,
       sharedScenePrompt: decomposed.sharedScenePrompt,
       primaryRegionPrompt: decomposed.primaryRegionPrompt,
       secondaryRegionPrompt: decomposed.secondaryRegionPrompt,
@@ -442,7 +444,8 @@ export async function POST(
         originalAdditions: originalNegativeAdditions,
         optimizedAdditions: negativePromptAdditions !== originalNegativeAdditions ? negativePromptAdditions : null,
       },
-      passes: debugPasses,
+      passes: debugMetadata.passes,
+      pass1Composition: debugMetadata.pass1Composition || null,
       intermediateImages: {} as Record<string, string>,
     };
 
@@ -489,11 +492,11 @@ export async function POST(
         .eq("id", promptId);
     }
 
-    console.log(`[DebugGen][${promptId}] Submitted debug job ${jobId} with ${debugPasses.length} debug passes`);
+    console.log(`[DebugGen][${promptId}] Submitted debug job ${jobId} with ${debugMetadata.passes.length} debug passes`);
 
     return NextResponse.json({
       jobId: `runpod-${jobId}`,
-      debugPasses: debugPasses.length,
+      debugPasses: debugMetadata.passes.length,
       optimizationApplied,
       optimizationNotes,
     });

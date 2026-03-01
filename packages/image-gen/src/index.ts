@@ -35,7 +35,7 @@ export type { ModelSelection, ModelSelectionOptions } from './model-selector';
 
 
 // Prompt decomposition for multi-pass workflow
-export { decomposePrompt } from './prompt-decomposer';
+export { decomposePrompt, deduplicateWeightedTokens } from './prompt-decomposer';
 export type { DecomposedPrompt } from './prompt-decomposer';
 
 // Composition intelligence
@@ -48,7 +48,11 @@ export type { OptimizationInput, OptimizedPrompts, CharacterContext } from './pr
 
 // Debug mode for multi-pass workflow
 export { buildDebugPassInfo, injectDebugSaveNodes } from './debug-workflow';
-export type { DebugPassInfo } from './debug-workflow';
+export type { DebugPassInfo, Pass1CompositionDebug, DebugMetadata } from './debug-workflow';
+
+// Post-hoc person count validation for dual-character scenes
+export { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from './person-validator';
+export type { PersonValidationResult } from './person-validator';
 
 // Character LoRA pipeline — server-only, import directly:
 //   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'

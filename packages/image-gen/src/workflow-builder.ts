@@ -1,4 +1,5 @@
 import { DEFAULT_MODEL } from './model-registry';
+import { deduplicateWeightedTokens } from './prompt-decomposer';
 
 type WorkflowType = 'portrait' | 'single-character' | 'dual-character' | 'multi-pass';
 
@@ -646,9 +647,16 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     : (params.negativePrompt || DEFAULT_NEGATIVE_PROMPT);
   const negFull = buildNeg(negBase, params.negativePromptAdditions);
 
-  // Composition resolution: 0.75x target for better dual-figure establishment
-  const compWidth = Math.round(params.width * 0.75);
-  const compHeight = Math.round(params.height * 0.75);
+  // Composition resolution — snapped to multiples of 8 for SDXL compatibility
+  // Dual-character: ~79% width / ~77% height → 960×640 for 1216×832 target
+  //   More canvas per figure helps SDXL establish two distinct identities
+  // Single-character: 62.5% (1/1.6) → 760×520 — adequate for one figure
+  const compWidth = hasDualCharacter
+    ? Math.round(params.width * 0.79 / 8) * 8
+    : Math.round(params.width / 1.6);
+  const compHeight = hasDualCharacter
+    ? Math.round(params.height * 0.77 / 8) * 8
+    : Math.round(params.height / 1.6);
 
   const workflow: Record<string, any> = {};
 
@@ -685,12 +693,12 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   if (useAttentionCouple) {
     // --- AttentionCouplePPM path (dual-character) ---
-    // Full scene prompt as base_cond — includes "(1man, 1woman:1.3)" and both
-    // character descriptions so the global composition establishes two people.
-    // Regional prompts (nodes 120, 121) then refine which character goes where.
+    // base_cond uses sharedScenePrompt: ONLY environment, lighting, camera angle.
+    // Character-specific content (actions, clothing, poses) lives exclusively in
+    // regional prompts (nodes 120, 121) to prevent cross-contamination.
     workflow['110'] = {
       class_type: 'CLIPTextEncode',
-      inputs: { text: params.scenePrompt, clip: [pass1Model, 1] },
+      inputs: { text: params.sharedScenePrompt!, clip: [pass1Model, 1] },
     };
     // Negative conditioning
     workflow['111'] = {
@@ -755,15 +763,15 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
         negative: ['111', 0],
         latent_image: ['112', 0],
         seed: params.seed,
-        steps: 20,
-        cfg: 11,
+        steps: 28,
+        cfg: 7.5,
         sampler_name: 'dpmpp_2m',
         scheduler: 'karras',
         denoise: 1.0,
       },
     };
 
-    console.log('[MultiPass] Pass 1: AttentionCouplePPM — base_cond=110(scenePrompt), regions: primary=120/123(left), secondary=121/124(right)');
+    console.log('[MultiPass] Pass 1: AttentionCouplePPM — base_cond=110(sharedScenePrompt), regions: primary=120/123(left), secondary=121/124(right)');
   } else {
     // --- Standard path (single character or no regional prompts) ---
     workflow['110'] = {
@@ -795,6 +803,23 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
     };
   }
 
+  // --- Pass 1 debug save (dual-character only) ---
+  // Decode and save the Pass 1 composition so we can inspect whether two
+  // distinct figures were established before downstream passes run.
+  if (hasDualCharacter) {
+    workflow['130'] = {
+      class_type: 'VAEDecode',
+      inputs: { samples: ['113', 0], vae: [CKPT_NODE, 2] },
+    };
+    workflow['131'] = {
+      class_type: 'SaveImage',
+      inputs: {
+        images: ['130', 0],
+        filename_prefix: `${prefix}_debug_pass1`,
+      },
+    };
+  }
+
   // =========================================================================
   // PASS 2 — CHARACTER IDENTITY
   // Upscale to target res, apply ONLY the PRIMARY character LoRA.
@@ -817,10 +842,22 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
 
   let pass2PositiveText: string;
   if (hasDualCharacter) {
-    // Only embed primary character identity in Pass 2.
-    // Secondary character is described generically here to reserve spatial
-    // placement; their LoRA activates later in Pass 4b/5b.
-    pass2PositiveText = `${params.primaryIdentityPrompt}, ${params.scenePrompt}, two people in scene`;
+    // Dual-character Pass 2: character count first, then scene, then both identities.
+    // This gives CLIP the gender count early, followed by spatial/environmental context,
+    // then both characters' identity tags. Primary LoRA is active in this pass;
+    // secondary LoRA activates later in Pass 4b/5b but the tags here help CLIP
+    // maintain the second figure's appearance through the upscale.
+    const pg = params.primaryGender || 'female';
+    const sg = params.secondaryGender || 'male';
+    const genderCount = pg === sg
+      ? `(2${pg === 'female' ? 'women' : 'men'}:1.3)`
+      : `(1man, 1woman:1.3)`;
+    const secondaryBlock = params.secondaryIdentityPrompt
+      ? `, ${params.secondaryIdentityPrompt}`
+      : '';
+    pass2PositiveText = deduplicateWeightedTokens(
+      `${genderCount}, ${params.scenePrompt}, ${params.primaryIdentityPrompt}${secondaryBlock}`
+    );
   } else {
     pass2PositiveText = `${params.primaryIdentityPrompt}, ${params.scenePrompt}`;
   }

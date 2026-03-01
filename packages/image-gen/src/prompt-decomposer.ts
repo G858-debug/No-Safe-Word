@@ -153,6 +153,107 @@ export function decomposePrompt(
   };
 }
 
+/**
+ * Deduplicate weighted tokens in an SDXL prompt.
+ *
+ * When multiple pipeline stages each inject the same token (e.g. the optimizer
+ * adds "(1man, 1woman:1.5)" and the workflow builder prepends "(1man, 1woman:1.3)"),
+ * the model sees conflicting guidance. This function keeps only the highest-weighted
+ * instance of each duplicated token.
+ *
+ * Handles both weighted "(token:1.3)" and unweighted "(token)" or bare "token" forms.
+ * Correctly handles tokens with internal commas like "(1man, 1woman:1.3)" by tracking
+ * parenthesis balance during tokenization.
+ *
+ * @param prompt - The assembled prompt string
+ * @returns The prompt with duplicate weighted tokens collapsed
+ */
+export function deduplicateWeightedTokens(prompt: string): string {
+  // Phase 1: Tokenize respecting paren balance.
+  // "(1man, 1woman:1.3)" is ONE token despite the internal comma.
+  const tokens: string[] = [];
+  const rawParts = prompt.split(',');
+  let i = 0;
+
+  while (i < rawParts.length) {
+    const part = rawParts[i];
+    const openCount = (part.match(/\(/g) || []).length;
+    const closeCount = (part.match(/\)/g) || []).length;
+    let balance = openCount - closeCount;
+
+    if (balance > 0 && i + 1 < rawParts.length) {
+      // Unbalanced open paren — rejoin until balanced
+      let combined = part;
+      let j = i + 1;
+      while (balance > 0 && j < rawParts.length) {
+        combined += ',' + rawParts[j];
+        balance += (rawParts[j].match(/\(/g) || []).length;
+        balance -= (rawParts[j].match(/\)/g) || []).length;
+        j++;
+      }
+      tokens.push(combined);
+      i = j;
+    } else {
+      tokens.push(part);
+      i++;
+    }
+  }
+
+  // Phase 2: Extract key + weight from weighted tokens only, find duplicates.
+  // Only tokens with explicit weight syntax "(text:N.N)" are candidates for dedup.
+  // Unweighted tokens like "tok", "dark brown eyes" may appear intentionally
+  // multiple times (e.g. trigger words for different LoRAs, shared traits).
+  interface TokenInfo {
+    text: string;       // original text (with leading whitespace)
+    key: string;        // normalized lookup key (lowercase, content inside parens)
+    weight: number;     // extracted weight
+    isWeighted: boolean;
+  }
+
+  const parsed: TokenInfo[] = tokens.map(text => {
+    const trimmed = text.trim();
+    // Only match "(content:weight)" — the explicit SDXL emphasis syntax
+    const wm = trimmed.match(/^\((.+):(\d+\.?\d*)\)$/);
+    if (wm) {
+      return { text, key: wm[1].trim().toLowerCase(), weight: parseFloat(wm[2]), isWeighted: true };
+    }
+    return { text, key: '', weight: 0, isWeighted: false };
+  });
+
+  // Map: key → index of the token to keep (highest weight wins)
+  const bestIndex = new Map<string, number>();
+  const duplicateIndices = new Set<number>();
+
+  for (let idx = 0; idx < parsed.length; idx++) {
+    const { key, isWeighted } = parsed[idx];
+    // Skip unweighted tokens — they're never deduplicated
+    if (!isWeighted || !key) continue;
+
+    const existing = bestIndex.get(key);
+    if (existing !== undefined) {
+      // Duplicate found — keep the higher weight
+      if (parsed[idx].weight > parsed[existing].weight) {
+        duplicateIndices.add(existing);
+        bestIndex.set(key, idx);
+      } else {
+        duplicateIndices.add(idx);
+      }
+    } else {
+      bestIndex.set(key, idx);
+    }
+  }
+
+  if (duplicateIndices.size === 0) return prompt;
+
+  // Phase 3: Rebuild, skipping removed tokens.
+  const kept = tokens.filter((_, idx) => !duplicateIndices.has(idx));
+  return kept.join(',')
+    .replace(/,(\s*,)+/g, ',')
+    .replace(/^\s*,\s*/, '')
+    .replace(/\s*,\s*$/, '')
+    .trim();
+}
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

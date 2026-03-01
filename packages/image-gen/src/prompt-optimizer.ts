@@ -124,7 +124,25 @@ PASS 3 — FULL PROMPT (fullPrompt):
 REGIONAL PROMPTS (Dual-Character Scenes Only):
 When the scene has two characters, you MUST also produce three regional prompt components that split the scene spatially for the Attention Couple node:
 
-- sharedScenePrompt: ONLY the background, setting, lighting, atmosphere, camera angle, composition. NO character descriptions, NO actions, NO clothing, NO body parts. This is what the entire canvas shares.
+- sharedScenePrompt: The cinematographer's setup note — everything about the environment, NOTHING about what the characters are doing. Think of it as: "If you removed the actors from set, what would the camera still see?"
+
+  MUST KEEP in sharedScenePrompt (these are CRITICAL for correct scene rendering):
+  * Lighting source and quality with weight 1.3: (single amber streetlight:1.3), (candlelight:1.3), (neon sign glow:1.3)
+  * Time of day with weight 1.3: (night scene:1.3), (Middelburg night:1.3), (golden hour:1.3), (dark sky:1.2)
+  * Setting/location descriptors: "mechanic workshop", "restaurant interior", "Middelburg street"
+  * Environmental atmosphere from the setting: "workshop glow spilling onto street", "steam rising from kitchen"
+  * Shot type and camera angle: "close-medium shot", "slight low angle", "shallow depth of field"
+  * Mood/tension descriptors: "electric tension", "intimate atmosphere"
+  * Props that are part of the SETTING (not held by characters): "open car hood", "engine visible", "wine bottles on table"
+
+  MUST REMOVE from sharedScenePrompt (character-specific only):
+  * Character actions and poses: "leaning over", "standing beside", "biting lip"
+  * Clothing descriptions: "overalls", "off-shoulder top", "braids"
+  * Body part references: "forearm", "collarbone", "shoulders"
+  * Character positioning relative to each other: "man in foreground", "body angled toward him"
+  * Gender/count tags (these go in scenePrompt, not here): "(1man, 1woman:1.5)"
+
+  The sharedScenePrompt sets the ENTIRE canvas atmosphere. If it's too sparse, the model defaults to generic daytime/outdoor settings. ALWAYS include at least: lighting, time of day, location, camera angle.
 
 - primaryRegionPrompt: The PRIMARY character's gender tag, body type, pose, action, clothing, and spatial position. Start with "(1[gender]:1.4)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.4), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
 
@@ -142,7 +160,8 @@ CRITICAL RULES for regional prompts:
 LIGHTING AND TIME-OF-DAY EMPHASIS:
 - When the original prompt specifies a time of day (night, evening, dawn, golden hour), apply weight 1.2-1.3 to reinforce it: (night scene:1.3), (dark sky:1.2)
 - When a specific light source is named, apply weight 1.3: (single amber streetlight:1.3), (candlelight:1.3), (neon glow:1.3)
-- These weighted lighting terms should appear in the sharedScenePrompt AFTER any character count indicators like (1man, 1woman) but before other setting details like location names
+- For dual-character scenes: lighting and time-of-day terms MUST appear in sharedScenePrompt (they set the canvas atmosphere). They should be the FIRST weighted elements in sharedScenePrompt.
+- For scenePrompt: lighting/time terms appear AFTER the character count indicator (1man, 1woman:1.5) but before other setting details
 
 ACTION AND POSE PRESERVATION (CRITICAL):
 - Identify all specific action verbs, poses, body positions, and facial expressions in the original prompt

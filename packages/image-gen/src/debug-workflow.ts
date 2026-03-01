@@ -37,6 +37,36 @@ export interface DebugPassInfo {
 }
 
 /**
+ * Pass 1 composition debug metadata for dual-character scenes.
+ * The workflow always saves a decoded Pass 1 image (nodes 130-131)
+ * so we can diagnose whether figure-merge failures originate in
+ * Pass 1 (composition) or downstream passes.
+ */
+export interface Pass1CompositionDebug {
+  /** Whether the debug image was saved in the workflow */
+  imageSaved: boolean;
+  /** Resolution of the Pass 1 composition (e.g. "912x624") */
+  resolution: string;
+  /** Seed used for the Pass 1 KSampler */
+  seed: number;
+  /** VAEDecode node ID in the workflow graph */
+  vaeDecodeNodeId: string;
+  /** SaveImage node ID in the workflow graph */
+  saveNodeId: string;
+  /** Filename prefix for the saved image */
+  filenamePrefix: string;
+}
+
+/**
+ * Full debug metadata structure returned by buildDebugPassInfo.
+ */
+export interface DebugMetadata {
+  passes: DebugPassInfo[];
+  /** Present only for dual-character scenes — Pass 1 composition diagnostic */
+  pass1Composition?: Pass1CompositionDebug;
+}
+
+/**
  * Generates the debug pass metadata for a multi-pass workflow.
  * This is called alongside the workflow build to produce the metadata
  * that the debug page will display.
@@ -57,15 +87,22 @@ export function buildDebugPassInfo(config: {
   primaryGenderLoras?: Array<{ filename: string }>;
   secondaryGenderLoras?: Array<{ filename: string }>;
   hasDualCharacter: boolean;
+  // Character genders for Pass 2 gender count token
+  primaryGender?: 'male' | 'female';
+  secondaryGender?: 'male' | 'female';
   // Regional prompts for Attention Couple
   sharedScenePrompt?: string;
   primaryRegionPrompt?: string;
   secondaryRegionPrompt?: string;
-}): DebugPassInfo[] {
+}): DebugMetadata {
   const passes: DebugPassInfo[] = [];
   const prefix = config.filenamePrefix || "debug";
-  const compWidth = Math.round(config.width * 0.75);
-  const compHeight = Math.round(config.height * 0.75);
+  const compWidth = config.hasDualCharacter
+    ? Math.round(config.width * 0.79 / 8) * 8
+    : Math.round(config.width / 1.6);
+  const compHeight = config.hasDualCharacter
+    ? Math.round(config.height * 0.77 / 8) * 8
+    : Math.round(config.height / 1.6);
 
   // Pass 1 — Composition
   const useAttentionCouple = config.hasDualCharacter
@@ -80,13 +117,13 @@ export function buildDebugPassInfo(config: {
       ? "Scene layout at reduced resolution with AttentionCouplePPM regional conditioning. Shared background applied to full canvas via base_cond. Primary character prompt routed to left ~55% region. Secondary character prompt routed to right ~55% region (10% overlap for natural blending). Detail-tweaker LoRA only."
       : "Scene layout at reduced resolution. Only detail-tweaker LoRA. No character identity — just spatial layout, poses, and setting.",
     prompt: useAttentionCouple
-      ? `[BASE_COND (node 110)] ${config.scenePrompt}\n[SHARED SCENE] ${config.sharedScenePrompt}\n[LEFT REGION] ${config.primaryRegionPrompt}\n[RIGHT REGION] ${config.secondaryRegionPrompt}`
+      ? `[BASE_COND (node 110)] ${config.sharedScenePrompt}\n[LEFT REGION] ${config.primaryRegionPrompt}\n[RIGHT REGION] ${config.secondaryRegionPrompt}`
       : config.scenePrompt,
     loras: ["detail-tweaker-xl.safetensors"],
     params: {
       seed: config.seed,
-      steps: 20,
-      cfg: 11,
+      steps: useAttentionCouple ? 28 : 20,
+      cfg: useAttentionCouple ? 7.5 : 11,
       denoise: 1.0,
       width: compWidth,
       height: compHeight,
@@ -95,12 +132,22 @@ export function buildDebugPassInfo(config: {
   });
 
   // Pass 2 — Character Identity
+  const pass2Prompt = config.hasDualCharacter
+    ? (() => {
+        const pg = config.primaryGender || 'female';
+        const sg = config.secondaryGender || 'male';
+        const gc = pg === sg ? `(2${pg === 'female' ? 'women' : 'men'}:1.3)` : '(1man, 1woman:1.3)';
+        const sec = config.secondaryIdentityPrompt ? `, ${config.secondaryIdentityPrompt}` : '';
+        return `${gc}, ${config.scenePrompt}, ${config.primaryIdentityPrompt}${sec}`;
+      })()
+    : `${config.primaryIdentityPrompt}, ${config.scenePrompt}`;
   passes.push({
     pass: 2,
     name: "Character Identity",
-    description:
-      "Upscale to target resolution + primary character LoRA applied. Injects character appearance into the composition. Secondary character described generically.",
-    prompt: `${config.primaryIdentityPrompt}, ${config.scenePrompt}`,
+    description: config.hasDualCharacter
+      ? "Upscale to target resolution + primary character LoRA applied. Gender count token first, then scene context, then both characters' identity tags. Secondary LoRA activates in Pass 4b/5b."
+      : "Upscale to target resolution + primary character LoRA applied. Injects character appearance into the composition.",
+    prompt: pass2Prompt,
     loras: config.characterLoras?.map((l) => l.filename) || [],
     params: {
       seed: config.seed + 1,
@@ -225,7 +272,23 @@ export function buildDebugPassInfo(config: {
     filenamePrefix: `${prefix}_pass7_cleanup`,
   });
 
-  return passes;
+  // Pass 1 composition debug metadata (dual-character only)
+  // Nodes 130-131 are always injected by workflow-builder for dual-character scenes
+  const pass1Composition: Pass1CompositionDebug | undefined = config.hasDualCharacter
+    ? {
+        imageSaved: true,
+        resolution: `${compWidth}x${compHeight}`,
+        seed: config.seed,
+        vaeDecodeNodeId: '130',
+        saveNodeId: '131',
+        filenamePrefix: `${prefix}_debug_pass1`,
+      }
+    : undefined;
+
+  return {
+    passes,
+    pass1Composition,
+  };
 }
 
 /**
