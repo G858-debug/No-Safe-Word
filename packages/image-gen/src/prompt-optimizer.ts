@@ -140,21 +140,24 @@ When the scene has two characters, you MUST also produce three regional prompt c
   * Clothing descriptions: "overalls", "off-shoulder top", "braids"
   * Body part references: "forearm", "collarbone", "shoulders"
   * Character positioning relative to each other: "man in foreground", "body angled toward him"
-  * Gender/count tags (these go in scenePrompt, not here): "(1man, 1woman:1.5)"
+  * Full gender/count tags at scene weight "(1man, 1woman:1.5)" — the sharedScenePrompt uses the SPATIAL version "(1man, 1woman:1.3), (man on left, woman on right:1.3)" instead
 
-  The sharedScenePrompt sets the ENTIRE canvas atmosphere. If it's too sparse, the model defaults to generic daytime/outdoor settings. ALWAYS include at least: lighting, time of day, location, camera angle.
+  MUST INCLUDE spatial gender anchor (CRITICAL for two-person rendering):
+  * The sharedScenePrompt MUST include "(1man, 1woman:1.3), (man on left, woman on right:1.3)" near the start, BEFORE lighting and setting. This tells the base_cond where each gender belongs spatially so the model seeds both figures before regional masks refine them. Without this, the model defaults to rendering only one person.
 
-- primaryRegionPrompt: The PRIMARY character's gender tag, body type, pose, action, clothing, and spatial position. Start with "(1[gender]:1.4)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.4), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
+  The sharedScenePrompt sets the ENTIRE canvas atmosphere. If it's too sparse, the model defaults to generic daytime/outdoor settings. ALWAYS include at least: gender spatial anchor, lighting, time of day, location, camera angle.
 
-- secondaryRegionPrompt: The SECONDARY character's body type, gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.4)". Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.4), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man, right side"
+- primaryRegionPrompt: The PRIMARY character's gender tag, spatial anchor, body type, pose, action, clothing. The FIRST token MUST be the gender+count at weight 1.5: "(1man:1.5)" or "(1woman:1.5)". The SECOND token MUST be the spatial anchor "(left side:1.3)". Then body type, pose, action, clothing. Include ONLY what this specific character is doing and wearing. Example: "(1man:1.5), (left side:1.3), (muscular build:1.2), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt"
+
+- secondaryRegionPrompt: The SECONDARY character's gender tag, spatial anchor, body type, pose, action, clothing. The FIRST token MUST be the gender+count at weight 1.5: "(1woman:1.5)" or "(1man:1.5)". The SECOND token MUST be the spatial anchor "(right side:1.3)". Then body type, pose, action, clothing. Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.5), (right side:1.3), (curvaceous body:1.2), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man"
 
 CRITICAL RULES for regional prompts:
 - Each region prompt must be self-contained — no references to the other character
-- Gender tags are MANDATORY at the start of each region prompt
+- Gender tags at weight 1.5 are MANDATORY as the FIRST token of each region prompt, followed by spatial anchor (left side:1.3) or (right side:1.3) as the SECOND token
 - Shared scene prompt must have ZERO character-specific content
 - Actions must be clearly assigned to their character's region
 - CLOTHING ISOLATION: Each character's clothing MUST only appear in THEIR region prompt. Never let one character's clothing terms leak into the other's region. If the man wears overalls, 'overalls' must ONLY appear in his region prompt. If the woman wears an off-shoulder top, that must ONLY appear in her region prompt. NEVER use negation like 'NOT wearing X' in any prompt — SDXL interprets negation as emphasis and will render the unwanted item. Simply OMIT the other character's clothing entirely.
-- BODY TYPE (MANDATORY): Female characters MUST have body shape descriptors in their region prompt. Pull these from the character's identity tags or structured data. Include with weight 1.2-1.3: (curvaceous body:1.2), (large breasts:1.2), (large butt:1.2), (wide hips:1.2), (defined waist:1.2). Male characters include (muscular build:1.2), (broad shoulders:1.2). These go IMMEDIATELY after the gender tag, before pose/action.
+- BODY TYPE (MANDATORY): Female characters MUST have body shape descriptors in their region prompt. Pull these from the character's identity tags or structured data. Include with weight 1.2-1.3: (curvaceous body:1.2), (large breasts:1.2), (large butt:1.2), (wide hips:1.2), (defined waist:1.2). Male characters include (muscular build:1.2), (broad shoulders:1.2). These go IMMEDIATELY after the spatial anchor, before pose/action.
 - Keep each region prompt under ~40 tokens for optimal CLIP processing
 
 LIGHTING AND TIME-OF-DAY EMPHASIS:

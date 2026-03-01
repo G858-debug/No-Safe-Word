@@ -52,6 +52,7 @@ class CreateSoftRegionMask:
                 "start_pct": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "end_pct": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "feather_pct": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 0.5, "step": 0.01}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05}),
             }
         }
 
@@ -59,7 +60,7 @@ class CreateSoftRegionMask:
     FUNCTION = "create_mask"
     CATEGORY = "nsw/masks"
 
-    def create_mask(self, width, height, start_pct, end_pct, feather_pct):
+    def create_mask(self, width, height, start_pct, end_pct, feather_pct, strength=1.0):
         mask = torch.zeros(1, height, width)
         start_px = int(width * start_pct)
         end_px = int(width * end_pct)
@@ -82,6 +83,11 @@ class CreateSoftRegionMask:
             px = core_end + i
             if 0 <= px < width and px < end_px:
                 mask[:, :, px] = 1.0 - (i + 1) / (feather_px + 1)
+
+        # Scale mask values by strength — values > 1.0 increase region influence
+        # relative to the base mask in AttentionCouplePPM (which normalizes intersections)
+        if strength != 1.0:
+            mask = mask * strength
 
         return (mask,)
 
