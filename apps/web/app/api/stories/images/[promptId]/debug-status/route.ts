@@ -31,6 +31,8 @@ export async function GET(
     const runpodJobId = jobId.replace(/^runpod-/, "");
     const status = await getRunPodJobStatus(runpodJobId);
 
+    console.log(`[DebugStatus] Job ${runpodJobId}: status=${status.status}, hasOutput=${!!status.output}, imageCount=${status.output?.images?.length ?? 0}`);
+
     if (status.status === "COMPLETED" && status.output) {
       // RunPod returns all images (including debug intermediates) in the output
       // Map filename prefixes to image URLs
@@ -41,15 +43,14 @@ export async function GET(
       if (status.output.images && Array.isArray(status.output.images)) {
         for (const img of status.output.images) {
           if (img.filename && img.data) {
-            // Match debug filename prefix pattern: debug_XXXXXXXX_passN_name
-            const match = img.filename.match(/^(debug_[a-f0-9]+_pass\w+)/);
-            if (match) {
-              // For s3_url type, data is the URL directly
-              // For base64 type, data is base64-encoded image data
+            // Strip ComfyUI counter suffix (_00001_.png) to get the prefix
+            // e.g. "debug_43597c6b_pass1_composition_00001_.png" → "debug_43597c6b_pass1_composition"
+            const prefix = img.filename.replace(/_\d+_\.png$/, "");
+            if (prefix.startsWith("debug_")) {
               const imageUrl = img.type === "s3_url"
                 ? img.data
                 : `data:image/png;base64,${img.data.replace(/^data:image\/\w+;base64,/, "")}`;
-              intermediateImages[match[1]] = imageUrl;
+              intermediateImages[prefix] = imageUrl;
             }
           }
         }
@@ -60,13 +61,15 @@ export async function GET(
       if (output.message && Array.isArray(output.message)) {
         for (const item of output.message) {
           if (typeof item === "object" && item.filename && (item.data || item.url)) {
-            const match = item.filename.match(/^(debug_[a-f0-9]+_pass\w+)/);
-            if (match) {
-              intermediateImages[match[1]] = item.url || item.data;
+            const prefix = item.filename.replace(/_\d+_\.png$/, "");
+            if (prefix.startsWith("debug_")) {
+              intermediateImages[prefix] = item.url || item.data;
             }
           }
         }
       }
+
+      console.log(`[DebugStatus] Matched ${Object.keys(intermediateImages).length} images:`, Object.keys(intermediateImages));
 
       // Update the debug_data with intermediate image URLs
       // Note: debug_data is a JSONB column added via migration, not yet in generated types
