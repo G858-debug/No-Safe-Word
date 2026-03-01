@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,7 @@ import {
   Users,
   Zap,
   CheckCircle2,
+  Bug,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -765,6 +767,7 @@ export default function ImageGeneration({
                             prompt={ip}
                             state={promptStates[ip.id]}
                             imageType={imageType}
+                            seriesId={seriesId}
                             promptPositionMap={promptPositionMap.current}
                             onUpdatePrompt={updatePrompt}
                             onRegenerate={handleRegenerate}
@@ -852,6 +855,7 @@ interface ImageCardProps {
   prompt: ImagePromptData;
   state: PromptState | undefined;
   imageType: string;
+  seriesId: string;
   promptPositionMap: Record<string, number>;
   onUpdatePrompt: (id: string, updates: Partial<PromptState>) => void;
   onRegenerate: (id: string) => void;
@@ -865,6 +869,7 @@ function ImageCard({
   prompt: ip,
   state,
   imageType,
+  seriesId,
   promptPositionMap,
   onUpdatePrompt,
   onRegenerate,
@@ -1050,6 +1055,19 @@ function ImageCard({
               Approved
             </Button>
           )}
+          <Link
+            href={`/dashboard/stories/${seriesId}/debug/${ip.id}`}
+            className="ml-auto"
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-zinc-600 hover:text-zinc-400"
+              title="Debug"
+            >
+              <Bug className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
         </div>
       </CardContent>
     </Card>
