@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { extractCharacterTags, buildStoryImagePrompt } from "@no-safe-word/image-gen";
+import { extractCharacterTags, buildStoryImagePrompt, buildFacePrompt } from "@no-safe-word/image-gen";
 import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
@@ -78,6 +78,7 @@ export async function POST(
     let primaryCharLora: CharacterLoraEntry | undefined;
     let secondaryCharLora: CharacterLoraEntry | undefined;
     let secondaryGender: 'male' | 'female' | undefined;
+    let secDesc: Record<string, string> | undefined;
 
     // Fetch series info via post
     const { data: post } = await supabase
@@ -160,8 +161,9 @@ export async function POST(
             .select("description")
             .eq("id", imgPrompt.secondary_character_id)
             .single();
-          if (secChar?.description) {
-            secondaryGender = (secChar.description as Record<string, string>).gender as 'male' | 'female' | undefined;
+          secDesc = secChar?.description as Record<string, string> | undefined;
+          if (secDesc) {
+            secondaryGender = secDesc.gender as 'male' | 'female' | undefined;
           }
 
           const { data: secondaryStoryChar } = await (supabase as any)
@@ -292,10 +294,14 @@ export async function POST(
     }
 
     // Build face prompt from approved tags or character data
-    // Needed for IPAdapter workflows AND multi-pass (Pass 4 FaceDetailer)
+    // Hair descriptors are front-loaded with strong weights for FaceDetailer accuracy
     if (imgPrompt.character_id && needsFacePrompt) {
-      primaryFacePrompt = approvedCharacterTags ||
-        `portrait of ${charData.name}, ${charData.ethnicity}, ${charData.skinTone} skin, ${charData.hairStyle} ${charData.hairColor} hair, ${charData.eyeColor} eyes, photorealistic`;
+      primaryFacePrompt = buildFacePrompt(
+        approvedCharacterTags,
+        charData,
+        primaryCharLora?.triggerWord || 'tok',
+        hasSecondary,
+      );
     }
 
     // Build secondary face prompt for dual-character scenes
@@ -303,14 +309,15 @@ export async function POST(
     let secondarySeed: number | undefined;
 
     if (hasSecondary && imgPrompt.secondary_character_id) {
-      secondaryFacePrompt = secondaryCharacterTags || "person, photorealistic";
+      secondaryFacePrompt = buildFacePrompt(
+        secondaryCharacterTags,
+        { hairStyle: secDesc?.hairStyle || '', hairColor: secDesc?.hairColor || '', gender: secondaryGender || 'female' },
+        secondaryCharLora?.triggerWord || 'tok',
+        hasSecondary,
+      );
       secondarySeed = seed + 1000;
     }
 
-    // Prepend LoRA trigger word to face prompts so FaceDetailer activates the LoRA
-    if (primaryCharLora && primaryFacePrompt) {
-      primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}`;
-    }
     if (secondaryCharLora && secondaryFacePrompt) {
       secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
     }

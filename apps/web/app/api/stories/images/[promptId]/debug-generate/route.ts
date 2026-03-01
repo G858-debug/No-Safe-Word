@@ -29,6 +29,7 @@ import {
   shouldOptimize,
   buildDebugPassInfo,
   injectDebugSaveNodes,
+  buildFacePrompt,
 } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
@@ -82,6 +83,7 @@ export async function POST(
     let primaryCharLora: CharacterLoraEntry | undefined;
     let secondaryCharLora: CharacterLoraEntry | undefined;
     let secondaryGender: 'male' | 'female' | undefined;
+    let secDesc: Record<string, string> | undefined;
 
     if (imgPrompt.character_id) {
       const { data: character } = await supabase
@@ -147,8 +149,9 @@ export async function POST(
           .select("description")
           .eq("id", imgPrompt.secondary_character_id)
           .single();
-        if (secChar?.description) {
-          secondaryGender = (secChar.description as Record<string, string>).gender as 'male' | 'female' | undefined;
+        secDesc = secChar?.description as Record<string, string> | undefined;
+        if (secDesc) {
+          secondaryGender = secDesc.gender as 'male' | 'female' | undefined;
         }
 
         const { data: secondaryStoryChar } = await (supabase as any)
@@ -283,23 +286,24 @@ export async function POST(
       contentLevel: classification.contentLevel,
     });
 
-    // 11. Face prompts
-    let primaryFacePrompt = approvedCharacterTags ||
-      `portrait of ${charData.name}, ${charData.ethnicity}, ${charData.skinTone} skin, ${charData.hairStyle} ${charData.hairColor} hair, ${charData.eyeColor} eyes, photorealistic`;
+    // 11. Face prompts — hair descriptors front-loaded for FaceDetailer accuracy
+    let primaryFacePrompt = buildFacePrompt(
+      approvedCharacterTags,
+      charData,
+      primaryCharLora?.triggerWord || 'tok',
+      hasSecondary,
+    );
     let secondaryFacePrompt: string | undefined;
     let secondarySeed: number | undefined;
 
     if (hasSecondary) {
-      secondaryFacePrompt = secondaryCharacterTags || "person, photorealistic";
+      secondaryFacePrompt = buildFacePrompt(
+        secondaryCharacterTags,
+        { hairStyle: secDesc?.hairStyle || '', hairColor: secDesc?.hairColor || '', gender: secondaryGender || 'female' },
+        secondaryCharLora?.triggerWord || 'tok',
+        hasSecondary,
+      );
       secondarySeed = seed + 1000;
-    }
-
-    // Prepend LoRA trigger words
-    if (primaryCharLora) {
-      primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}`;
-    }
-    if (secondaryCharLora && secondaryFacePrompt) {
-      secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
     }
 
     // 12. Gender LoRAs for person inpainting

@@ -258,6 +258,84 @@ export function extractCharacterTags(
 }
 
 /**
+ * Build a face-pass prompt optimized for FaceDetailer.
+ *
+ * Front-loads HAIR descriptors with strong emphasis because FaceDetailer's
+ * bbox_crop_factor: 3.0 crop includes the hairline and top of head. If hair
+ * isn't weighted early, the base model's default hair (or LoRA bleed from
+ * other passes) wins.
+ *
+ * Order: trigger word → hair (weighted) → gender → ethnicity → facial features → skin
+ *
+ * For male characters in dual-character scenes, adds explicit anti-braid
+ * descriptors to prevent LoRA cross-contamination from female character's
+ * braids-cornrows LoRA (which runs in Pass 4b, before Pass 5a sees the image).
+ *
+ * @param approvedTags - Extracted character tags from approved portrait prompt
+ * @param charData - Character structured data (for hairStyle/hairColor/gender)
+ * @param triggerWord - LoRA trigger word (default "tok")
+ * @param isDualCharacter - Whether this is a dual-character scene (enables anti-bleed)
+ */
+export function buildFacePrompt(
+  approvedTags: string | null,
+  charData: { hairStyle: string; hairColor: string; gender: string; name?: string; ethnicity?: string; skinTone?: string; eyeColor?: string },
+  triggerWord: string = 'tok',
+  isDualCharacter: boolean = false,
+): string {
+  const isMale = /^male$/i.test(charData.gender);
+
+  // Build hair descriptor with weight
+  let hairDesc = '';
+  if (charData.hairStyle && charData.hairColor) {
+    const needsSuffix = !/\bhair\b/i.test(charData.hairStyle);
+    hairDesc = `${charData.hairColor} ${charData.hairStyle}${needsSuffix ? ' hair' : ''}`;
+  } else if (charData.hairColor) {
+    hairDesc = `${charData.hairColor} hair`;
+  } else if (charData.hairStyle) {
+    hairDesc = /\bhair\b/i.test(charData.hairStyle) ? charData.hairStyle : `${charData.hairStyle} hair`;
+  }
+
+  // Build the face prompt parts in priority order
+  const parts: string[] = [triggerWord];
+
+  // 1. Hair — front-loaded with strong weight
+  if (hairDesc) {
+    parts.push(`(${hairDesc}:1.4)`);
+  }
+
+  // 2. Anti-braid descriptors for male characters in dual-character scenes
+  //    Prevents LoRA cross-contamination from female character's braids pass
+  if (isMale && isDualCharacter) {
+    const hasBraids = /\b(?:braid|cornrow|loc|twist|dread)\b/i.test(charData.hairStyle || '');
+    if (!hasBraids) {
+      parts.push('(no braids:1.3)', '(male haircut:1.3)');
+    }
+  }
+
+  // 3. Remaining identity tags from approved prompt (with hair tokens removed to avoid duplication)
+  if (approvedTags) {
+    const tags = approvedTags.split(',').map(s => s.trim()).filter(Boolean);
+    const hairPattern = /\bhair\b|\b(?:braid|braids|braided|cornrow|dreadlocks|dreads|afro|locs|twists|fade|buzz[- ]?cut)\b/i;
+    // Also strip body type tags — not relevant for face crop
+    const bodyPattern = /\b(?:body|build|frame|figure|physique|muscular|athletic|slim|slender|curvaceous|voluptuous|curvy|breasts?|bust|hips?|waist|thighs?|shoulders)\b/i;
+    for (const tag of tags) {
+      if (hairPattern.test(tag)) continue; // Already front-loaded above
+      if (bodyPattern.test(tag)) continue; // Not relevant for face crop
+      parts.push(tag);
+    }
+  } else if (charData.ethnicity) {
+    // Fallback: build minimal identity from structured data
+    parts.push(charData.gender);
+    parts.push(charData.ethnicity);
+    if (charData.skinTone) parts.push(`${charData.skinTone} skin`);
+    if (charData.eyeColor) parts.push(`${charData.eyeColor} eyes`);
+    parts.push('photorealistic');
+  }
+
+  return parts.join(', ');
+}
+
+/**
  * Strip inline parenthetical character descriptions from a scene prompt.
  * These are blocks like "(24, oval face, high cheekbones, neat braids in low bun, slim curvaceous figure)"
  * that duplicate appearance info already captured in the approved character tags.

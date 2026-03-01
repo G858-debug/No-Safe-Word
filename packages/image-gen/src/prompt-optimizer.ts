@@ -147,9 +147,27 @@ When the scene has two characters, you MUST also produce three regional prompt c
 
   The sharedScenePrompt sets the ENTIRE canvas atmosphere. If it's too sparse, the model defaults to generic daytime/outdoor settings. ALWAYS include at least: gender spatial anchor, lighting, time of day, location, camera angle.
 
-- primaryRegionPrompt: The PRIMARY character's gender tag, spatial anchor, body type, pose, action, clothing. The FIRST token MUST be the gender+count at weight 1.5: "(1man:1.5)" or "(1woman:1.5)". The SECOND token MUST be the spatial anchor "(left side:1.3)". Then body type, pose, action, clothing. Include ONLY what this specific character is doing and wearing. Example: "(1man:1.5), (left side:1.3), (muscular build:1.2), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt"
+- primaryRegionPrompt: The PRIMARY character's complete description for the LEFT region. Each region has its own independent 77-token CLIP window — use the FULL budget. Fill tokens in this priority order:
+  1. Gender + count at weight 1.5: "(1man:1.5)" — MUST be first token
+  2. Spatial anchor: "(left side:1.3)" — MUST be second token
+  3. Body type and build: (muscular build:1.2), (broad shoulders:1.2), (tall:1.1)
+  4. Clothing — be specific and complete, every garment and detail: "overalls unzipped to waist over grease-stained white t-shirt, heavy work boots"
+  5. Action and pose with weight: (leaning over car engine:1.3), (forearm flexed on engine block:1.2)
+  6. Expression and gaze with weight: (looking up with calm confident eyes:1.3), (slight knowing smile:1.2)
+  7. Skin tone, hair, distinguishing features: "dark brown skin, short-cropped hair, strong jaw"
+  8. Emotional quality / character energy: "quiet masculine confidence, grounded presence"
+  Example: "(1man:1.5), (left side:1.3), (muscular build:1.2), (broad shoulders:1.2), overalls unzipped to waist over grease-stained white t-shirt, heavy work boots, (leaning over car engine:1.3), (forearm flexed on engine block:1.2), (looking up with calm confident eyes:1.3), dark brown skin, short-cropped hair, quiet masculine authority"
 
-- secondaryRegionPrompt: The SECONDARY character's gender tag, spatial anchor, body type, pose, action, clothing. The FIRST token MUST be the gender+count at weight 1.5: "(1woman:1.5)" or "(1man:1.5)". The SECOND token MUST be the spatial anchor "(right side:1.3)". Then body type, pose, action, clothing. Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.5), (right side:1.3), (curvaceous body:1.2), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man"
+- secondaryRegionPrompt: The SECONDARY character's complete description for the RIGHT region. Each region has its own independent 77-token CLIP window — use the FULL budget. Fill tokens in this priority order:
+  1. Gender + count at weight 1.5: "(1woman:1.5)" — MUST be first token
+  2. Spatial anchor: "(right side:1.3)" — MUST be second token
+  3. Body type — ALL FOUR mandatory for every female character, every time: (curvaceous body:1.3), (large breasts:1.2), (wide hips:1.2), (large butt:1.2)
+  4. Clothing — be specific and complete, form-fitting by default: "fitted off-shoulder top revealing collarbone, high-waist jeans hugging curves, strappy heels"
+  5. Action and pose with weight: (standing beside car:1.2), (hip cocked:1.2), (body angled toward man:1.2)
+  6. Expression and gaze with weight: (biting lower lip:1.3), (playful seductive gaze:1.3)
+  7. Skin tone, hair, distinguishing features: "medium brown skin, braids loose over shoulders, high cheekbones"
+  8. Emotional quality / character energy: "flirtatious tension, feminine confidence"
+  Example: "(1woman:1.5), (right side:1.3), (curvaceous body:1.3), (large breasts:1.2), (wide hips:1.2), (large butt:1.2), fitted off-shoulder top revealing collarbone, high-waist jeans hugging curves, strappy heels, (standing beside car:1.2), (hip cocked:1.2), (biting lower lip:1.3), (playful seductive gaze:1.3), medium brown skin, braids loose over shoulders, flirtatious tension"
 
 CRITICAL RULES for regional prompts:
 - Each region prompt must be self-contained — no references to the other character
@@ -157,8 +175,8 @@ CRITICAL RULES for regional prompts:
 - Shared scene prompt must have ZERO character-specific content
 - Actions must be clearly assigned to their character's region
 - CLOTHING ISOLATION: Each character's clothing MUST only appear in THEIR region prompt. Never let one character's clothing terms leak into the other's region. If the man wears overalls, 'overalls' must ONLY appear in his region prompt. If the woman wears an off-shoulder top, that must ONLY appear in her region prompt. NEVER use negation like 'NOT wearing X' in any prompt — SDXL interprets negation as emphasis and will render the unwanted item. Simply OMIT the other character's clothing entirely.
-- BODY TYPE (MANDATORY): Female characters MUST have body shape descriptors in their region prompt. Pull these from the character's identity tags or structured data. Include with weight 1.2-1.3: (curvaceous body:1.2), (large breasts:1.2), (large butt:1.2), (wide hips:1.2), (defined waist:1.2). Male characters include (muscular build:1.2), (broad shoulders:1.2). These go IMMEDIATELY after the spatial anchor, before pose/action.
-- Keep each region prompt under ~40 tokens for optimal CLIP processing
+- BODY TYPE (MANDATORY): Female characters MUST include ALL FOUR of these body descriptors in their region prompt — no exceptions: (curvaceous body:1.3), (large breasts:1.2), (wide hips:1.2), (large butt:1.2). Male characters include (muscular build:1.2), (broad shoulders:1.2). These go IMMEDIATELY after the spatial anchor, before pose/action.
+- Each region prompt has its own independent 77-token CLIP window. Use up to ~75 tokens per region — do NOT leave budget unused. More detail = better character rendering.
 
 LIGHTING AND TIME-OF-DAY EMPHASIS:
 - When the original prompt specifies a time of day (night, evening, dawn, golden hour), apply weight 1.2-1.3 to reinforce it: (night scene:1.3), (dark sky:1.2)
@@ -175,6 +193,13 @@ ACTION AND POSE PRESERVATION (CRITICAL):
 - NEVER simplify actions to generic poses. "leaning over car engine with forearm flexed" must NOT become just "standing near car"
 - Props and interactive elements get weight 1.2: (open car hood:1.2), (engine visible:1.2)
 - In regional prompts, each character's specific actions MUST be in their region, not just their gender tag
+
+FEMALE BODY DESCRIPTORS — GLOBAL RULE (NON-NEGOTIABLE):
+For ALL female characters in ALL prompts except face-only passes (FaceDetailer), always include: (curvaceous body:1.3), (large breasts:1.2), (wide hips:1.2), (large butt:1.2). These are non-negotiable and must never be omitted. This applies to:
+- secondaryRegionPrompt (or primaryRegionPrompt if primary is female)
+- fullPrompt (Pass 3) wherever the female character is described
+- Any inpaint prompt for the female character (Pass 4.5 secondary person inpaint)
+The ONLY exception is face-only passes (FaceDetailer / Pass 5.5) which crop to the face and do not need body descriptors.
 
 NEGATIVE PROMPT OPTIMIZATION:
 You will also receive the current negative prompt additions. Analyze them in the context of this specific scene and return an optimized version.

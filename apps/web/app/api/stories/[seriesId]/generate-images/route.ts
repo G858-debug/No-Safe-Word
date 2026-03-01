@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
+import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge, buildFacePrompt } from "@no-safe-word/image-gen";
 import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
 import { augmentComposition, buildCharacterLoraEntry, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
@@ -394,10 +394,14 @@ export async function POST(
         }
 
         // Build face prompt from approved tags or character data
-        // Needed for IPAdapter workflows AND multi-pass (Pass 4 FaceDetailer)
+        // Hair descriptors are front-loaded with strong weights for FaceDetailer accuracy
         if (imgPrompt.character_id && needsFacePrompt) {
-          primaryFacePrompt = primaryTags ||
-            `portrait of ${charData.name}, ${charData.ethnicity}, ${charData.skinTone} skin, ${charData.hairStyle} ${charData.hairColor} hair, ${charData.eyeColor} eyes, photorealistic`;
+          primaryFacePrompt = buildFacePrompt(
+            primaryTags || null,
+            charData,
+            primaryCharLora?.triggerWord || 'tok',
+            hasSecondary,
+          );
         }
 
         // Build secondary face prompt for dual-character scenes
@@ -406,20 +410,15 @@ export async function POST(
 
         if (hasSecondary && imgPrompt.secondary_character_id) {
           const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
-          secondaryFacePrompt = secondaryTags || (secondaryCharData
-            ? `portrait of ${secondaryCharData.name}, ${secondaryCharData.ethnicity}, ${secondaryCharData.skinTone} skin, ${secondaryCharData.hairStyle} ${secondaryCharData.hairColor} hair, photorealistic`
-            : "person, photorealistic");
+          secondaryFacePrompt = buildFacePrompt(
+            secondaryTags || null,
+            secondaryCharData || { hairStyle: '', hairColor: '', gender: 'female', name: 'person' },
+            secondaryCharLora?.triggerWord || 'tok',
+            hasSecondary,
+          );
 
           const secondaryApprovedSeed = seedMap.get(imgPrompt.secondary_character_id);
           secondarySeed = secondaryApprovedSeed ? secondaryApprovedSeed + imgPrompt.position : seed + 1000;
-        }
-
-        // Prepend LoRA trigger word to face prompts so FaceDetailer activates the LoRA
-        if (primaryCharLora && primaryFacePrompt) {
-          primaryFacePrompt = `${primaryCharLora.triggerWord || 'tok'}, ${primaryFacePrompt}`;
-        }
-        if (secondaryCharLora && secondaryFacePrompt) {
-          secondaryFacePrompt = `${secondaryCharLora.triggerWord || 'tok'}, ${secondaryFacePrompt}`;
         }
 
         // Use promptOverride if available, otherwise raw prompt
