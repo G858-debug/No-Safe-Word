@@ -91,6 +91,7 @@ POSE AND ACTION EMPHASIS:
 LIGHTING AND TIME-OF-DAY EMPHASIS:
 - When the original prompt specifies a time of day (night, evening, dawn, golden hour), apply weight 1.2-1.3 to reinforce it: (night scene:1.3), (dark sky:1.2)
 - When a specific light source is named, apply weight 1.3: (single amber streetlight:1.3), (candlelight:1.3), (neon glow:1.3)
+- Lighting descriptors should appear early in the prompt, but AFTER character count and gender indicators like (1man, 1woman:1.3). Character count must always be the first weighted element.
 
 OUTPUT FORMAT:
 Return ONLY the optimized prompt text. No explanations, no markdown, no quotes. Just the prompt.`;
@@ -135,6 +136,11 @@ CRITICAL RULES for regional prompts:
 - Shared scene prompt must have ZERO character-specific content
 - Actions must be clearly assigned to their character's region
 - Keep each region prompt under ~40 tokens for optimal CLIP processing
+
+LIGHTING AND TIME-OF-DAY EMPHASIS:
+- When the original prompt specifies a time of day (night, evening, dawn, golden hour), apply weight 1.2-1.3 to reinforce it: (night scene:1.3), (dark sky:1.2)
+- When a specific light source is named, apply weight 1.3: (single amber streetlight:1.3), (candlelight:1.3), (neon glow:1.3)
+- These weighted lighting terms should appear in the sharedScenePrompt AFTER any character count indicators like (1man, 1woman) but before other setting details like location names
 
 ACTION AND POSE PRESERVATION (CRITICAL):
 - Identify all specific action verbs, poses, body positions, and facial expressions in the original prompt
