@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRunPodJobStatus, base64ToBuffer } from "@no-safe-word/image-gen";
 import { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
+import type { Json } from "@no-safe-word/shared";
 
 export async function GET(
   _request: NextRequest,
@@ -95,7 +96,7 @@ export async function GET(
           // Update image settings with new seed and validation tracking
           await supabase
             .from("images")
-            .update({ settings: updatedSettings })
+            .update({ settings: updatedSettings as Json })
             .eq("id", jobRow.image_id);
 
           // Trigger retry via internal endpoint
