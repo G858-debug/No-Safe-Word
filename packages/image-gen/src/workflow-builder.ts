@@ -751,15 +751,15 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
       class_type: 'NSWCreateSoftRegionMask',
       inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 1.0, feather_pct: 0.0 },
     };
-    // Left region: primary character (0% to 55% with 10% feather, strength 1.3 to override base_cond)
+    // Left region: primary character (0% to 52% with 5% feather, strength 1.3 to override base_cond)
     workflow['123'] = {
       class_type: 'NSWCreateSoftRegionMask',
-      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 0.55, feather_pct: 0.1, strength: 1.3 },
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.0, end_pct: 0.52, feather_pct: 0.05, strength: 1.3 },
     };
-    // Right region: secondary character (45% to 100% with 10% feather, strength 1.3 to override base_cond)
+    // Right region: secondary character (48% to 100% with 5% feather, strength 1.3 to override base_cond)
     workflow['124'] = {
       class_type: 'NSWCreateSoftRegionMask',
-      inputs: { width: compWidth, height: compHeight, start_pct: 0.45, end_pct: 1.0, feather_pct: 0.1, strength: 1.3 },
+      inputs: { width: compWidth, height: compHeight, start_pct: 0.48, end_pct: 1.0, feather_pct: 0.05, strength: 1.3 },
     };
 
     // AttentionCouplePPM: patches the model to route attention per-region
