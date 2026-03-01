@@ -88,6 +88,10 @@ POSE AND ACTION EMPHASIS:
 - Clothing states that convey sensuality: (unzipped:1.2), (slipped off shoulder:1.2), (unbuttoned:1.2)
 - These weighted action details should appear early in the prompt, before setting/atmosphere descriptions
 
+LIGHTING AND TIME-OF-DAY EMPHASIS:
+- When the original prompt specifies a time of day (night, evening, dawn, golden hour), apply weight 1.2-1.3 to reinforce it: (night scene:1.3), (dark sky:1.2)
+- When a specific light source is named, apply weight 1.3: (single amber streetlight:1.3), (candlelight:1.3), (neon glow:1.3)
+
 OUTPUT FORMAT:
 Return ONLY the optimized prompt text. No explanations, no markdown, no quotes. Just the prompt.`;
 
