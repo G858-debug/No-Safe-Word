@@ -1198,7 +1198,7 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   const classTypes = new Set(
     Object.values(workflow).map((n: any) => n.class_type as string)
   );
-  console.log(`[MultiPass] Workflow class_types: ${[...classTypes].sort().join(', ')}`);
+  console.log(`[MultiPass] Workflow class_types: ${Array.from(classTypes).sort().join(', ')}`);
   if (useAttentionCouple) {
     console.log('[MultiPass] WARNING: Workflow uses AttentionCouplePPM + NSWCreateSoftRegionMask — ensure these custom nodes are installed on the worker');
   }
