@@ -126,15 +126,17 @@ When the scene has two characters, you MUST also produce three regional prompt c
 
 - sharedScenePrompt: ONLY the background, setting, lighting, atmosphere, camera angle, composition. NO character descriptions, NO actions, NO clothing, NO body parts. This is what the entire canvas shares.
 
-- primaryRegionPrompt: The PRIMARY character's gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.3), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
+- primaryRegionPrompt: The PRIMARY character's gender tag, body type, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1man:1.3), leaning over car engine, forearm flexed, looking up at camera, overalls unzipped to waist over white t-shirt, foreground centre"
 
-- secondaryRegionPrompt: The SECONDARY character's gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.3), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man, right side"
+- secondaryRegionPrompt: The SECONDARY character's body type, gender tag, pose, action, clothing, and spatial position. Start with "(1[gender]:1.3)". Include ONLY what this specific character is doing and wearing. Example: "(1woman:1.3), standing beside car, braids loose, off-shoulder top revealing collarbone, biting lower lip, body angled toward man, right side"
 
 CRITICAL RULES for regional prompts:
 - Each region prompt must be self-contained — no references to the other character
 - Gender tags are MANDATORY at the start of each region prompt
 - Shared scene prompt must have ZERO character-specific content
 - Actions must be clearly assigned to their character's region
+- CLOTHING ISOLATION: Each character's clothing MUST only appear in THEIR region prompt. Never let one character's clothing terms leak into the other's region. If the man wears overalls, 'overalls' must ONLY be in his region. If the woman wears an off-shoulder top, that must ONLY be in her region. Add (NOT wearing [other character's clothing]:1.1) if clothing bleed is likely.
+- BODY TYPE: When character data describes body shape (curvaceous, large breasts, round hips, muscular build), include these in the character's region prompt with weight 1.2: (curvaceous body:1.2), (large breasts:1.2), (wide hips:1.2). Female characters should have their body type emphasized to ensure it renders.
 - Keep each region prompt under ~40 tokens for optimal CLIP processing
 
 LIGHTING AND TIME-OF-DAY EMPHASIS:
