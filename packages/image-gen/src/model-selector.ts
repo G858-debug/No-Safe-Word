@@ -51,7 +51,7 @@ export function selectModel(
   }
 
   // 2. Explicit intimate content prefers maximum quality model (Lustify)
-  //    Suggestive/intimate-but-not-explicit scenes use Juggernaut for cleaner output
+  //    Suggestive/intimate-but-not-explicit scenes use the default model for cleaner output
   const contentLevel = options.contentLevel || classification.contentLevel;
   const needsExplicitModel = contentLevel === 'nsfw'
     && classification.hasIntimateContent
@@ -109,6 +109,6 @@ export function selectModel(
     checkpointName: DEFAULT_MODEL,
     model: defaultEntry,
     fellBack: false,
-    reason: 'Using default model (Juggernaut XL v10)',
+    reason: 'Using default model (RealVisXL V5.0)',
   };
 }

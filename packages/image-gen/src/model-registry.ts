@@ -16,19 +16,19 @@ export const MODEL_REGISTRY: ModelEntry[] = [
   {
     name: 'Juggernaut XL v10 Ragnarok',
     filename: 'juggernaut-x-v10.safetensors',
-    tier: 'standard',
+    tier: 'premium',
     strengths: ['diversity', 'realism'],
     fileSizeMb: 6500,
-    description: 'Best balance of quality, diversity, and cost. Default model.',
+    description: 'Strong diversity and realism. Previously the default model.',
     installed: true,
   },
   {
     name: 'RealVisXL V5.0',
     filename: 'realvisxl-v5.safetensors',
-    tier: 'premium',
+    tier: 'standard',
     strengths: ['portrait', 'skin_detail', 'diversity'],
     fileSizeMb: 6800,
-    description: 'Premium model for character portraits. Superior face and skin rendering.',
+    description: 'Default model. Superior face, skin, and portrait rendering. Includes Juggernaut XL merge.',
     installed: true,
   },
   {
@@ -42,7 +42,7 @@ export const MODEL_REGISTRY: ModelEntry[] = [
   },
 ];
 
-export const DEFAULT_MODEL = 'juggernaut-x-v10.safetensors';
+export const DEFAULT_MODEL = 'realvisxl-v5.safetensors';
 
 export function getModelByFilename(filename: string): ModelEntry | undefined {
   return MODEL_REGISTRY.find((m) => m.filename === filename);
