@@ -300,6 +300,8 @@ export default function DebugPage() {
   const [generating, setGenerating] = useState(false);
   const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Store images from polling response directly (avoids DB round-trip for large base64 data)
+  const [polledImages, setPolledImages] = useState<Record<string, string>>({});
 
   // Fetch prompt data (including debug_data if available)
   const fetchPromptData = useCallback(async () => {
@@ -364,7 +366,10 @@ export default function DebugPage() {
             clearInterval(interval);
             setPollInterval(null);
             setGenerating(false);
-            // Refresh prompt data to get debug_data with images
+            // Use images directly from polling response
+            if (statusData.intermediateImages) {
+              setPolledImages(statusData.intermediateImages);
+            }
             fetchPromptData();
           } else if (statusData.status === "failed") {
             clearInterval(interval);
@@ -390,7 +395,7 @@ export default function DebugPage() {
     const dd = promptData?.debug_data;
     if (!dd || !dd.jobId) return;
     // Already have images or already polling
-    if (Object.keys(dd.intermediateImages || {}).length > 0 || pollInterval || generating) return;
+    if (Object.keys(dd.intermediateImages || {}).length > 0 || Object.keys(polledImages).length > 0 || pollInterval || generating) return;
 
     // Check if job is completed and fetch images
     const checkAndFetch = async () => {
@@ -402,7 +407,7 @@ export default function DebugPage() {
         const statusData = await statusRes.json();
 
         if (statusData.status === "completed" && Object.keys(statusData.intermediateImages || {}).length > 0) {
-          // Images were fetched and saved — reload data
+          setPolledImages(statusData.intermediateImages);
           fetchPromptData();
         } else if (statusData.status === "generating" || statusData.status === "queued") {
           // Job still running — start polling
@@ -418,6 +423,9 @@ export default function DebugPage() {
                 clearInterval(interval);
                 setPollInterval(null);
                 setGenerating(false);
+                if (data.intermediateImages) {
+                  setPolledImages(data.intermediateImages);
+                }
                 fetchPromptData();
               } else if (data.status === "failed") {
                 clearInterval(interval);
@@ -437,7 +445,7 @@ export default function DebugPage() {
     };
 
     checkAndFetch();
-  }, [promptData?.debug_data, pollInterval, generating, promptId, fetchPromptData]);
+  }, [promptData?.debug_data, pollInterval, generating, promptId, fetchPromptData, polledImages]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -645,7 +653,7 @@ export default function DebugPage() {
                 <PassCard
                   key={passInfo.filenamePrefix}
                   passInfo={passInfo}
-                  imageUrl={debugData.intermediateImages[passInfo.filenamePrefix]}
+                  imageUrl={polledImages[passInfo.filenamePrefix] || debugData.intermediateImages[passInfo.filenamePrefix]}
                   isLoading={generating}
                 />
               ))}
