@@ -671,10 +671,17 @@ export function buildMultiPassWorkflow(params: MultiPassWorkflowParams): Record<
   ];
   const pass1Model = buildPassLoraChain(workflow, CKPT_NODE, 101, detailTweakerOnly);
 
-  const useAttentionCouple = hasDualCharacter
+  const attentionCoupleEnabled = process.env.ENABLE_ATTENTION_COUPLE !== 'false'; // default ON
+
+  const useAttentionCouple = attentionCoupleEnabled
+    && hasDualCharacter
     && !!params.sharedScenePrompt
     && !!params.primaryRegionPrompt
     && !!params.secondaryRegionPrompt;
+
+  if (hasDualCharacter && !useAttentionCouple) {
+    console.log('[MultiPass] Attention Couple DISABLED — using standard composition with full scene prompt');
+  }
 
   if (useAttentionCouple) {
     // --- Attention Couple path (dual-character) ---
