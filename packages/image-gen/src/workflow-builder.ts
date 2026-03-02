@@ -1460,3 +1460,349 @@ export function buildWorkflow(config: {
       throw new Error(`Unknown workflow type: ${config.type}`);
   }
 }
+
+// ============================================================
+// FLUX KONTEXT [DEV] WORKFLOW BUILDER
+// ============================================================
+
+export type KontextWorkflowType = 'portrait' | 'single' | 'dual';
+
+export interface KontextWorkflowConfig {
+  type: KontextWorkflowType;
+  positivePrompt: string;
+  width: number;
+  height: number;
+  seed: number;
+  filenamePrefix: string;
+  /** true = use SFW checkpoint, false = use NSFW checkpoint */
+  sfwMode: boolean;
+  /** Primary character reference image filename (must match images[].name in RunPod request) */
+  primaryRefImageName?: string;
+  /** Secondary character reference image filename (dual scenes only) */
+  secondaryRefImageName?: string;
+}
+
+/**
+ * Build a Flux Kontext [dev] ComfyUI workflow.
+ *
+ * Kontext uses a completely different architecture from SDXL:
+ * - LoadDiffusionModel (UNETLoader) instead of CheckpointLoaderSimple
+ * - DualCLIPLoader for text encoders
+ * - Reference image conditioning via InstructPixToPixConditioning
+ * - No negative prompts, no LoRAs, no IPAdapter, no FaceDetailer
+ * - Character consistency comes from feeding approved portrait as input image
+ *
+ * TODO: The official Kontext workflow uses ReferenceLatent + FluxGuidance +
+ * ConditioningZeroOut nodes instead of InstructPixToPixConditioning. If the
+ * RunPod ComfyUI has these nodes available, switch to that approach for
+ * better results. See: https://comfyanonymous.github.io/ComfyUI_examples/flux/
+ */
+export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<string, any> {
+  const sfwModel = process.env.KONTEXT_SFW_MODEL || 'flux1-dev-kontext_fp8_scaled.safetensors';
+  const nsfwModel = process.env.KONTEXT_NSFW_MODEL || 'flux1-kontext-nsfw.safetensors';
+  const modelName = config.sfwMode ? sfwModel : nsfwModel;
+
+  const workflow: Record<string, any> = {};
+
+  // ---- Shared nodes (all workflow types) ----
+
+  // Node 1: UNETLoader — Load the Kontext diffusion model
+  workflow['1'] = {
+    class_type: 'UNETLoader',
+    inputs: {
+      unet_name: modelName,
+      weight_dtype: 'fp8_e4m3fn',
+    },
+  };
+
+  // Node 2: DualCLIPLoader — Load text encoders for Flux
+  workflow['2'] = {
+    class_type: 'DualCLIPLoader',
+    inputs: {
+      clip_name1: 't5xxl_fp8_e4m3fn_scaled.safetensors',
+      clip_name2: 'clip_l.safetensors',
+      type: 'flux',
+    },
+  };
+
+  // Node 3: VAELoader
+  workflow['3'] = {
+    class_type: 'VAELoader',
+    inputs: {
+      vae_name: 'ae.safetensors',
+    },
+  };
+
+  // Node 4: CLIPTextEncode — Positive prompt only (Kontext has no negative prompt)
+  workflow['4'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: config.positivePrompt,
+      clip: ['2', 0],
+    },
+  };
+
+  switch (config.type) {
+    case 'portrait':
+      return buildKontextPortraitWorkflow(workflow, config);
+    case 'single':
+      return buildKontextSingleWorkflow(workflow, config);
+    case 'dual':
+      return buildKontextDualWorkflow(workflow, config);
+    default:
+      throw new Error(`Unknown Kontext workflow type: ${config.type}`);
+  }
+}
+
+/** Text-to-image portrait — no reference image */
+function buildKontextPortraitWorkflow(
+  workflow: Record<string, any>,
+  config: KontextWorkflowConfig,
+): Record<string, any> {
+  // Node 5: EmptyLatentImage
+  workflow['5'] = {
+    class_type: 'EmptyLatentImage',
+    inputs: {
+      width: config.width,
+      height: config.height,
+      batch_size: 1,
+    },
+  };
+
+  // Node 6: KSampler — Kontext text-to-image uses CFG 1.0, guidance comes from model
+  workflow['6'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: ['1', 0],
+      positive: ['4', 0],
+      negative: ['4', 0], // Kontext: same positive for negative (effectively no negative)
+      latent_image: ['5', 0],
+      seed: config.seed,
+      steps: 20,
+      cfg: 1.0,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: 1.0,
+    },
+  };
+
+  // Node 7: VAEDecode
+  workflow['7'] = {
+    class_type: 'VAEDecode',
+    inputs: {
+      samples: ['6', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 8: SaveImage
+  workflow['8'] = {
+    class_type: 'SaveImage',
+    inputs: {
+      filename_prefix: config.filenamePrefix,
+      images: ['7', 0],
+    },
+  };
+
+  return workflow;
+}
+
+/** Single reference image — one character with portrait as reference */
+function buildKontextSingleWorkflow(
+  workflow: Record<string, any>,
+  config: KontextWorkflowConfig,
+): Record<string, any> {
+  if (!config.primaryRefImageName) {
+    throw new Error('Kontext single workflow requires primaryRefImageName');
+  }
+
+  // Node 5: LoadImage — primary character reference
+  workflow['5'] = {
+    class_type: 'LoadImage',
+    inputs: {
+      image: config.primaryRefImageName,
+    },
+  };
+
+  // Node 6: ImageScale — scale reference to output dimensions
+  workflow['6'] = {
+    class_type: 'ImageScale',
+    inputs: {
+      image: ['5', 0],
+      width: config.width,
+      height: config.height,
+      upscale_method: 'lanczos',
+      crop: 'disabled',
+    },
+  };
+
+  // Node 7: VAEEncode — encode reference image to latent
+  workflow['7'] = {
+    class_type: 'VAEEncode',
+    inputs: {
+      pixels: ['6', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 8: InstructPixToPixConditioning — combine prompt with reference image
+  // TODO: Official Kontext workflow uses ReferenceLatent + FluxGuidance(2.5) +
+  // ConditioningZeroOut instead. If available on RunPod, switch to:
+  //   ConditioningZeroOut(positive) → negative
+  //   ReferenceLatent(positive, latent) → modified_positive, ref_latent
+  //   FluxGuidance(modified_positive, 2.5) → guided_positive
+  //   KSampler(model, guided_positive, negative, ref_latent)
+  workflow['8'] = {
+    class_type: 'InstructPixToPixConditioning',
+    inputs: {
+      positive: ['4', 0],
+      negative: ['4', 0],
+      vae: ['3', 0],
+      pixels: ['6', 0],
+    },
+  };
+
+  // Node 9: KSampler
+  workflow['9'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: ['1', 0],
+      positive: ['8', 0],
+      negative: ['8', 1],
+      latent_image: ['7', 0],
+      seed: config.seed,
+      steps: 20,
+      cfg: 2.5,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: 1.0,
+    },
+  };
+
+  // Node 10: VAEDecode
+  workflow['10'] = {
+    class_type: 'VAEDecode',
+    inputs: {
+      samples: ['9', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 11: SaveImage
+  workflow['11'] = {
+    class_type: 'SaveImage',
+    inputs: {
+      filename_prefix: config.filenamePrefix,
+      images: ['10', 0],
+    },
+  };
+
+  return workflow;
+}
+
+/** Dual reference images — two characters stitched side by side */
+function buildKontextDualWorkflow(
+  workflow: Record<string, any>,
+  config: KontextWorkflowConfig,
+): Record<string, any> {
+  if (!config.primaryRefImageName || !config.secondaryRefImageName) {
+    throw new Error('Kontext dual workflow requires both primaryRefImageName and secondaryRefImageName');
+  }
+
+  // Node 5: LoadImage — primary character
+  workflow['5'] = {
+    class_type: 'LoadImage',
+    inputs: {
+      image: config.primaryRefImageName,
+    },
+  };
+
+  // Node 6: LoadImage — secondary character
+  workflow['6'] = {
+    class_type: 'LoadImage',
+    inputs: {
+      image: config.secondaryRefImageName,
+    },
+  };
+
+  // Node 7: ImageConcanate — stitch images side by side (note: ComfyUI spelling)
+  workflow['7'] = {
+    class_type: 'ImageConcanate',
+    inputs: {
+      image1: ['5', 0],
+      image2: ['6', 0],
+      direction: 'right',
+      match_image_size: true,
+    },
+  };
+
+  // Node 8: ImageScale — scale stitched image
+  workflow['8'] = {
+    class_type: 'ImageScale',
+    inputs: {
+      image: ['7', 0],
+      width: config.width * 2, // double width for side-by-side
+      height: config.height,
+      upscale_method: 'lanczos',
+      crop: 'disabled',
+    },
+  };
+
+  // Node 9: VAEEncode — encode stitched reference to latent
+  workflow['9'] = {
+    class_type: 'VAEEncode',
+    inputs: {
+      pixels: ['8', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 10: InstructPixToPixConditioning
+  // TODO: See single workflow TODO — switch to ReferenceLatent + FluxGuidance when available
+  workflow['10'] = {
+    class_type: 'InstructPixToPixConditioning',
+    inputs: {
+      positive: ['4', 0],
+      negative: ['4', 0],
+      vae: ['3', 0],
+      pixels: ['8', 0],
+    },
+  };
+
+  // Node 11: KSampler
+  workflow['11'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: ['1', 0],
+      positive: ['10', 0],
+      negative: ['10', 1],
+      latent_image: ['9', 0],
+      seed: config.seed,
+      steps: 20,
+      cfg: 2.5,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: 1.0,
+    },
+  };
+
+  // Node 12: VAEDecode
+  workflow['12'] = {
+    class_type: 'VAEDecode',
+    inputs: {
+      samples: ['11', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 13: SaveImage
+  workflow['13'] = {
+    class_type: 'SaveImage',
+    inputs: {
+      filename_prefix: config.filenamePrefix,
+      images: ['12', 0],
+    },
+  };
+
+  return workflow;
+}

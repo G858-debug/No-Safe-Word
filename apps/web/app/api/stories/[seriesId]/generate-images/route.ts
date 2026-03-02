@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge, buildFacePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
 import { augmentComposition, buildCharacterLoraEntry, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
-import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
-import type { CharacterData } from "@no-safe-word/shared";
+import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
+import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
 
 interface QueuedJob {
   promptId: string;
@@ -27,6 +27,15 @@ export async function POST(
   try {
     const body = await request.json().catch(() => ({}));
     const { post_id, regenerate } = body as { post_id?: string; regenerate?: boolean };
+
+    // 0. Fetch series to determine image engine
+    const { data: seriesRecord } = await supabase
+      .from("story_series")
+      .select("image_engine")
+      .eq("id", seriesId)
+      .single();
+
+    const imageEngine: ImageEngine = (seriesRecord as any)?.image_engine || "sdxl";
 
     // 1. Verify all characters in the series are approved
     // Note: active_lora_id is not in auto-generated types yet, so we cast
@@ -303,6 +312,141 @@ export async function POST(
           : null;
 
         const hasSecondary = !!imgPrompt.secondary_character_id;
+
+        // ====== KONTEXT ENGINE PATH ======
+        if (imageEngine === "kontext") {
+          // Determine Kontext workflow type
+          const kontextType: KontextWorkflowType = !imgPrompt.character_id
+            ? "portrait"
+            : hasSecondary
+              ? "dual"
+              : "single";
+
+          // Determine SFW vs NSFW
+          const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
+
+          // Fetch reference images for character consistency
+          const kontextImages: Array<{ name: string; image: string }> = [];
+
+          if (kontextType !== "portrait" && imgPrompt.character_id) {
+            const { data: sc } = await supabase
+              .from("story_characters")
+              .select("approved_image_id")
+              .eq("series_id", seriesId)
+              .eq("character_id", imgPrompt.character_id)
+              .single();
+
+            if (sc?.approved_image_id) {
+              const { data: img } = await supabase
+                .from("images")
+                .select("stored_url")
+                .eq("id", sc.approved_image_id)
+                .single();
+
+              if (img?.stored_url) {
+                const primaryRefBase64 = await imageUrlToBase64(img.stored_url);
+                kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+              }
+            }
+          }
+
+          if (kontextType === "dual" && imgPrompt.secondary_character_id) {
+            const { data: sc2 } = await supabase
+              .from("story_characters")
+              .select("approved_image_id")
+              .eq("series_id", seriesId)
+              .eq("character_id", imgPrompt.secondary_character_id)
+              .single();
+
+            if (sc2?.approved_image_id) {
+              const { data: img2 } = await supabase
+                .from("images")
+                .select("stored_url")
+                .eq("id", sc2.approved_image_id)
+                .single();
+
+              if (img2?.stored_url) {
+                const secondaryRefBase64 = await imageUrlToBase64(img2.stored_url);
+                kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
+              }
+            }
+          }
+
+          // Kontext dimensions: portrait-oriented by default, landscape for wide/establishing shots
+          const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
+          const kontextWidth = isLandscape ? 1216 : 832;
+          const kontextHeight = isLandscape ? 832 : 1216;
+
+          // Build Kontext workflow — uses raw scene prompt (no SDXL tag injection needed)
+          const kontextWorkflow = buildKontextWorkflow({
+            type: kontextType,
+            positivePrompt: imgPrompt.prompt,
+            width: kontextWidth,
+            height: kontextHeight,
+            seed,
+            filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
+            sfwMode,
+            primaryRefImageName: kontextType !== "portrait" ? "primary_ref.png" : undefined,
+            secondaryRefImageName: kontextType === "dual" ? "secondary_ref.png" : undefined,
+          });
+
+          console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}`);
+
+          // Submit to RunPod (same endpoint)
+          const { jobId: kontextJobId } = await submitRunPodJob(
+            kontextWorkflow,
+            kontextImages.length > 0 ? kontextImages : undefined,
+          );
+
+          // Create image record
+          const { data: kontextImageRow, error: kontextImgError } = await supabase
+            .from("images")
+            .insert({
+              character_id: imgPrompt.character_id || null,
+              prompt: imgPrompt.prompt,
+              negative_prompt: "none",
+              settings: {
+                width: kontextWidth,
+                height: kontextHeight,
+                steps: 20,
+                cfg: kontextType === "portrait" ? 1.0 : 2.5,
+                seed,
+                engine: "runpod-kontext",
+                workflowType: kontextType,
+              },
+              mode,
+            })
+            .select("id")
+            .single();
+
+          if (kontextImgError || !kontextImageRow) {
+            throw new Error(`Failed to create image record: ${kontextImgError?.message}`);
+          }
+
+          await supabase.from("generation_jobs").insert({
+            job_id: `runpod-${kontextJobId}`,
+            image_id: kontextImageRow.id,
+            status: "pending",
+            cost: 0,
+          });
+
+          await supabase
+            .from("story_image_prompts")
+            .update({ image_id: kontextImageRow.id })
+            .eq("id", imgPrompt.id);
+
+          jobs.push({
+            promptId: imgPrompt.id,
+            jobId: `runpod-${kontextJobId}`,
+          });
+
+          if (i < prompts.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          continue; // Skip SDXL path below
+        }
+
+        // ====== SDXL ENGINE PATH (existing, unchanged) ======
 
         // Composition intelligence: augment dual-character scenes with spatial cues
         let scenePromptForBuild = imgPrompt.prompt;

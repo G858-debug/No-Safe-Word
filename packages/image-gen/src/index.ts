@@ -16,7 +16,9 @@ export {
   buildDualCharacterWorkflow,
   buildMultiPassWorkflow,
   buildWorkflow,
+  buildKontextWorkflow,
 } from './workflow-builder';
+export type { KontextWorkflowConfig, KontextWorkflowType } from './workflow-builder';
 
 export { classifyScene } from './scene-classifier';
 export type { SceneClassification, ImageType, InteractionType } from './scene-classifier';

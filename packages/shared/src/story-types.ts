@@ -92,6 +92,8 @@ export interface MarketingImport {
 // DATABASE ROW TYPES (what Supabase stores)
 // ============================================================
 
+export type ImageEngine = 'sdxl' | 'kontext';
+
 export interface StorySeriesRow {
   id: string;
   title: string;
@@ -100,6 +102,7 @@ export interface StorySeriesRow {
   total_parts: number;
   hashtag: string | null;
   status: SeriesStatus;
+  image_engine: ImageEngine;
   marketing: Record<string, unknown>;
   created_at: string;
   updated_at: string;

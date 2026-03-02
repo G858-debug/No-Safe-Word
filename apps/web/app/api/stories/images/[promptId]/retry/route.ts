@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { extractCharacterTags, buildStoryImagePrompt, buildFacePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
-import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
-import type { CharacterData } from "@no-safe-word/shared";
+import { extractCharacterTags, buildStoryImagePrompt, buildFacePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
+import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
+import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
 
 // POST /api/stories/images/[promptId]/retry — Internal retry for failed person validation
 // Called by the status route when dual-character validation detects wrong person count.
@@ -70,6 +70,17 @@ export async function POST(
       .eq("id", imgPrompt.post_id)
       .single();
 
+    // Fetch image engine from series
+    let imageEngine: ImageEngine = "sdxl";
+    if (post) {
+      const { data: seriesRecord } = await supabase
+        .from("story_series")
+        .select("image_engine")
+        .eq("id", post.series_id)
+        .single();
+      imageEngine = (seriesRecord as any)?.image_engine || "sdxl";
+    }
+
     if (imgPrompt.character_id) {
       const { data: character } = await supabase
         .from("characters")
@@ -108,6 +119,9 @@ export async function POST(
 
         if (storyChar?.approved_prompt) {
           approvedCharacterTags = extractCharacterTags(storyChar.approved_prompt);
+          if (charData.age) {
+            approvedCharacterTags = replaceTagsAge(approvedCharacterTags, charData.age);
+          }
         }
 
         if (storyChar?.active_lora_id) {
@@ -195,6 +209,95 @@ export async function POST(
     let finalPrompt = promptOverride || imgPrompt.prompt;
 
     const hasSecondary = !!imgPrompt.secondary_character_id;
+
+    // ====== KONTEXT ENGINE PATH ======
+    if (imageEngine === "kontext") {
+      const kontextType: KontextWorkflowType = !imgPrompt.character_id
+        ? "portrait"
+        : hasSecondary
+          ? "dual"
+          : "single";
+
+      const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
+      const kontextImages: Array<{ name: string; image: string }> = [];
+
+      if (kontextType !== "portrait" && imgPrompt.character_id && post) {
+        const { data: sc } = await supabase
+          .from("story_characters")
+          .select("approved_image_id")
+          .eq("series_id", post.series_id)
+          .eq("character_id", imgPrompt.character_id)
+          .single();
+
+        if (sc?.approved_image_id) {
+          const { data: img } = await supabase
+            .from("images")
+            .select("stored_url")
+            .eq("id", sc.approved_image_id)
+            .single();
+
+          if (img?.stored_url) {
+            kontextImages.push({ name: "primary_ref.png", image: await imageUrlToBase64(img.stored_url) });
+          }
+        }
+      }
+
+      if (kontextType === "dual" && imgPrompt.secondary_character_id && post) {
+        const { data: sc2 } = await supabase
+          .from("story_characters")
+          .select("approved_image_id")
+          .eq("series_id", post.series_id)
+          .eq("character_id", imgPrompt.secondary_character_id)
+          .single();
+
+        if (sc2?.approved_image_id) {
+          const { data: img2 } = await supabase
+            .from("images")
+            .select("stored_url")
+            .eq("id", sc2.approved_image_id)
+            .single();
+
+          if (img2?.stored_url) {
+            kontextImages.push({ name: "secondary_ref.png", image: await imageUrlToBase64(img2.stored_url) });
+          }
+        }
+      }
+
+      const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
+      const kontextWidth = isLandscape ? 1216 : 832;
+      const kontextHeight = isLandscape ? 832 : 1216;
+
+      const kontextWorkflow = buildKontextWorkflow({
+        type: kontextType,
+        positivePrompt: imgPrompt.prompt,
+        width: kontextWidth,
+        height: kontextHeight,
+        seed: newSeed,
+        filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
+        sfwMode,
+        primaryRefImageName: kontextType !== "portrait" ? "primary_ref.png" : undefined,
+        secondaryRefImageName: kontextType === "dual" ? "secondary_ref.png" : undefined,
+      });
+
+      const { jobId: runpodJobId } = await submitRunPodJob(
+        kontextWorkflow,
+        kontextImages.length > 0 ? kontextImages : undefined,
+      );
+
+      const newJobId = `runpod-${runpodJobId}`;
+
+      await supabase
+        .from("generation_jobs")
+        .update({ job_id: newJobId, status: "pending", completed_at: null })
+        .eq("job_id", oldJobId);
+
+      console.log(`[Retry/Kontext][${promptId}] Resubmitted with seed ${newSeed}, new job: ${newJobId}`);
+
+      return NextResponse.json({ jobId: newJobId, seed: newSeed });
+    }
+
+    // ====== SDXL ENGINE PATH (existing, unchanged) ======
+
     const primaryHasLora = !!primaryCharLora;
 
     const useMultiPass = !!imgPrompt.character_id && primaryHasLora;

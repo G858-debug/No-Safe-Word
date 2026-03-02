@@ -18,6 +18,13 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   BookOpen,
   Users,
   Image as ImageIcon,
@@ -25,6 +32,7 @@ import {
   Hash,
   FileText,
   ArrowLeft,
+  Zap,
 } from "lucide-react";
 import CharacterApproval, {
   type CharacterFromAPI,
@@ -34,6 +42,7 @@ import PublishPanel from "./components/PublishPanel";
 import type {
   StorySeriesRow,
   StoryPostRow,
+  ImageEngine,
 } from "@no-safe-word/shared";
 
 // ---------------------------------------------------------------------------
@@ -181,6 +190,23 @@ export default function SeriesDetailPage() {
   // Derived state
   const allCharsApproved =
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
+
+  // Engine update handler
+  async function handleEngineChange(engine: ImageEngine) {
+    try {
+      const res = await fetch(`/api/stories/${seriesId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_engine: engine }),
+      });
+      if (!res.ok) throw new Error("Failed to update engine");
+      setData((prev) =>
+        prev ? { ...prev, series: { ...prev.series, image_engine: engine } } : prev
+      );
+    } catch (err) {
+      console.error("Engine update failed:", err);
+    }
+  }
 
   // ------- Loading state -------
   if (loading) {
@@ -351,6 +377,38 @@ export default function SeriesDetailPage() {
                   </div>
                 </dl>
 
+                {/* Image Engine selector */}
+                <div className="pt-3 border-t">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="text-sm text-muted-foreground mb-1 block">
+                        Image Engine
+                      </label>
+                      <Select
+                        value={series.image_engine || "sdxl"}
+                        onValueChange={(v) => handleEngineChange(v as ImageEngine)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sdxl">SDXL (Current Pipeline)</SelectItem>
+                          <SelectItem value="kontext">
+                            <span className="flex items-center gap-1.5">
+                              Flux Kontext [dev]
+                              <Zap className="h-3.5 w-3.5 text-yellow-500" />
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="flex-1 text-xs text-muted-foreground mt-5">
+                      {(series.image_engine || "sdxl") === "sdxl"
+                        ? "Original pipeline with IPAdapter character consistency"
+                        : "Better prompt adherence, native character consistency, no LoRAs needed"}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 

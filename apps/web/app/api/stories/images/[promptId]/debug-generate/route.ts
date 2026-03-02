@@ -30,6 +30,7 @@ import {
   buildDebugPassInfo,
   injectDebugSaveNodes,
   buildFacePrompt,
+  replaceTagsAge,
 } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
@@ -68,6 +69,20 @@ export async function POST(
       return NextResponse.json(
         { error: "Post not found for this image prompt" },
         { status: 404 }
+      );
+    }
+
+    // Check engine — debug mode is only for SDXL multi-pass workflow
+    const { data: seriesRecord } = await supabase
+      .from("story_series")
+      .select("image_engine")
+      .eq("id", post.series_id)
+      .single();
+
+    if ((seriesRecord as any)?.image_engine === "kontext") {
+      return NextResponse.json(
+        { error: "Debug generation is not available for Kontext engine (no multi-pass workflow)" },
+        { status: 400 }
       );
     }
 
@@ -118,6 +133,9 @@ export async function POST(
 
       if (storyChar?.approved_prompt) {
         approvedCharacterTags = extractCharacterTags(storyChar.approved_prompt);
+        if (charData.age) {
+          approvedCharacterTags = replaceTagsAge(approvedCharacterTags, charData.age);
+        }
       }
 
       // Fetch deployed LoRA

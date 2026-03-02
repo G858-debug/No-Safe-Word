@@ -13,7 +13,8 @@
     "build:web": "npm run build --workspace=@no-safe-word/web",
     "start": "npm run start --workspace=@no-safe-word/web",
     "lint": "turbo run lint --continue",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "download:kontext-models": "node scripts/download-kontext-models.mjs"
   },
   "engines": {
     "node": ">=20.0.0",
