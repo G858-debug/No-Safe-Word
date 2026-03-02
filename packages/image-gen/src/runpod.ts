@@ -228,52 +228,6 @@ export async function imageUrlToBase64(url: string): Promise<string> {
 }
 
 /**
- * Concatenate two base64 images side by side (horizontally).
- * Used for Kontext dual-character workflows — combines primary and secondary
- * reference portraits into a single reference before sending to ComfyUI.
- */
-export async function concatImagesHorizontally(base64A: string, base64B: string): Promise<string> {
-  const sharp = (await import('sharp')).default;
-  const bufA = Buffer.from(base64A, 'base64');
-  const bufB = Buffer.from(base64B, 'base64');
-
-  const [metaA, metaB] = await Promise.all([
-    sharp(bufA).metadata(),
-    sharp(bufB).metadata(),
-  ]);
-
-  const height = Math.max(metaA.height || 512, metaB.height || 512);
-
-  // Resize both to the same height, preserving aspect ratio
-  const [resizedA, resizedB] = await Promise.all([
-    sharp(bufA).resize({ height, fit: 'inside' }).png().toBuffer(),
-    sharp(bufB).resize({ height, fit: 'inside' }).png().toBuffer(),
-  ]);
-
-  const metaRA = await sharp(resizedA).metadata();
-  const metaRB = await sharp(resizedB).metadata();
-  const widthA = metaRA.width || 512;
-  const widthB = metaRB.width || 512;
-
-  const combined = await sharp({
-    create: {
-      width: widthA + widthB,
-      height,
-      channels: 3,
-      background: { r: 0, g: 0, b: 0 },
-    },
-  })
-    .composite([
-      { input: resizedA, left: 0, top: 0 },
-      { input: resizedB, left: widthA, top: 0 },
-    ])
-    .png()
-    .toBuffer();
-
-  return combined.toString('base64');
-}
-
-/**
  * Convert base64 image data to a Buffer for Supabase storage upload.
  */
 export function base64ToBuffer(base64: string): Buffer {

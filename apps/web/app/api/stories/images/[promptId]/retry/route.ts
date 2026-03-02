@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, buildFacePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, concatImagesHorizontally, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
+import { concatImagesHorizontally } from "@/lib/server/image-concat";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
 import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
 

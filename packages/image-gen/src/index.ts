@@ -6,7 +6,6 @@ export {
   getRunPodJobStatus,
   waitForRunPodResult,
   imageUrlToBase64,
-  concatImagesHorizontally,
   base64ToBuffer,
 } from './runpod';
 export type { CharacterLoraDownload } from './runpod';
