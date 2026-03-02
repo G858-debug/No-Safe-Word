@@ -1700,16 +1700,19 @@ function buildKontextSingleWorkflow(
   return workflow;
 }
 
-/** Dual reference images — two characters stitched side by side */
+/** Dual reference images — both characters combined into a single reference image server-side.
+ *  The route concatenates both portraits horizontally before calling this builder,
+ *  so the workflow receives a single pre-combined image via primaryRefImageName.
+ *  Node graph is identical to the single workflow. */
 function buildKontextDualWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
 ): Record<string, any> {
-  if (!config.primaryRefImageName || !config.secondaryRefImageName) {
-    throw new Error('Kontext dual workflow requires both primaryRefImageName and secondaryRefImageName');
+  if (!config.primaryRefImageName) {
+    throw new Error('Kontext dual workflow requires primaryRefImageName (pre-combined reference image)');
   }
 
-  // Node 5: LoadImage — primary character
+  // Node 5: LoadImage — combined reference (both characters side by side)
   workflow['5'] = {
     class_type: 'LoadImage',
     inputs: {
@@ -1717,66 +1720,46 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 6: LoadImage — secondary character
+  // Node 6: ImageScale — scale combined reference
   workflow['6'] = {
-    class_type: 'LoadImage',
-    inputs: {
-      image: config.secondaryRefImageName,
-    },
-  };
-
-  // Node 7: ImageConcanate — stitch images side by side (note: ComfyUI spelling)
-  workflow['7'] = {
-    class_type: 'ImageConcanate',
-    inputs: {
-      image1: ['5', 0],
-      image2: ['6', 0],
-      direction: 'right',
-      match_image_size: true,
-    },
-  };
-
-  // Node 8: ImageScale — scale stitched image
-  workflow['8'] = {
     class_type: 'ImageScale',
     inputs: {
-      image: ['7', 0],
-      width: config.width * 2, // double width for side-by-side
+      image: ['5', 0],
+      width: config.width,
       height: config.height,
       upscale_method: 'lanczos',
       crop: 'disabled',
     },
   };
 
-  // Node 9: VAEEncode — encode stitched reference to latent
-  workflow['9'] = {
+  // Node 7: VAEEncode — encode reference to latent
+  workflow['7'] = {
     class_type: 'VAEEncode',
     inputs: {
-      pixels: ['8', 0],
+      pixels: ['6', 0],
       vae: ['3', 0],
     },
   };
 
-  // Node 10: InstructPixToPixConditioning
-  // TODO: See single workflow TODO — switch to ReferenceLatent + FluxGuidance when available
-  workflow['10'] = {
+  // Node 8: InstructPixToPixConditioning
+  workflow['8'] = {
     class_type: 'InstructPixToPixConditioning',
     inputs: {
       positive: ['4', 0],
       negative: ['4', 0],
       vae: ['3', 0],
-      pixels: ['8', 0],
+      pixels: ['6', 0],
     },
   };
 
-  // Node 11: KSampler
-  workflow['11'] = {
+  // Node 9: KSampler
+  workflow['9'] = {
     class_type: 'KSampler',
     inputs: {
       model: ['1', 0],
-      positive: ['10', 0],
-      negative: ['10', 1],
-      latent_image: ['9', 0],
+      positive: ['8', 0],
+      negative: ['8', 1],
+      latent_image: ['7', 0],
       seed: config.seed,
       steps: 20,
       cfg: 2.5,
@@ -1786,21 +1769,21 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 12: VAEDecode
-  workflow['12'] = {
+  // Node 10: VAEDecode
+  workflow['10'] = {
     class_type: 'VAEDecode',
     inputs: {
-      samples: ['11', 0],
+      samples: ['9', 0],
       vae: ['3', 0],
     },
   };
 
-  // Node 13: SaveImage
-  workflow['13'] = {
+  // Node 11: SaveImage
+  workflow['11'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['12', 0],
+      images: ['10', 0],
     },
   };
 

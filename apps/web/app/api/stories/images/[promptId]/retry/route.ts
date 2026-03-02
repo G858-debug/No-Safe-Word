@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, buildFacePrompt, replaceTagsAge } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, concatImagesHorizontally, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, buildCharacterLoraEntry, decomposePrompt, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
 import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
 
@@ -219,7 +219,7 @@ export async function POST(
           : "single";
 
       const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
-      const kontextImages: Array<{ name: string; image: string }> = [];
+      let kontextImages: Array<{ name: string; image: string }> = [];
 
       if (kontextType !== "portrait" && imgPrompt.character_id && post) {
         const { data: sc } = await supabase
@@ -273,9 +273,25 @@ export async function POST(
         }
       }
 
+      // For dual scenes: combine both ref images into one server-side
+      if (kontextType === "dual" && kontextImages.length === 2) {
+        try {
+          const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
+          kontextImages = [{ name: "combined_ref.png", image: combined }];
+          console.log(`[Kontext][${promptId}] Combined primary + secondary ref images server-side`);
+        } catch (err) {
+          console.warn(`[Kontext][${promptId}] Failed to combine ref images, using primary only:`, err instanceof Error ? err.message : err);
+          kontextImages = [kontextImages[0]];
+        }
+      }
+
       const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
       const kontextWidth = isLandscape ? 1216 : 832;
       const kontextHeight = isLandscape ? 832 : 1216;
+
+      const refImageName = kontextType === "dual"
+        ? (kontextImages[0]?.name || "combined_ref.png")
+        : kontextType !== "portrait" ? "primary_ref.png" : undefined;
 
       const kontextWorkflow = buildKontextWorkflow({
         type: kontextType,
@@ -285,8 +301,7 @@ export async function POST(
         seed: newSeed,
         filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
         sfwMode,
-        primaryRefImageName: kontextType !== "portrait" ? "primary_ref.png" : undefined,
-        secondaryRefImageName: kontextType === "dual" ? "secondary_ref.png" : undefined,
+        primaryRefImageName: refImageName,
       });
 
       const { jobId: runpodJobId } = await submitRunPodJob(

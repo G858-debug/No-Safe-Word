@@ -16,10 +16,12 @@
     "@no-safe-word/shared": "*",
     "@types/archiver": "^7.0.0",
     "archiver": "^7.0.1",
-    "replicate": "^1.4.0"
+    "replicate": "^1.4.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/sharp": "^0.31.1",
     "typescript": "^5"
   }
 }

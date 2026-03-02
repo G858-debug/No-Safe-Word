@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge, buildFacePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, concatImagesHorizontally, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
 import { augmentComposition, buildCharacterLoraEntry, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
 import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
@@ -326,7 +326,7 @@ export async function POST(
           const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
 
           // Fetch reference images for character consistency
-          const kontextImages: Array<{ name: string; image: string }> = [];
+          let kontextImages: Array<{ name: string; image: string }> = [];
 
           if (kontextType !== "portrait" && imgPrompt.character_id) {
             const { data: sc } = await supabase
@@ -382,10 +382,26 @@ export async function POST(
             }
           }
 
+          // For dual scenes: combine both ref images into one server-side
+          if (kontextType === "dual" && kontextImages.length === 2) {
+            try {
+              const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
+              kontextImages = [{ name: "combined_ref.png", image: combined }];
+              console.log(`[Kontext][${imgPrompt.id}] Combined primary + secondary ref images server-side`);
+            } catch (err) {
+              console.warn(`[Kontext][${imgPrompt.id}] Failed to combine ref images, using primary only:`, err instanceof Error ? err.message : err);
+              kontextImages = [kontextImages[0]];
+            }
+          }
+
           // Kontext dimensions: portrait-oriented by default, landscape for wide/establishing shots
           const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
           const kontextWidth = isLandscape ? 1216 : 832;
           const kontextHeight = isLandscape ? 832 : 1216;
+
+          const refImageName = kontextType === "dual"
+            ? (kontextImages[0]?.name || "combined_ref.png")
+            : kontextType !== "portrait" ? "primary_ref.png" : undefined;
 
           // Build Kontext workflow — uses raw scene prompt (no SDXL tag injection needed)
           const kontextWorkflow = buildKontextWorkflow({
@@ -396,8 +412,7 @@ export async function POST(
             seed,
             filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
             sfwMode,
-            primaryRefImageName: kontextType !== "portrait" ? "primary_ref.png" : undefined,
-            secondaryRefImageName: kontextType === "dual" ? "secondary_ref.png" : undefined,
+            primaryRefImageName: refImageName,
           });
 
           console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}`);
