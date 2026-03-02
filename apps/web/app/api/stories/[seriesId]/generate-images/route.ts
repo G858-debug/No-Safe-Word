@@ -339,13 +339,14 @@ export async function POST(
             if (sc?.approved_image_id) {
               const { data: img } = await supabase
                 .from("images")
-                .select("stored_url")
+                .select("stored_url, sfw_url")
                 .eq("id", sc.approved_image_id)
                 .single();
 
-              if (img?.stored_url) {
+              const primaryRefUrl = img?.stored_url || img?.sfw_url;
+              if (primaryRefUrl) {
                 try {
-                  const primaryRefBase64 = await imageUrlToBase64(img.stored_url);
+                  const primaryRefBase64 = await imageUrlToBase64(primaryRefUrl);
                   kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
                 } catch (err) {
                   console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
@@ -365,13 +366,14 @@ export async function POST(
             if (sc2?.approved_image_id) {
               const { data: img2 } = await supabase
                 .from("images")
-                .select("stored_url")
+                .select("stored_url, sfw_url")
                 .eq("id", sc2.approved_image_id)
                 .single();
 
-              if (img2?.stored_url) {
+              const secondaryRefUrl = img2?.stored_url || img2?.sfw_url;
+              if (secondaryRefUrl) {
                 try {
-                  const secondaryRefBase64 = await imageUrlToBase64(img2.stored_url);
+                  const secondaryRefBase64 = await imageUrlToBase64(secondaryRefUrl);
                   kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
                 } catch (err) {
                   console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch secondary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
@@ -534,13 +536,14 @@ export async function POST(
           if (sc?.approved_image_id) {
             const { data: img } = await supabase
               .from("images")
-              .select("stored_url")
+              .select("stored_url, sfw_url")
               .eq("id", sc.approved_image_id)
               .single();
 
-            if (img?.stored_url) {
+            const sdxlRefUrl = img?.stored_url || img?.sfw_url;
+            if (sdxlRefUrl) {
               try {
-                const primaryRefBase64 = await imageUrlToBase64(img.stored_url);
+                const primaryRefBase64 = await imageUrlToBase64(sdxlRefUrl);
                 images.push({ name: "primary_ref.png", image: primaryRefBase64 });
               } catch (err) {
                 console.warn(`[StoryImage][${imgPrompt.id}] Failed to fetch primary ref image for SDXL, proceeding without it:`, err instanceof Error ? err.message : err);
