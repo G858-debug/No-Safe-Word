@@ -281,7 +281,11 @@ export async function POST(
             .single();
 
           if (img?.stored_url) {
-            kontextImages.push({ name: "primary_ref.png", image: await imageUrlToBase64(img.stored_url) });
+            try {
+              kontextImages.push({ name: "primary_ref.png", image: await imageUrlToBase64(img.stored_url) });
+            } catch (err) {
+              console.warn(`[Kontext][${promptId}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
+            }
           }
         }
       }
@@ -302,7 +306,11 @@ export async function POST(
             .single();
 
           if (img2?.stored_url) {
-            kontextImages.push({ name: "secondary_ref.png", image: await imageUrlToBase64(img2.stored_url) });
+            try {
+              kontextImages.push({ name: "secondary_ref.png", image: await imageUrlToBase64(img2.stored_url) });
+            } catch (err) {
+              console.warn(`[Kontext][${promptId}] Failed to fetch secondary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
+            }
           }
         }
       }
@@ -423,8 +431,12 @@ export async function POST(
           .single();
 
         if (refImg?.stored_url) {
-          const primaryRefBase64 = await imageUrlToBase64(refImg.stored_url);
-          refImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+          try {
+            const primaryRefBase64 = await imageUrlToBase64(refImg.stored_url);
+            refImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+          } catch (err) {
+            console.warn(`[StoryImage][${promptId}] Failed to fetch primary ref image for SDXL, proceeding without it:`, err instanceof Error ? err.message : err);
+          }
         }
       }
     }
