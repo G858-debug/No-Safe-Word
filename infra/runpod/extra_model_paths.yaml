@@ -1,0 +1,14 @@
+# Extra model paths for ComfyUI — network volume mounted at /runpod-volume.
+# Flux Kontext models (UNET, CLIP, VAE) are stored on the persistent volume
+# so they survive container restarts without re-downloading ~17GB each time.
+# Downloaded via: node scripts/download-kontext-models.mjs
+
+a_custom_path:
+  base_path: /runpod-volume
+  checkpoints: models/checkpoints
+  diffusion_models: models/diffusion_models
+  vae: models/vae
+  clip: models/clip
+  loras: models/loras
+  controlnet: models/controlnet
+  upscale_models: models/upscale_models

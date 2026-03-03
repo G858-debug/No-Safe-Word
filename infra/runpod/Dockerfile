@@ -27,6 +27,11 @@ RUN mv /handler.py /handler_original.py
 COPY patch_handler.py /tmp/patch_handler.py
 RUN python3 /tmp/patch_handler.py && rm /tmp/patch_handler.py /handler_original.py
 
+# ---- Extra model paths (network volume) ----
+# Tells ComfyUI to also search /runpod-volume/models/ for model files.
+# Flux Kontext models live on the network volume to avoid bloating container disk.
+COPY extra_model_paths.yaml ${COMFY_DIR}/extra_model_paths.yaml
+
 # ---- Override runtime model download script ----
 # The base image ships download-models.sh, but we may update it more
 # frequently (e.g. adding new LoRAs). Re-copy here so the app image
