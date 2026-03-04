@@ -374,6 +374,7 @@ export async function POST(
               console.log(`[Kontext][${imgPrompt.id}] Combined face + body ref images vertically for "${charName}"`);
             } else {
               // Dual-character scene: primary character still uses face-only (horizontal stitch with secondary happens later)
+              console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching primary ref for "${charName}" (approved_image_id: ${sc?.approved_image_id || 'NONE'})`);
               if (sc?.approved_image_id) {
                 const { data: img } = await supabase
                   .from("images")
@@ -382,25 +383,34 @@ export async function POST(
                   .single();
 
                 const primaryRefUrl = img?.stored_url || img?.sfw_url;
+                console.log(`[Kontext][${imgPrompt.id}] Primary ref URL: ${primaryRefUrl ? primaryRefUrl.substring(0, 80) + '...' : 'NONE'}`);
                 if (primaryRefUrl) {
                   try {
                     const primaryRefBase64 = await imageUrlToBase64(primaryRefUrl);
                     kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+                    console.log(`[Kontext][${imgPrompt.id}] Primary ref loaded (${Math.round(primaryRefBase64.length / 1024)}KB base64)`);
                   } catch (err) {
                     console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
                   }
                 }
+              } else {
+                console.warn(`[Kontext][${imgPrompt.id}] WARNING: Primary character "${charName}" has no approved_image_id for dual scene`);
               }
             }
           }
 
           if (kontextType === "dual" && imgPrompt.secondary_character_id) {
+            const secondaryName = characterDataMap.get(imgPrompt.secondary_character_id)?.name || imgPrompt.secondary_character_name || "Unknown";
+            console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching secondary ref for "${secondaryName}" (character_id: ${imgPrompt.secondary_character_id})`);
+
             const { data: sc2 } = await supabase
               .from("story_characters")
               .select("approved_image_id")
               .eq("series_id", seriesId)
               .eq("character_id", imgPrompt.secondary_character_id)
               .single();
+
+            console.log(`[Kontext][${imgPrompt.id}] Secondary "${secondaryName}" approved_image_id: ${sc2?.approved_image_id || 'NONE'}`);
 
             if (sc2?.approved_image_id) {
               const { data: img2 } = await supabase
@@ -410,14 +420,18 @@ export async function POST(
                 .single();
 
               const secondaryRefUrl = img2?.stored_url || img2?.sfw_url;
+              console.log(`[Kontext][${imgPrompt.id}] Secondary ref URL: ${secondaryRefUrl ? secondaryRefUrl.substring(0, 80) + '...' : 'NONE'}`);
               if (secondaryRefUrl) {
                 try {
                   const secondaryRefBase64 = await imageUrlToBase64(secondaryRefUrl);
                   kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
+                  console.log(`[Kontext][${imgPrompt.id}] Secondary ref loaded (${Math.round(secondaryRefBase64.length / 1024)}KB base64)`);
                 } catch (err) {
                   console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch secondary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
                 }
               }
+            } else {
+              console.warn(`[Kontext][${imgPrompt.id}] WARNING: Secondary character "${secondaryName}" has no approved_image_id — no reference image for identity`);
             }
           }
 
@@ -461,6 +475,11 @@ export async function POST(
               }
             }
           }
+
+          // Log the assembled prompt before rewriting
+          console.log(`[Kontext][${imgPrompt.id}] Pre-rewrite prompt (${kontextPositivePrompt.length} chars):`);
+          console.log(`  ${kontextPositivePrompt.substring(0, 300)}`);
+          console.log(`[Kontext][${imgPrompt.id}] Ref images: ${kontextImages.length}, refImageName: ${refImageName || 'NONE'}, type: ${kontextType}`);
 
           // Rewrite prompt from SDXL tag format → Flux natural language
           const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
