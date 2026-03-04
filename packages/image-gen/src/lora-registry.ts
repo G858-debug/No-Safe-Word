@@ -259,6 +259,29 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     installed: true,
     genderCategory: 'female',
   },
+  {
+    name: 'Flux Two People Kissing',
+    filename: 'flux-two-people-kissing.safetensors',
+    category: 'style',
+    defaultStrength: 0.7,
+    clipStrength: 0.7,
+    triggerWord: 'kissing',
+    description: 'Realistic two-person kissing — prevents face merging and lip distortion (AEmotionStudio, 104 training images)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false, // needs upload to RunPod volume
+    genderCategory: 'neutral',
+  },
+  {
+    name: 'Flux Lustly NSFW',
+    filename: 'flux_lustly-ai_v1.safetensors',
+    category: 'bodies',
+    defaultStrength: 0.7,
+    clipStrength: 0.7,
+    description: 'Male and female anatomy accuracy for intimate scenes — improves body interaction and nudity rendering (Lustly.ai)',
+    compatibleWith: ['nsfw'],
+    installed: false, // needs upload to RunPod volume
+    genderCategory: 'neutral',
+  },
 ];
 
 export function getKontextLoras(gender?: 'male' | 'female' | 'neutral'): LoraEntry[] {
@@ -288,6 +311,8 @@ export function selectKontextResources(opts: {
   const isNsfw = imageType === 'website_nsfw_paired';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
   const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
+  const isKissing = /\b(kiss|kissing|kisses|french.kiss|lips.meet|lips.touch)\b/i.test(prompt);
+  const isIntimate = /\b(naked|nude|sex|intimate|penetrat|straddle|undress|topless)\b/i.test(prompt);
   const isFemale = gender === 'female';
   // Include female body LoRAs if either character is female
   const hasFemaleCharacter = isFemale || secondaryGender === 'female';
@@ -324,8 +349,22 @@ export function selectKontextResources(opts: {
     loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(hourglassStrength * 100) / 100, strengthClip: Math.round(hourglassStrength * 100) / 100 });
   }
 
-  // Strength budget cap — scale down if total exceeds 3.0
-  const MAX_TOTAL_STRENGTH = 3.0;
+  // 4. Kissing LoRA — dual-character kissing scenes
+  if (hasDualCharacter && isKissing) {
+    let kissStrength = 0.7;
+    if (isCloseUp) kissStrength = 0.85; // stronger for close-up kisses
+    loras.push({ filename: 'flux-two-people-kissing.safetensors', strengthModel: kissStrength, strengthClip: kissStrength });
+  }
+
+  // 5. NSFW anatomy LoRA — intimate/sex scenes only
+  if (!isSfw && isIntimate) {
+    let nsfwStrength = 0.7;
+    if (hasDualCharacter) nsfwStrength = 0.6; // reduce slightly to stay under budget
+    loras.push({ filename: 'flux_lustly-ai_v1.safetensors', strengthModel: nsfwStrength, strengthClip: nsfwStrength });
+  }
+
+  // Strength budget cap — scale down if total exceeds 3.5
+  const MAX_TOTAL_STRENGTH = 3.5;
   const totalStrength = loras.reduce((sum, l) => sum + l.strengthModel, 0);
   if (totalStrength > MAX_TOTAL_STRENGTH) {
     const scale = MAX_TOTAL_STRENGTH / totalStrength;
