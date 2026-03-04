@@ -267,6 +267,71 @@ export function getKontextLoras(gender?: 'male' | 'female' | 'neutral'): LoraEnt
   );
 }
 
+export interface KontextResourceSelection {
+  loras: Array<{ filename: string; strengthModel: number; strengthClip: number }>;
+}
+
+/**
+ * Scene-aware Kontext LoRA selection. Adapts which LoRAs are loaded and their
+ * strengths based on character gender, SFW/NSFW, shot type, and character count.
+ */
+export function selectKontextResources(opts: {
+  gender: 'male' | 'female';
+  isSfw: boolean;
+  imageType: string;
+  prompt: string;
+  hasDualCharacter: boolean;
+}): KontextResourceSelection {
+  const { gender, isSfw, imageType, prompt, hasDualCharacter } = opts;
+  const isFacebookSfw = imageType === 'facebook_sfw';
+  const isNsfw = imageType === 'website_nsfw_paired';
+  const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
+  const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
+  const isFemale = gender === 'female';
+
+  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+
+  // 1. Realism LoRA — always included
+  let realismStrength = 0.8;
+  if (isFacebookSfw) realismStrength = 0.9;
+  if (hasDualCharacter) realismStrength = 0.7;
+  loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
+
+  // 2. Detail LoRA — always included, strength varies by shot type
+  let detailStrength = 0.6;
+  if (isCloseUp) detailStrength = 0.8;
+  else if (isWide) detailStrength = 0.4;
+  if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
+  loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+
+  // 3. Body LoRAs — female characters only
+  if (isFemale) {
+    // Perfect busts
+    let bustsStrength = 0.7;
+    if (isFacebookSfw) bustsStrength = 0.4;
+    else if (isNsfw) bustsStrength = 0.8;
+    loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: bustsStrength, strengthClip: bustsStrength });
+
+    // Hourglass body — skip for dual scenes with male primary (would affect male character)
+    let hourglassStrength = 0.9;
+    if (isFacebookSfw) hourglassStrength = 0.5;
+    loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: hourglassStrength, strengthClip: hourglassStrength });
+  }
+
+  // Strength budget cap — scale down if total exceeds 3.0
+  const MAX_TOTAL_STRENGTH = 3.0;
+  const totalStrength = loras.reduce((sum, l) => sum + l.strengthModel, 0);
+  if (totalStrength > MAX_TOTAL_STRENGTH) {
+    const scale = MAX_TOTAL_STRENGTH / totalStrength;
+    for (const l of loras) {
+      l.strengthModel = Math.round(l.strengthModel * scale * 100) / 100;
+      l.strengthClip = Math.round(l.strengthClip * scale * 100) / 100;
+    }
+  }
+
+  return { loras };
+}
+
 export function getLorasByCategory(category: LoraCategory): LoraEntry[] {
   return LORA_REGISTRY.filter((l) => l.category === category);
 }

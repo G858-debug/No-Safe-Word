@@ -3,7 +3,7 @@ import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge, buildFacePrompt } from "@no-safe-word/image-gen";
 import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, buildKontextIdentityPrefix, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
 import { concatImagesHorizontally, concatImagesVertically } from "@/lib/server/image-concat";
-import { augmentComposition, buildCharacterLoraEntry, getKontextLoras, optimizePrompts, shouldOptimize, rewritePromptForFlux } from "@no-safe-word/image-gen";
+import { augmentComposition, buildCharacterLoraEntry, getKontextLoras, selectKontextResources, optimizePrompts, shouldOptimize, rewritePromptForFlux } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
 import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
 
@@ -474,15 +474,16 @@ export async function POST(
             console.log(`[Kontext][${imgPrompt.id}] Prompt rewritten for Flux`);
           }
 
-          // Select Kontext LoRAs — neutral LoRAs always, female body LoRAs for female characters
+          // Select Kontext LoRAs — scene-aware selection based on gender, SFW/NSFW, shot type
           const primaryGenderForKontext = (charData?.gender as 'male' | 'female') || 'female';
-          const kontextLoraEntries = getKontextLoras(primaryGenderForKontext);
-          const kontextLoras = kontextLoraEntries.map(l => ({
-            filename: l.filename,
-            strengthModel: l.defaultStrength,
-            strengthClip: l.clipStrength,
-          }));
-          console.log(`[Kontext][${imgPrompt.id}] LoRAs (${primaryGenderForKontext}): ${kontextLoraEntries.map(l => l.filename).join(', ')}`);
+          const { loras: kontextLoras } = selectKontextResources({
+            gender: primaryGenderForKontext,
+            isSfw: sfwMode,
+            imageType: imgPrompt.image_type,
+            prompt: imgPrompt.prompt,
+            hasDualCharacter: hasSecondary,
+          });
+          console.log(`[Kontext][${imgPrompt.id}] LoRAs (${primaryGenderForKontext}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map(l => `${l.filename}@${l.strengthModel}`).join(', ')}`);
 
           // Build Kontext workflow — uses identity-prefixed scene prompt
           const kontextWorkflow = buildKontextWorkflow({

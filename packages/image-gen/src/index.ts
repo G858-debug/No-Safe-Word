@@ -26,8 +26,8 @@ export { selectDimensionsFromPrompt, DIMENSION_PRESETS } from './dimension-prese
 export type { DimensionPreset } from './dimension-presets';
 export { selectResources } from './resource-selector';
 export type { ResourceSelection, SelectedLora } from './resource-selector';
-export { LORA_REGISTRY, KONTEXT_LORA_REGISTRY, getLorasByCategory, getLoraByFilename, getKontextLoras, buildCharacterLoraEntry } from './lora-registry';
-export type { LoraEntry, CharacterLoraEntry } from './lora-registry';
+export { LORA_REGISTRY, KONTEXT_LORA_REGISTRY, getLorasByCategory, getLoraByFilename, getKontextLoras, selectKontextResources, buildCharacterLoraEntry } from './lora-registry';
+export type { LoraEntry, CharacterLoraEntry, KontextResourceSelection } from './lora-registry';
 
 // Model selection intelligence
 export { MODEL_REGISTRY, DEFAULT_MODEL, getModelByFilename, getInstalledModels, getModelsByTier } from './model-registry';
