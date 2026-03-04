@@ -1638,7 +1638,12 @@ function buildKontextPortraitWorkflow(
   return workflow;
 }
 
-/** Single reference image — one character with portrait as reference */
+/** Single reference image — one character with portrait as reference.
+ *  Uses the official Kontext conditioning chain:
+ *    LoadImage → VAEEncode → ReferenceLatent (binds identity into conditioning)
+ *    CLIPTextEncode → ReferenceLatent → FluxGuidance (applies Flux-native guidance)
+ *    ConditioningZeroOut (zeros out negative — Flux has no negative prompt)
+ *    KSampler receives identity-conditioned prompt + reference latent */
 function buildKontextSingleWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
@@ -1677,55 +1682,66 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 8: InstructPixToPixConditioning — combine prompt with reference image
-  // TODO: Official Kontext workflow uses ReferenceLatent + FluxGuidance(2.5) +
-  // ConditioningZeroOut instead. If available on RunPod, switch to:
-  //   ConditioningZeroOut(positive) → negative
-  //   ReferenceLatent(positive, latent) → modified_positive, ref_latent
-  //   FluxGuidance(modified_positive, 2.5) → guided_positive
-  //   KSampler(model, guided_positive, negative, ref_latent)
+  // Node 8: ReferenceLatent — binds reference image identity into the conditioning.
+  // This is the Kontext-specific node that preserves character identity from the
+  // reference image. Output 0 = identity-conditioned positive, Output 1 = ref latent.
   workflow['8'] = {
-    class_type: 'InstructPixToPixConditioning',
+    class_type: 'ReferenceLatent',
     inputs: {
-      positive: ['4', 0],
-      negative: ['4', 0],
-      vae: ['3', 0],
-      pixels: ['6', 0],
+      positive: ['4', 0],      // Text conditioning from CLIPTextEncode
+      latent: ['7', 0],        // Encoded reference image
     },
   };
 
-  // Node 9: KSampler
+  // Node 9: FluxGuidance — applies Flux-native guidance (replaces CFG for Flux models)
   workflow['9'] = {
+    class_type: 'FluxGuidance',
+    inputs: {
+      conditioning: ['8', 0],  // Identity-conditioned positive from ReferenceLatent
+      guidance: 2.5,
+    },
+  };
+
+  // Node 10: ConditioningZeroOut — Flux has no negative prompt, so zero it out
+  workflow['10'] = {
+    class_type: 'ConditioningZeroOut',
+    inputs: {
+      conditioning: ['4', 0],  // Original text conditioning → zeroed for negative
+    },
+  };
+
+  // Node 11: KSampler — generates with identity-conditioned prompt + reference latent
+  workflow['11'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: ['8', 0],
-      negative: ['8', 1],
-      latent_image: ['7', 0],
+      positive: ['9', 0],      // FluxGuidance output (identity + text + guidance)
+      negative: ['10', 0],     // Zeroed-out conditioning
+      latent_image: ['8', 1],  // Reference latent from ReferenceLatent
       seed: config.seed,
       steps: 20,
-      cfg: 2.5,
+      cfg: 1.0,                // CFG 1.0 — guidance handled by FluxGuidance node
       sampler_name: 'euler',
       scheduler: 'simple',
       denoise: 1.0,
     },
   };
 
-  // Node 10: VAEDecode
-  workflow['10'] = {
+  // Node 12: VAEDecode
+  workflow['12'] = {
     class_type: 'VAEDecode',
     inputs: {
-      samples: ['9', 0],
+      samples: ['11', 0],
       vae: ['3', 0],
     },
   };
 
-  // Node 11: SaveImage
-  workflow['11'] = {
+  // Node 13: SaveImage
+  workflow['13'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['10', 0],
+      images: ['12', 0],
     },
   };
 
@@ -1735,7 +1751,7 @@ function buildKontextSingleWorkflow(
 /** Dual reference images — both characters combined into a single reference image server-side.
  *  The route concatenates both portraits horizontally before calling this builder,
  *  so the workflow receives a single pre-combined image via primaryRefImageName.
- *  Node graph is identical to the single workflow. */
+ *  Uses the same official Kontext conditioning chain as the single workflow. */
 function buildKontextDualWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
@@ -1774,49 +1790,64 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 8: InstructPixToPixConditioning
+  // Node 8: ReferenceLatent — binds both characters' identity into conditioning
   workflow['8'] = {
-    class_type: 'InstructPixToPixConditioning',
+    class_type: 'ReferenceLatent',
     inputs: {
       positive: ['4', 0],
-      negative: ['4', 0],
-      vae: ['3', 0],
-      pixels: ['6', 0],
+      latent: ['7', 0],
     },
   };
 
-  // Node 9: KSampler
+  // Node 9: FluxGuidance — Flux-native guidance
   workflow['9'] = {
+    class_type: 'FluxGuidance',
+    inputs: {
+      conditioning: ['8', 0],
+      guidance: 2.5,
+    },
+  };
+
+  // Node 10: ConditioningZeroOut — zero out negative (Flux has no negative prompt)
+  workflow['10'] = {
+    class_type: 'ConditioningZeroOut',
+    inputs: {
+      conditioning: ['4', 0],
+    },
+  };
+
+  // Node 11: KSampler — identity-conditioned generation
+  workflow['11'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: ['8', 0],
-      negative: ['8', 1],
-      latent_image: ['7', 0],
+      positive: ['9', 0],
+      negative: ['10', 0],
+      latent_image: ['8', 1],  // Reference latent from ReferenceLatent
       seed: config.seed,
       steps: 20,
-      cfg: 2.5,
+      cfg: 1.0,
       sampler_name: 'euler',
       scheduler: 'simple',
       denoise: 1.0,
     },
   };
 
-  // Node 10: VAEDecode
-  workflow['10'] = {
+  // Node 12: VAEDecode
+  workflow['12'] = {
     class_type: 'VAEDecode',
     inputs: {
-      samples: ['9', 0],
+      samples: ['11', 0],
       vae: ['3', 0],
     },
   };
 
-  // Node 11: SaveImage
-  workflow['11'] = {
+  // Node 13: SaveImage
+  workflow['13'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['10', 0],
+      images: ['12', 0],
     },
   };
 
