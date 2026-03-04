@@ -17,6 +17,24 @@ interface FailedJob {
   error: string;
 }
 
+/** Try stored_url first; if it fails (e.g. 400/404), fall back to sfw_url */
+async function fetchRefImageBase64(
+  img: { stored_url?: string | null; sfw_url?: string | null } | null,
+  label: string,
+): Promise<string | null> {
+  if (!img) return null;
+  const urls = [img.stored_url, img.sfw_url].filter(Boolean) as string[];
+  for (const url of urls) {
+    try {
+      return await imageUrlToBase64(url);
+    } catch (err) {
+      console.warn(`[Kontext] ${label}: failed to fetch ${url.substring(0, 60)}...: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  console.warn(`[Kontext] ${label}: all URLs failed`);
+  return null;
+}
+
 // POST /api/stories/[seriesId]/generate-images — Batch generate story images
 export async function POST(
   request: NextRequest,
@@ -348,26 +366,22 @@ export async function POST(
                 );
               }
 
-              // Fetch both image URLs in parallel
+              // Fetch both image URLs in parallel (with fallback from stored_url → sfw_url)
               const [{ data: faceImg }, { data: bodyImg }] = await Promise.all([
                 supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
                 supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
               ]);
 
-              const faceUrl = faceImg?.stored_url || faceImg?.sfw_url;
-              const bodyUrl = bodyImg?.stored_url || bodyImg?.sfw_url;
+              const [faceBase64, bodyBase64] = await Promise.all([
+                fetchRefImageBase64(faceImg, `${charName} face`),
+                fetchRefImageBase64(bodyImg, `${charName} body`),
+              ]);
 
-              if (!faceUrl || !bodyUrl) {
+              if (!faceBase64 || !bodyBase64) {
                 throw new Error(
-                  `Character "${charName}" has approved image IDs but the image URLs could not be resolved. Face URL: ${faceUrl ? "OK" : "missing"}, Body URL: ${bodyUrl ? "OK" : "missing"}.`
+                  `Character "${charName}" has approved image IDs but the images could not be fetched. Face: ${faceBase64 ? "OK" : "failed"}, Body: ${bodyBase64 ? "OK" : "failed"}.`
                 );
               }
-
-              // Convert both to base64 and stitch vertically (face on top, body below)
-              const [faceBase64, bodyBase64] = await Promise.all([
-                imageUrlToBase64(faceUrl),
-                imageUrlToBase64(bodyUrl),
-              ]);
 
               const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
               kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
@@ -382,16 +396,10 @@ export async function POST(
                   .eq("id", sc.approved_image_id)
                   .single();
 
-                const primaryRefUrl = img?.stored_url || img?.sfw_url;
-                console.log(`[Kontext][${imgPrompt.id}] Primary ref URL: ${primaryRefUrl ? primaryRefUrl.substring(0, 80) + '...' : 'NONE'}`);
-                if (primaryRefUrl) {
-                  try {
-                    const primaryRefBase64 = await imageUrlToBase64(primaryRefUrl);
-                    kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
-                    console.log(`[Kontext][${imgPrompt.id}] Primary ref loaded (${Math.round(primaryRefBase64.length / 1024)}KB base64)`);
-                  } catch (err) {
-                    console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
-                  }
+                const primaryRefBase64 = await fetchRefImageBase64(img, `${charName} primary`);
+                if (primaryRefBase64) {
+                  kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+                  console.log(`[Kontext][${imgPrompt.id}] Primary ref loaded (${Math.round(primaryRefBase64.length / 1024)}KB base64)`);
                 }
               } else {
                 console.warn(`[Kontext][${imgPrompt.id}] WARNING: Primary character "${charName}" has no approved_image_id for dual scene`);
@@ -419,16 +427,10 @@ export async function POST(
                 .eq("id", sc2.approved_image_id)
                 .single();
 
-              const secondaryRefUrl = img2?.stored_url || img2?.sfw_url;
-              console.log(`[Kontext][${imgPrompt.id}] Secondary ref URL: ${secondaryRefUrl ? secondaryRefUrl.substring(0, 80) + '...' : 'NONE'}`);
-              if (secondaryRefUrl) {
-                try {
-                  const secondaryRefBase64 = await imageUrlToBase64(secondaryRefUrl);
-                  kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
-                  console.log(`[Kontext][${imgPrompt.id}] Secondary ref loaded (${Math.round(secondaryRefBase64.length / 1024)}KB base64)`);
-                } catch (err) {
-                  console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch secondary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
-                }
+              const secondaryRefBase64 = await fetchRefImageBase64(img2, `${secondaryName} secondary`);
+              if (secondaryRefBase64) {
+                kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
+                console.log(`[Kontext][${imgPrompt.id}] Secondary ref loaded (${Math.round(secondaryRefBase64.length / 1024)}KB base64)`);
               }
             } else {
               console.warn(`[Kontext][${imgPrompt.id}] WARNING: Secondary character "${secondaryName}" has no approved_image_id — no reference image for identity`);
@@ -474,6 +476,14 @@ export async function POST(
                 console.log(`[Kontext][${imgPrompt.id}] Identity prefix for secondary character: ${secondaryPrefix.trim()}`);
               }
             }
+          }
+
+          // For dual-character interaction scenes, redirect camera gaze to interpersonal gaze
+          if (hasSecondary) {
+            kontextPositivePrompt = kontextPositivePrompt.replace(
+              /\(([^,)]+),\s*looking (directly )?(at|into) (the )?camera(:[0-9.]+)?\)/gi,
+              (_, expr, _d, _a, _t, weight) => `(${expr}, looking at the other person${weight || ':1.3'})`,
+            );
           }
 
           // Log the assembled prompt before rewriting
