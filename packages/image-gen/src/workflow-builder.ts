@@ -1661,19 +1661,16 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 6: ImageScale — scale reference to output dimensions
+  // Node 6: FluxKontextImageScale — Kontext-aware scaling that preserves aspect ratio.
+  // Unlike ImageScale with crop:disabled, this won't stretch the reference image.
   workflow['6'] = {
-    class_type: 'ImageScale',
+    class_type: 'FluxKontextImageScale',
     inputs: {
       image: ['5', 0],
-      width: config.width,
-      height: config.height,
-      upscale_method: 'lanczos',
-      crop: 'disabled',
     },
   };
 
-  // Node 7: VAEEncode — encode reference image to latent
+  // Node 7: VAEEncode — encode scaled reference image to latent for identity conditioning
   workflow['7'] = {
     class_type: 'VAEEncode',
     inputs: {
@@ -1684,7 +1681,6 @@ function buildKontextSingleWorkflow(
 
   // Node 8: ReferenceLatent — binds reference image identity into the text conditioning.
   // Takes text conditioning + encoded reference latent, outputs identity-aware CONDITIONING.
-  // The same VAEEncode latent (node 7) also feeds KSampler's latent_image directly.
   workflow['8'] = {
     class_type: 'ReferenceLatent',
     inputs: {
@@ -1710,15 +1706,25 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 11: KSampler — generates with identity-conditioned prompt
-  // latent_image comes from VAEEncode (node 7), NOT from ReferenceLatent
+  // Node 11: EmptyLatentImage — clean latent at the desired output dimensions.
+  // Separate from the reference VAEEncode so output isn't distorted by ref aspect ratio.
   workflow['11'] = {
+    class_type: 'EmptyLatentImage',
+    inputs: {
+      width: config.width,
+      height: config.height,
+      batch_size: 1,
+    },
+  };
+
+  // Node 12: KSampler — generates with identity-conditioned prompt at correct dimensions
+  workflow['12'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
       positive: ['9', 0],      // FluxGuidance output (identity + text + guidance)
       negative: ['10', 0],     // Zeroed-out conditioning
-      latent_image: ['7', 0],  // Reference latent from VAEEncode directly
+      latent_image: ['11', 0], // Clean latent at correct output dimensions
       seed: config.seed,
       steps: 20,
       cfg: 1.0,                // CFG 1.0 — guidance handled by FluxGuidance node
@@ -1728,21 +1734,21 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 12: VAEDecode
-  workflow['12'] = {
+  // Node 13: VAEDecode
+  workflow['13'] = {
     class_type: 'VAEDecode',
     inputs: {
-      samples: ['11', 0],
+      samples: ['12', 0],
       vae: ['3', 0],
     },
   };
 
-  // Node 13: SaveImage
-  workflow['13'] = {
+  // Node 14: SaveImage
+  workflow['14'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['12', 0],
+      images: ['13', 0],
     },
   };
 
@@ -1770,19 +1776,15 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 6: ImageScale — scale combined reference
+  // Node 6: FluxKontextImageScale — Kontext-aware scaling that preserves aspect ratio
   workflow['6'] = {
-    class_type: 'ImageScale',
+    class_type: 'FluxKontextImageScale',
     inputs: {
       image: ['5', 0],
-      width: config.width,
-      height: config.height,
-      upscale_method: 'lanczos',
-      crop: 'disabled',
     },
   };
 
-  // Node 7: VAEEncode — encode reference to latent
+  // Node 7: VAEEncode — encode reference to latent for identity conditioning
   workflow['7'] = {
     class_type: 'VAEEncode',
     inputs: {
@@ -1817,14 +1819,24 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 11: KSampler — identity-conditioned generation
+  // Node 11: EmptyLatentImage — clean latent at correct output dimensions
   workflow['11'] = {
+    class_type: 'EmptyLatentImage',
+    inputs: {
+      width: config.width,
+      height: config.height,
+      batch_size: 1,
+    },
+  };
+
+  // Node 12: KSampler — identity-conditioned generation at correct dimensions
+  workflow['12'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
       positive: ['9', 0],
       negative: ['10', 0],
-      latent_image: ['7', 0],  // Reference latent from VAEEncode directly
+      latent_image: ['11', 0], // Clean latent at correct output dimensions
       seed: config.seed,
       steps: 20,
       cfg: 1.0,
@@ -1834,21 +1846,21 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 12: VAEDecode
-  workflow['12'] = {
+  // Node 13: VAEDecode
+  workflow['13'] = {
     class_type: 'VAEDecode',
     inputs: {
-      samples: ['11', 0],
+      samples: ['12', 0],
       vae: ['3', 0],
     },
   };
 
-  // Node 13: SaveImage
-  workflow['13'] = {
+  // Node 14: SaveImage
+  workflow['14'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['12', 0],
+      images: ['13', 0],
     },
   };
 
