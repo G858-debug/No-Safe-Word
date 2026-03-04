@@ -1682,14 +1682,14 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 8: ReferenceLatent — binds reference image identity into the conditioning.
-  // This is the Kontext-specific node that preserves character identity from the
-  // reference image. Output 0 = identity-conditioned positive, Output 1 = ref latent.
+  // Node 8: ReferenceLatent — binds reference image identity into the text conditioning.
+  // Takes text conditioning + encoded reference latent, outputs identity-aware CONDITIONING.
+  // The same VAEEncode latent (node 7) also feeds KSampler's latent_image directly.
   workflow['8'] = {
     class_type: 'ReferenceLatent',
     inputs: {
-      positive: ['4', 0],      // Text conditioning from CLIPTextEncode
-      latent: ['7', 0],        // Encoded reference image
+      conditioning: ['4', 0],  // Text conditioning from CLIPTextEncode
+      latent: ['7', 0],        // Encoded reference image from VAEEncode
     },
   };
 
@@ -1697,7 +1697,7 @@ function buildKontextSingleWorkflow(
   workflow['9'] = {
     class_type: 'FluxGuidance',
     inputs: {
-      conditioning: ['8', 0],  // Identity-conditioned positive from ReferenceLatent
+      conditioning: ['8', 0],  // Identity-conditioned output from ReferenceLatent
       guidance: 2.5,
     },
   };
@@ -1710,14 +1710,15 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 11: KSampler — generates with identity-conditioned prompt + reference latent
+  // Node 11: KSampler — generates with identity-conditioned prompt
+  // latent_image comes from VAEEncode (node 7), NOT from ReferenceLatent
   workflow['11'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
       positive: ['9', 0],      // FluxGuidance output (identity + text + guidance)
       negative: ['10', 0],     // Zeroed-out conditioning
-      latent_image: ['8', 1],  // Reference latent from ReferenceLatent
+      latent_image: ['7', 0],  // Reference latent from VAEEncode directly
       seed: config.seed,
       steps: 20,
       cfg: 1.0,                // CFG 1.0 — guidance handled by FluxGuidance node
@@ -1794,7 +1795,7 @@ function buildKontextDualWorkflow(
   workflow['8'] = {
     class_type: 'ReferenceLatent',
     inputs: {
-      positive: ['4', 0],
+      conditioning: ['4', 0],
       latent: ['7', 0],
     },
   };
@@ -1823,7 +1824,7 @@ function buildKontextDualWorkflow(
       model: modelRef,
       positive: ['9', 0],
       negative: ['10', 0],
-      latent_image: ['8', 1],  // Reference latent from ReferenceLatent
+      latent_image: ['7', 0],  // Reference latent from VAEEncode directly
       seed: config.seed,
       steps: 20,
       cfg: 1.0,
