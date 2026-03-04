@@ -91,37 +91,65 @@ async function gql(query, variables = {}) {
 // ---------------------------------------------------------------------------
 // Pod lifecycle
 // ---------------------------------------------------------------------------
+const GPU_TYPES = [
+  "NVIDIA GeForce RTX 4090",
+  "NVIDIA GeForce RTX 3090",
+  "NVIDIA RTX A6000",
+  "NVIDIA RTX A5000",
+  "NVIDIA RTX A4500",
+  "NVIDIA RTX A4000",
+  "NVIDIA RTX 4000 Ada Generation",
+  "NVIDIA L40",
+  "NVIDIA L40S",
+  "NVIDIA GeForce RTX 4080",
+  "NVIDIA GeForce RTX 3080 Ti",
+  "NVIDIA GeForce RTX 3080",
+  "NVIDIA A40",
+  "NVIDIA L4",
+];
+
 async function createPod() {
-  console.log("Creating downloader pod on RunPod...");
-  const data = await gql(`
-    mutation {
-      podFindAndDeployOnDemand(input: {
-        name: "kontext-downloader"
-        imageName: "runpod/pytorch:2.4.1-py3.11-cuda12.4.1-devel-ubuntu22.04"
-        gpuTypeId: "NVIDIA GeForce RTX 3090"
-        cloudType: SECURE
-        volumeId: "${VOLUME_ID}"
-        volumeMountPath: "/workspace"
-        startJupyter: false
-        startSsh: true
-        minMemoryInGb: 16
-        minVcpuCount: 2
-      }) {
-        id
-        desiredStatus
-        imageName
-        runtime {
-          ports {
-            ip
-            privatePort
-            publicPort
-            type
+  for (const gpuType of GPU_TYPES) {
+    try {
+      console.log(`Trying ${gpuType}...`);
+      const data = await gql(`
+        mutation {
+          podFindAndDeployOnDemand(input: {
+            name: "kontext-downloader"
+            imageName: "runpod/pytorch:2.4.1-py3.11-cuda12.4.1-devel-ubuntu22.04"
+            gpuTypeId: "${gpuType}"
+            cloudType: ALL
+            volumeKey: "${VOLUME_ID}"
+            volumeMountPath: "/workspace"
+            startJupyter: false
+            startSsh: true
+            minMemoryInGb: 8
+            minVcpuCount: 2
+          }) {
+            id
+            desiredStatus
+            imageName
+            runtime {
+              ports {
+                ip
+                privatePort
+                publicPort
+                type
+              }
+            }
           }
         }
+      `);
+      console.log(`Got ${gpuType}!`);
+      return data.podFindAndDeployOnDemand;
+    } catch (err) {
+      if (err.message.includes("SUPPLY_CONSTRAINT")) {
+        continue; // Try next GPU type
       }
+      throw err; // Re-throw non-supply errors
     }
-  `);
-  return data.podFindAndDeployOnDemand;
+  }
+  throw new Error("No GPU available in any type — EU-RO-1 fully out of stock");
 }
 
 async function getPodStatus(podId) {
@@ -211,12 +239,11 @@ mkdir -p /workspace/models/vae
 
 echo "=== Starting Flux Kontext model downloads ==="
 
-# SFW model (HuggingFace gated — requires token)
+# SFW model (Comfy-Org fp8 quantized — no auth needed)
 if [ ! -f "/workspace/models/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors" ]; then
-  echo "Downloading SFW Kontext model (~17GB)..."
-  wget --header="Authorization: Bearer ${HF_TOKEN}" \\
-    -O /workspace/models/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors \\
-    "https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/resolve/main/flux1-dev-kontext_fp8_scaled.safetensors"
+  echo "Downloading SFW Kontext model (~12GB)..."
+  wget -O /workspace/models/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors \\
+    "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors"
 else
   echo "SFW model already exists, skipping."
 fi
