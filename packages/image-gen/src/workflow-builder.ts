@@ -1498,9 +1498,9 @@ export interface KontextWorkflowConfig {
  * better results. See: https://comfyanonymous.github.io/ComfyUI_examples/flux/
  */
 export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<string, any> {
-  const sfwModel = process.env.KONTEXT_SFW_MODEL || 'flux1-dev-kontext_fp8_scaled.safetensors';
-  const nsfwModel = process.env.KONTEXT_NSFW_MODEL || 'flux1-kontext-nsfw.safetensors';
-  const modelName = config.sfwMode ? sfwModel : nsfwModel;
+  // Use the same Kontext model for both SFW and NSFW — there is no separate
+  // NSFW variant. The fp8 model handles all content types.
+  const modelName = process.env.KONTEXT_SFW_MODEL || 'flux1-dev-kontext_fp8_scaled.safetensors';
 
   const workflow: Record<string, any> = {};
 
