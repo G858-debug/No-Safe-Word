@@ -57,17 +57,10 @@ export function buildKontextIdentityPrefix(charData: CharacterData): string {
     sentences.push(bodyParts.join(", ") + ".");
   }
 
-  // ── 3. Clothing sentence ──
-  if (charData.clothing) {
-    let clothingSentence = `Wearing ${charData.clothing}.`;
-
-    const isCurvy = /curv|hourglass|voluptuous|thick|busty|full figure/i.test(bt);
-    if (isCurvy) {
-      clothingSentence += " Clothing is tight and form-fitting, accentuating her figure.";
-    }
-
-    sentences.push(clothingSentence);
-  }
+  // ── 3. Clothing ──
+  // Intentionally omitted from the identity prefix. The scene prompt controls
+  // what the character wears in each image — injecting default clothing here
+  // would conflict with scene-specific wardrobe choices and confuse Kontext.
 
   if (sentences.length === 0) return "";
   return sentences.join(" ") + "\n";
