@@ -476,8 +476,13 @@ export async function POST(
 
           // Select Kontext LoRAs — scene-aware selection based on gender, SFW/NSFW, shot type
           const primaryGenderForKontext = (charData?.gender as 'male' | 'female') || 'female';
+          const secondaryCharDataForKontext = imgPrompt.secondary_character_id
+            ? characterDataMap.get(imgPrompt.secondary_character_id)
+            : undefined;
+          const secondaryGenderForKontext = secondaryCharDataForKontext?.gender as 'male' | 'female' | undefined;
           const { loras: kontextLoras } = selectKontextResources({
             gender: primaryGenderForKontext,
+            secondaryGender: secondaryGenderForKontext,
             isSfw: sfwMode,
             imageType: imgPrompt.image_type,
             prompt: imgPrompt.prompt,

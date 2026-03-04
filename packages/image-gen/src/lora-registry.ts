@@ -277,17 +277,20 @@ export interface KontextResourceSelection {
  */
 export function selectKontextResources(opts: {
   gender: 'male' | 'female';
+  secondaryGender?: 'male' | 'female';
   isSfw: boolean;
   imageType: string;
   prompt: string;
   hasDualCharacter: boolean;
 }): KontextResourceSelection {
-  const { gender, isSfw, imageType, prompt, hasDualCharacter } = opts;
+  const { gender, secondaryGender, isSfw, imageType, prompt, hasDualCharacter } = opts;
   const isFacebookSfw = imageType === 'facebook_sfw';
   const isNsfw = imageType === 'website_nsfw_paired';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
   const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
   const isFemale = gender === 'female';
+  // Include female body LoRAs if either character is female
+  const hasFemaleCharacter = isFemale || secondaryGender === 'female';
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
 
@@ -304,18 +307,21 @@ export function selectKontextResources(opts: {
   if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
   loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
 
-  // 3. Body LoRAs — female characters only
-  if (isFemale) {
-    // Perfect busts
-    let bustsStrength = 0.7;
-    if (isFacebookSfw) bustsStrength = 0.4;
-    else if (isNsfw) bustsStrength = 0.8;
-    loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: bustsStrength, strengthClip: bustsStrength });
+  // 3. Body LoRAs — included when ANY character is female
+  // For dual scenes with a male primary + female secondary, we still want body
+  // enhancement for the female character (at slightly reduced strength).
+  if (hasFemaleCharacter) {
+    const isSecondaryOnly = !isFemale && secondaryGender === 'female';
+    const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0; // 30% reduction when female is only secondary
 
-    // Hourglass body — skip for dual scenes with male primary (would affect male character)
-    let hourglassStrength = 0.9;
-    if (isFacebookSfw) hourglassStrength = 0.5;
-    loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: hourglassStrength, strengthClip: hourglassStrength });
+    let bustsStrength = 0.7 * secondaryReduction;
+    if (isFacebookSfw) bustsStrength = 0.4 * secondaryReduction;
+    else if (isNsfw) bustsStrength = 0.8 * secondaryReduction;
+    loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
+
+    let hourglassStrength = 0.9 * secondaryReduction;
+    if (isFacebookSfw) hourglassStrength = 0.5 * secondaryReduction;
+    loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(hourglassStrength * 100) / 100, strengthClip: Math.round(hourglassStrength * 100) / 100 });
   }
 
   // Strength budget cap — scale down if total exceeds 3.0
