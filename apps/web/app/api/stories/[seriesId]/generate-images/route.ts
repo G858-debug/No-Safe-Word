@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge, buildFacePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
-import { concatImagesHorizontally } from "@/lib/server/image-concat";
-import { augmentComposition, buildCharacterLoraEntry, optimizePrompts, shouldOptimize } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, buildKontextIdentityPrefix, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
+import { concatImagesHorizontally, concatImagesVertically } from "@/lib/server/image-concat";
+import { augmentComposition, buildCharacterLoraEntry, getKontextLoras, optimizePrompts, shouldOptimize, rewritePromptForFlux } from "@no-safe-word/image-gen";
 import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
 import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
 
@@ -330,27 +330,65 @@ export async function POST(
           let kontextImages: Array<{ name: string; image: string }> = [];
 
           if (kontextType !== "portrait" && imgPrompt.character_id) {
+            // Fetch both face portrait and full-body reference for single-character scenes
             const { data: sc } = await supabase
               .from("story_characters")
-              .select("approved_image_id")
+              .select("approved_image_id, approved_fullbody_image_id")
               .eq("series_id", seriesId)
               .eq("character_id", imgPrompt.character_id)
               .single();
 
-            if (sc?.approved_image_id) {
-              const { data: img } = await supabase
-                .from("images")
-                .select("stored_url, sfw_url")
-                .eq("id", sc.approved_image_id)
-                .single();
+            const charName = characterDataMap.get(imgPrompt.character_id)?.name || imgPrompt.character_name || "Unknown";
 
-              const primaryRefUrl = img?.stored_url || img?.sfw_url;
-              if (primaryRefUrl) {
-                try {
-                  const primaryRefBase64 = await imageUrlToBase64(primaryRefUrl);
-                  kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
-                } catch (err) {
-                  console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
+            if (kontextType === "single") {
+              // Single-character scene: require BOTH face + body, stitch vertically
+              if (!sc?.approved_image_id || !sc?.approved_fullbody_image_id) {
+                throw new Error(
+                  `Character "${charName}" requires both a face portrait and body shot to be approved before generating scene images. Please approve both in Stage 8.`
+                );
+              }
+
+              // Fetch both image URLs in parallel
+              const [{ data: faceImg }, { data: bodyImg }] = await Promise.all([
+                supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
+                supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
+              ]);
+
+              const faceUrl = faceImg?.stored_url || faceImg?.sfw_url;
+              const bodyUrl = bodyImg?.stored_url || bodyImg?.sfw_url;
+
+              if (!faceUrl || !bodyUrl) {
+                throw new Error(
+                  `Character "${charName}" has approved image IDs but the image URLs could not be resolved. Face URL: ${faceUrl ? "OK" : "missing"}, Body URL: ${bodyUrl ? "OK" : "missing"}.`
+                );
+              }
+
+              // Convert both to base64 and stitch vertically (face on top, body below)
+              const [faceBase64, bodyBase64] = await Promise.all([
+                imageUrlToBase64(faceUrl),
+                imageUrlToBase64(bodyUrl),
+              ]);
+
+              const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
+              kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
+              console.log(`[Kontext][${imgPrompt.id}] Combined face + body ref images vertically for "${charName}"`);
+            } else {
+              // Dual-character scene: primary character still uses face-only (horizontal stitch with secondary happens later)
+              if (sc?.approved_image_id) {
+                const { data: img } = await supabase
+                  .from("images")
+                  .select("stored_url, sfw_url")
+                  .eq("id", sc.approved_image_id)
+                  .single();
+
+                const primaryRefUrl = img?.stored_url || img?.sfw_url;
+                if (primaryRefUrl) {
+                  try {
+                    const primaryRefBase64 = await imageUrlToBase64(primaryRefUrl);
+                    kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+                  } catch (err) {
+                    console.warn(`[Kontext][${imgPrompt.id}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
+                  }
                 }
               }
             }
@@ -404,19 +442,62 @@ export async function POST(
             ? (kontextImages[0]?.name || "combined_ref.png")
             : kontextType !== "portrait" ? "primary_ref.png" : undefined;
 
-          // Build Kontext workflow — uses raw scene prompt (no SDXL tag injection needed)
+          // Build character identity prefix for Kontext prompts
+          let kontextPositivePrompt = imgPrompt.prompt;
+          if (imgPrompt.character_id) {
+            const identityPrefix = buildKontextIdentityPrefix(charData);
+            if (identityPrefix) {
+              kontextPositivePrompt = `${identityPrefix}${imgPrompt.prompt}`;
+              console.log(`[Kontext][${imgPrompt.id}] Identity prefix for primary character: ${identityPrefix.trim()}`);
+            }
+          }
+          if (imgPrompt.secondary_character_id) {
+            const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
+            if (secondaryCharData) {
+              const secondaryPrefix = buildKontextIdentityPrefix(secondaryCharData);
+              if (secondaryPrefix) {
+                kontextPositivePrompt += `\nThe second person in this scene is: ${secondaryPrefix}`;
+                console.log(`[Kontext][${imgPrompt.id}] Identity prefix for secondary character: ${secondaryPrefix.trim()}`);
+              }
+            }
+          }
+
+          // Rewrite prompt from SDXL tag format → Flux natural language
+          const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
+          if (rewrittenPrompt !== kontextPositivePrompt) {
+            kontextPositivePrompt = rewrittenPrompt;
+            // Persist the rewritten prompt back to the DB row
+            await supabase
+              .from("story_image_prompts")
+              .update({ prompt: rewrittenPrompt })
+              .eq("id", imgPrompt.id);
+            console.log(`[Kontext][${imgPrompt.id}] Prompt rewritten for Flux`);
+          }
+
+          // Select Kontext LoRAs — neutral LoRAs always, female body LoRAs for female characters
+          const primaryGenderForKontext = (charData?.gender as 'male' | 'female') || 'female';
+          const kontextLoraEntries = getKontextLoras(primaryGenderForKontext);
+          const kontextLoras = kontextLoraEntries.map(l => ({
+            filename: l.filename,
+            strengthModel: l.defaultStrength,
+            strengthClip: l.clipStrength,
+          }));
+          console.log(`[Kontext][${imgPrompt.id}] LoRAs (${primaryGenderForKontext}): ${kontextLoraEntries.map(l => l.filename).join(', ')}`);
+
+          // Build Kontext workflow — uses identity-prefixed scene prompt
           const kontextWorkflow = buildKontextWorkflow({
             type: kontextType,
-            positivePrompt: imgPrompt.prompt,
+            positivePrompt: kontextPositivePrompt,
             width: kontextWidth,
             height: kontextHeight,
             seed,
             filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
             sfwMode,
             primaryRefImageName: refImageName,
+            loras: kontextLoras,
           });
 
-          console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}`);
+          console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}, loras=${kontextLoras.length}`);
 
           // Submit to RunPod (same endpoint)
           const { jobId: kontextJobId } = await submitRunPodJob(

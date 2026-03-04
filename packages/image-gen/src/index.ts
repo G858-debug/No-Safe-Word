@@ -26,7 +26,7 @@ export { selectDimensionsFromPrompt, DIMENSION_PRESETS } from './dimension-prese
 export type { DimensionPreset } from './dimension-presets';
 export { selectResources } from './resource-selector';
 export type { ResourceSelection, SelectedLora } from './resource-selector';
-export { LORA_REGISTRY, getLorasByCategory, getLoraByFilename, buildCharacterLoraEntry } from './lora-registry';
+export { LORA_REGISTRY, KONTEXT_LORA_REGISTRY, getLorasByCategory, getLoraByFilename, getKontextLoras, buildCharacterLoraEntry } from './lora-registry';
 export type { LoraEntry, CharacterLoraEntry } from './lora-registry';
 
 // Model selection intelligence
@@ -55,6 +55,12 @@ export type { DebugPassInfo, Pass1CompositionDebug, DebugMetadata } from './debu
 // Post-hoc person count validation for dual-character scenes
 export { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from './person-validator';
 export type { PersonValidationResult } from './person-validator';
+
+// Kontext identity prefix for natural-language character description
+export { buildKontextIdentityPrefix } from './kontext-identity';
+
+// Flux prompt rewriter — converts SDXL tag-style prompts to Flux natural language
+export { rewritePromptForFlux } from './flux-prompt-rewriter';
 
 // Character LoRA pipeline — server-only, import directly:
 //   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'

@@ -212,6 +212,61 @@ export const LORA_REGISTRY: LoraEntry[] = [
   },
 ];
 
+// ---- Kontext (Flux) LoRAs — loaded from /runpod-volume/models/loras/ ----
+export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
+  {
+    name: 'XLabs Flux Realism',
+    filename: 'flux_realism_lora.safetensors',
+    category: 'style',
+    defaultStrength: 0.8,
+    clipStrength: 0.8,
+    description: 'Photorealism enhancement for Flux — natural skin, lighting, and textures (XLabs-AI, 55k+ downloads)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+    genderCategory: 'neutral',
+  },
+  {
+    name: 'Shakker-Labs Add Details',
+    filename: 'flux-add-details.safetensors',
+    category: 'detail',
+    defaultStrength: 0.6,
+    clipStrength: 0.6,
+    description: 'Detail and natural skin enhancement for Flux — pore-level realism without over-sharpening (Shakker-Labs)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+    genderCategory: 'neutral',
+  },
+  {
+    name: 'FC Flux Perfect Busts',
+    filename: 'fc-flux-perfect-busts.safetensors',
+    category: 'bodies',
+    defaultStrength: 0.7,
+    clipStrength: 0.7,
+    triggerWord: 'woman',
+    description: 'Full round breasts with slim waist for Flux — trained on Flux.1 Dev (FC, 25k+ downloads)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+    genderCategory: 'female',
+  },
+  {
+    name: 'Hourglass Body Shape Flux',
+    filename: 'hourglassv32_FLUX.safetensors',
+    category: 'bodies',
+    defaultStrength: 0.9,
+    clipStrength: 0.9,
+    description: 'Hourglass figure enhancement — wide hips, round butt, thick thighs for Flux (olaz, 9.5k downloads)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+    genderCategory: 'female',
+  },
+];
+
+export function getKontextLoras(gender?: 'male' | 'female' | 'neutral'): LoraEntry[] {
+  return KONTEXT_LORA_REGISTRY.filter(
+    (l) => l.genderCategory === 'neutral' || l.genderCategory === gender,
+  );
+}
+
 export function getLorasByCategory(category: LoraCategory): LoraEntry[] {
   return LORA_REGISTRY.filter((l) => l.category === category);
 }

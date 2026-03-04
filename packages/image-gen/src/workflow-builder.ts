@@ -1480,6 +1480,8 @@ export interface KontextWorkflowConfig {
   primaryRefImageName?: string;
   /** Secondary character reference image filename (dual scenes only) */
   secondaryRefImageName?: string;
+  /** Optional LoRA stack for Flux — injected between model loaders and sampler */
+  loras?: LoraInput[];
 }
 
 /**
@@ -1489,7 +1491,7 @@ export interface KontextWorkflowConfig {
  * - LoadDiffusionModel (UNETLoader) instead of CheckpointLoaderSimple
  * - DualCLIPLoader for text encoders
  * - Reference image conditioning via InstructPixToPixConditioning
- * - No negative prompts, no LoRAs, no IPAdapter, no FaceDetailer
+ * - No negative prompts, no IPAdapter, no FaceDetailer
  * - Character consistency comes from feeding approved portrait as input image
  *
  * TODO: The official Kontext workflow uses ReferenceLatent + FluxGuidance +
@@ -1533,22 +1535,50 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
     },
   };
 
-  // Node 4: CLIPTextEncode — Positive prompt only (Kontext has no negative prompt)
+  // ---- Optional LoRA chain (nodes 50+) ----
+  // Chains between UNETLoader/DualCLIPLoader and CLIPTextEncode/KSampler.
+  // First LoRA takes model from node 1 (UNETLoader output 0) and clip from
+  // node 2 (DualCLIPLoader output 0). Subsequent LoRAs chain from the previous.
+  let modelRef: [string, number] = ['1', 0];
+  let clipRef: [string, number] = ['2', 0];
+
+  if (config.loras && config.loras.length > 0) {
+    const capped = config.loras.slice(0, 6);
+    for (let i = 0; i < capped.length; i++) {
+      const nodeId = String(50 + i);
+      const lora = capped[i];
+      workflow[nodeId] = {
+        class_type: 'LoraLoader',
+        inputs: {
+          lora_name: lora.filename,
+          strength_model: lora.strengthModel,
+          strength_clip: lora.strengthClip,
+          model: modelRef,
+          clip: clipRef,
+        },
+      };
+      modelRef = [nodeId, 0];
+      clipRef = [nodeId, 1];
+    }
+  }
+
+  // Node 4: CLIPTextEncode — Positive prompt (uses LoRA-modified clip if LoRAs present)
   workflow['4'] = {
     class_type: 'CLIPTextEncode',
     inputs: {
       text: config.positivePrompt,
-      clip: ['2', 0],
+      clip: clipRef,
     },
   };
 
+  // Pass modelRef to type-specific builders so KSampler uses the LoRA-modified model
   switch (config.type) {
     case 'portrait':
-      return buildKontextPortraitWorkflow(workflow, config);
+      return buildKontextPortraitWorkflow(workflow, config, modelRef);
     case 'single':
-      return buildKontextSingleWorkflow(workflow, config);
+      return buildKontextSingleWorkflow(workflow, config, modelRef);
     case 'dual':
-      return buildKontextDualWorkflow(workflow, config);
+      return buildKontextDualWorkflow(workflow, config, modelRef);
     default:
       throw new Error(`Unknown Kontext workflow type: ${config.type}`);
   }
@@ -1558,6 +1588,7 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
 function buildKontextPortraitWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
+  modelRef: [string, number],
 ): Record<string, any> {
   // Node 5: EmptyLatentImage
   workflow['5'] = {
@@ -1573,7 +1604,7 @@ function buildKontextPortraitWorkflow(
   workflow['6'] = {
     class_type: 'KSampler',
     inputs: {
-      model: ['1', 0],
+      model: modelRef,
       positive: ['4', 0],
       negative: ['4', 0], // Kontext: same positive for negative (effectively no negative)
       latent_image: ['5', 0],
@@ -1611,6 +1642,7 @@ function buildKontextPortraitWorkflow(
 function buildKontextSingleWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
+  modelRef: [string, number],
 ): Record<string, any> {
   if (!config.primaryRefImageName) {
     throw new Error('Kontext single workflow requires primaryRefImageName');
@@ -1666,7 +1698,7 @@ function buildKontextSingleWorkflow(
   workflow['9'] = {
     class_type: 'KSampler',
     inputs: {
-      model: ['1', 0],
+      model: modelRef,
       positive: ['8', 0],
       negative: ['8', 1],
       latent_image: ['7', 0],
@@ -1707,6 +1739,7 @@ function buildKontextSingleWorkflow(
 function buildKontextDualWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
+  modelRef: [string, number],
 ): Record<string, any> {
   if (!config.primaryRefImageName) {
     throw new Error('Kontext dual workflow requires primaryRefImageName (pre-combined reference image)');
@@ -1756,7 +1789,7 @@ function buildKontextDualWorkflow(
   workflow['9'] = {
     class_type: 'KSampler',
     inputs: {
-      model: ['1', 0],
+      model: modelRef,
       positive: ['8', 0],
       negative: ['8', 1],
       latent_image: ['7', 0],

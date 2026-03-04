@@ -281,6 +281,45 @@ else
   echo "VAE already exists, skipping."
 fi
 
+# ---- Flux LoRAs (for Kontext workflows) ----
+mkdir -p /workspace/models/loras
+
+# 1. XLabs Flux Realism LoRA (Civitai #631986, version 706528)
+if [ ! -f "/workspace/models/loras/flux_realism_lora.safetensors" ]; then
+  echo "Downloading XLabs Flux Realism LoRA..."
+  wget -O /workspace/models/loras/flux_realism_lora.safetensors \\
+    "https://civitai.com/api/download/models/706528${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}"
+else
+  echo "flux_realism_lora.safetensors already exists, skipping."
+fi
+
+# 2. Shakker-Labs Add Details LoRA (HuggingFace, no auth needed)
+if [ ! -f "/workspace/models/loras/flux-add-details.safetensors" ]; then
+  echo "Downloading Shakker-Labs Add Details LoRA..."
+  wget -O /workspace/models/loras/flux-add-details.safetensors \\
+    "https://huggingface.co/Shakker-Labs/FLUX.1-dev-LoRA-add-details/resolve/main/FLUX-dev-lora-add_details.safetensors"
+else
+  echo "flux-add-details.safetensors already exists, skipping."
+fi
+
+# 3. FC Flux Perfect Busts V3 (Civitai #61099, version 1782533 — NSFW, needs token)
+if [ ! -f "/workspace/models/loras/fc-flux-perfect-busts.safetensors" ]; then
+  echo "Downloading FC Flux Perfect Busts LoRA..."
+  wget -O /workspace/models/loras/fc-flux-perfect-busts.safetensors \\
+    "https://civitai.com/api/download/models/1782533${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "FC Perfect Busts download failed (may need CIVITAI_TOKEN for NSFW content)"
+else
+  echo "fc-flux-perfect-busts.safetensors already exists, skipping."
+fi
+
+# 4. Hourglass Body Shape v3.2 FLUX (Civitai #129130, version 1668530)
+if [ ! -f "/workspace/models/loras/hourglassv32_FLUX.safetensors" ]; then
+  echo "Downloading Hourglass Body Shape v3.2 FLUX LoRA..."
+  wget -O /workspace/models/loras/hourglassv32_FLUX.safetensors \\
+    "https://civitai.com/api/download/models/1668530${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}"
+else
+  echo "hourglassv32_FLUX.safetensors already exists, skipping."
+fi
+
 echo ""
 echo "=== ALL DOWNLOADS COMPLETE ==="
 echo ""
@@ -292,6 +331,9 @@ ls -lh /workspace/models/clip/ 2>/dev/null || echo "(empty)"
 echo ""
 echo "--- vae ---"
 ls -lh /workspace/models/vae/ 2>/dev/null || echo "(empty)"
+echo ""
+echo "--- loras ---"
+ls -lh /workspace/models/loras/ 2>/dev/null || echo "(empty)"
 `;
 }
 
@@ -372,9 +414,13 @@ async function main() {
   CLIP: clip_l.safetensors
   VAE: ae.safetensors
 
-  Pod terminated. Network volume ready.
+  LoRAs:
+    flux_realism_lora.safetensors      (XLabs Flux Realism)
+    flux-add-details.safetensors       (Shakker-Labs Add Details)
+    fc-flux-perfect-busts.safetensors  (FC Perfect Busts Flux V3)
+    hourglassv32_FLUX.safetensors      (Hourglass Body Shape v3.2)
 
-  Next: Set KONTEXT_NSFW_MODEL=<nsfw-filename> in .env.local
+  Pod terminated. Network volume ready.
 ===================================
 `);
   } catch (err) {
