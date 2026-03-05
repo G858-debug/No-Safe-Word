@@ -21,9 +21,15 @@ export async function GET(
 
     // Strip the runpod- prefix if present
     const runpodJobId = jobId.startsWith("runpod-") ? jobId.replace("runpod-", "") : jobId;
-    console.log(`[StoryPublisher] Polling RunPod job: ${runpodJobId}`);
 
     const status = await getRunPodJobStatus(runpodJobId);
+
+    // Only log on status transitions — suppress routine IN_QUEUE/IN_PROGRESS polls
+    if (status.status === "COMPLETED") {
+      console.log(`[StoryPublisher] RunPod job COMPLETED: ${runpodJobId}`);
+    } else if (status.status === "FAILED") {
+      console.log(`[StoryPublisher] RunPod job FAILED: ${runpodJobId}`);
+    }
 
     if (status.status === "COMPLETED" && status.output?.images?.[0]) {
       const imageData = status.output.images[0].data;

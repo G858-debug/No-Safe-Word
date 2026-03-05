@@ -5,7 +5,6 @@ import { CharacterForm } from "@/app/dashboard-components/CharacterForm";
 import { SceneBuilder } from "@/app/dashboard-components/SceneBuilder";
 import { SettingsPanel } from "@/app/dashboard-components/SettingsPanel";
 import { ImageGallery } from "@/app/dashboard-components/ImageGallery";
-import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,10 +29,8 @@ export default function DashboardPage() {
     removeImage,
   } = useGeneration();
 
-  const prompt = buildPrompt(character, scene);
-  const negativePrompt = buildNegativePrompt(scene, {
-    africanFeatureCorrection: needsAfricanFeatureCorrection(character),
-  });
+  const prompt = "(legacy dashboard — use Story Publisher)";
+  const negativePrompt = "";
 
   return (
     <div className="dark min-h-screen bg-background text-foreground">

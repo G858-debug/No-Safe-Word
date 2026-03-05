@@ -1,35 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
-import { submitRunPodJob, buildPortraitWorkflow, classifyScene, selectResources, selectModel, DEFAULT_MODEL } from "@no-safe-word/image-gen";
-import type { CharacterData, SceneData } from "@no-safe-word/shared";
-
-/** Debug levels for systematic resource testing (progressive — each level adds one layer) */
-type DebugLevel = "bare" | "model" | "loras" | "negative" | "full";
+import {
+  buildKontextWorkflow,
+  buildKontextIdentityPrefix,
+  buildFluxPrompt,
+  selectKontextResources,
+  submitRunPodJob,
+} from "@no-safe-word/image-gen";
+import type { CharacterData } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
 
-const PORTRAIT_SCENE: SceneData = {
-  mode: "sfw",
-  setting: "(professional portrait photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background",
-  lighting: "soft studio",
-  mood: "professional portrait",
-  sfwDescription:
-    "looking at camera, neutral expression, photorealistic",
-  nsfwDescription: "",
-  additionalTags: [],
-};
+const PORTRAIT_SCENE_DESCRIPTION =
+  "Professional portrait photography with soft diffused studio lighting against a clean neutral gray backdrop. Close-up head and shoulders, looking directly at the camera with a confident expression.";
 
-const FULLBODY_SCENE: SceneData = {
-  mode: "sfw",
-  setting: "(fashion photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background",
-  lighting: "studio-quality lighting",
-  mood: "fashion photography",
-  sfwDescription:
-    "full body standing pose, full body visible head to feet, standing naturally, photorealistic",
-  nsfwDescription: "",
-  additionalTags: [],
-};
+const FULLBODY_SCENE_DESCRIPTION =
+  "Full body standing pose in soft studio lighting against a medium gray backdrop. Standing naturally, full body visible from head to feet.";
 
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait or full body
 export async function POST(
@@ -40,23 +26,11 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    // Parse optional debugLevel, forceModel, type from request body
-    let debugLevel: DebugLevel = "full";
-    let forceModel: string | undefined;
-    let customNegativePrompt: string | undefined;
+    // Parse optional seed and type from request body
     let customSeed: number | undefined;
     let imageType: ImageType = "portrait";
     try {
       const body = await request.json();
-      if (body.debugLevel && ["bare", "model", "loras", "negative", "full"].includes(body.debugLevel)) {
-        debugLevel = body.debugLevel;
-      }
-      if (body.forceModel && typeof body.forceModel === "string") {
-        forceModel = body.forceModel;
-      }
-      if (body.negativePrompt && typeof body.negativePrompt === "string") {
-        customNegativePrompt = body.negativePrompt;
-      }
       if (typeof body.seed === "number" && body.seed > 0) {
         customSeed = body.seed;
       }
@@ -67,9 +41,7 @@ export async function POST(
       // No body or invalid JSON — use defaults
     }
 
-    const scene = imageType === "fullBody" ? FULLBODY_SCENE : PORTRAIT_SCENE;
-
-    console.log(`[StoryPublisher] Generating ${imageType} for storyCharId: ${storyCharId}, debugLevel: ${debugLevel}`);
+    console.log(`[StoryPublisher] Generating ${imageType} (Kontext) for storyCharId: ${storyCharId}`);
 
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
@@ -121,54 +93,36 @@ export async function POST(
       age: desc.age || "",
     };
 
-    // 4. Generate with a known seed (fixed or random)
+    // 4. Build Kontext prompt
     const seed = customSeed || Math.floor(Math.random() * 2_147_483_647) + 1;
-    const prompt = buildPrompt(characterData, scene);
+    const identityPrefix = buildKontextIdentityPrefix(characterData);
+    const sceneDescription = imageType === "fullBody" ? FULLBODY_SCENE_DESCRIPTION : PORTRAIT_SCENE_DESCRIPTION;
+    const { prompt: fluxPrompt } = buildFluxPrompt(identityPrefix, sceneDescription, { mode: 'sfw' });
 
-    // --- Debug level resource selection ---
-    const useFullNegative = debugLevel === "negative" || debugLevel === "full";
-    const useLoras = debugLevel === "loras" || debugLevel === "negative" || debugLevel === "full";
-    const useModelSelection = debugLevel !== "bare";
-    const useFaceDetailer = debugLevel === "full";
+    // 5. Select Kontext LoRAs
+    const gender = characterData.gender === 'male' ? 'male' : 'female';
+    const kontextResources = selectKontextResources({
+      gender,
+      isSfw: true,
+      imageType: 'portrait',
+      prompt: fluxPrompt,
+      hasDualCharacter: false,
+    });
 
-    // Negative prompt (custom override from UI takes priority)
-    const negativePrompt = customNegativePrompt
-      ? customNegativePrompt
-      : useFullNegative
-        ? buildNegativePrompt(scene, {
-            africanFeatureCorrection: needsAfricanFeatureCorrection(characterData),
-          })
-        : "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature";
+    console.log(`[StoryPublisher] Kontext identity prefix: ${identityPrefix.substring(0, 80)}...`);
+    console.log(`[StoryPublisher] LoRAs: ${kontextResources.loras.length > 0 ? kontextResources.loras.map(l => l.filename).join(", ") : "NONE"}`);
+    console.log(`[StoryPublisher] Seed: ${seed}`);
 
-    // Scene classification + resources
-    const classification = classifyScene(prompt, "portrait");
-    const resources = useLoras ? selectResources(classification) : { loras: [], negativePromptAdditions: "" };
-
-    // Model selection (forceModel overrides both debug level and auto-selection)
-    const modelSelection = forceModel
-      ? selectModel(classification, "portrait", { forceModel })
-      : useModelSelection
-        ? selectModel(classification, "portrait")
-        : { checkpointName: DEFAULT_MODEL, model: null, fellBack: false, reason: "Debug: bare mode — using base model" };
-
-    console.log(`[StoryPublisher] Debug level: ${debugLevel}`);
-    console.log(`[StoryPublisher]   Model: ${modelSelection.checkpointName} (${modelSelection.reason})`);
-    console.log(`[StoryPublisher]   LoRAs: ${resources.loras.length > 0 ? resources.loras.map(l => l.filename).join(", ") : "NONE"}`);
-    console.log(`[StoryPublisher]   Negative prompt: ${useFullNegative ? "full (SFW + African correction)" : "minimal (base only)"}`);
-    console.log(`[StoryPublisher]   FaceDetailer: ${useFaceDetailer ? "ON" : "OFF"}`);
-    console.log(`[StoryPublisher]   Seed: ${seed}`);
-
-    const workflow = buildPortraitWorkflow({
-      positivePrompt: prompt,
-      negativePrompt,
+    // 6. Build Kontext workflow
+    const workflow = buildKontextWorkflow({
+      type: 'portrait',
+      positivePrompt: fluxPrompt,
       width: 832,
       height: 1216,
       seed,
       filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      loras: useLoras ? (resources.loras.length > 0 ? resources.loras : undefined) : [],
-      negativePromptAdditions: resources.negativePromptAdditions || undefined,
-      checkpointName: modelSelection.checkpointName,
-      skipFaceDetailer: !useFaceDetailer,
+      sfwMode: true,
+      loras: kontextResources.loras,
     });
 
     // Submit async job to RunPod (returns immediately)
@@ -179,16 +133,13 @@ export async function POST(
       .from("images")
       .insert({
         character_id: character.id,
-        prompt,
-        negative_prompt: negativePrompt,
+        prompt: fluxPrompt,
         settings: {
-          width: 832, height: 1216, steps: 30, cfg: 7.5, seed,
-          engine: "runpod-comfyui",
-          debugLevel,
+          width: 832,
+          height: 1216,
+          engine: "kontext",
           imageType,
-          model: modelSelection.checkpointName,
-          loras: resources.loras.map(l => l.filename),
-          faceDetailer: useFaceDetailer,
+          seed,
         },
         mode: "sfw",
       })
@@ -212,7 +163,6 @@ export async function POST(
     return NextResponse.json({
       jobId: `runpod-${jobId}`,
       imageId: imageRow.id,
-      debugLevel,
     });
   } catch (err) {
     console.error("Character portrait generation failed:", err);

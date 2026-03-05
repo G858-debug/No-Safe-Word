@@ -403,9 +403,7 @@ export default function SeriesDetailPage() {
                       </Select>
                     </div>
                     <p className="flex-1 text-xs text-muted-foreground mt-5">
-                      {(series.image_engine || "sdxl") === "sdxl"
-                        ? "Original pipeline with IPAdapter character consistency"
-                        : "Better prompt adherence, native character consistency, no LoRAs needed"}
+                      Better prompt adherence, native character consistency
                     </p>
                   </div>
                 </div>
