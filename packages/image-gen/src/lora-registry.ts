@@ -49,169 +49,6 @@ export function buildCharacterLoraEntry(dbRecord: {
   };
 }
 
-export const LORA_REGISTRY: LoraEntry[] = [
-  {
-    name: 'Detail Tweaker XL',
-    filename: 'detail-tweaker-xl.safetensors',
-    category: 'detail',
-    defaultStrength: 0.5,
-    clipStrength: 0.5,
-    description: 'Overall sharpness and detail enhancement, always on',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Realistic Skin XL',
-    filename: 'realistic-skin-xl.safetensors',
-    category: 'skin',
-    defaultStrength: 0.75,
-    clipStrength: 0.75,
-    description: 'Photorealistic skin texture for close-up and medium shots (Skin Texture Style v4 by EauDeNoire)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Eyes Detail XL',
-    filename: 'eyes-detail-xl.safetensors',
-    category: 'eyes',
-    defaultStrength: 0.5,
-    clipStrength: 0.5,
-    description: 'Better eyes and gaze accuracy for eye contact shots (DetailedEyes v3 by bdsqlsz)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Hands XL',
-    filename: 'negative-hands-v2.safetensors',
-    category: 'hands',
-    defaultStrength: 0.8,
-    clipStrength: 0.8,
-    description: 'Reduce hand artifacts, use only when hands are visible (Hands XL v2.1 by EauDeNoire)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Better Bodies XL',
-    filename: 'better-bodies-xl.safetensors',
-    category: 'bodies',
-    defaultStrength: 0.5,
-    clipStrength: 0.5,
-    description: 'Anatomical accuracy for NSFW content',
-    compatibleWith: ['nsfw'],
-    installed: true,
-    genderCategory: 'female',
-  },
-  {
-    name: 'Curvy Body SDXL',
-    filename: 'curvy-body-sdxl.safetensors',
-    category: 'bodies',
-    defaultStrength: 0.7,
-    clipStrength: 0.7,
-    description: 'Curvy body shape enhancement for realistic proportions',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'female',
-  },
-  {
-    name: 'Cinematic Lighting XL',
-    filename: 'cinematic-lighting-xl.safetensors',
-    category: 'lighting',
-    defaultStrength: 0.4,
-    clipStrength: 0.4,
-    description: 'Enhanced dramatic lighting for cinematic scenes (ntc-ai slider)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'CineColor Harmonizer',
-    filename: 'cinecolor-harmonizer.safetensors',
-    category: 'cinematic',
-    defaultStrength: 0.3,
-    clipStrength: 0.3,
-    triggerWord: 'sunset_gold_film',
-    description: 'Warm golden color grading with cinematic contrast — pure palette modifier, no anatomy changes (jarod2212)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Melanin Mix XL',
-    filename: 'melanin-mix-xl.safetensors',
-    category: 'melanin',
-    defaultStrength: 0.5,
-    clipStrength: 0.5,
-    triggerWord: 'melanin',
-    description: 'Dark skin tone and texture enhancement trained on 1000+ Black influencer photos (Ggrue)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Couples Poses XL',
-    filename: 'couples-poses-xl.safetensors',
-    category: 'style',
-    defaultStrength: 0.6,
-    clipStrength: 0.6,
-    triggerWord: 'couples_pose',
-    description: 'Improved dual-character pose composition — reduces merged limbs and anatomical errors in two-person scenes',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Touch of Realism V2',
-    filename: 'touch-of-realism-v2.safetensors',
-    category: 'cinematic',
-    defaultStrength: 0.45,
-    clipStrength: 0.45,
-    triggerWord: 'touch-of-realismV2',
-    description: 'Real photography lens effects — shallow DOF, bokeh, light flares, natural depth separation (trained on Sony A7III photos by Huslyo)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'High Fashion SDXL',
-    filename: 'high-fashion-xl.safetensors',
-    category: 'detail',
-    defaultStrength: 0.4,
-    clipStrength: 0.4,
-    description: 'Fashion photography clothing and fabric detail enhancement — improves garment rendering, fabric textures, and clothing accuracy',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'female',
-  },
-  {
-    name: 'Interior Design Universal SDXL',
-    filename: 'interior-design-xl.safetensors',
-    category: 'style',
-    defaultStrength: 0.4,
-    clipStrength: 0.4,
-    triggerWord: 'mrares',
-    description: 'Indoor scene enhancement — improves restaurants, bedrooms, kitchens, workshops with better light/shadow and spatial depth (by AresWei)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'neutral',
-  },
-  {
-    name: 'Braids & Cornrows SDXL',
-    filename: 'braids-cornrows-xl.safetensors',
-    category: 'detail',
-    defaultStrength: 0.5,
-    clipStrength: 0.5,
-    triggerWord: 'braided side',
-    description: 'Braided hairstyle detail enhancement — cornrows, side braids, African braided styles (by staffy)',
-    compatibleWith: ['sfw', 'nsfw'],
-    installed: true,
-    genderCategory: 'female',
-  },
-];
-
 // ---- Kontext (Flux) LoRAs — loaded from /runpod-volume/models/loras/ ----
 export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
   {
@@ -282,6 +119,64 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     installed: true,
     genderCategory: 'neutral',
   },
+  {
+    name: 'Boudoir Style Flux',
+    filename: 'boudoir-style-flux.safetensors',
+    category: 'style',
+    defaultStrength: 0.6,
+    clipStrength: 0.6,
+    triggerWord: 'boud01rstyle',
+    description: 'Boudoir photography aesthetic — intimate, sensual atmosphere with soft warm lighting and elegant posing (CivitAI #1122736)',
+    compatibleWith: ['nsfw'],
+    installed: false,
+    genderCategory: 'female',
+  },
+  {
+    name: 'Flux Fashion Editorial',
+    filename: 'flux-fashion-editorial.safetensors',
+    category: 'style',
+    defaultStrength: 0.5,
+    clipStrength: 0.5,
+    triggerWord: 'flux-fash',
+    description: 'Premium fashion editorial photography — luxury magazine look, sharp cheekbones, flawless skin, high-end studio lighting (CivitAI #2138223)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'female',
+  },
+  {
+    name: 'Flux Oiled Skin',
+    filename: 'flux-oiled-skin.safetensors',
+    category: 'skin',
+    defaultStrength: 0.7,
+    clipStrength: 0.7,
+    description: 'Oil sheen on skin — glistening, slick highlight effect. Triggered by scene keywords: oiled, glistening, shiny skin (CivitAI #770197)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'neutral',
+  },
+  {
+    name: 'Flux Sweat Effect',
+    filename: 'flux-sweat-v2.safetensors',
+    category: 'skin',
+    defaultStrength: 0.6,
+    clipStrength: 0.6,
+    description: 'Sweat droplets and glistening skin — from close-up drops to overall shiny look for gym/sport/cinematic scenes (CivitAI #1059415)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'neutral',
+  },
+  {
+    name: 'Flux Beauty Skin',
+    filename: 'flux-beauty-skin.safetensors',
+    category: 'skin',
+    defaultStrength: 0.3,
+    clipStrength: 0.3,
+    triggerWord: 'mdlnbaytskn',
+    description: 'Photorealistic skin texture with natural detail, avoids plastic look — pore-level realism for close-up portraits (CivitAI #2298043)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'neutral',
+  },
 ];
 
 export function getKontextLoras(gender?: 'male' | 'female' | 'neutral'): LoraEntry[] {
@@ -313,24 +208,37 @@ export function selectKontextResources(opts: {
   const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
   const isKissing = /\b(kiss|kissing|kisses|french.kiss|lips.meet|lips.touch)\b/i.test(prompt);
   const isIntimate = /\b(naked|nude|sex|intimate|penetrat|straddle|undress|topless)\b/i.test(prompt);
+  const isOiled = /\b(oil(?:ed)?|glistening.skin|shiny.skin|slick.skin|oily)\b/i.test(prompt);
+  const isSweaty = /\b(sweat(?:y|ing)?|perspir|gym|workout|post-workout|athletic)\b/i.test(prompt);
   const isFemale = gender === 'female';
   // Include female body LoRAs if either character is female
   const hasFemaleCharacter = isFemale || secondaryGender === 'female';
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
 
-  // 1. Realism LoRA — always included
+  // 1. Realism LoRA — always included. Reduced for NSFW to give body LoRAs
+  //    more room in the model's attention budget.
   let realismStrength = 0.8;
   if (isFacebookSfw) realismStrength = 0.9;
-  if (hasDualCharacter) realismStrength = 0.7;
+  else if (isNsfw) realismStrength = 0.7;
+  if (hasDualCharacter) realismStrength = Math.min(realismStrength, 0.7);
   loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
 
-  // 2. Detail LoRA — always included, strength varies by shot type
-  let detailStrength = 0.6;
-  if (isCloseUp) detailStrength = 0.8;
-  else if (isWide) detailStrength = 0.4;
-  if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
-  loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+  // 2. Style/Detail LoRA — slot 2 swaps to a style LoRA for female characters:
+  //    • SFW female     → Fashion Editorial (luxury magazine look)
+  //    • NSFW female solo (no dual) → Boudoir Style (intimate/sensual atmosphere)
+  //    • All other cases → Detail LoRA as-is
+  if (hasFemaleCharacter && isSfw && !hasDualCharacter) {
+    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+  } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
+    loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+  } else {
+    let detailStrength = 0.6;
+    if (isCloseUp) detailStrength = 0.8;
+    else if (isWide) detailStrength = 0.4;
+    if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
+    loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+  }
 
   // 3. Body LoRAs — included when ANY character is female
   // For dual scenes with a male primary + female secondary, we still want body
@@ -341,11 +249,14 @@ export function selectKontextResources(opts: {
 
     let bustsStrength = 0.7 * secondaryReduction;
     if (isFacebookSfw) bustsStrength = 0.4 * secondaryReduction;
-    else if (isNsfw) bustsStrength = 0.8 * secondaryReduction;
+    else if (isNsfw) bustsStrength = 0.85 * secondaryReduction;
     loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
 
+    // Hourglass body shape — strongest for NSFW since Flux has no negative prompt
+    // to prevent "flat/boyish" rendering; the LoRA must do all the work.
     let hourglassStrength = 0.9 * secondaryReduction;
     if (isFacebookSfw) hourglassStrength = 0.5 * secondaryReduction;
+    else if (isNsfw) hourglassStrength = 0.95 * secondaryReduction;
     loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(hourglassStrength * 100) / 100, strengthClip: Math.round(hourglassStrength * 100) / 100 });
   }
 
@@ -363,6 +274,19 @@ export function selectKontextResources(opts: {
     loras.push({ filename: 'flux_lustly-ai_v1.safetensors', strengthModel: nsfwStrength, strengthClip: nsfwStrength });
   }
 
+  // 6. Skin effect LoRA — situational, mutually exclusive, only if a slot is free
+  //    Priority: oiled > sweaty > beauty skin (close-up female)
+  //    These are installed: false until downloaded, but selection logic is always active
+  if (loras.length < 6) {
+    if (isOiled) {
+      loras.push({ filename: 'flux-oiled-skin.safetensors', strengthModel: 0.7, strengthClip: 0.7 });
+    } else if (isSweaty) {
+      loras.push({ filename: 'flux-sweat-v2.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    } else if (isCloseUp && hasFemaleCharacter) {
+      loras.push({ filename: 'flux-beauty-skin.safetensors', strengthModel: 0.3, strengthClip: 0.3 });
+    }
+  }
+
   // Strength budget cap — scale down if total exceeds 3.5
   const MAX_TOTAL_STRENGTH = 3.5;
   const totalStrength = loras.reduce((sum, l) => sum + l.strengthModel, 0);
@@ -377,10 +301,3 @@ export function selectKontextResources(opts: {
   return { loras };
 }
 
-export function getLorasByCategory(category: LoraCategory): LoraEntry[] {
-  return LORA_REGISTRY.filter((l) => l.category === category);
-}
-
-export function getLoraByFilename(filename: string): LoraEntry | undefined {
-  return LORA_REGISTRY.find((l) => l.filename === filename);
-}

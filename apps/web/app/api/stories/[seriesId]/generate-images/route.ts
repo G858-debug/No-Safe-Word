@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { extractCharacterTags, buildStoryImagePrompt, replaceTagsAge, buildFacePrompt } from "@no-safe-word/image-gen";
-import { submitRunPodJob, imageUrlToBase64, buildWorkflow, buildKontextWorkflow, buildKontextIdentityPrefix, classifyScene, selectResources, selectModel, selectDimensionsFromPrompt, decomposePrompt } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, buildKontextWorkflow, buildKontextIdentityPrefix, selectKontextResources, rewritePromptForFlux, buildFluxPrompt, injectFluxFemaleEnhancement } from "@no-safe-word/image-gen";
 import { concatImagesHorizontally, concatImagesVertically } from "@/lib/server/image-concat";
-import { augmentComposition, buildCharacterLoraEntry, getKontextLoras, selectKontextResources, optimizePrompts, shouldOptimize, rewritePromptForFlux } from "@no-safe-word/image-gen";
-import type { ImageType, CharacterLoraEntry, DecomposedPrompt, CharacterContext, KontextWorkflowType } from "@no-safe-word/image-gen";
-import type { CharacterData, ImageEngine } from "@no-safe-word/shared";
+import type { KontextWorkflowType } from "@no-safe-word/image-gen";
+import type { CharacterData } from "@no-safe-word/shared";
 
 interface QueuedJob {
   promptId: string;
@@ -47,28 +45,16 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const { post_id, regenerate } = body as { post_id?: string; regenerate?: boolean };
 
-    // 0. Fetch series to determine image engine
-    const { data: seriesRecord } = await supabase
-      .from("story_series")
-      .select("image_engine")
-      .eq("id", seriesId)
-      .single();
-
-    const imageEngine: ImageEngine = (seriesRecord as any)?.image_engine || "sdxl";
-
     // 1. Verify all characters in the series are approved
-    // Note: active_lora_id is not in auto-generated types yet, so we cast
     const { data: storyChars, error: charsError } = await (supabase as any)
       .from("story_characters")
-      .select("id, character_id, approved, approved_seed, approved_prompt, active_lora_id")
+      .select("id, character_id, approved, approved_seed")
       .eq("series_id", seriesId) as {
         data: Array<{
           id: string;
           character_id: string;
           approved: boolean;
           approved_seed: number | null;
-          approved_prompt: string | null;
-          active_lora_id: string | null;
         }> | null;
         error: any;
       };
@@ -96,22 +82,10 @@ export async function POST(
       );
     }
 
-    // Build character_id → approved_seed and character_id → approved character tags maps
+    // Build character_id → approved_seed map
     const seedMap = new Map<string, number | null>();
-    const approvedTagsMap = new Map<string, string>();
-    const loraIdMap = new Map<string, string>(); // character_id → active_lora_id
     storyChars.forEach((sc) => {
       seedMap.set(sc.character_id, sc.approved_seed);
-      if (sc.active_lora_id) {
-        loraIdMap.set(sc.character_id, sc.active_lora_id);
-      }
-      if (sc.approved_prompt) {
-        const tags = extractCharacterTags(sc.approved_prompt);
-        if (tags) approvedTagsMap.set(sc.character_id, tags);
-        console.log(`[StoryImage] Using approved_prompt tags for character ${sc.character_id}:`, tags);
-      } else {
-        console.warn(`[StoryImage] No approved_prompt for character ${sc.character_id} — falling back to character description. Re-approve the character portrait to save the prompt.`);
-      }
     });
 
     // 2. Find target posts
@@ -218,58 +192,6 @@ export async function POST(
       }
     }
 
-    // Safeguard: correct ages in approved tags using canonical character data.
-    // The approved_prompt may contain a manually-edited age that differs from
-    // the character's actual age in the database.
-    approvedTagsMap.forEach((tags, charId) => {
-      const charData = characterDataMap.get(charId);
-      if (charData?.age) {
-        const corrected = replaceTagsAge(tags, charData.age);
-        if (corrected !== tags) {
-          console.warn(`[StoryImage] Age mismatch in approved tags for character ${charId}. Corrected to "${charData.age}".`);
-          approvedTagsMap.set(charId, corrected);
-        }
-      }
-    });
-
-    // Build character_id → CharacterLoraEntry map for deployed LoRAs
-    const characterLoraMap = new Map<string, CharacterLoraEntry>();
-    if (loraIdMap.size > 0) {
-      const loraIds = Array.from(loraIdMap.values());
-      const { data: loraRecords } = await (supabase as any)
-        .from("character_loras")
-        .select("id, character_id, filename, trigger_word, storage_url")
-        .in("id", loraIds)
-        .eq("status", "deployed") as {
-          data: Array<{
-            id: string;
-            character_id: string;
-            filename: string;
-            trigger_word: string;
-            storage_url: string | null;
-          }> | null;
-        };
-
-      if (loraRecords) {
-        for (const lora of loraRecords) {
-          if (!lora.storage_url) continue;
-          const charData = characterDataMap.get(lora.character_id);
-          const charName = charData?.name || "Unknown";
-          characterLoraMap.set(
-            lora.character_id,
-            buildCharacterLoraEntry({
-              character_id: lora.character_id,
-              character_name: charName,
-              filename: lora.filename,
-              trigger_word: lora.trigger_word,
-              storage_url: lora.storage_url,
-            })
-          );
-          console.log(`[StoryImage] Character LoRA active for ${charName}: ${lora.filename}`);
-        }
-      }
-    }
-
     // Empty character for prompts not linked to a character
     const emptyCharacter: CharacterData = {
       name: "",
@@ -322,643 +244,301 @@ export async function POST(
           seed = Math.floor(Math.random() * 2_147_483_647) + 1;
         }
 
-        // Build prompt using approved character tags for consistency
-        const primaryTags = imgPrompt.character_id
-          ? approvedTagsMap.get(imgPrompt.character_id) || null
-          : null;
-        const secondaryTags = imgPrompt.secondary_character_id
-          ? approvedTagsMap.get(imgPrompt.secondary_character_id) || null
-          : null;
-
         const hasSecondary = !!imgPrompt.secondary_character_id;
 
-        // ====== KONTEXT ENGINE PATH ======
-        if (imageEngine === "kontext") {
-          // Determine Kontext workflow type
-          const kontextType: KontextWorkflowType = !imgPrompt.character_id
-            ? "portrait"
-            : hasSecondary
-              ? "dual"
-              : "single";
+        // Determine Kontext workflow type
+        const kontextType: KontextWorkflowType = !imgPrompt.character_id
+          ? "portrait"
+          : hasSecondary
+            ? "dual"
+            : "single";
 
-          // Determine SFW vs NSFW
-          const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
+        // Determine SFW vs NSFW
+        const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
 
-          // Fetch reference images for character consistency
-          let kontextImages: Array<{ name: string; image: string }> = [];
+        // Fetch reference images for character consistency
+        let kontextImages: Array<{ name: string; image: string }> = [];
 
-          if (kontextType !== "portrait" && imgPrompt.character_id) {
-            // Fetch both face portrait and full-body reference for single-character scenes
-            const { data: sc } = await supabase
-              .from("story_characters")
-              .select("approved_image_id, approved_fullbody_image_id")
-              .eq("series_id", seriesId)
-              .eq("character_id", imgPrompt.character_id)
-              .single();
-
-            const charName = characterDataMap.get(imgPrompt.character_id)?.name || imgPrompt.character_name || "Unknown";
-
-            if (kontextType === "single") {
-              // Single-character scene: require BOTH face + body, stitch vertically
-              if (!sc?.approved_image_id || !sc?.approved_fullbody_image_id) {
-                throw new Error(
-                  `Character "${charName}" requires both a face portrait and body shot to be approved before generating scene images. Please approve both in Stage 8.`
-                );
-              }
-
-              // Fetch both image URLs in parallel (with fallback from stored_url → sfw_url)
-              const [{ data: faceImg }, { data: bodyImg }] = await Promise.all([
-                supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
-                supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
-              ]);
-
-              const [faceBase64, bodyBase64] = await Promise.all([
-                fetchRefImageBase64(faceImg, `${charName} face`),
-                fetchRefImageBase64(bodyImg, `${charName} body`),
-              ]);
-
-              if (!faceBase64 || !bodyBase64) {
-                throw new Error(
-                  `Character "${charName}" has approved image IDs but the images could not be fetched. Face: ${faceBase64 ? "OK" : "failed"}, Body: ${bodyBase64 ? "OK" : "failed"}.`
-                );
-              }
-
-              const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
-              kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
-              console.log(`[Kontext][${imgPrompt.id}] Combined face + body ref images vertically for "${charName}"`);
-            } else {
-              // Dual-character scene: primary character still uses face-only (horizontal stitch with secondary happens later)
-              console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching primary ref for "${charName}" (approved_image_id: ${sc?.approved_image_id || 'NONE'})`);
-              if (sc?.approved_image_id) {
-                const { data: img } = await supabase
-                  .from("images")
-                  .select("stored_url, sfw_url")
-                  .eq("id", sc.approved_image_id)
-                  .single();
-
-                const primaryRefBase64 = await fetchRefImageBase64(img, `${charName} primary`);
-                if (primaryRefBase64) {
-                  kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
-                  console.log(`[Kontext][${imgPrompt.id}] Primary ref loaded (${Math.round(primaryRefBase64.length / 1024)}KB base64)`);
-                }
-              } else {
-                console.warn(`[Kontext][${imgPrompt.id}] WARNING: Primary character "${charName}" has no approved_image_id for dual scene`);
-              }
-            }
-          }
-
-          if (kontextType === "dual" && imgPrompt.secondary_character_id) {
-            const secondaryName = characterDataMap.get(imgPrompt.secondary_character_id)?.name || imgPrompt.secondary_character_name || "Unknown";
-            console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching secondary ref for "${secondaryName}" (character_id: ${imgPrompt.secondary_character_id})`);
-
-            const { data: sc2 } = await supabase
-              .from("story_characters")
-              .select("approved_image_id")
-              .eq("series_id", seriesId)
-              .eq("character_id", imgPrompt.secondary_character_id)
-              .single();
-
-            console.log(`[Kontext][${imgPrompt.id}] Secondary "${secondaryName}" approved_image_id: ${sc2?.approved_image_id || 'NONE'}`);
-
-            if (sc2?.approved_image_id) {
-              const { data: img2 } = await supabase
-                .from("images")
-                .select("stored_url, sfw_url")
-                .eq("id", sc2.approved_image_id)
-                .single();
-
-              const secondaryRefBase64 = await fetchRefImageBase64(img2, `${secondaryName} secondary`);
-              if (secondaryRefBase64) {
-                kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
-                console.log(`[Kontext][${imgPrompt.id}] Secondary ref loaded (${Math.round(secondaryRefBase64.length / 1024)}KB base64)`);
-              }
-            } else {
-              console.warn(`[Kontext][${imgPrompt.id}] WARNING: Secondary character "${secondaryName}" has no approved_image_id — no reference image for identity`);
-            }
-          }
-
-          // For dual scenes: combine both ref images into one server-side
-          if (kontextType === "dual" && kontextImages.length === 2) {
-            try {
-              const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
-              kontextImages = [{ name: "combined_ref.png", image: combined }];
-              console.log(`[Kontext][${imgPrompt.id}] Combined primary + secondary ref images server-side`);
-            } catch (err) {
-              console.warn(`[Kontext][${imgPrompt.id}] Failed to combine ref images, using primary only:`, err instanceof Error ? err.message : err);
-              kontextImages = [kontextImages[0]];
-            }
-          }
-
-          // Kontext dimensions: portrait-oriented by default, landscape for wide/establishing shots
-          const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
-          const kontextWidth = isLandscape ? 1216 : 832;
-          const kontextHeight = isLandscape ? 832 : 1216;
-
-          const refImageName = kontextType === "dual"
-            ? (kontextImages[0]?.name || "combined_ref.png")
-            : kontextType !== "portrait" ? "primary_ref.png" : undefined;
-
-          // Build character identity prefix for Kontext prompts
-          let kontextPositivePrompt = imgPrompt.prompt;
-          if (imgPrompt.character_id) {
-            const identityPrefix = buildKontextIdentityPrefix(charData);
-            if (identityPrefix) {
-              kontextPositivePrompt = `${identityPrefix}${imgPrompt.prompt}`;
-              console.log(`[Kontext][${imgPrompt.id}] Identity prefix for primary character: ${identityPrefix.trim()}`);
-            }
-          }
-          if (imgPrompt.secondary_character_id) {
-            const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
-            if (secondaryCharData) {
-              const secondaryPrefix = buildKontextIdentityPrefix(secondaryCharData);
-              if (secondaryPrefix) {
-                kontextPositivePrompt += `\nThe second person in this scene is: ${secondaryPrefix}`;
-                console.log(`[Kontext][${imgPrompt.id}] Identity prefix for secondary character: ${secondaryPrefix.trim()}`);
-              }
-            }
-          }
-
-          // For dual-character interaction scenes, redirect camera gaze to interpersonal gaze
-          if (hasSecondary) {
-            kontextPositivePrompt = kontextPositivePrompt.replace(
-              /\(([^,)]+),\s*looking (directly )?(at|into) (the )?camera(:[0-9.]+)?\)/gi,
-              (_, expr, _d, _a, _t, weight) => `(${expr}, looking at the other person${weight || ':1.3'})`,
-            );
-          }
-
-          // Log the assembled prompt before rewriting
-          console.log(`[Kontext][${imgPrompt.id}] Pre-rewrite prompt (${kontextPositivePrompt.length} chars):`);
-          console.log(`  ${kontextPositivePrompt.substring(0, 300)}`);
-          console.log(`[Kontext][${imgPrompt.id}] Ref images: ${kontextImages.length}, refImageName: ${refImageName || 'NONE'}, type: ${kontextType}`);
-
-          // Rewrite prompt from SDXL tag format → Flux natural language
-          const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
-          if (rewrittenPrompt !== kontextPositivePrompt) {
-            kontextPositivePrompt = rewrittenPrompt;
-            // Persist the rewritten prompt back to the DB row
-            await supabase
-              .from("story_image_prompts")
-              .update({ prompt: rewrittenPrompt })
-              .eq("id", imgPrompt.id);
-            console.log(`[Kontext][${imgPrompt.id}] Prompt rewritten for Flux`);
-          }
-
-          // Select Kontext LoRAs — scene-aware selection based on gender, SFW/NSFW, shot type
-          const primaryGenderForKontext = (charData?.gender as 'male' | 'female') || 'female';
-          const secondaryCharDataForKontext = imgPrompt.secondary_character_id
-            ? characterDataMap.get(imgPrompt.secondary_character_id)
-            : undefined;
-          const secondaryGenderForKontext = secondaryCharDataForKontext?.gender as 'male' | 'female' | undefined;
-          const { loras: kontextLoras } = selectKontextResources({
-            gender: primaryGenderForKontext,
-            secondaryGender: secondaryGenderForKontext,
-            isSfw: sfwMode,
-            imageType: imgPrompt.image_type,
-            prompt: imgPrompt.prompt,
-            hasDualCharacter: hasSecondary,
-          });
-          console.log(`[Kontext][${imgPrompt.id}] LoRAs (${primaryGenderForKontext}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map(l => `${l.filename}@${l.strengthModel}`).join(', ')}`);
-
-          // Build Kontext workflow — uses identity-prefixed scene prompt
-          const kontextWorkflow = buildKontextWorkflow({
-            type: kontextType,
-            positivePrompt: kontextPositivePrompt,
-            width: kontextWidth,
-            height: kontextHeight,
-            seed,
-            filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
-            sfwMode,
-            primaryRefImageName: refImageName,
-            loras: kontextLoras,
-          });
-
-          console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}, loras=${kontextLoras.length}`);
-
-          // Submit to RunPod (same endpoint)
-          const { jobId: kontextJobId } = await submitRunPodJob(
-            kontextWorkflow,
-            kontextImages.length > 0 ? kontextImages : undefined,
-          );
-
-          // Create image record
-          const { data: kontextImageRow, error: kontextImgError } = await supabase
-            .from("images")
-            .insert({
-              character_id: imgPrompt.character_id || null,
-              prompt: imgPrompt.prompt,
-              negative_prompt: "none",
-              settings: {
-                width: kontextWidth,
-                height: kontextHeight,
-                steps: 20,
-                cfg: kontextType === "portrait" ? 1.0 : 2.5,
-                seed,
-                engine: "runpod-kontext",
-                workflowType: kontextType,
-              },
-              mode,
-            })
-            .select("id")
-            .single();
-
-          if (kontextImgError || !kontextImageRow) {
-            throw new Error(`Failed to create image record: ${kontextImgError?.message}`);
-          }
-
-          await supabase.from("generation_jobs").insert({
-            job_id: `runpod-${kontextJobId}`,
-            image_id: kontextImageRow.id,
-            status: "pending",
-            cost: 0,
-          });
-
-          await supabase
-            .from("story_image_prompts")
-            .update({ image_id: kontextImageRow.id })
-            .eq("id", imgPrompt.id);
-
-          jobs.push({
-            promptId: imgPrompt.id,
-            jobId: `runpod-${kontextJobId}`,
-          });
-
-          if (i < prompts.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-          continue; // Skip SDXL path below
-        }
-
-        // ====== SDXL ENGINE PATH (existing, unchanged) ======
-
-        // Composition intelligence: augment dual-character scenes with spatial cues
-        let scenePromptForBuild = imgPrompt.prompt;
-        if (hasSecondary) {
-          const preClassification = classifyScene(imgPrompt.prompt, imgPrompt.image_type as ImageType, 2);
-          const compositionResult = augmentComposition(imgPrompt.prompt, preClassification);
-          if (compositionResult.wasAugmented) {
-            scenePromptForBuild = compositionResult.augmentedPrompt;
-            console.log(`[StoryImage][${imgPrompt.id}] Composition augmented: +${compositionResult.injectedCues.join(', ')}`);
-          }
-        }
-
-        // Look up character LoRAs (needed for trigger word injection into prompt and workflow selection)
-        const primaryCharLora = imgPrompt.character_id ? characterLoraMap.get(imgPrompt.character_id) : undefined;
-        const secondaryCharLora = imgPrompt.secondary_character_id ? characterLoraMap.get(imgPrompt.secondary_character_id) : undefined;
-
-        // Extract trigger words from character LoRAs for prompt injection
-        const triggerWords = [primaryCharLora, secondaryCharLora]
-          .filter((l): l is CharacterLoraEntry => !!l)
-          .map(l => l.triggerWord)
-          .filter((tw): tw is string => !!tw);
-
-        const promptOverride = (primaryTags || secondaryTags)
-          ? buildStoryImagePrompt(primaryTags, secondaryTags, scenePromptForBuild, mode, triggerWords)
-          : undefined;
-
-        // Diagnostic logging — trace the prompt pipeline
-        console.log(`[StoryImage][${imgPrompt.id}] Raw scene prompt:`, imgPrompt.prompt.substring(0, 120));
-        console.log(`[StoryImage][${imgPrompt.id}] character_id: ${imgPrompt.character_id}, secondary_character_id: ${imgPrompt.secondary_character_id}`);
-        console.log(`[StoryImage][${imgPrompt.id}] Primary tags: ${primaryTags ? primaryTags.substring(0, 120) : 'NULL (no approved_prompt)'}`);
-        console.log(`[StoryImage][${imgPrompt.id}] Secondary tags: ${secondaryTags ? secondaryTags.substring(0, 120) : 'NULL'}`);
-        console.log(`[StoryImage][${imgPrompt.id}] promptOverride: ${promptOverride ? 'YES — using buildStoryImagePrompt' : 'NO — falling back to buildPrompt(charData, scene)'}`);
-        if (promptOverride) {
-          console.log(`[StoryImage][${imgPrompt.id}] Final prompt:`, promptOverride.substring(0, 200));
-        }
-        const primaryHasLora = !!primaryCharLora;
-        const secondaryHasLora = !!secondaryCharLora;
-
-        // Multi-pass: any scene where the primary character has a deployed LoRA
-        const useMultiPass = !!imgPrompt.character_id && primaryHasLora;
-
-        let workflowType: "portrait" | "single-character" | "dual-character" | "multi-pass";
-        if (!imgPrompt.character_id) {
-          // No character linked — plain portrait (atmospheric/detail shots)
-          workflowType = "portrait";
-        } else if (useMultiPass) {
-          // Primary character has a LoRA — use multi-pass for best quality
-          workflowType = "multi-pass";
-          console.log(`[StoryImage][${imgPrompt.id}] Using multi-pass workflow (primaryLoRA=${primaryHasLora}, secondaryLoRA=${secondaryHasLora}, hasSecondary=${hasSecondary})`);
-        } else if (hasSecondary) {
-          // Dual-character but primary has no LoRA — use IPAdapter-based dual workflow
-          workflowType = "dual-character";
-          console.log(`[StoryImage][${imgPrompt.id}] Dual-character scene: using dual-character workflow (IPAdapter, no primary LoRA)`);
-        } else {
-          // Single character, no LoRA — IPAdapter fallback
-          workflowType = "single-character";
-          console.log(`[StoryImage][${imgPrompt.id}] Single-character scene: using single-character workflow (IPAdapter, no LoRA)`);
-        }
-
-        // Fetch primary character's approved portrait as base64 for IPAdapter
-        // For dual-character scenes: ALWAYS fetch, even with LoRAs — IPAdapter provides
-        // face-specific anchoring while LoRAs handle general identity in base generation.
-        // Only skip for portrait workflow (single char with LoRA, or no character).
-        const images: Array<{ name: string; image: string }> = [];
-        let primaryFacePrompt: string | undefined;
-        const needsIPAdapter = workflowType !== "portrait" && workflowType !== "multi-pass";
-        const needsFacePrompt = needsIPAdapter || workflowType === "multi-pass";
-
-        if (imgPrompt.character_id && needsIPAdapter) {
+        if (kontextType !== "portrait" && imgPrompt.character_id) {
+          // Fetch both face portrait and full-body reference for single-character scenes
           const { data: sc } = await supabase
             .from("story_characters")
-            .select("approved_image_id")
+            .select("approved_image_id, approved_fullbody_image_id")
             .eq("series_id", seriesId)
             .eq("character_id", imgPrompt.character_id)
             .single();
 
-          if (sc?.approved_image_id) {
-            const { data: img } = await supabase
+          const charName = characterDataMap.get(imgPrompt.character_id)?.name || imgPrompt.character_name || "Unknown";
+
+          if (kontextType === "single") {
+            // Single-character scene: require BOTH face + body, stitch vertically
+            if (!sc?.approved_image_id || !sc?.approved_fullbody_image_id) {
+              throw new Error(
+                `Character "${charName}" requires both a face portrait and body shot to be approved before generating scene images. Please approve both in Stage 8.`
+              );
+            }
+
+            // Fetch both image URLs in parallel (with fallback from stored_url → sfw_url)
+            const [{ data: faceImg }, { data: bodyImg }] = await Promise.all([
+              supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
+              supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
+            ]);
+
+            const [faceBase64, bodyBase64] = await Promise.all([
+              fetchRefImageBase64(faceImg, `${charName} face`),
+              fetchRefImageBase64(bodyImg, `${charName} body`),
+            ]);
+
+            if (!faceBase64 || !bodyBase64) {
+              throw new Error(
+                `Character "${charName}" has approved image IDs but the images could not be fetched. Face: ${faceBase64 ? "OK" : "failed"}, Body: ${bodyBase64 ? "OK" : "failed"}.`
+              );
+            }
+
+            const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
+            kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
+            console.log(`[Kontext][${imgPrompt.id}] Combined face + body ref images vertically for "${charName}"`);
+          } else {
+            // Dual-character scene: primary character still uses face-only (horizontal stitch with secondary happens later)
+            console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching primary ref for "${charName}" (approved_image_id: ${sc?.approved_image_id || 'NONE'})`);
+            if (sc?.approved_image_id) {
+              const { data: img } = await supabase
+                .from("images")
+                .select("stored_url, sfw_url")
+                .eq("id", sc.approved_image_id)
+                .single();
+
+              const primaryRefBase64 = await fetchRefImageBase64(img, `${charName} primary`);
+              if (primaryRefBase64) {
+                kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+                console.log(`[Kontext][${imgPrompt.id}] Primary ref loaded (${Math.round(primaryRefBase64.length / 1024)}KB base64)`);
+              }
+            } else {
+              console.warn(`[Kontext][${imgPrompt.id}] WARNING: Primary character "${charName}" has no approved_image_id for dual scene`);
+            }
+          }
+        }
+
+        if (kontextType === "dual" && imgPrompt.secondary_character_id) {
+          const secondaryName = characterDataMap.get(imgPrompt.secondary_character_id)?.name || imgPrompt.secondary_character_name || "Unknown";
+          console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching secondary ref for "${secondaryName}" (character_id: ${imgPrompt.secondary_character_id})`);
+
+          const { data: sc2 } = await supabase
+            .from("story_characters")
+            .select("approved_image_id")
+            .eq("series_id", seriesId)
+            .eq("character_id", imgPrompt.secondary_character_id)
+            .single();
+
+          console.log(`[Kontext][${imgPrompt.id}] Secondary "${secondaryName}" approved_image_id: ${sc2?.approved_image_id || 'NONE'}`);
+
+          if (sc2?.approved_image_id) {
+            const { data: img2 } = await supabase
               .from("images")
               .select("stored_url, sfw_url")
-              .eq("id", sc.approved_image_id)
+              .eq("id", sc2.approved_image_id)
               .single();
 
-            const sdxlRefUrl = img?.stored_url || img?.sfw_url;
-            if (sdxlRefUrl) {
-              try {
-                const primaryRefBase64 = await imageUrlToBase64(sdxlRefUrl);
-                images.push({ name: "primary_ref.png", image: primaryRefBase64 });
-              } catch (err) {
-                console.warn(`[StoryImage][${imgPrompt.id}] Failed to fetch primary ref image for SDXL, proceeding without it:`, err instanceof Error ? err.message : err);
-              }
+            const secondaryRefBase64 = await fetchRefImageBase64(img2, `${secondaryName} secondary`);
+            if (secondaryRefBase64) {
+              kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
+              console.log(`[Kontext][${imgPrompt.id}] Secondary ref loaded (${Math.round(secondaryRefBase64.length / 1024)}KB base64)`);
             }
-          }
-        }
-
-        // Build face prompt from approved tags or character data
-        // Hair descriptors are front-loaded with strong weights for FaceDetailer accuracy
-        if (imgPrompt.character_id && needsFacePrompt) {
-          primaryFacePrompt = buildFacePrompt(
-            primaryTags || null,
-            charData,
-            primaryCharLora?.triggerWord || 'tok',
-            hasSecondary,
-          );
-        }
-
-        // Build secondary face prompt for dual-character scenes
-        let secondaryFacePrompt: string | undefined;
-        let secondarySeed: number | undefined;
-
-        if (hasSecondary && imgPrompt.secondary_character_id) {
-          const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
-          secondaryFacePrompt = buildFacePrompt(
-            secondaryTags || null,
-            secondaryCharData || { hairStyle: '', hairColor: '', gender: 'female', name: 'person' },
-            secondaryCharLora?.triggerWord || 'tok',
-            hasSecondary,
-          );
-
-          const secondaryApprovedSeed = seedMap.get(imgPrompt.secondary_character_id);
-          secondarySeed = secondaryApprovedSeed ? secondaryApprovedSeed + imgPrompt.position : seed + 1000;
-        }
-
-        // Use promptOverride if available, otherwise raw prompt
-        let finalPrompt = promptOverride || imgPrompt.prompt;
-
-        // Scene intelligence: classify scene for dimensions and resources
-        const knownCharCount = hasSecondary ? 2 : 1;
-        const classification = classifyScene(finalPrompt, imgPrompt.image_type as ImageType, knownCharCount);
-
-        // Multi-pass prompt decomposition
-        let decomposed: DecomposedPrompt | undefined;
-        let originalDecomposed: DecomposedPrompt | undefined;
-        if (workflowType === 'multi-pass') {
-          decomposed = decomposePrompt(finalPrompt, primaryTags, secondaryTags);
-          originalDecomposed = { ...decomposed };
-          console.log(`[StoryImage][${imgPrompt.id}] Multi-pass decomposition:`);
-          console.log(`[StoryImage][${imgPrompt.id}]   scenePrompt: ${decomposed.scenePrompt.substring(0, 150)}`);
-          console.log(`[StoryImage][${imgPrompt.id}]   primaryIdentity: ${decomposed.primaryIdentityPrompt.substring(0, 100)}`);
-          if (decomposed.secondaryIdentityPrompt) {
-            console.log(`[StoryImage][${imgPrompt.id}]   secondaryIdentity: ${decomposed.secondaryIdentityPrompt.substring(0, 100)}`);
-          }
-        }
-
-        // AI prompt optimization — restructure for optimal SDXL generation
-        const secondaryCharDataForOpt = imgPrompt.secondary_character_id
-          ? characterDataMap.get(imgPrompt.secondary_character_id)
-          : undefined;
-        const characters: CharacterContext[] = [];
-        if (imgPrompt.character_id && charData.name) {
-          characters.push({
-            name: charData.name,
-            gender: (charData.gender as 'male' | 'female') || 'female',
-            role: 'primary',
-            identityTags: primaryTags || undefined,
-          });
-        }
-        if (imgPrompt.secondary_character_id && secondaryCharDataForOpt) {
-          characters.push({
-            name: secondaryCharDataForOpt.name,
-            gender: (secondaryCharDataForOpt.gender as 'male' | 'female') || 'female',
-            role: 'secondary',
-            identityTags: secondaryTags || undefined,
-          });
-        }
-
-        // Select resources early so negative additions can be passed to the AI optimizer
-        const resources = selectResources(classification, primaryCharLora, secondaryCharLora, finalPrompt, imgPrompt.image_type as ImageType, hasSecondary);
-        let negativePromptAdditions = resources.negativePromptAdditions;
-
-        if (shouldOptimize(characters, imgPrompt.image_type) && decomposed) {
-          const optimized = await optimizePrompts(
-            {
-              fullPrompt: finalPrompt,
-              rawScenePrompt: imgPrompt.prompt,
-              characters,
-              mode,
-              imageType: imgPrompt.image_type as 'facebook_sfw' | 'website_nsfw_paired' | 'website_only' | 'portrait',
-              negativePromptAdditions,
-            },
-            decomposed,
-          );
-          if (optimized.wasOptimized) {
-            finalPrompt = optimized.optimizedFullPrompt;
-            decomposed = optimized.optimizedDecomposed;
-            if (optimized.optimizedNegativeAdditions !== undefined) {
-              negativePromptAdditions = optimized.optimizedNegativeAdditions;
-              console.log(`[StoryImage][${imgPrompt.id}] Negative prompt optimized by AI`);
-              console.log(`[StoryImage][${imgPrompt.id}]   negative: ${negativePromptAdditions.substring(0, 150)}`);
-            }
-            console.log(`[StoryImage][${imgPrompt.id}] AI prompt optimization applied (${optimized.durationMs}ms): ${optimized.notes.join('; ')}`);
-            // Detailed per-field logging (each on its own line to avoid Railway truncation)
-            const d = optimized.optimizedDecomposed;
-            console.log(`[Optimizer][${imgPrompt.id}] Phase1 fullPrompt:`);
-            console.log(`  ${optimized.optimizedFullPrompt}`);
-            console.log(`[Optimizer][${imgPrompt.id}] Phase2 scenePrompt:`);
-            console.log(`  ${d.scenePrompt}`);
-            console.log(`[Optimizer][${imgPrompt.id}] Phase2 primaryIdentityPrompt:`);
-            console.log(`  ${d.primaryIdentityPrompt}`);
-            console.log(`[Optimizer][${imgPrompt.id}] Phase2 secondaryIdentityPrompt:`);
-            console.log(`  ${d.secondaryIdentityPrompt ?? 'NULL'}`);
-            console.log(`[Optimizer][${imgPrompt.id}] Phase2 sharedScenePrompt:`);
-            console.log(`  ${d.sharedScenePrompt ?? 'NULL'}`);
-            console.log(`[Optimizer][${imgPrompt.id}] Phase2 primaryRegionPrompt:`);
-            console.log(`  ${d.primaryRegionPrompt ?? 'NULL'}`);
-            console.log(`[Optimizer][${imgPrompt.id}] Phase2 secondaryRegionPrompt:`);
-            console.log(`  ${d.secondaryRegionPrompt ?? 'NULL'}`);
           } else {
-            console.log(`[StoryImage][${imgPrompt.id}] AI prompt optimization skipped: ${optimized.notes.join('; ')}`);
+            console.warn(`[Kontext][${imgPrompt.id}] WARNING: Secondary character "${secondaryName}" has no approved_image_id — no reference image for identity`);
           }
         }
 
-        // Scene-aware dimension selection
-        const dimensions = selectDimensionsFromPrompt(classification, imgPrompt.image_type as ImageType, hasSecondary, finalPrompt);
-        const width = dimensions.width;
-        const height = dimensions.height;
-        console.log(`[StoryImage] Dimensions: ${dimensions.name} (${width}x${height})`);
-
-        console.log(`[StoryImage][${imgPrompt.id}] Scene classification:`, JSON.stringify(classification));
-        console.log(`[StoryImage][${imgPrompt.id}] Selected LoRAs: ${resources.loras.map(l => l.filename).join(', ')}`);
-        if (primaryCharLora) {
-          console.log(`[StoryImage][${imgPrompt.id}] Character LoRA injected: ${primaryCharLora.filename}`);
-        }
-        if (secondaryCharLora) {
-          console.log(`[StoryImage][${imgPrompt.id}] Secondary character LoRA injected: ${secondaryCharLora.filename}`);
-        }
-
-        const modelSelection = selectModel(classification, imgPrompt.image_type as ImageType, {
-          contentLevel: classification.contentLevel,
-        });
-        console.log(`[StoryImage][${imgPrompt.id}] Model selected: ${modelSelection.checkpointName} — ${modelSelection.reason}`);
-
-        // Build per-character gender LoRA stacks for multi-pass person inpainting
-        const primaryGender = charData?.gender as 'male' | 'female' | undefined;
-        const secondaryCharData = imgPrompt.secondary_character_id
-          ? characterDataMap.get(imgPrompt.secondary_character_id)
-          : undefined;
-        const secondaryGender = secondaryCharData?.gender as 'male' | 'female' | undefined;
-
-        const primaryGenderLoras = primaryGender === 'female'
-          ? resources.femaleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
-          : primaryGender === 'male'
-            ? resources.maleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
-            : [];
-
-        const secondaryGenderLoras = secondaryGender === 'female'
-          ? resources.femaleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
-          : secondaryGender === 'male'
-            ? resources.maleLoras.map(l => ({ filename: l.filename, strengthModel: l.strengthModel, strengthClip: l.strengthClip }))
-            : [];
-
-        if (workflowType === 'multi-pass') {
-          console.log(`[StoryImage][${imgPrompt.id}] Pass 3 neutral LoRAs: ${resources.neutralLoras.map(l => l.filename).join(', ')}`);
-          console.log(`[StoryImage][${imgPrompt.id}] Pass 4a gender LoRAs (${primaryGender}): ${primaryGenderLoras.map(l => l.filename).join(', ') || 'none'}`);
-          if (hasSecondary) {
-            console.log(`[StoryImage][${imgPrompt.id}] Pass 4b gender LoRAs (${secondaryGender}): ${secondaryGenderLoras.map(l => l.filename).join(', ') || 'none'}`);
+        // For dual scenes: combine both ref images into one server-side
+        if (kontextType === "dual" && kontextImages.length === 2) {
+          try {
+            const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
+            kontextImages = [{ name: "combined_ref.png", image: combined }];
+            console.log(`[Kontext][${imgPrompt.id}] Combined primary + secondary ref images server-side`);
+          } catch (err) {
+            console.warn(`[Kontext][${imgPrompt.id}] Failed to combine ref images, using primary only:`, err instanceof Error ? err.message : err);
+            kontextImages = [kontextImages[0]];
           }
         }
 
-        if (decomposed?.sharedScenePrompt && decomposed?.primaryRegionPrompt && decomposed?.secondaryRegionPrompt) {
-          console.log(`[StoryImage][${imgPrompt.id}] Attention Couple enabled:`);
-          console.log(`[StoryImage][${imgPrompt.id}]   shared: ${decomposed.sharedScenePrompt.substring(0, 100)}`);
-          console.log(`[StoryImage][${imgPrompt.id}]   primaryRegion: ${decomposed.primaryRegionPrompt.substring(0, 100)}`);
-          console.log(`[StoryImage][${imgPrompt.id}]   secondaryRegion: ${decomposed.secondaryRegionPrompt.substring(0, 100)}`);
+        // Kontext dimensions: portrait-oriented by default, landscape for wide/establishing shots
+        const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
+        const kontextWidth = isLandscape ? 1216 : 832;
+        const kontextHeight = isLandscape ? 832 : 1216;
+
+        const refImageName = kontextType === "dual"
+          ? (kontextImages[0]?.name || "combined_ref.png")
+          : kontextType !== "portrait" ? "primary_ref.png" : undefined;
+
+        // Build character identity prefix for Kontext prompts (natural-language prose)
+        let identityPrefix = "";
+        if (imgPrompt.character_id) {
+          identityPrefix = buildKontextIdentityPrefix(charData);
+          if (identityPrefix) {
+            console.log(`[Kontext][${imgPrompt.id}] Identity prefix for primary character: ${identityPrefix.trim()}`);
+          }
+        }
+        if (imgPrompt.secondary_character_id) {
+          const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
+          if (secondaryCharData) {
+            const secondaryPrefix = buildKontextIdentityPrefix(secondaryCharData);
+            if (secondaryPrefix) {
+              identityPrefix += `The second person in this scene is: ${secondaryPrefix}`;
+              console.log(`[Kontext][${imgPrompt.id}] Identity prefix for secondary character: ${secondaryPrefix.trim()}`);
+            }
+          }
         }
 
-        const workflow = buildWorkflow({
-          type: workflowType,
-          positivePrompt: finalPrompt,
-          width,
-          height,
-          seed,
-          filenamePrefix: `story_${imgPrompt.id.substring(0, 8)}`,
-          primaryRefImageName: needsIPAdapter ? "primary_ref.png" : undefined,
-          primaryFacePrompt,
-          ipadapterWeight: hasSecondary ? 0.7 : 0.85,
-          secondaryFacePrompt,
-          secondarySeed,
-          loras: workflowType === 'multi-pass' ? resources.neutralLoras : resources.loras,
-          negativePromptAdditions,
-          checkpointName: modelSelection.checkpointName,
-          cfg: modelSelection.paramOverrides?.cfg,
-          hiresFixEnabled: resources.paramOverrides?.hiresFixEnabled ?? true,
-          // Multi-pass specific fields
-          scenePrompt: decomposed?.scenePrompt,
-          primaryIdentityPrompt: decomposed?.primaryIdentityPrompt,
-          secondaryIdentityPrompt: decomposed?.secondaryIdentityPrompt,
-          fullPrompt: decomposed?.fullPrompt,
-          sharedScenePrompt: decomposed?.sharedScenePrompt,
-          primaryRegionPrompt: decomposed?.primaryRegionPrompt,
-          secondaryRegionPrompt: decomposed?.secondaryRegionPrompt,
-          characterLoras: [primaryCharLora, secondaryCharLora]
-            .filter((l): l is CharacterLoraEntry => !!l)
-            .map(l => ({
-              filename: l.filename,
-              strengthModel: l.defaultStrength,
-              strengthClip: l.clipStrength,
-            })),
-          primaryGenderLoras,
-          secondaryGenderLoras,
-          primaryGender,
-          secondaryGender,
-          hasDualCharacter: hasSecondary,
-          fallbackSecondaryIdentityPrompt: originalDecomposed?.secondaryIdentityPrompt,
-        });
-
-        // ---- Workflow structure validation logging ----
-        const wfNodes = Object.entries(workflow);
-        const nodesByPass: Record<string, string[]> = {};
-        for (const [nodeId, node] of wfNodes) {
-          const n = Number(nodeId);
-          const pass = n < 200 ? 'Pass1-Base' : n < 300 ? 'Pass2-Hires' : n < 400 ? 'Pass3-LoRA' : n < 500 ? 'Pass4-Person' : n < 600 ? 'Pass5-Face' : n < 700 ? 'Pass6-Save' : 'Pass7-Final';
-          if (!nodesByPass[pass]) nodesByPass[pass] = [];
-          nodesByPass[pass].push(`${nodeId}:${(node as any).class_type}`);
-        }
-        console.log(`[MultiPass][${imgPrompt.id}] Workflow summary: ${wfNodes.length} nodes, type=${workflowType}`);
-        for (const [pass, nodes] of Object.entries(nodesByPass).sort()) {
-          console.log(`[MultiPass][${imgPrompt.id}]   ${pass}: ${nodes.join(', ')}`);
+        // Inject female attractiveness enhancement for Flux.
+        // This adds beauty/body prose to the identity prefix since Flux has no negative prompt
+        // enforcement and no emphasis weights — all attractiveness must come from positive text.
+        const primaryIsFemale = charData?.gender === 'female';
+        if (primaryIsFemale && identityPrefix) {
+          identityPrefix = injectFluxFemaleEnhancement(identityPrefix, mode, imgPrompt.prompt);
         }
 
-        // Log character LoRA downloads being sent to RunPod
-        if (resources.characterLoraDownloads && resources.characterLoraDownloads.length > 0) {
-          console.log(`[MultiPass][${imgPrompt.id}] Character LoRA downloads for RunPod worker:`);
-          for (const dl of resources.characterLoraDownloads) {
-            console.log(`[MultiPass][${imgPrompt.id}]   ${dl.filename} → ${dl.url.substring(0, 100)}...`);
+        // For dual-character interaction scenes, redirect camera gaze to interpersonal gaze.
+        // Use plain text (no emphasis weights) since Flux's T5 doesn't support them.
+        let sceneForFlux = imgPrompt.prompt;
+        if (hasSecondary) {
+          sceneForFlux = sceneForFlux.replace(
+            /\(([^,)]+),\s*looking (directly )?(at|into) (the )?camera(:[0-9.]+)?\)/gi,
+            (_, expr) => `${expr}, looking at the other person`,
+          );
+          // Also catch unweighted variants
+          sceneForFlux = sceneForFlux.replace(
+            /looking (directly )?(at|into) (the )?camera/gi,
+            'looking at the other person',
+          );
+        }
+
+        // Build Flux-native prompt: strip SDXL syntax, enhance gaze descriptions,
+        // add atmosphere suffix, then flag if LLM rewriting is still needed.
+        const { prompt: fluxPrompt, needsLlmRewrite } = buildFluxPrompt(
+          identityPrefix, sceneForFlux, { mode, hasDualCharacter: hasSecondary },
+        );
+        let kontextPositivePrompt = fluxPrompt;
+
+        console.log(`[Kontext][${imgPrompt.id}] Pre-rewrite prompt (${kontextPositivePrompt.length} chars, needsLlmRewrite=${needsLlmRewrite}):`);
+        console.log(`  ${kontextPositivePrompt.substring(0, 300)}`);
+        console.log(`[Kontext][${imgPrompt.id}] Ref images: ${kontextImages.length}, refImageName: ${refImageName || 'NONE'}, type: ${kontextType}`);
+
+        // Only invoke the LLM rewriter when the prompt still has heavy SDXL tag formatting
+        // that the deterministic stripper couldn't convert to natural language.
+        if (needsLlmRewrite) {
+          const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
+          if (rewrittenPrompt !== kontextPositivePrompt) {
+            kontextPositivePrompt = rewrittenPrompt;
+            console.log(`[Kontext][${imgPrompt.id}] Prompt rewritten by LLM for Flux`);
           }
         } else {
-          console.warn(`[MultiPass][${imgPrompt.id}] WARNING: No character LoRA downloads — worker won't have LoRA files!`);
+          console.log(`[Kontext][${imgPrompt.id}] Prompt is already natural language — skipping LLM rewrite`);
         }
 
-        // Submit async job to RunPod
-        const { jobId } = await submitRunPodJob(workflow, images.length > 0 ? images : undefined, resources.characterLoraDownloads);
+        // Persist the final prompt back to the DB row
+        if (kontextPositivePrompt !== imgPrompt.prompt) {
+          await supabase
+            .from("story_image_prompts")
+            .update({ prompt: kontextPositivePrompt })
+            .eq("id", imgPrompt.id);
+        }
+
+        // Select Kontext LoRAs — scene-aware selection based on gender, SFW/NSFW, shot type
+        const primaryGenderForKontext = (charData?.gender as 'male' | 'female') || 'female';
+        const secondaryCharDataForKontext = imgPrompt.secondary_character_id
+          ? characterDataMap.get(imgPrompt.secondary_character_id)
+          : undefined;
+        const secondaryGenderForKontext = secondaryCharDataForKontext?.gender as 'male' | 'female' | undefined;
+        const { loras: kontextLoras } = selectKontextResources({
+          gender: primaryGenderForKontext,
+          secondaryGender: secondaryGenderForKontext,
+          isSfw: sfwMode,
+          imageType: imgPrompt.image_type,
+          prompt: imgPrompt.prompt,
+          hasDualCharacter: hasSecondary,
+        });
+        console.log(`[Kontext][${imgPrompt.id}] LoRAs (${primaryGenderForKontext}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map(l => `${l.filename}@${l.strengthModel}`).join(', ')}`);
+
+        // Inject Kontext LoRA trigger words that aren't already present in the prompt.
+        // Some Flux LoRAs require their trigger word in the prompt to activate.
+        const kontextTriggerRegistry: Record<string, string> = {
+          'fc-flux-perfect-busts.safetensors': 'woman',
+          'flux-two-people-kissing.safetensors': 'kissing',
+          'boudoir-style-flux.safetensors': 'boud01rstyle',
+          'flux-fashion-editorial.safetensors': 'flux-fash',
+          'flux-beauty-skin.safetensors': 'mdlnbaytskn',
+        };
+        for (const lora of kontextLoras) {
+          const trigger = kontextTriggerRegistry[lora.filename];
+          if (trigger && !new RegExp(`\\b${trigger}\\b`, 'i').test(kontextPositivePrompt)) {
+            kontextPositivePrompt = `${trigger}, ${kontextPositivePrompt}`;
+            console.log(`[Kontext][${imgPrompt.id}] Injected trigger word "${trigger}" for ${lora.filename}`);
+          }
+        }
+
+        // Build Kontext workflow — uses identity-prefixed scene prompt
+        const kontextWorkflow = buildKontextWorkflow({
+          type: kontextType,
+          positivePrompt: kontextPositivePrompt,
+          width: kontextWidth,
+          height: kontextHeight,
+          seed,
+          filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
+          sfwMode,
+          primaryRefImageName: refImageName,
+          loras: kontextLoras,
+        });
+
+        console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}, loras=${kontextLoras.length}`);
+
+        // Submit to RunPod
+        const { jobId: kontextJobId } = await submitRunPodJob(
+          kontextWorkflow,
+          kontextImages.length > 0 ? kontextImages : undefined,
+        );
 
         // Create image record
-        const { data: imageRow, error: imgError } = await supabase
+        const { data: kontextImageRow, error: kontextImgError } = await supabase
           .from("images")
           .insert({
             character_id: imgPrompt.character_id || null,
-            prompt: imgPrompt.prompt,
-            negative_prompt: "auto",
-            settings: { width, height, steps: 30, cfg: 7, seed, engine: "runpod-comfyui", workflowType, hiresFix: true },
+            prompt: kontextPositivePrompt,
+            negative_prompt: "",
+            settings: {
+              width: kontextWidth,
+              height: kontextHeight,
+              steps: 20,
+              cfg: kontextType === "portrait" ? 1.0 : 2.5,
+              seed,
+              engine: "runpod-kontext",
+              workflowType: kontextType,
+            },
             mode,
           })
           .select("id")
           .single();
 
-        if (imgError || !imageRow) {
-          throw new Error(`Failed to create image record: ${imgError?.message}`);
+        if (kontextImgError || !kontextImageRow) {
+          throw new Error(`Failed to create image record: ${kontextImgError?.message}`);
         }
 
-        // Save RunPod job with 'runpod-' prefix
         await supabase.from("generation_jobs").insert({
-          job_id: `runpod-${jobId}`,
-          image_id: imageRow.id,
+          job_id: `runpod-${kontextJobId}`,
+          image_id: kontextImageRow.id,
           status: "pending",
           cost: 0,
         });
 
-        // Link image to the prompt row
         await supabase
           .from("story_image_prompts")
-          .update({ image_id: imageRow.id })
+          .update({ image_id: kontextImageRow.id })
           .eq("id", imgPrompt.id);
 
         jobs.push({
           promptId: imgPrompt.id,
-          jobId: `runpod-${jobId}`,
+          jobId: `runpod-${kontextJobId}`,
         });
 
-        // Small delay between RunPod jobs
         if (i < prompts.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }

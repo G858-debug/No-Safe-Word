@@ -91,21 +91,30 @@ async function gql(query, variables = {}) {
 // ---------------------------------------------------------------------------
 // Pod lifecycle
 // ---------------------------------------------------------------------------
+// GPU types ordered by cost-efficiency for a download-only pod.
+// EU-RO-1 is a SECURE cloud datacenter — cloudType must be SECURE.
 const GPU_TYPES = [
   "NVIDIA GeForce RTX 4090",
-  "NVIDIA GeForce RTX 3090",
-  "NVIDIA RTX A6000",
-  "NVIDIA RTX A5000",
   "NVIDIA RTX A4500",
   "NVIDIA RTX A4000",
   "NVIDIA RTX 4000 Ada Generation",
+  "NVIDIA RTX 2000 Ada Generation",
+  "NVIDIA RTX 5090",
+  "NVIDIA RTX PRO 4500 Blackwell",
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
   "NVIDIA L40",
   "NVIDIA L40S",
+  "NVIDIA A40",
+  "NVIDIA L4",
+  "NVIDIA A100 80GB PCIe",
+  "NVIDIA A100-SXM4-80GB",
+  "NVIDIA GeForce RTX 3090",
+  "NVIDIA RTX A6000",
+  "NVIDIA RTX A5000",
   "NVIDIA GeForce RTX 4080",
   "NVIDIA GeForce RTX 3080 Ti",
   "NVIDIA GeForce RTX 3080",
-  "NVIDIA A40",
-  "NVIDIA L4",
 ];
 
 async function createPod() {
@@ -118,7 +127,7 @@ async function createPod() {
             name: "kontext-downloader"
             imageName: "runpod/pytorch:2.4.1-py3.11-cuda12.4.1-devel-ubuntu22.04"
             gpuTypeId: "${gpuType}"
-            cloudType: ALL
+            cloudType: SECURE
             volumeKey: "${VOLUME_ID}"
             volumeMountPath: "/workspace"
             startJupyter: false
@@ -149,7 +158,7 @@ async function createPod() {
       throw err; // Re-throw non-supply errors
     }
   }
-  throw new Error("No GPU available in any type — EU-RO-1 fully out of stock");
+  throw new Error("No GPU available in EU-RO-1 SECURE cloud — try again later or check RunPod dashboard");
 }
 
 async function getPodStatus(podId) {
@@ -338,6 +347,51 @@ else
   echo "flux_lustly-ai_v1.safetensors already exists, skipping."
 fi
 
+# 7. Boudoir Style Flux LoRA (Civitai #1122736, version 1261874 — trigger: boud01rstyle)
+if [ ! -f "/workspace/models/loras/boudoir-style-flux.safetensors" ]; then
+  echo "Downloading Boudoir Style Flux LoRA..."
+  wget -O /workspace/models/loras/boudoir-style-flux.safetensors \\
+    "https://civitai.com/api/download/models/1261874${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Boudoir Style LoRA download failed (non-fatal)"
+else
+  echo "boudoir-style-flux.safetensors already exists, skipping."
+fi
+
+# 8. Flux Fashion Editorial LoRA (Civitai #2138223, version 2418642 — trigger: flux-fash)
+if [ ! -f "/workspace/models/loras/flux-fashion-editorial.safetensors" ]; then
+  echo "Downloading Flux Fashion Editorial LoRA..."
+  wget -O /workspace/models/loras/flux-fashion-editorial.safetensors \\
+    "https://civitai.com/api/download/models/2418642${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Flux Fashion Editorial LoRA download failed (non-fatal)"
+else
+  echo "flux-fashion-editorial.safetensors already exists, skipping."
+fi
+
+# 9. Flux Oiled Skin LoRA (Civitai #770197, version 861452 — no trigger word needed)
+if [ ! -f "/workspace/models/loras/flux-oiled-skin.safetensors" ]; then
+  echo "Downloading Flux Oiled Skin LoRA..."
+  wget -O /workspace/models/loras/flux-oiled-skin.safetensors \\
+    "https://civitai.com/api/download/models/861452${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Oiled Skin LoRA download failed (non-fatal)"
+else
+  echo "flux-oiled-skin.safetensors already exists, skipping."
+fi
+
+# 10. Flux Sweat Effect LoRA v2 (Civitai #1059415, version 1188867 — no trigger word needed)
+if [ ! -f "/workspace/models/loras/flux-sweat-v2.safetensors" ]; then
+  echo "Downloading Flux Sweat Effect LoRA..."
+  wget -O /workspace/models/loras/flux-sweat-v2.safetensors \\
+    "https://civitai.com/api/download/models/1188867${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Sweat LoRA download failed (non-fatal)"
+else
+  echo "flux-sweat-v2.safetensors already exists, skipping."
+fi
+
+# 11. Flux Beauty Skin LoRA (Civitai #2298043, version 2585889 — trigger: mdlnbaytskn)
+if [ ! -f "/workspace/models/loras/flux-beauty-skin.safetensors" ]; then
+  echo "Downloading Flux Beauty Skin LoRA..."
+  wget -O /workspace/models/loras/flux-beauty-skin.safetensors \\
+    "https://civitai.com/api/download/models/2585889${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Beauty Skin LoRA download failed (non-fatal)"
+else
+  echo "flux-beauty-skin.safetensors already exists, skipping."
+fi
+
 echo ""
 echo "=== ALL DOWNLOADS COMPLETE ==="
 echo ""
@@ -433,12 +487,17 @@ async function main() {
   VAE: ae.safetensors
 
   LoRAs:
-    flux_realism_lora.safetensors      (XLabs Flux Realism)
-    flux-add-details.safetensors       (Shakker-Labs Add Details)
-    fc-flux-perfect-busts.safetensors  (FC Perfect Busts Flux V3)
-    hourglassv32_FLUX.safetensors      (Hourglass Body Shape v3.2)
-    flux-two-people-kissing.safetensors (Flux Two People Kissing)
-    flux_lustly-ai_v1.safetensors      (Flux Lustly NSFW)
+    flux_realism_lora.safetensors         (XLabs Flux Realism)
+    flux-add-details.safetensors          (Shakker-Labs Add Details)
+    fc-flux-perfect-busts.safetensors     (FC Perfect Busts Flux V3)
+    hourglassv32_FLUX.safetensors         (Hourglass Body Shape v3.2)
+    flux-two-people-kissing.safetensors   (Flux Two People Kissing)
+    flux_lustly-ai_v1.safetensors         (Flux Lustly NSFW)
+    boudoir-style-flux.safetensors        (Boudoir Style Flux)
+    flux-fashion-editorial.safetensors    (Flux Fashion Editorial)
+    flux-oiled-skin.safetensors           (Flux Oiled Skin)
+    flux-sweat-v2.safetensors             (Flux Sweat Effect v2)
+    flux-beauty-skin.safetensors          (Flux Beauty Skin)
 
   Pod terminated. Network volume ready.
 ===================================
