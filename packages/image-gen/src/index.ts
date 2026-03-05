@@ -1,4 +1,4 @@
-export * from './prompt-builder';
+export { extractCharacterTags, cleanScenePrompt } from './prompt-builder';
 
 export {
   submitRunPodJob,
@@ -10,47 +10,15 @@ export {
 } from './runpod';
 export type { CharacterLoraDownload } from './runpod';
 
-export {
-  buildPortraitWorkflow,
-  buildSingleCharacterWorkflow,
-  buildDualCharacterWorkflow,
-  buildMultiPassWorkflow,
-  buildWorkflow,
-  buildKontextWorkflow,
-} from './workflow-builder';
+export { buildKontextWorkflow } from './workflow-builder';
 export type { KontextWorkflowConfig, KontextWorkflowType } from './workflow-builder';
 
 export { classifyScene } from './scene-classifier';
 export type { SceneClassification, ImageType, InteractionType } from './scene-classifier';
 export { selectDimensionsFromPrompt, DIMENSION_PRESETS } from './dimension-presets';
 export type { DimensionPreset } from './dimension-presets';
-export { selectResources } from './resource-selector';
-export type { ResourceSelection, SelectedLora } from './resource-selector';
-export { LORA_REGISTRY, KONTEXT_LORA_REGISTRY, getLorasByCategory, getLoraByFilename, getKontextLoras, selectKontextResources, buildCharacterLoraEntry } from './lora-registry';
+export { KONTEXT_LORA_REGISTRY, getKontextLoras, selectKontextResources, buildCharacterLoraEntry } from './lora-registry';
 export type { LoraEntry, CharacterLoraEntry, KontextResourceSelection } from './lora-registry';
-
-// Model selection intelligence
-export { MODEL_REGISTRY, DEFAULT_MODEL, getModelByFilename, getInstalledModels, getModelsByTier } from './model-registry';
-export type { ModelEntry, ModelTier, ModelStrength } from './model-registry';
-export { selectModel } from './model-selector';
-export type { ModelSelection, ModelSelectionOptions } from './model-selector';
-
-
-// Prompt decomposition for multi-pass workflow
-export { decomposePrompt, deduplicateWeightedTokens } from './prompt-decomposer';
-export type { DecomposedPrompt } from './prompt-decomposer';
-
-// Composition intelligence
-export { augmentComposition } from './composition-advisor';
-export type { CompositionResult } from './composition-advisor';
-
-// Prompt optimization (AI-powered)
-export { optimizePrompts, shouldOptimize } from './prompt-optimizer';
-export type { OptimizationInput, OptimizedPrompts, CharacterContext } from './prompt-optimizer';
-
-// Debug mode for multi-pass workflow
-export { buildDebugPassInfo, injectDebugSaveNodes } from './debug-workflow';
-export type { DebugPassInfo, Pass1CompositionDebug, DebugMetadata } from './debug-workflow';
 
 // Post-hoc person count validation for dual-character scenes
 export { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from './person-validator';
@@ -59,8 +27,11 @@ export type { PersonValidationResult } from './person-validator';
 // Kontext identity prefix for natural-language character description
 export { buildKontextIdentityPrefix } from './kontext-identity';
 
-// Flux prompt rewriter — converts SDXL tag-style prompts to Flux natural language
+// Flux prompt rewriter — converts tag-style prompts to Flux natural language
 export { rewritePromptForFlux } from './flux-prompt-rewriter';
+
+// Flux-native prompt builder — assembles prose prompts, strips legacy syntax, and enhances sensuality
+export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFemaleEnhancement, injectFluxGazeEmphasis, buildFluxAtmosphereSuffix } from './flux-prompt-builder';
 
 // Character LoRA pipeline — server-only, import directly:
 //   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'

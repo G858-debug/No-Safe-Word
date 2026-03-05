@@ -6,7 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { CharacterInput, ValidationResult } from './types';
 import { PIPELINE_CONFIG } from './types';
 import {
-  buildPortraitWorkflow,
+  buildKontextWorkflow,
   submitRunPodJob,
   waitForRunPodResult,
 } from '../index';
@@ -89,26 +89,22 @@ export async function validateLora(
     console.log(`[LoRA Validate] Test ${i + 1}/${prompts.length}: ${description}`);
 
     try {
-      // Build a portrait workflow with the character LoRA injected
-      const workflow = buildPortraitWorkflow({
+      // Build a Kontext portrait workflow with the character LoRA injected
+      const workflow = buildKontextWorkflow({
+        type: 'portrait',
         positivePrompt: prompt,
         width: 1024,
         height: 1024,
         seed: 42 + i,
-        checkpointName: 'lustify-v5-endgame.safetensors',
-        cfg: 4.0,
+        filenamePrefix: `validate_${loraId}`,
+        sfwMode: false,
         loras: [
           {
             filename: `characters/${loraFilename}`,
             strengthModel: 0.8,
             strengthClip: 0.8,
           },
-          // Keep detail tweaker for quality
-          {
-            filename: 'detail-tweaker-xl.safetensors',
-            strengthModel: 0.5,
-            strengthClip: 0.5,
-          },
+          { filename: 'flux_realism_lora.safetensors', strengthModel: 0.8, strengthClip: 0.8 },
         ],
       });
 

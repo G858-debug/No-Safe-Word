@@ -1,67 +1,120 @@
 import type { CharacterData } from "@no-safe-word/shared";
 
 /**
- * Build a natural-language identity prefix for Kontext prompts.
+ * Build a natural-language identity prefix for Kontext/Flux prompts.
  *
- * Kontext doesn't use SDXL-style tag injection — instead, character identity
- * is conveyed through a descriptive paragraph prepended to the scene prompt.
- * The reference image handles visual consistency; this text anchors the model
- * on ethnicity, build, and clothing details that the reference alone can't
- * guarantee (e.g. body proportions, specific hair style, skin tone).
+ * Flux's T5 text encoder processes natural language prose far better than
+ * comma-separated tag lists. This function outputs flowing descriptive
+ * sentences that anchor the model on ethnicity, build, and hair details
+ * the reference image alone can't guarantee.
  *
- * Returns a multi-sentence string ending with a newline.
+ * Clothing is intentionally omitted — the scene prompt controls wardrobe.
+ *
+ * Returns a multi-sentence prose string ending with a newline.
  */
 export function buildKontextIdentityPrefix(charData: CharacterData): string {
   const sentences: string[] = [];
 
-  // ── 1. Ethnicity + face sentence ──
-  const faceParts: string[] = [];
-  if (charData.ethnicity) faceParts.push(charData.ethnicity);
-  if (charData.gender === "female") faceParts.push("woman");
-  else if (charData.gender === "male") faceParts.push("man");
-  else faceParts.push("person");
-  if (charData.age) faceParts.push(`${charData.age} years old`);
-  if (charData.distinguishingFeatures) faceParts.push(charData.distinguishingFeatures);
-  if (charData.eyeColor) faceParts.push(`${charData.eyeColor} eyes`);
-  if (charData.skinTone) faceParts.push(`${charData.skinTone} skin`);
-  // Hair as a combined phrase
-  const hairParts: string[] = [];
-  if (charData.hairColor) hairParts.push(charData.hairColor);
-  if (charData.hairStyle) hairParts.push(charData.hairStyle);
-  if (hairParts.length > 0) faceParts.push(hairParts.join(" "));
+  // ── 1. Core identity sentence: "A 26-year-old African woman with ..." ──
+  const gender =
+    charData.gender === "female" ? "woman" :
+    charData.gender === "male" ? "man" : "person";
 
-  if (faceParts.length > 0) {
-    sentences.push(faceParts.join(", ") + ".");
+  let core = "";
+  if (charData.age && charData.ethnicity) {
+    core = `A ${charData.age}-year-old ${charData.ethnicity} ${gender}`;
+  } else if (charData.age) {
+    core = `A ${charData.age}-year-old ${gender}`;
+  } else if (charData.ethnicity) {
+    core = `${article(charData.ethnicity)} ${charData.ethnicity} ${gender}`;
+  } else {
+    core = `A ${gender}`;
   }
 
-  // ── 2. Body sentence ──
+  // Append facial/hair details as "with X, Y, and Z"
+  const details: string[] = [];
+  if (charData.hairColor || charData.hairStyle) {
+    const hair = [charData.hairColor, charData.hairStyle].filter(Boolean).join(" ");
+    // Ensure it ends with "hair" if the style doesn't already contain it
+    details.push(/\bhair\b/i.test(hair) ? hair : `${hair} hair`);
+  }
+  if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
+  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
+  if (charData.distinguishingFeatures) details.push(charData.distinguishingFeatures);
+
+  if (details.length > 0) {
+    core += ` with ${joinWithAnd(details)}`;
+  }
+  sentences.push(core + ".");
+
+  // ── 2. Body sentence: "She has a curvaceous figure with ..." ──
+  const isFemale = charData.gender === "female";
   const bt = (charData.bodyType || "").toLowerCase();
   if (bt) {
-    const bodyParts: string[] = [charData.bodyType];
+    const pronoun = isFemale ? "She" :
+                    charData.gender === "male" ? "He" : "They";
+    const verb = pronoun === "They" ? "have" : "has";
 
-    const hasLargeBreasts = /large breasts|full breasts|big breasts|busty/i.test(bt);
-    if (hasLargeBreasts && !/large breasts/i.test(bt)) {
-      bodyParts.push("large breasts");
+    // Extract the core build descriptor and any supplemental body details
+    const bodyDetails: string[] = [];
+
+    // Start with the raw bodyType as the base
+    bodyDetails.push(charData.bodyType);
+
+    // For female characters, ensure body LoRAs get text reinforcement.
+    // If bodyType mentions curvy/curvaceous but lacks specifics, add them.
+    if (isFemale) {
+      const hasCurvyBase = /curv|voluptuous|hourglass|full[- ]figured/i.test(bt);
+      if (hasCurvyBase && !/\bbreasts?\b/i.test(bt)) {
+        bodyDetails.push("full breasts");
+      }
+      if (hasCurvyBase && !/\bhips?\b/i.test(bt)) {
+        bodyDetails.push("wide hips");
+      }
+      if (hasCurvyBase && !/\bwaist\b/i.test(bt)) {
+        bodyDetails.push("a slim waist");
+      }
     }
 
-    const hasCurvyRear = /large butt|big ass|round hips|full hips|curvy/i.test(bt);
-    if (hasCurvyRear && !/full round ass/i.test(bt)) {
-      bodyParts.push("full round ass, wide hips");
+    // Add supplemental descriptors if not already present (any gender)
+    if (/large breasts|full breasts|big breasts|busty/i.test(bt) && !/large breasts/i.test(bt) && !/full breasts/i.test(bt)) {
+      bodyDetails.push("large breasts");
+    }
+    if (/large butt|big ass|round hips|full hips/i.test(bt) && !/full round ass/i.test(bt)) {
+      bodyDetails.push("a full round ass and wide hips");
+    }
+    if (/slim waist|defined waist/i.test(bt) && !/slim waist/i.test(bt)) {
+      bodyDetails.push("a slim waist");
     }
 
-    const hasSlimWaist = /slim waist|defined waist/i.test(bt);
-    if (hasSlimWaist && !/slim waist/i.test(bt)) {
-      bodyParts.push("slim waist");
+    if (bodyDetails.length === 1) {
+      sentences.push(`${pronoun} ${verb} a ${bodyDetails[0]} build.`);
+    } else {
+      const [base, ...rest] = bodyDetails;
+      sentences.push(`${pronoun} ${verb} a ${base} build with ${joinWithAnd(rest)}.`);
     }
-
-    sentences.push(bodyParts.join(", ") + ".");
   }
 
-  // ── 3. Clothing ──
-  // Intentionally omitted from the identity prefix. The scene prompt controls
-  // what the character wears in each image — injecting default clothing here
-  // would conflict with scene-specific wardrobe choices and confuse Kontext.
+  // ── 3. Beauty/skin sentence for female characters ──
+  // Reinforces attractiveness since Flux has no negative prompt to prevent
+  // unflattering rendering and no emphasis weights for beauty tags.
+  if (isFemale) {
+    sentences.push("She has beautiful features and smooth, glowing skin.");
+  }
 
   if (sentences.length === 0) return "";
   return sentences.join(" ") + "\n";
+}
+
+/** Join items with commas and "and" before the last: ["a", "b", "c"] → "a, b, and c" */
+function joinWithAnd(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+/** Return "A" or "An" depending on the first letter of the word */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? "An" : "A";
 }

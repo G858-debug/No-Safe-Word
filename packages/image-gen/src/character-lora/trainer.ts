@@ -1,6 +1,8 @@
 // Stage 4: LoRA Training via Replicate API
 // Creates a ZIP of images + captions, uploads to Supabase,
-// then kicks off SDXL LoRA training on Replicate.
+// then kicks off LoRA training on Replicate.
+// Note: Training uses Replicate's SDXL base model, but the resulting LoRAs
+// are loaded in the Flux/Kontext workflow via LoraLoader nodes.
 
 import Replicate from 'replicate';
 import archiver from 'archiver';
@@ -9,10 +11,10 @@ import { PassThrough } from 'stream';
 import type { CaptionResult, TrainingParams, TrainingResult } from './types';
 import { DEFAULT_TRAINING_PARAMS, PIPELINE_CONFIG } from './types';
 
-// Replicate's SDXL training model
-const SDXL_TRAINING_OWNER = 'stability-ai';
-const SDXL_TRAINING_MODEL = 'sdxl';
-const SDXL_TRAINING_VERSION =
+// Replicate training model (uses SDXL base for training, but resulting LoRAs work with Flux/Kontext)
+const LORA_TRAINING_OWNER = 'stability-ai';
+const LORA_TRAINING_MODEL = 'sdxl';
+const LORA_TRAINING_VERSION =
   '7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc';
 
 interface TrainerDeps {
@@ -92,9 +94,9 @@ export async function trainLora(
   await ensureReplicateModel(replicate, replicateOwner, destModel);
 
   const training = await replicate.trainings.create(
-    SDXL_TRAINING_OWNER,
-    SDXL_TRAINING_MODEL,
-    SDXL_TRAINING_VERSION,
+    LORA_TRAINING_OWNER,
+    LORA_TRAINING_MODEL,
+    LORA_TRAINING_VERSION,
     {
       destination,
       input: {

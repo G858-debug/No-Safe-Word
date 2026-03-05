@@ -20,7 +20,7 @@ import {
 } from './dataset-prompts';
 import type { DatasetPrompt } from './dataset-prompts';
 import {
-  buildPortraitWorkflow,
+  buildKontextWorkflow,
   submitRunPodJob,
   waitForRunPodResult,
   imageUrlToBase64,
@@ -41,7 +41,7 @@ interface DatasetGeneratorDeps {
  * Generate a hybrid training dataset for a character LoRA.
  *
  * Phase 1: Nano Banana Pro for face/head shots (uses portrait as reference)
- * Phase 2: ComfyUI/RunPod for body shots (uses IPAdapter with portrait + body-type prompts)
+ * Phase 2: ComfyUI/RunPod for body shots (uses Kontext ReferenceLatent with portrait + body-type prompts)
  *
  * All images are generated sequentially with delays between requests.
  */
@@ -243,7 +243,7 @@ async function generateComfyUIImages(
   prompts: DatasetPrompt[],
   deps: DatasetGeneratorDeps,
 ): Promise<GenerationBatchResult> {
-  // Pre-fetch the portrait image as base64 for IPAdapter reference
+  // Pre-fetch the portrait image as base64 for Kontext ReferenceLatent conditioning
   const portraitBase64 = await imageUrlToBase64(character.approvedImageUrl);
 
   const records: LoraDatasetImageRow[] = [];
@@ -298,37 +298,22 @@ async function generateSingleComfyUI(
   // Fetch portrait base64 if not pre-fetched
   const refBase64 = portraitBase64 || await imageUrlToBase64(character.approvedImageUrl);
 
-  // Select checkpoint based on prompt configuration
-  const checkpointMap: Record<string, string> = {
-    realvis: 'realvisxl-v5.safetensors',
-    lustify: 'lustify-v5-endgame.safetensors',
-  };
-  const checkpointName = checkpointMap[prompt.checkpoint || 'realvis'];
-
-  // Build a portrait workflow with IPAdapter for face reference.
-  // We use buildPortraitWorkflow for dataset generation (no FaceDetailer needed —
-  // the LoRA training doesn't require refined faces, just consistent ones).
-  // For body shots we include the standard LoRA stack for quality.
-  const workflow = buildPortraitWorkflow({
+  // Build a Kontext single-character workflow with the portrait as reference image.
+  // For dataset generation, we use the reference image for face consistency.
+  const workflow = buildKontextWorkflow({
+    type: 'single',
     positivePrompt: prompt.prompt,
     width: 1024,
     height: 1024,
     seed: character.portraitSeed + hashCode(prompt.id),
-    checkpointName,
-    cfg: prompt.checkpoint === 'lustify' ? 3.5 : 7.5,
+    filenamePrefix: `dataset_${loraId}`,
+    sfwMode: !prompt.checkpoint || prompt.checkpoint !== 'lustify',
+    primaryRefImageName: 'ref_portrait.png',
     loras: [
-      { filename: 'detail-tweaker-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
-      { filename: 'realistic-skin-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 },
-      { filename: 'melanin-mix-xl.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
+      { filename: 'flux_realism_lora.safetensors', strengthModel: 0.8, strengthClip: 0.8 },
+      { filename: 'flux-add-details.safetensors', strengthModel: 0.6, strengthClip: 0.6 },
     ],
-    skipFaceDetailer: true, // Faster generation, training doesn't need ultra-refined faces
   });
-
-  // Add IPAdapter FaceID nodes for face consistency.
-  // We inject these directly into the workflow since buildPortraitWorkflow
-  // doesn't include IPAdapter (it's designed for initial generation without a reference).
-  const lastLoraNode = findLastLoraNode(workflow);
-  injectIPAdapter(workflow, lastLoraNode, refBase64);
 
   // Submit to RunPod with the portrait reference image
   const { jobId } = await submitRunPodJob(workflow, [
@@ -339,67 +324,6 @@ async function generateSingleComfyUI(
   const imageBuffer = Buffer.from(imageBase64, 'base64');
 
   return saveDatasetImage(imageBuffer, prompt, loraId, deps);
-}
-
-/**
- * Inject IPAdapter FaceID nodes into an existing workflow.
- * Modifies the KSampler to use the IPAdapter model output.
- */
-function injectIPAdapter(
-  workflow: Record<string, any>,
-  lastLoraNode: string,
-  _refBase64: string,
-): void {
-  // Node 30: IPAdapter Unified Loader FaceID
-  workflow['30'] = {
-    class_type: 'IPAdapterUnifiedLoaderFaceID',
-    inputs: {
-      model: [lastLoraNode, 0],
-      preset: 'FACEID PLUS V2',
-      lora_strength: 0.6,
-      provider: 'CUDA',
-    },
-  };
-
-  // Node 31: Load the reference portrait image
-  workflow['31'] = {
-    class_type: 'LoadImage',
-    inputs: { image: 'ref_portrait.png' },
-  };
-
-  // Node 32: IPAdapter FaceID application
-  workflow['32'] = {
-    class_type: 'IPAdapterFaceID',
-    inputs: {
-      model: ['30', 0],
-      ipadapter: ['30', 1],
-      image: ['31', 0],
-      weight: 0.8,
-      weight_faceidv2: 0.8,
-      weight_type: 'linear',
-      combine_embeds: 'concat',
-      start_at: 0.0,
-      end_at: 1.0,
-      embeds_scaling: 'V only',
-    },
-  };
-
-  // Rewire KSampler (node 6) to use IPAdapter output instead of LoRA output
-  if (workflow['6']) {
-    workflow['6'].inputs.model = ['32', 0];
-  }
-}
-
-/**
- * Find the last LoRA loader node in the workflow chain.
- * Falls back to the checkpoint loader if no LoRAs.
- */
-function findLastLoraNode(workflow: Record<string, any>): string {
-  const loraIds = ['2e', '2d', '2c', '2b', '2a', '2'];
-  for (const id of loraIds) {
-    if (workflow[id]) return id;
-  }
-  return '1'; // Checkpoint loader
 }
 
 // ── Shared Helpers ────────────────────────────────────────────────
