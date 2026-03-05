@@ -52,7 +52,7 @@ loadEnv();
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
 const VOLUME_ID = process.env.RUNPOD_NETWORK_VOLUME_ID;
 const HF_TOKEN = process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN;
-const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN;
+const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN || process.env.CIVITAI_API_KEY;
 const CIVITAI_NSFW_URL = process.env.CIVITAI_NSFW_MODEL_URL;
 
 const missing = [];
@@ -320,6 +320,24 @@ else
   echo "hourglassv32_FLUX.safetensors already exists, skipping."
 fi
 
+# 5. Flux Two People Kissing LoRA (Civitai #881864, version 987191)
+if [ ! -f "/workspace/models/loras/flux-two-people-kissing.safetensors" ]; then
+  echo "Downloading Flux Two People Kissing LoRA..."
+  wget -O /workspace/models/loras/flux-two-people-kissing.safetensors \\
+    "https://civitai.com/api/download/models/987191${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Kissing LoRA download failed (non-fatal)"
+else
+  echo "flux-two-people-kissing.safetensors already exists, skipping."
+fi
+
+# 6. Flux Lustly NSFW LoRA (Civitai #875879, version 980521 — NSFW, needs token)
+if [ ! -f "/workspace/models/loras/flux_lustly-ai_v1.safetensors" ]; then
+  echo "Downloading Flux Lustly NSFW LoRA..."
+  wget -O /workspace/models/loras/flux_lustly-ai_v1.safetensors \\
+    "https://civitai.com/api/download/models/980521${CIVITAI_TOKEN ? '?token=' + CIVITAI_TOKEN : ''}" || echo "Lustly NSFW LoRA download failed (may need CIVITAI_TOKEN for NSFW content)"
+else
+  echo "flux_lustly-ai_v1.safetensors already exists, skipping."
+fi
+
 echo ""
 echo "=== ALL DOWNLOADS COMPLETE ==="
 echo ""
@@ -419,6 +437,8 @@ async function main() {
     flux-add-details.safetensors       (Shakker-Labs Add Details)
     fc-flux-perfect-busts.safetensors  (FC Perfect Busts Flux V3)
     hourglassv32_FLUX.safetensors      (Hourglass Body Shape v3.2)
+    flux-two-people-kissing.safetensors (Flux Two People Kissing)
+    flux_lustly-ai_v1.safetensors      (Flux Lustly NSFW)
 
   Pod terminated. Network volume ready.
 ===================================

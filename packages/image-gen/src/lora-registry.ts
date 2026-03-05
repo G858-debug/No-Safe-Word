@@ -268,7 +268,7 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     triggerWord: 'kissing',
     description: 'Realistic two-person kissing — prevents face merging and lip distortion (AEmotionStudio, 104 training images)',
     compatibleWith: ['sfw', 'nsfw'],
-    installed: false, // needs upload to RunPod volume
+    installed: true,
     genderCategory: 'neutral',
   },
   {
@@ -279,7 +279,7 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     clipStrength: 0.7,
     description: 'Male and female anatomy accuracy for intimate scenes — improves body interaction and nudity rendering (Lustly.ai)',
     compatibleWith: ['nsfw'],
-    installed: false, // needs upload to RunPod volume
+    installed: true,
     genderCategory: 'neutral',
   },
 ];
