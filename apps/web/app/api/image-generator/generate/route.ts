@@ -1,30 +1,76 @@
 import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob, buildKontextWorkflow } from "@no-safe-word/image-gen";
+import type { CharacterLoraDownload } from "@no-safe-word/image-gen";
 
 // POST /api/image-generator/generate
-// Body: { prompt: string }
+// Body: { prompt: string, characterId?: string }
 // Returns: { jobId: string }
 export async function POST(request: NextRequest) {
   try {
-    const { prompt } = await request.json();
+    const { prompt, characterId } = await request.json();
 
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
     }
 
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    let finalPrompt = prompt.trim();
+
+    // Base LoRAs always included — realism + detail
+    const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
+      { filename: "flux_realism_lora.safetensors", strengthModel: 0.8, strengthClip: 0.8 },
+      { filename: "flux-add-details.safetensors", strengthModel: 0.6, strengthClip: 0.6 },
+    ];
+
+    const characterLoraDownloads: CharacterLoraDownload[] = [];
+
+    // If a character is selected, fetch their deployed LoRA and inject it
+    if (characterId) {
+      const { data: loraRow } = await (supabase as any)
+        .from("character_loras")
+        .select("filename, storage_url, trigger_word")
+        .eq("character_id", characterId)
+        .eq("status", "deployed")
+        .order("deployed_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (loraRow?.filename && loraRow?.storage_url) {
+        const loraFilename = `characters/${loraRow.filename}`;
+        loras.push({ filename: loraFilename, strengthModel: 0.8, strengthClip: 0.8 });
+
+        characterLoraDownloads.push({
+          filename: loraFilename,
+          url: loraRow.storage_url,
+        });
+
+        // Inject trigger word if present and not already in prompt
+        if (loraRow.trigger_word && loraRow.trigger_word !== "tok") {
+          const trigger = loraRow.trigger_word as string;
+          if (!new RegExp(`\\b${trigger}\\b`, "i").test(finalPrompt)) {
+            finalPrompt = `${trigger}, ${finalPrompt}`;
+          }
+        }
+      }
+    }
 
     const workflow = buildKontextWorkflow({
       type: "portrait",
-      positivePrompt: prompt.trim(),
+      positivePrompt: finalPrompt,
       width: 832,
       height: 1216,
       seed,
       filenamePrefix: "imggen_test",
       sfwMode: false,
+      loras,
     });
 
-    const { jobId } = await submitRunPodJob(workflow);
+    const { jobId } = await submitRunPodJob(
+      workflow,
+      undefined,
+      characterLoraDownloads.length > 0 ? characterLoraDownloads : undefined
+    );
 
     return NextResponse.json({ jobId });
   } catch (err) {
