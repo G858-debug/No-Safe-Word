@@ -92,7 +92,7 @@ export interface MarketingImport {
 // DATABASE ROW TYPES (what Supabase stores)
 // ============================================================
 
-export type ImageEngine = 'sdxl' | 'kontext';
+export type ImageEngine = 'kontext';
 
 export interface StorySeriesRow {
   id: string;

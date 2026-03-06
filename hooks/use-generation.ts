@@ -12,7 +12,6 @@ import {
   DEFAULT_CHARACTER,
   DEFAULT_SCENE,
 } from "@no-safe-word/shared";
-import { buildPrompt, buildNegativePrompt, needsAfricanFeatureCorrection } from "@no-safe-word/image-gen";
 
 export function useGeneration() {
   const [character, setCharacter] = useState<CharacterData>(DEFAULT_CHARACTER);
@@ -79,10 +78,8 @@ export function useGeneration() {
     setIsGenerating(true);
     setError(null);
 
-    const prompt = buildPrompt(character, scene);
-    const negativePrompt = buildNegativePrompt(scene, {
-      africanFeatureCorrection: needsAfricanFeatureCorrection(character),
-    });
+    const prompt = "(legacy dashboard)";
+    const negativePrompt = "";
 
     try {
       const res = await fetch("/api/generate", {

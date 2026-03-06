@@ -18,47 +18,20 @@ export const ASPECT_RATIOS: AspectRatio[] = [
   { label: "Tall (832x1216)", width: 832, height: 1216 },
 ];
 
-export const MODEL_PRESETS: ModelPreset[] = [
-  {
-    name: "Juggernaut XL Ragnarok",
-    urn: "urn:air:sdxl:checkpoint:civitai:133005@1759168",
-    type: "SDXL",
-    description: "Best all-round SDXL photorealism. Strong anatomy, diverse faces, cinematic lighting.",
-  },
-  {
-    name: "RealVisXL V5.0",
-    urn: "urn:air:sdxl:checkpoint:civitai:139562@344487",
-    type: "SDXL",
-    description: "Exceptional photorealistic people. Best skin textures and portrait lighting.",
-  },
-  {
-    name: "Lustify V5 Endgame",
-    urn: "urn:air:sdxl:checkpoint:civitai:573152@1094291",
-    type: "SDXL",
-    description: "Purpose-built NSFW photorealism with superior anatomy and intimate scene rendering.",
-  },
-];
+/** @deprecated SDXL models removed — Kontext uses a single model */
+export const MODEL_PRESETS: ModelPreset[] = [];
 
-export const SCHEDULERS: SchedulerOption[] = [
-  { label: "Euler a", value: "EulerA" },
-  { label: "Euler", value: "Euler" },
-  { label: "DPM++ 2M Karras", value: "DPM2MKarras" },
-  { label: "DPM++ SDE Karras", value: "DPMSDEKarras" },
-  { label: "DPM++ 2M", value: "DPM2M" },
-  { label: "DDIM", value: "DDIM" },
-  { label: "LMS Karras", value: "LMSKarras" },
-  { label: "UniPC", value: "UniPC" },
-  { label: "LCM", value: "LCM" },
-  { label: "DEIS", value: "DEIS" },
-];
+/** @deprecated SDXL schedulers removed — Kontext uses euler/simple */
+export const SCHEDULERS: SchedulerOption[] = [];
 
+/** @deprecated SDXL generation defaults — kept for dashboard backward compat */
 export const DEFAULT_SETTINGS: GenerationSettings = {
-  modelUrn: "urn:air:sdxl:checkpoint:civitai:133005@1759168",
+  modelUrn: "",
   width: 832,
   height: 1216,
-  steps: 30,
-  cfgScale: 7,
-  scheduler: "DPM2MKarras",
+  steps: 20,
+  cfgScale: 1,
+  scheduler: "euler",
   seed: -1,
   clipSkip: 1,
   batchSize: 1,

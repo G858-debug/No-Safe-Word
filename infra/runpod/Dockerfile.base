@@ -1,51 +1,13 @@
 FROM runpod/worker-comfyui:5.7.1-base
 
-# ---- Custom Nodes + InsightFace (single layer to reduce intermediate disk) ----
-# Impact Pack: FaceDetailer, SAMLoader
-# Impact Subpack: UltralyticsDetectorProvider (separated since Impact Pack v8.0)
-# IPAdapter Plus: IPAdapterUnifiedLoaderFaceID, IPAdapterFaceID
-# InsightFace + ONNX Runtime for FaceID face embedding extraction
-# insightface>=0.7 has no pre-built wheel for Python 3.12, so we build from source.
-COPY diagnose-ipadapter.py /tmp/diagnose-ipadapter.py
-COPY download-insightface.py /tmp/download-insightface.py
-RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack && \
-    comfy-node-install comfyui_ipadapter_plus && \
-    python3 /tmp/diagnose-ipadapter.py && \
-    apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && \
-    pip install --no-cache-dir Cython && \
-    pip install --no-cache-dir 'insightface>=0.7' onnxruntime-gpu && \
-    apt-get purge -y build-essential python3-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* && \
-    python3 /tmp/download-insightface.py && \
-    rm /tmp/diagnose-ipadapter.py /tmp/download-insightface.py && \
-    cd /comfyui/custom_nodes && \
+# ---- Custom Nodes ----
+# ComfyUI-ppm: FluxKontextImageScale node (Kontext-aware image scaling)
+RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/pamparamm/ComfyUI-ppm.git && \
     cd ComfyUI-ppm && git checkout ebb35c7
 
-# ---- All LoRA Downloads (single layer) ----
-# HuggingFace + CivitAI LoRAs combined into one RUN to minimize layers.
-# Uses Python urllib (not wget) because wget decodes percent-encoded chars
-# in redirect URLs, breaking AWS S3 signatures for files with spaces.
-ARG CIVITAI_API_KEY=""
-ENV COMFY_DIR=/comfyui
-COPY download-civitai-loras.py /tmp/download-civitai-loras.py
-RUN mkdir -p ${COMFY_DIR}/models/loras && python3 -c "\
-import urllib.request, os;\
-loras = [\
-  ('https://huggingface.co/LyliaEngine/add-detail-xl/resolve/main/add-detail-xl.safetensors', 'detail-tweaker-xl.safetensors'),\
-  ('https://huggingface.co/ford442/sdxl-vae-bf16/resolve/main/LoRA/skin_texture_style_v4.safetensors', 'realistic-skin-xl.safetensors'),\
-  ('https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/detailedEyes_v3.safetensors', 'eyes-detail-xl.safetensors'),\
-  ('https://huggingface.co/ffxvs/lora-effects-xl/resolve/main/hands_xl_v21.safetensors', 'negative-hands-v2.safetensors'),\
-  ('https://huggingface.co/ntc-ai/SDXL-LoRA-slider.cinematic-lighting/resolve/main/cinematic%20lighting.safetensors', 'cinematic-lighting-xl.safetensors'),\
-];\
-d = os.environ['COMFY_DIR'] + '/models/loras/';\
-[print(f'Downloading {name}...') or urllib.request.urlretrieve(url, d + name) or print(f'  done') for url, name in loras];\
-print('All HuggingFace LoRAs downloaded.')\
-" && \
-    CIVITAI_API_KEY="${CIVITAI_API_KEY}" python3 /tmp/download-civitai-loras.py && \
-    rm /tmp/download-civitai-loras.py
-
 # ---- Runtime Model Download ----
-# Large models (checkpoint ~6.5GB, SAM ~400MB, YOLO ~50MB) are downloaded
+# Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
 # on first startup to keep the image buildable on GitHub Actions runners.
 # With a RunPod network volume, these persist across restarts.
 COPY download-models.sh /usr/local/bin/download-models.sh

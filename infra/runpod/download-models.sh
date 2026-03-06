@@ -113,6 +113,87 @@ echo "[NSW] ========================================="
 echo "[NSW] Checking models..."
 echo "[NSW] ========================================="
 
+# ---- One-time SDXL model cleanup ----
+# Deletes SDXL-only model files from the network volume to free ~20GB.
+# Safe to re-run: rm -f is a no-op if the file is already gone.
+# Kontext/Flux uses diffusion_models/, clip/, vae/ — not checkpoints/.
+
+VOLUME_MODELS="${VOLUME_LORAS_DIR%/loras}"  # /runpod-volume/models
+
+echo "[NSW] Cleaning up SDXL model files..."
+
+# Checkpoints dir: SDXL only (Juggernaut XL, RealVisXL, Lustify). Flux uses diffusion_models/.
+if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
+  rm -f "${VOLUME_MODELS}/checkpoints/"*.safetensors
+  rm -f "${VOLUME_MODELS}/checkpoints/"*.ckpt
+  echo "[NSW] ✓ Cleared checkpoints/ (SDXL checkpoints removed)"
+fi
+
+# FaceDetailer / YOLO detection models (no longer used with Kontext)
+if [ -d "${VOLUME_MODELS}/ultralytics" ]; then
+  rm -rf "${VOLUME_MODELS}/ultralytics"
+  echo "[NSW] ✓ Cleared ultralytics/ (YOLO face/person detection removed)"
+fi
+
+# SAM segmentation models (used by FaceDetailer, no longer needed)
+if [ -d "${VOLUME_MODELS}/sams" ]; then
+  rm -rf "${VOLUME_MODELS}/sams"
+  echo "[NSW] ✓ Cleared sams/ (SAM segmentation removed)"
+fi
+
+# CLIP Vision (used by IPAdapter, no longer needed)
+if [ -d "${VOLUME_MODELS}/clip_vision" ]; then
+  rm -rf "${VOLUME_MODELS}/clip_vision"
+  echo "[NSW] ✓ Cleared clip_vision/ (IPAdapter CLIP Vision removed)"
+fi
+
+# IPAdapter models (no longer used)
+if [ -d "${VOLUME_MODELS}/ipadapter" ]; then
+  rm -rf "${VOLUME_MODELS}/ipadapter"
+  echo "[NSW] ✓ Cleared ipadapter/ (IPAdapter models removed)"
+fi
+
+# SDXL LoRAs from /runpod-volume/models/loras/ — delete all non-Kontext LoRAs
+# Keep: flux_realism_lora, flux-add-details, fc-flux-perfect-busts, hourglassv32_FLUX,
+#        flux-two-people-kissing, flux_lustly-ai_v1, boudoir-style-flux,
+#        flux-fashion-editorial, flux-oiled-skin, flux-sweat-v2, flux-beauty-skin,
+#        characters/ (trained character LoRAs)
+KEEP_LORAS=(
+  "flux_realism_lora.safetensors"
+  "flux-add-details.safetensors"
+  "fc-flux-perfect-busts.safetensors"
+  "hourglassv32_FLUX.safetensors"
+  "flux-two-people-kissing.safetensors"
+  "flux_lustly-ai_v1.safetensors"
+  "boudoir-style-flux.safetensors"
+  "flux-fashion-editorial.safetensors"
+  "flux-oiled-skin.safetensors"
+  "flux-sweat-v2.safetensors"
+  "flux-beauty-skin.safetensors"
+)
+
+if [ -d "${VOLUME_LORAS_DIR}" ]; then
+  for lora_file in "${VOLUME_LORAS_DIR}"/*.safetensors; do
+    [ -f "$lora_file" ] || continue
+    basename_file=$(basename "$lora_file")
+    keep=false
+    for keep_name in "${KEEP_LORAS[@]}"; do
+      if [ "$basename_file" = "$keep_name" ]; then
+        keep=true
+        break
+      fi
+    done
+    if [ "$keep" = false ]; then
+      echo "[NSW] Removing SDXL LoRA: $basename_file"
+      rm -f "$lora_file"
+    fi
+  done
+  echo "[NSW] ✓ SDXL LoRAs removed from loras/"
+fi
+
+echo "[NSW] SDXL cleanup complete."
+echo "[NSW] ========================================="
+
 # ---- Kontext LoRAs on persistent volume ----
 # Downloaded to /runpod-volume/models/loras/ so they survive container restarts.
 # Requires CIVITAI_API_KEY env var for NSFW/restricted models.
