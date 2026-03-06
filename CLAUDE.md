@@ -5,26 +5,31 @@
 ### Character Consistency Rules
 1. **Approved characters** (anyone in the story_characters table with an approved portrait): appearance is ALWAYS defined by the approved portrait prompt tags, never by scene prompts. The pipeline injects these automatically.
 2. **Non-character people** (background figures, unnamed extras, one-off mentions like "a waiter", "his mother", "the woman at the next table"): MUST be described inline in the scene prompt with physical details, since the pipeline has no data for them. Keep these descriptions brief — just enough for the model to render them correctly (e.g., "older woman in floral dress and doek in background" rather than full Five Layers treatment).
-3. Scene prompts describe ONLY: action, pose, clothing for this scene, setting, lighting, camera angle, composition, gaze/expression override — plus any non-character people as described above.
+3. Scene prompts describe ONLY: action, pose, clothing for this scene, setting, lighting, camera angle, composition, gaze/expression — plus any non-character people as described above.
 4. Never include physical descriptions (skin tone, hair, build, face shape) for approved characters in scene prompts — the pipeline injects these from character data.
-5. Always specify gaze direction explicitly with emphasis: (looking directly at camera:1.3), (eyes closed:1.2), etc.
-6. For multi-character scenes with TWO approved characters, use primary + secondary character linking. Both get their tags injected. Only describe non-character people inline.
+5. Always specify gaze direction explicitly using plain text: "looking directly at the camera" (no emphasis weights — Flux's T5 encoder ignores them).
+6. For multi-character scenes with TWO approved characters, use primary + secondary character linking. Both get their identity injected. Only describe non-character people inline.
 
-### Scene Prompt Format (New Standard)
-Scene prompts should follow this structure:
+### Scene Prompt Format
+Write scene prompts as **natural-language prose** — not comma-separated tags. Flux uses a T5 text encoder that processes sentences, not tag lists.
 
-[action/pose], [expression/gaze with weight], [scene-specific clothing], [setting with South African details], [specific light source], [atmosphere], [composition — shot type, camera angle, depth of field]
+**Rules:**
+- NO emphasis weights — `(tag:1.3)` syntax is ignored by T5. Just describe what you want.
+- NO negative prompts — Flux has no negative conditioning. Omit "avoid X" phrasing.
+- NO quality tags — no masterpiece, best quality, 8k, photorealistic, etc.
+- Write flowing descriptive sentences, not comma-separated fragments.
+- Character identity is injected as a prose paragraph by the pipeline — do NOT include physical descriptions.
 
-**Clothing guidance for female characters:** Default to form-fitting, revealing, or glamorous clothing choices (fitted tops, low necklines, mini skirts, heels, bodycon dresses, etc.). The pipeline enhances attractiveness automatically — scene clothing should complement this, not fight it. Only use loose/baggy/modest clothing when it's a deliberate creative choice for a specific scene (e.g., character is intentionally dressed down, in sleepwear, or the narrative calls for it). Never leave clothing unspecified — the model will default to generic unflattering choices.
+**Clothing guidance for female characters:** Default to form-fitting, revealing, or glamorous clothing choices (fitted tops, low necklines, mini skirts, heels, bodycon dresses, etc.). The pipeline enhances attractiveness automatically — scene clothing should complement this, not fight it. Only use loose/baggy/modest clothing when it's a deliberate creative choice. Never leave clothing unspecified.
 
-Example (old style — DO NOT USE):
-"A stunning young Black South African woman (24, oval face, high cheekbones, neat braids in low bun, slim curvaceous figure, fitted low-cut top showing tasteful cleavage, gold earrings), leaning forward with a sharp seductive half-smile..."
+Example (old comma-tag style — DO NOT USE):
+"leaning forward over restaurant table, (sharp seductive half-smile, looking directly at camera:1.3), fitted low-cut top showing tasteful cleavage, gold earrings"
 
-Example (new style — USE THIS):
-"leaning forward over restaurant table, (sharp seductive half-smile, looking directly at camera:1.3), fitted low-cut top showing tasteful cleavage, gold earrings, wine glass dangling from fingers, Piatto restaurant interior, warm amber light from single overhead pendant, Friday evening atmosphere, shallow depth of field blurring other diners, medium shot, eye-level"
+Example (correct Flux prose — USE THIS):
+"She leans forward over the restaurant table with a sharp seductive half-smile, looking directly at the camera. She wears a fitted low-cut top showing tasteful cleavage and gold earrings. A wine glass dangles from her fingers. The scene is lit by warm amber light from a single overhead pendant inside Piatto restaurant on a Friday evening. Medium shot at eye level with a shallow depth of field blurring the other diners."
 
 ### The Five Layers (Every Prompt Must Have All Five)
-1. Expression & Gaze — face tells the story, always specify with emphasis weight
+1. Expression & Gaze — face tells the story; describe gaze direction explicitly in plain text
 2. Narrative Implication — something just happened or is about to, viewer fills the gap
 3. Lighting & Atmosphere — name the specific light source, never "warm lighting"
 4. Composition & Framing — camera angle, shot type, depth of field, strategic cropping
@@ -39,12 +44,12 @@ Example (new style — USE THIS):
 - Cultural grounding (African print fabric, specific SA locations, local objects) creates authenticity and differentiates from generic AI content
 
 ### Model Selection
-- Default: Juggernaut XL Ragnarok (best balance of quality, diversity, and cost)
-- For premium character portraits: RealVisXL V5.0
-- For NSFW / intimate scenes: Lustify V5 Endgame (superior anatomy, CFG 3.0-4.5)
+- Single model: Flux1 Dev Kontext (fp8 quantized) for all content types (SFW and NSFW)
+- Character consistency via reference image conditioning (ReferenceLatent)
+- Scene-aware LoRA stack: Realism, Detail, body LoRAs (female), Kissing (dual), NSFW anatomy (intimate)
 
 ### Self-Contained Prompts (Critical)
-Every image prompt must be fully self-contained. The Civitai API generates each image independently — there is NO context, NO memory, and NO reference to any other image or prompt.
+Every image prompt must be fully self-contained. Each image is generated independently — there is NO context, NO memory, and NO reference to any other image or prompt.
 
 NEVER use in any prompt:
 - "Same scene...", "Same bedroom...", "Same café..."
@@ -64,20 +69,11 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
 
 ### Multi-Character Scenes
 - Tag the scene with the PRIMARY character only
-- Describe the secondary character by role and clothing, not by physical features
+- The secondary character's identity is injected automatically by the pipeline
 - Give spatial composition instructions: "woman in foreground left, man behind right shoulder"
-- For critical couple shots, consider generating each character separately
-
-### LoRA-First Workflow Selection
-1. When characters have deployed LoRAs (trained identity models), the pipeline uses the `portrait` workflow type — LoRAs handle character consistency directly in the base generation, making IPAdapter unnecessary.
-2. IPAdapter (reference image-based identity) is only used as a fallback when characters lack trained LoRAs.
-3. For dual-character scenes where both characters have LoRAs, both are loaded into the portrait workflow simultaneously.
-4. **Trigger words are critical:** LoRAs only activate when their trigger word (typically "tok") appears in the positive prompt. The pipeline injects trigger words automatically via `buildStoryImagePrompt()` — they appear after the quality prefix but before character tags.
-5. FaceDetailer face prompts also include the trigger word so the LoRA activates during the face refinement pass, not just the base generation.
+- For dual scenes, both portrait reference images are combined horizontally before conditioning
 
 ### Female Character Enhancement
-1. Female characters always receive attractiveness emphasis tags in the positive prompt: beautiful face, perfect makeup, curvaceous figure, hourglass body, form-fitting clothing.
-2. Curvaceous body descriptors (large breasts, wide hips, slim waist, thick thighs) are always present with appropriate emphasis weight — higher for NSFW, moderate for SFW.
-3. The `curvy-body-sdxl` LoRA is always loaded for any scene with a detected female character, regardless of content level or skin visibility. This ensures the intended body type renders consistently.
-4. Negative prompts actively prevent the model from rendering unflattering body types: flat chest, boyish figure, shapeless body, frumpy/unflattering clothing.
-5. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and skips the enhancement.
+1. Female characters receive attractiveness prose in the identity prefix (injected by the pipeline): beautiful face, curvaceous figure, etc.
+2. Body LoRAs (fc-flux-perfect-busts, hourglassv32_FLUX) are always loaded for scenes with female characters. These LoRAs do the heavy lifting since Flux has no negative prompt to prevent unflattering rendering.
+3. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and the pipeline adjusts enhancement accordingly.
