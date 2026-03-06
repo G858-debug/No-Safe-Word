@@ -45,11 +45,11 @@ export default function StoriesLayout({
             </nav>
             <div className="flex items-center gap-2">
               <Link
-                href="/dashboard"
+                href="/dashboard/image-generator"
                 className="inline-flex items-center gap-1.5 rounded-md border border-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <Wand2 className="h-3.5 w-3.5" />
-                Manual Generation
+                Image Generator
               </Link>
               <LogoutButton />
             </div>
