@@ -299,19 +299,40 @@ export async function POST(
             kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
             console.log(`[Kontext][${imgPrompt.id}] Combined face + body ref images vertically for "${charName}"`);
           } else {
-            // Dual-character scene: primary character still uses face-only (horizontal stitch with secondary happens later)
-            console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching primary ref for "${charName}" (approved_image_id: ${sc?.approved_image_id || 'NONE'})`);
+            // Dual-character scene: use face + full-body reference for primary character (same as single scenes)
+            // so ReferenceLatent sees the approved body proportions, not just the face.
+            console.log(`[Kontext][${imgPrompt.id}] Dual scene: fetching primary ref for "${charName}" (face: ${sc?.approved_image_id || 'NONE'}, body: ${sc?.approved_fullbody_image_id || 'NONE'})`);
             if (sc?.approved_image_id) {
-              const { data: img } = await supabase
-                .from("images")
-                .select("stored_url, sfw_url")
-                .eq("id", sc.approved_image_id)
-                .single();
-
-              const primaryRefBase64 = await fetchRefImageBase64(img, `${charName} primary`);
-              if (primaryRefBase64) {
-                kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
-                console.log(`[Kontext][${imgPrompt.id}] Primary ref loaded (${Math.round(primaryRefBase64.length / 1024)}KB base64)`);
+              if (sc.approved_fullbody_image_id) {
+                // Prefer face+body vertical stitch to anchor body proportions in ReferenceLatent
+                const [{ data: faceImg }, { data: bodyImg }] = await Promise.all([
+                  supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
+                  supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
+                ]);
+                const [faceBase64, bodyBase64] = await Promise.all([
+                  fetchRefImageBase64(faceImg, `${charName} face`),
+                  fetchRefImageBase64(bodyImg, `${charName} body`),
+                ]);
+                if (faceBase64 && bodyBase64) {
+                  const stitchedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 512);
+                  kontextImages.push({ name: "primary_ref.png", image: stitchedBase64 });
+                  console.log(`[Kontext][${imgPrompt.id}] Primary ref: face+body vertically stitched (${Math.round(stitchedBase64.length / 1024)}KB base64)`);
+                } else if (faceBase64) {
+                  kontextImages.push({ name: "primary_ref.png", image: faceBase64 });
+                  console.warn(`[Kontext][${imgPrompt.id}] Primary ref: face only (body fetch failed)`);
+                }
+              } else {
+                // Fall back to face-only if no full-body approved yet
+                const { data: img } = await supabase
+                  .from("images")
+                  .select("stored_url, sfw_url")
+                  .eq("id", sc.approved_image_id)
+                  .single();
+                const primaryRefBase64 = await fetchRefImageBase64(img, `${charName} primary`);
+                if (primaryRefBase64) {
+                  kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+                  console.warn(`[Kontext][${imgPrompt.id}] Primary ref: face only — no approved_fullbody_image_id for "${charName}"`);
+                }
               }
             } else {
               console.warn(`[Kontext][${imgPrompt.id}] WARNING: Primary character "${charName}" has no approved_image_id for dual scene`);

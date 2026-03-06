@@ -287,8 +287,10 @@ export function selectKontextResources(opts: {
     }
   }
 
-  // Strength budget cap — scale down if total exceeds 3.5
-  const MAX_TOTAL_STRENGTH = 3.5;
+  // Strength budget cap — scale down if total exceeds 4.0.
+  // Raised from 3.5: body LoRAs (busts + hourglass) were being diluted to ~77%
+  // in NSFW dual + kissing + intimate scenes, weakening body consistency.
+  const MAX_TOTAL_STRENGTH = 4.0;
   const totalStrength = loras.reduce((sum, l) => sum + l.strengthModel, 0);
   if (totalStrength > MAX_TOTAL_STRENGTH) {
     const scale = MAX_TOTAL_STRENGTH / totalStrength;
