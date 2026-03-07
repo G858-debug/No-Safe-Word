@@ -97,6 +97,18 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     genderCategory: 'female',
   },
   {
+    name: 'NSW Curves Body LoRA',
+    filename: 'nsw-curves-body.safetensors',
+    category: 'bodies',
+    defaultStrength: 0.8,
+    clipStrength: 0.8,
+    triggerWord: 'nsw_curves',
+    description: 'Custom-trained body proportions LoRA — curvaceous figure, large breasts, wide hips, thick thighs, hourglass body (191 training images, Flux Dev)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'female',
+  },
+  {
     name: 'Flux Two People Kissing',
     filename: 'flux-two-people-kissing.safetensors',
     category: 'style',
@@ -250,25 +262,29 @@ export function selectKontextResources(opts: {
   }
 
   // 3. Body LoRAs — included when ANY character is female
+  // NSW Curves is our custom-trained body LoRA that combines what perfect-busts
+  // and hourglass did separately. It takes one LoRA slot instead of two.
   // For dual scenes with a male primary + female secondary, we still want body
   // enhancement for the female character (at slightly reduced strength).
   if (hasFemaleCharacter) {
     const isSecondaryOnly = !isFemale && secondaryGender === 'female';
     const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0; // 30% reduction when female is only secondary
 
-    let bustsStrength = 0.7 * secondaryReduction;
-    if (isFacebookSfw) bustsStrength = 0.4 * secondaryReduction;
-    else if (isNsfw) bustsStrength = 0.85 * secondaryReduction;
-    else if (isFullBody) bustsStrength = 1.0 * secondaryReduction; // full figure visible — maximum effect
-    loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
+    // NSW Curves body LoRA — custom-trained on curvaceous body proportions.
+    // Replaces both perfect-busts + hourglass in a single slot.
+    let curvesStrength = 0.8 * secondaryReduction;
+    if (isFacebookSfw) curvesStrength = 0.5 * secondaryReduction;
+    else if (isNsfw) curvesStrength = 0.9 * secondaryReduction;
+    else if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
+    loras.push({ filename: 'nsw-curves-body.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
+    pendingTriggers.push('nsw_curves');
 
-    // Hourglass body shape — strongest for NSFW since Flux has no negative prompt
-    // to prevent "flat/boyish" rendering; the LoRA must do all the work.
-    let hourglassStrength = 0.9 * secondaryReduction;
-    if (isFacebookSfw) hourglassStrength = 0.5 * secondaryReduction;
-    else if (isNsfw) hourglassStrength = 0.95 * secondaryReduction;
-    else if (isFullBody) hourglassStrength = 1.0 * secondaryReduction; // full figure visible — maximum effect
-    loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(hourglassStrength * 100) / 100, strengthClip: Math.round(hourglassStrength * 100) / 100 });
+    // Keep perfect-busts as a complementary LoRA at reduced strength
+    let bustsStrength = 0.5 * secondaryReduction;
+    if (isFacebookSfw) bustsStrength = 0.3 * secondaryReduction;
+    else if (isNsfw) bustsStrength = 0.6 * secondaryReduction;
+    else if (isFullBody) bustsStrength = 0.7 * secondaryReduction;
+    loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
   }
 
   // 4. Kissing LoRA — dual-character kissing scenes

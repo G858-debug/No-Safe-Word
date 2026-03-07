@@ -189,6 +189,7 @@ KEEP_LORAS=(
   "backshot-sdxl.safetensors"
   "bad-anatomy-neg-sdxl.safetensors"
   "realfeet-sdxl.safetensors"
+  "nsw-curves-body.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -267,6 +268,41 @@ download_to_volume "736970" "backshot-sdxl.safetensors"
 download_to_volume "486308" "bad-anatomy-neg-sdxl.safetensors"
 # RealFeet SDXL — improves feet/ankle/lower leg rendering — CivitAI model 211517, version 238277
 download_to_volume "238277" "realfeet-sdxl.safetensors"
+
+# NSW Curves body LoRA — custom-trained on Replicate (Flux Dev, 191 images)
+# The Replicate output is a .tar containing the .safetensors file.
+NSW_CURVES_DEST="${VOLUME_LORAS_DIR}/nsw-curves-body.safetensors"
+NSW_CURVES_URL="https://replicate.delivery/xezq/2eBOTROp2kT2MKdv2IQwyQ7VYWQF9Z2MOPX01U3gC9pKekOWA/trained_model.tar"
+if [ -f "$NSW_CURVES_DEST" ]; then
+    echo "[NSW] ✓ nsw-curves-body.safetensors (volume, exists)"
+elif [ -d "${VOLUME_LORAS_DIR}" ]; then
+    echo "[NSW] Downloading nsw-curves-body LoRA from Replicate..."
+    python3 -c "
+import urllib.request, tarfile, io, sys, os, shutil
+try:
+    req = urllib.request.Request('${NSW_CURVES_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=300)
+    tar_bytes = io.BytesIO(resp.read())
+    resp.close()
+    with tarfile.open(fileobj=tar_bytes) as tf:
+        for member in tf.getmembers():
+            if member.name.endswith('.safetensors'):
+                f = tf.extractfile(member)
+                if f:
+                    with open('${NSW_CURVES_DEST}.tmp', 'wb') as out:
+                        shutil.copyfileobj(f, out)
+                    os.rename('${NSW_CURVES_DEST}.tmp', '${NSW_CURVES_DEST}')
+                    print(f'Extracted {member.name}')
+                    sys.exit(0)
+    print('No .safetensors found in tar', file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && echo "[NSW] ✓ nsw-curves-body.safetensors (volume, downloaded)" || \
+    { rm -f "${NSW_CURVES_DEST}.tmp"; echo "[NSW] ✗✗ nsw-curves-body.safetensors FAILED"; }
+fi
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then
