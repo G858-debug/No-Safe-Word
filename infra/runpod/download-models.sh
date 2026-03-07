@@ -185,6 +185,7 @@ KEEP_LORAS=(
   "flux-sweat-v2.safetensors"
   "flux-beauty-skin.safetensors"
   "curvy-body-sdxl.safetensors"
+  "skin-realism-sdxl.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -255,6 +256,8 @@ else
 fi
 
 download_to_volume "1449869" "curvy-body-sdxl.safetensors"
+# Skin Realism (pores, imperfections, natural texture) — CivitAI model 248951, version 340833
+download_to_volume "340833" "skin-realism-sdxl.safetensors"
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then

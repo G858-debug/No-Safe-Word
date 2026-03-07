@@ -20,13 +20,24 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
         clip: ['1', 1],
       },
     },
+    // Skin realism LoRA — adds pores, imperfections, natural skin texture
+    '9': {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: 'skin-realism-sdxl.safetensors',
+        strength_model: 0.35,
+        strength_clip: 0.35,
+        model: ['2', 0],
+        clip: ['2', 1],
+      },
+    },
     '3': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: prompt, clip: ['2', 1] },
+      inputs: { text: prompt, clip: ['9', 1] },
     },
     '4': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: negativePrompt, clip: ['2', 1] },
+      inputs: { text: negativePrompt, clip: ['9', 1] },
     },
     '5': {
       class_type: 'EmptyLatentImage',
@@ -35,7 +46,7 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
     '6': {
       class_type: 'KSampler',
       inputs: {
-        model: ['2', 0],
+        model: ['9', 0],
         positive: ['3', 0],
         negative: ['4', 0],
         latent_image: ['5', 0],
