@@ -197,6 +197,7 @@ export default function GeneratePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [dispatchProgress, setDispatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [testCount, setTestCount] = useState(10);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isPolling = useRef(false);
@@ -293,36 +294,41 @@ export default function GeneratePage() {
     [sessionId],
   );
 
-  // ── Generate All ──────────────────────────────────────────────
+  // ── Dispatch a slice of pending prompts ───────────────────────
 
-  const handleGenerateAll = useCallback(async () => {
-    setIsGenerating(true);
-    setError(null);
+  const dispatchBatch = useCallback(
+    async (limit?: number) => {
+      setIsGenerating(true);
+      setError(null);
 
-    const pending = ANIME_PROMPTS.filter((p) => {
-      const s = states[p.id - 1];
-      return !s.record || s.record.status === "rejected";
-    });
+      const pending = ANIME_PROMPTS.filter((p) => {
+        const s = states[p.id - 1];
+        return !s.record || s.record.status === "rejected";
+      }).slice(0, limit);
 
-    if (pending.length === 0) {
+      if (pending.length === 0) {
+        setIsGenerating(false);
+        return;
+      }
+
+      setDispatchProgress({ done: 0, total: pending.length });
+      startPolling();
+
+      for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+        const batch = pending.slice(i, i + BATCH_SIZE);
+        await Promise.allSettled(batch.map((p) => dispatchPrompt(p)));
+        setDispatchProgress({ done: Math.min(i + BATCH_SIZE, pending.length), total: pending.length });
+        if (i + BATCH_SIZE < pending.length) await sleep(BATCH_DELAY_MS);
+      }
+
       setIsGenerating(false);
-      return;
-    }
+      setDispatchProgress(null);
+      await fetchStatus();
+    },
+    [states, dispatchPrompt, startPolling, fetchStatus],
+  );
 
-    setDispatchProgress({ done: 0, total: pending.length });
-    startPolling();
-
-    for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-      const batch = pending.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map((p) => dispatchPrompt(p)));
-      setDispatchProgress({ done: Math.min(i + BATCH_SIZE, pending.length), total: pending.length });
-      if (i + BATCH_SIZE < pending.length) await sleep(BATCH_DELAY_MS);
-    }
-
-    setIsGenerating(false);
-    setDispatchProgress(null);
-    await fetchStatus();
-  }, [states, dispatchPrompt, startPolling, fetchStatus]);
+  const handleGenerateAll = useCallback(() => dispatchBatch(), [dispatchBatch]);
 
   // ── Retry single failed card ──────────────────────────────────
 
@@ -362,6 +368,30 @@ export default function GeneratePage() {
               Proceed to Approval
               <ArrowRight className="h-4 w-4" />
             </Link>
+          )}
+
+          {/* Test batch */}
+          {counts.total === 0 && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5">
+              <label className="text-xs text-zinc-500">Test</label>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={testCount}
+                onChange={(e) => setTestCount(Math.min(50, Math.max(1, Number(e.target.value))))}
+                disabled={isGenerating}
+                className="w-12 rounded bg-zinc-800 px-1.5 py-0.5 text-center text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-amber-600 disabled:opacity-40"
+              />
+              <button
+                onClick={() => dispatchBatch(testCount)}
+                disabled={isGenerating}
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-40"
+              >
+                <Play className="h-3 w-3" />
+                Go
+              </button>
+            </div>
           )}
 
           <button
