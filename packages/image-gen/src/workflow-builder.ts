@@ -4,7 +4,7 @@ interface LoraInput {
   strengthClip: number;
 }
 
-export type KontextWorkflowType = 'portrait' | 'single' | 'dual';
+export type KontextWorkflowType = 'portrait' | 'single' | 'dual' | 'img2img';
 
 export interface KontextWorkflowConfig {
   type: KontextWorkflowType;
@@ -21,6 +21,13 @@ export interface KontextWorkflowConfig {
   secondaryRefImageName?: string;
   /** Optional LoRA stack for Flux — injected between model loaders and sampler */
   loras?: LoraInput[];
+  /**
+   * img2img only — denoise strength for the KSampler.
+   * 1.0 = full generation from noise (same as text-to-image).
+   * 0.72 = strong stylistic conversion while preserving pose/composition.
+   * Default: 0.72
+   */
+  denoiseStrength?: number;
 }
 
 /**
@@ -113,6 +120,8 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
       return buildKontextSingleWorkflow(workflow, config, modelRef);
     case 'dual':
       return buildKontextDualWorkflow(workflow, config, modelRef);
+    case 'img2img':
+      return buildKontextImg2ImgWorkflow(workflow, config, modelRef);
     default:
       throw new Error(`Unknown Kontext workflow type: ${config.type}`);
   }
@@ -283,6 +292,89 @@ function buildKontextSingleWorkflow(
     inputs: {
       filename_prefix: config.filenamePrefix,
       images: ['13', 0],
+    },
+  };
+
+  return workflow;
+}
+
+/**
+ * img2img — converts a source image (e.g. anime) to photorealistic using Flux Kontext.
+ *
+ * The source image is passed via the RunPod `images[]` array as "input.jpg".
+ * Unlike the portrait/single/dual workflows that start from EmptyLatentImage,
+ * here the encoded source image IS the starting latent — with partial denoise to
+ * preserve pose and composition while the model re-renders in the target style.
+ *
+ * Node IDs 20–25 to avoid collisions with shared nodes (1–4, 50+) and
+ * reference-workflow nodes (5–14).
+ */
+function buildKontextImg2ImgWorkflow(
+  workflow: Record<string, any>,
+  config: KontextWorkflowConfig,
+  modelRef: [string, number],
+): Record<string, any> {
+  const denoise = config.denoiseStrength ?? 0.72;
+
+  // Node 20: LoadImage — source image supplied via RunPod images[] array
+  workflow['20'] = {
+    class_type: 'LoadImage',
+    inputs: {
+      image: 'input.jpg',
+    },
+  };
+
+  // Node 21: FluxKontextImageScale — Kontext-aware scaling (preserves aspect ratio)
+  workflow['21'] = {
+    class_type: 'FluxKontextImageScale',
+    inputs: {
+      image: ['20', 0],
+    },
+  };
+
+  // Node 22: VAEEncode — encode source image to latent; this becomes the starting noise
+  workflow['22'] = {
+    class_type: 'VAEEncode',
+    inputs: {
+      pixels: ['21', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 23: KSampler — partial denoise from source latent.
+  // denoise < 1.0 means the sampler starts mid-trajectory, preserving
+  // the source structure while re-rendering style via the text prompt.
+  workflow['23'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: modelRef,
+      positive: ['4', 0],
+      negative: ['4', 0], // Flux has no negative prompt — mirror positive as a no-op
+      latent_image: ['22', 0],
+      seed: config.seed,
+      steps: 25,
+      cfg: 1.0,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise,
+    },
+  };
+
+  // Node 24: VAEDecode
+  workflow['24'] = {
+    class_type: 'VAEDecode',
+    inputs: {
+      samples: ['23', 0],
+      vae: ['3', 0],
+    },
+  };
+
+  // Node 25: SaveImage
+  workflow['25'] = {
+    class_type: 'SaveImage',
+    inputs: {
+      filename_prefix: config.filenamePrefix,
+      images: ['24', 0],
     },
   };
 
