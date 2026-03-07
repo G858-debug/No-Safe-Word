@@ -210,6 +210,10 @@ function Lightbox({
   onApprove,
   onReject,
   getEffectivePrompt,
+  onEditPrompt,
+  onResetPrompt,
+  onRegenerate,
+  editedPrompt,
 }: {
   states: PromptState[];
   index: number;
@@ -218,11 +222,15 @@ function Lightbox({
   onApprove: (imageId: string) => void;
   onReject: (imageId: string) => void;
   getEffectivePrompt: (id: number) => string;
+  onEditPrompt: (promptId: number, text: string) => void;
+  onResetPrompt: (promptId: number) => void;
+  onRegenerate: (prompt: AnimePrompt) => void;
+  editedPrompt: string | undefined;
 }) {
   const state = states[index];
   const { prompt, record, signedUrl } = state;
   const status = record?.status ?? "pending";
-  const [showPrompt, setShowPrompt] = useState(false);
+  const isEdited = editedPrompt !== undefined;
 
   // Find prev/next indices that have images
   const findAdjacentWithImage = (dir: -1 | 1) => {
@@ -237,6 +245,8 @@ function Lightbox({
   // Keyboard navigation
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't handle keys when typing in the textarea
+      if ((e.target as HTMLElement)?.tagName === "TEXTAREA") return;
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowLeft" && prevIdx >= 0) onNavigate(prevIdx);
       else if (e.key === "ArrowRight" && nextIdx >= 0) onNavigate(nextIdx);
@@ -254,7 +264,7 @@ function Lightbox({
       onClick={onClose}
     >
       <div
-        className="relative flex max-h-[95vh] max-w-[95vw] flex-col items-center"
+        className="relative flex max-h-[95vh] max-w-[95vw] gap-6"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close button */}
@@ -283,90 +293,123 @@ function Lightbox({
           </button>
         )}
 
-        {/* Image */}
-        {signedUrl ? (
-          <img
-            src={signedUrl}
-            alt={`Prompt ${prompt.id}`}
-            className="max-h-[75vh] rounded-lg object-contain"
-          />
-        ) : (
-          <div className="flex h-64 w-48 items-center justify-center rounded-lg bg-zinc-800">
-            <StatusDot status={status} />
-          </div>
-        )}
+        {/* Left: Image */}
+        <div className="flex flex-col items-center">
+          {signedUrl ? (
+            <img
+              src={signedUrl}
+              alt={`Prompt ${prompt.id}`}
+              className="max-h-[80vh] rounded-lg object-contain"
+            />
+          ) : (
+            <div className="flex h-64 w-48 items-center justify-center rounded-lg bg-zinc-800">
+              <StatusDot status={status} />
+            </div>
+          )}
 
-        {/* Info bar */}
-        <div className="mt-3 flex w-full items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-xs text-zinc-300">
-              #{prompt.id}
-            </span>
-            <StatusDot status={status} />
-            <span className="text-xs capitalize text-zinc-500">{status}</span>
-            {[
-              prompt.shotType.replace("_", " "),
-              prompt.poseCategory.replace(/_/g, " "),
-              prompt.clothingState.replace(/_/g, " "),
-              prompt.angleCategory.replace(/_/g, " "),
-            ].map((tag) => (
-              <span
-                key={tag}
-                className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500"
-              >
-                {tag}
+          {/* Info bar below image */}
+          <div className="mt-3 flex w-full items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-xs text-zinc-300">
+                #{prompt.id}
+                {isEdited && <span className="ml-1 text-amber-400">*</span>}
               </span>
-            ))}
+              <StatusDot status={status} />
+              <span className="text-xs capitalize text-zinc-500">{status}</span>
+              {[
+                prompt.shotType.replace("_", " "),
+                prompt.poseCategory.replace(/_/g, " "),
+                prompt.clothingState.replace(/_/g, " "),
+                prompt.angleCategory.replace(/_/g, " "),
+              ].map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+
+            {/* Approve / Reject buttons */}
+            <div className="flex items-center gap-2">
+              {canApprove && (
+                <button
+                  onClick={() => record && onApprove(record.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-900/40 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-900/60"
+                >
+                  <ThumbsUp className="h-4 w-4" />
+                  Approve
+                </button>
+              )}
+              {canReject && (
+                <button
+                  onClick={() => record && onReject(record.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-900/40 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-900/60"
+                >
+                  <ThumbsDown className="h-4 w-4" />
+                  Reject
+                </button>
+              )}
+              {status === "approved" && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-950/40 px-4 py-2 text-sm font-medium text-emerald-400">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Approved
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Approve / Reject buttons */}
-          <div className="flex items-center gap-2">
-            {canApprove && (
-              <button
-                onClick={() => record && onApprove(record.id)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-900/40 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-900/60"
-              >
-                <ThumbsUp className="h-4 w-4" />
-                Approve
-              </button>
-            )}
-            {canReject && (
-              <button
-                onClick={() => record && onReject(record.id)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-red-900/40 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-900/60"
-              >
-                <ThumbsDown className="h-4 w-4" />
-                Reject
-              </button>
-            )}
-            {status === "approved" && (
-              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-950/40 px-4 py-2 text-sm font-medium text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" />
-                Approved
-              </span>
-            )}
-          </div>
+          {/* Keyboard hint */}
+          <p className="mt-2 text-[10px] text-zinc-600">
+            ← → navigate · Esc close
+          </p>
         </div>
 
-        {/* Prompt text (collapsible) */}
-        <div className="mt-2 w-full">
+        {/* Right: Prompt editor panel */}
+        <div className="flex w-80 flex-col rounded-lg border border-zinc-800 bg-zinc-900/80 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
+              Prompt
+            </h3>
+            {isEdited && (
+              <button
+                onClick={() => onResetPrompt(prompt.id)}
+                className="text-[10px] text-zinc-500 hover:text-zinc-300"
+              >
+                Reset to default
+              </button>
+            )}
+          </div>
+          <textarea
+            value={editedPrompt ?? prompt.prompt}
+            onChange={(e) => onEditPrompt(prompt.id, e.target.value)}
+            className="mb-3 flex-1 resize-none rounded bg-zinc-800 px-3 py-2 text-xs leading-relaxed text-zinc-300 focus:outline-none focus:ring-1 focus:ring-amber-600"
+            style={{ minHeight: "200px" }}
+          />
           <button
-            onClick={() => setShowPrompt(!showPrompt)}
-            className="text-[10px] text-zinc-500 hover:text-zinc-300"
+            onClick={() => onRegenerate(prompt)}
+            disabled={status === "generating"}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-900/40 px-4 py-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-900/60 disabled:opacity-40"
           >
-            {showPrompt ? "Hide prompt" : "Show prompt"}
+            {status === "generating" ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating…
+              </>
+            ) : (
+              <>
+                <RotateCcw className="h-4 w-4" />
+                Regenerate
+              </>
+            )}
           </button>
-          {showPrompt && (
-            <p className="mt-1 max-h-24 overflow-y-auto rounded bg-zinc-900 px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
-              {getEffectivePrompt(prompt.id)}
+          {isEdited && (
+            <p className="mt-2 text-[10px] text-amber-400/70">
+              Prompt has been edited from default
             </p>
           )}
         </div>
-
-        {/* Keyboard hint */}
-        <p className="mt-2 text-[10px] text-zinc-600">
-          ← → navigate · Esc close
-        </p>
       </div>
     </div>
   );
@@ -861,6 +904,22 @@ export default function GeneratePage() {
           onApprove={handleApprove}
           onReject={handleReject}
           getEffectivePrompt={getEffectivePrompt}
+          editedPrompt={promptOverrides[states[lightboxIndex].prompt.id]}
+          onEditPrompt={(id, text) =>
+            setPromptOverrides((prev) => ({ ...prev, [id]: text }))
+          }
+          onResetPrompt={(id) =>
+            setPromptOverrides((prev) => {
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            })
+          }
+          onRegenerate={async (prompt) => {
+            await dispatchPrompt(prompt);
+            startPolling();
+            await fetchStatus();
+          }}
         />
       )}
 
