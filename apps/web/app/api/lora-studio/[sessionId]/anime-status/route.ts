@@ -161,6 +161,10 @@ export async function GET(
     failed: imageList.filter((i) => i.status === 'rejected').length,
   };
 
+  if (counts.total > 0 || toCheck.length > 0) {
+    console.log(`[anime-status] session=${sessionId} total=${counts.total} generating=${counts.generating} ready=${counts.ready} failed=${counts.failed} checked=${toCheck.length}`);
+  }
+
   // Auto-advance session status to anime_approval when all images are settled
   const allSettled =
     counts.total === 200 &&

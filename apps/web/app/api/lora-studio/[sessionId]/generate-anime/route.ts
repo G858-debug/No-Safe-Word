@@ -18,8 +18,11 @@ export async function POST(
 ) {
   const { sessionId } = await props.params;
 
+  console.log('[generate-anime] POST hit, sessionId:', sessionId);
+
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) {
+    console.error('[generate-anime] REPLICATE_API_TOKEN not set');
     return NextResponse.json({ error: 'REPLICATE_API_TOKEN not set' }, { status: 500 });
   }
 
@@ -46,8 +49,10 @@ export async function POST(
     .single();
 
   if (sessionErr || !session) {
+    console.error('[generate-anime] Session not found:', sessionId, sessionErr?.message);
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+  console.log('[generate-anime] Session found, creating prediction...');
 
   // Create the Replicate prediction (async — does not wait for completion)
   const replicateRes = await fetch(
@@ -132,5 +137,6 @@ export async function POST(
     imageId = inserted.id;
   }
 
+  console.log('[generate-anime] ✓ imageId:', imageId, 'predictionId:', predictionId);
   return NextResponse.json({ imageId, predictionId });
 }

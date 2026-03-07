@@ -68,7 +68,11 @@ export async function middleware(request: NextRequest) {
 
   // Protect dashboard API routes — return 401 instead of redirect
   if (isDashboardApiRoute(pathname)) {
-    if (!(await isAdminAuthenticated(request))) {
+    const authed = await isAdminAuthenticated(request);
+    if (pathname.startsWith("/api/lora-studio")) {
+      console.log(`[middleware] ${request.method} ${pathname} auth=${authed}`);
+    }
+    if (!authed) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
