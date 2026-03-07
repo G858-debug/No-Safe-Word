@@ -986,10 +986,11 @@ export default function GeneratePage() {
           <DistGroup
             label="Angle"
             items={[
-              { label: "Front", count: 70 },
-              { label: "3/4 angle", count: 80 },
-              { label: "Side profile", count: 30 },
-              { label: "Low angle", count: 20 },
+              { label: "Front", count: 72 },
+              { label: "3/4 angle", count: 84 },
+              { label: "Side profile", count: 41 },
+              { label: "Low angle", count: 23 },
+              { label: "Back", count: 20 },
             ]}
           />
         </div>
