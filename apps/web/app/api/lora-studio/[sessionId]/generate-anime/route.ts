@@ -5,9 +5,9 @@ import { supabase } from '@no-safe-word/story-engine';
 // Uses versioned predictions endpoint (/v1/predictions with version field).
 const REPLICATE_MODEL_VERSION = '5a2b1cff79a2cf60d2a498b424795a90e26b7a3992fbd13b340f73ff4942b81e';
 
-// CivitAI Curvy body SDXL LoRA by fellow_daoist (386MB, 5-star)
-const CIVITAI_API_TOKEN = process.env.CIVITAI_API_KEY ?? '';
-const LORA_URL = `https://civitai.com/api/download/models/1449869?type=Model&format=SafeTensor${CIVITAI_API_TOKEN ? `&token=${CIVITAI_API_TOKEN}` : ''}`;
+// Curvy body SDXL LoRA by fellow_daoist (386MB) — hosted on HuggingFace
+// (CivitAI downloads fail on Replicate workers, so we mirror on HF)
+const LORA_URL = 'https://huggingface.co/G858/curvy-body-sdxl-lora/resolve/main/curvy-body-sdxl.safetensors';
 
 // POST /api/lora-studio/[sessionId]/generate-anime
 // Triggers a single Replicate prediction for one anime training image.
