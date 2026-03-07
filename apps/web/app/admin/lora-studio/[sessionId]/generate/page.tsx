@@ -279,7 +279,7 @@ export default function GeneratePage() {
 
   const dispatchPrompt = useCallback(
     async (prompt: AnimePrompt) => {
-      await fetch(`/api/lora-studio/${sessionId}/generate-anime`, {
+      const res = await fetch(`/api/lora-studio/${sessionId}/generate-anime`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -291,6 +291,10 @@ export default function GeneratePage() {
           angleCategory: prompt.angleCategory,
         }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`generate-anime ${res.status}: ${body.slice(0, 200)}`);
+      }
     },
     [sessionId],
   );
@@ -317,7 +321,12 @@ export default function GeneratePage() {
 
       for (let i = 0; i < pending.length; i += BATCH_SIZE) {
         const batch = pending.slice(i, i + BATCH_SIZE);
-        await Promise.allSettled(batch.map((p) => dispatchPrompt(p)));
+        const results = await Promise.allSettled(batch.map((p) => dispatchPrompt(p)));
+        const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+        if (firstError) {
+          setError(String(firstError.reason));
+          break;
+        }
         setDispatchProgress({ done: Math.min(i + BATCH_SIZE, pending.length), total: pending.length });
         if (i + BATCH_SIZE < pending.length) await sleep(BATCH_DELAY_MS);
       }
