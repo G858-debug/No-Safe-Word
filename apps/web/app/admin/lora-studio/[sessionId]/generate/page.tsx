@@ -422,8 +422,8 @@ export default function GeneratePage() {
             </Link>
           )}
 
-          {/* Test batch */}
-          {counts.total === 0 && (
+          {/* Test batch — always visible when fewer than 200 images */}
+          {counts.total < 200 && (
             <div className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5">
               <label className="text-xs text-zinc-500">Test</label>
               <input
@@ -488,6 +488,37 @@ export default function GeneratePage() {
           {error}
         </div>
       )}
+
+      {/* Debug: direct API ping — bypasses all React state logic */}
+      <div className="mb-4 flex items-center gap-2">
+        <button
+          onClick={async () => {
+            addDebug('Ping: sending POST...');
+            try {
+              const r = await fetch(`/api/lora-studio/${sessionId}/generate-anime`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt: ANIME_PROMPTS[0].prompt,
+                  negativePrompt: ANIME_PROMPTS[0].negativePrompt,
+                  poseCategory: ANIME_PROMPTS[0].poseCategory,
+                  lightingCategory: ANIME_PROMPTS[0].lightingCategory,
+                  clothingState: ANIME_PROMPTS[0].clothingState,
+                  angleCategory: ANIME_PROMPTS[0].angleCategory,
+                }),
+              });
+              const body = await r.text();
+              addDebug(`Ping: ${r.status} — ${body.slice(0, 120)}`);
+            } catch (err) {
+              addDebug(`Ping ERROR: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }}
+          className="rounded border border-blue-800 bg-blue-950/30 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-950/50"
+        >
+          Ping API (1 image)
+        </button>
+        <span className="text-[10px] text-zinc-600">Direct fetch — bypasses batch logic</span>
+      </div>
 
       {debugLog.length > 0 && (
         <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3">
