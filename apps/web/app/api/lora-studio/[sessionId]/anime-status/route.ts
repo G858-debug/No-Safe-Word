@@ -23,6 +23,37 @@ export async function DELETE(
   return NextResponse.json({ ok: true });
 }
 
+// PATCH /api/lora-studio/[sessionId]/anime-status
+// Body: { imageId: string, action: 'approve' | 'reject' }
+// Approves or rejects a single anime image.
+export async function PATCH(
+  request: NextRequest,
+  props: { params: Promise<{ sessionId: string }> },
+) {
+  const { sessionId } = await props.params;
+  const { imageId, action } = (await request.json()) as { imageId: string; action: string };
+
+  if (!imageId || (action !== 'approve' && action !== 'reject')) {
+    return NextResponse.json({ error: 'imageId and action (approve|reject) required' }, { status: 400 });
+  }
+
+  const update = action === 'approve'
+    ? { status: 'approved', human_approved: true }
+    : { status: 'rejected', human_approved: false };
+
+  const { error } = await (supabase as any)
+    .from('nsw_lora_images')
+    .update(update)
+    .eq('id', imageId)
+    .eq('session_id', sessionId);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, action });
+}
+
 const STORAGE_BUCKET = 'lora-anime-images';
 // Process at most this many generating images per poll to stay within timeout
 const MAX_TO_PROCESS = 5;

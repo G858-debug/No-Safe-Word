@@ -12,6 +12,11 @@ import {
   ArrowRight,
   Play,
   Trash2,
+  ThumbsUp,
+  ThumbsDown,
+  X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { ANIME_PROMPTS } from "./prompts";
 import type { AnimePrompt } from "./prompts";
@@ -77,9 +82,11 @@ function StatusDot({ status }: { status: string | null }) {
 function PromptCard({
   state,
   onRetry,
+  onClick,
 }: {
   state: PromptState;
   onRetry: (prompt: AnimePrompt) => void;
+  onClick: () => void;
 }) {
   const { prompt, record, signedUrl } = state;
   const status = record?.status ?? "pending";
@@ -94,7 +101,10 @@ function PromptCard({
       : "border-zinc-800 bg-zinc-900/40";
 
   return (
-    <div className={`flex flex-col rounded-lg border p-1.5 transition-colors ${bgClass}`}>
+    <div
+      className={`flex flex-col rounded-lg border p-1.5 transition-colors ${bgClass} ${signedUrl ? "cursor-pointer hover:ring-1 hover:ring-zinc-600" : ""}`}
+      onClick={signedUrl ? onClick : undefined}
+    >
       {/* Thumbnail */}
       <div className="relative mb-1.5 aspect-[2/3] w-full overflow-hidden rounded bg-zinc-800">
         {signedUrl ? (
@@ -139,13 +149,169 @@ function PromptCard({
       {/* Retry */}
       {status === "rejected" && (
         <button
-          onClick={() => onRetry(prompt)}
+          onClick={(e) => { e.stopPropagation(); onRetry(prompt); }}
           className="mt-1.5 flex items-center justify-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-[9px] text-zinc-300 transition-colors hover:bg-zinc-700"
         >
           <RotateCcw className="h-2.5 w-2.5" />
           Retry
         </button>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Lightbox
+// ─────────────────────────────────────────────────────────────────
+
+function Lightbox({
+  states,
+  index,
+  onClose,
+  onNavigate,
+  onApprove,
+  onReject,
+}: {
+  states: PromptState[];
+  index: number;
+  onClose: () => void;
+  onNavigate: (index: number) => void;
+  onApprove: (imageId: string) => void;
+  onReject: (imageId: string) => void;
+}) {
+  const state = states[index];
+  const { prompt, record, signedUrl } = state;
+  const status = record?.status ?? "pending";
+
+  // Find prev/next indices that have images
+  const findAdjacentWithImage = (dir: -1 | 1) => {
+    for (let i = index + dir; i >= 0 && i < states.length; i += dir) {
+      if (states[i].signedUrl) return i;
+    }
+    return -1;
+  };
+  const prevIdx = findAdjacentWithImage(-1);
+  const nextIdx = findAdjacentWithImage(1);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft" && prevIdx >= 0) onNavigate(prevIdx);
+      else if (e.key === "ArrowRight" && nextIdx >= 0) onNavigate(nextIdx);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, onNavigate, prevIdx, nextIdx]);
+
+  const canApprove = record && (status === "ready" || status === "rejected");
+  const canReject = record && (status === "ready" || status === "approved");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex max-h-[95vh] max-w-[95vw] flex-col items-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute -right-2 -top-2 z-10 rounded-full bg-zinc-800 p-1.5 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        {/* Navigation arrows */}
+        {prevIdx >= 0 && (
+          <button
+            onClick={() => onNavigate(prevIdx)}
+            className="absolute left-[-60px] top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+        )}
+        {nextIdx >= 0 && (
+          <button
+            onClick={() => onNavigate(nextIdx)}
+            className="absolute right-[-60px] top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+          >
+            <ChevronRight className="h-6 w-6" />
+          </button>
+        )}
+
+        {/* Image */}
+        {signedUrl ? (
+          <img
+            src={signedUrl}
+            alt={`Prompt ${prompt.id}`}
+            className="max-h-[75vh] rounded-lg object-contain"
+          />
+        ) : (
+          <div className="flex h-64 w-48 items-center justify-center rounded-lg bg-zinc-800">
+            <StatusDot status={status} />
+          </div>
+        )}
+
+        {/* Info bar */}
+        <div className="mt-3 flex w-full items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="rounded bg-zinc-800 px-2 py-0.5 font-mono text-xs text-zinc-300">
+              #{prompt.id}
+            </span>
+            <StatusDot status={status} />
+            <span className="text-xs capitalize text-zinc-500">{status}</span>
+            {[
+              prompt.shotType.replace("_", " "),
+              prompt.poseCategory.replace(/_/g, " "),
+              prompt.clothingState.replace(/_/g, " "),
+              prompt.angleCategory.replace(/_/g, " "),
+            ].map((tag) => (
+              <span
+                key={tag}
+                className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+
+          {/* Approve / Reject buttons */}
+          <div className="flex items-center gap-2">
+            {canApprove && (
+              <button
+                onClick={() => record && onApprove(record.id)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-900/40 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-900/60"
+              >
+                <ThumbsUp className="h-4 w-4" />
+                Approve
+              </button>
+            )}
+            {canReject && (
+              <button
+                onClick={() => record && onReject(record.id)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-900/40 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-900/60"
+              >
+                <ThumbsDown className="h-4 w-4" />
+                Reject
+              </button>
+            )}
+            {status === "approved" && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-950/40 px-4 py-2 text-sm font-medium text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                Approved
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Keyboard hint */}
+        <p className="mt-2 text-[10px] text-zinc-600">
+          ← → navigate · Esc close
+        </p>
+      </div>
     </div>
   );
 }
@@ -393,6 +559,28 @@ export default function GeneratePage() {
     [dispatchPrompt, startPolling, fetchStatus],
   );
 
+  // ── Lightbox state ──────────────────────────────────────────
+
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  const handleApprove = useCallback(async (imageId: string) => {
+    await fetch(`/api/lora-studio/${sessionId}/anime-status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageId, action: "approve" }),
+    });
+    await fetchStatus();
+  }, [sessionId, fetchStatus]);
+
+  const handleReject = useCallback(async (imageId: string) => {
+    await fetch(`/api/lora-studio/${sessionId}/anime-status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageId, action: "reject" }),
+    });
+    await fetchStatus();
+  }, [sessionId, fetchStatus]);
+
   // ── Derived values ────────────────────────────────────────────
 
   const progressPct = Math.round((counts.ready / 200) * 100);
@@ -569,10 +757,27 @@ export default function GeneratePage() {
 
       {/* 200-card grid */}
       <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-8 lg:grid-cols-10">
-        {states.map((s) => (
-          <PromptCard key={s.prompt.id} state={s} onRetry={handleRetry} />
+        {states.map((s, i) => (
+          <PromptCard
+            key={s.prompt.id}
+            state={s}
+            onRetry={handleRetry}
+            onClick={() => setLightboxIndex(i)}
+          />
         ))}
       </div>
+
+      {/* Lightbox modal */}
+      {lightboxIndex !== null && (
+        <Lightbox
+          states={states}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={setLightboxIndex}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
+      )}
 
       {/* Distribution stats */}
       <div className="mt-8 rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
