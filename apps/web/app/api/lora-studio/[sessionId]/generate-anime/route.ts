@@ -5,7 +5,9 @@ import { supabase } from '@no-safe-word/story-engine';
 // Must use versioned predictions endpoint (/v1/predictions with version field),
 // not the model-based endpoint (/v1/models/{name}/predictions) which returns 404.
 const REPLICATE_MODEL_VERSION = 'c86579ac5193bf45422f1c8b92742135aa859b1850a8e4c531bff222fc75273d';
-const VENUS_BODY_LORA_URL = 'https://civitai.com/api/download/models/136081';
+// NOTE: External LoRA (Venus Body) removed — CivitAI downloads fail on Replicate workers
+// (pget doesn't support auth). Base SDXL is sufficient for pose reference images
+// since Flux Kontext does the actual photorealistic conversion.
 
 // POST /api/lora-studio/[sessionId]/generate-anime
 // Triggers a single Replicate prediction for one anime training image.
@@ -17,7 +19,6 @@ export async function POST(
   const { sessionId } = await props.params;
 
   const token = process.env.REPLICATE_API_TOKEN;
-  console.log('[generate-anime] hit, token present:', !!token, 'sessionId:', sessionId);
   if (!token) {
     return NextResponse.json({ error: 'REPLICATE_API_TOKEN not set' }, { status: 500 });
   }
@@ -63,8 +64,6 @@ export async function POST(
         input: {
           prompt,
           negative_prompt: negativePrompt,
-          replicate_weights: VENUS_BODY_LORA_URL,
-          lora_scale: 0.75,
           width: 768,
           height: 1152,
           num_inference_steps: 30,

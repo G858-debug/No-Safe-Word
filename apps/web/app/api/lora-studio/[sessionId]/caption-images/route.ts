@@ -79,13 +79,22 @@ export async function POST(
       const caption =
         message.content[0]?.type === 'text' ? message.content[0].text.trim() : '';
 
-      if (caption) {
+      // Skip refusals — Claude occasionally refuses to describe non-photorealistic images.
+      // Storing a refusal as a training caption would corrupt the dataset.
+      const isRefusal = caption.toLowerCase().startsWith("i'm not able") ||
+        caption.toLowerCase().startsWith("i cannot") ||
+        caption.toLowerCase().startsWith("i'm unable") ||
+        caption.toLowerCase().startsWith("i am unable");
+
+      if (caption && !isRefusal) {
         await (supabase as any)
           .from('nsw_lora_images')
           .update({ caption })
           .eq('id', id);
 
         results.push({ id, caption });
+      } else if (isRefusal) {
+        console.warn('[caption-images] Claude refused to caption image', id, '— skipping');
       }
     } catch (err) {
       console.error('[caption-images] Failed for image', id, err);
