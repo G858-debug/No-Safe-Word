@@ -439,6 +439,11 @@ export async function POST(
             /looking (directly )?(at|into) (the )?camera/gi,
             'looking at the other person',
           );
+          // If no gaze direction was mentioned at all, append interpersonal gaze.
+          // Without this, Flux defaults to camera gaze from the reference portraits.
+          if (!/looking at the other person/i.test(sceneForFlux) && !/looking at (him|her|each other|one another)/i.test(sceneForFlux)) {
+            sceneForFlux += ' Both people are looking at each other, not at the camera.';
+          }
         }
 
         // Build Flux-native prompt: strip SDXL syntax, enhance gaze descriptions,
