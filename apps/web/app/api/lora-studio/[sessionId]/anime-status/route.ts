@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
+import { getRunPodJobStatus } from '@no-safe-word/image-gen/runpod';
 import sharp from 'sharp';
 
 // DELETE /api/lora-studio/[sessionId]/anime-status
@@ -61,18 +62,13 @@ const MAX_TO_PROCESS = 5;
 
 // GET /api/lora-studio/[sessionId]/anime-status
 // Returns all nsw_lora_images for the session (anime stage).
-// For images in 'generating' status, checks Replicate and completes
-// storage when predictions succeed. Returns signed URLs for ready images.
+// For images in 'generating' status, checks RunPod and completes
+// storage when jobs succeed. Returns signed URLs for ready images.
 export async function GET(
   _request: NextRequest,
   props: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await props.params;
-
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) {
-    return NextResponse.json({ error: 'REPLICATE_API_TOKEN not set' }, { status: 500 });
-  }
 
   // Fetch all anime images for this session
   const { data: images, error } = await (supabase as any)
@@ -88,7 +84,7 @@ export async function GET(
 
   const imageList = (images ?? []) as Record<string, any>[];
 
-  // Find generating images with a prediction ID to check
+  // Find generating images with a job ID to check
   const toCheck = imageList
     .filter((img) => img.status === 'generating' && img.replicate_prediction_id)
     .slice(0, MAX_TO_PROCESS);
@@ -97,26 +93,13 @@ export async function GET(
     await Promise.allSettled(
       toCheck.map(async (img) => {
         try {
-          const predRes = await fetch(
-            `https://api.replicate.com/v1/predictions/${img.replicate_prediction_id}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          if (!predRes.ok) return;
+          const jobStatus = await getRunPodJobStatus(img.replicate_prediction_id);
 
-          const pred = await predRes.json();
-
-          if (pred.status === 'succeeded' && pred.output) {
-            // Replicate output is a URL string or array of URL strings
-            const replicateUrl: string = Array.isArray(pred.output)
-              ? pred.output[0]
-              : pred.output;
-
-            if (!replicateUrl) return;
-
-            // Download from Replicate
-            const imgRes = await fetch(replicateUrl);
-            if (!imgRes.ok) return;
-            const rawBuffer = Buffer.from(await imgRes.arrayBuffer());
+          if (jobStatus.status === 'COMPLETED' && jobStatus.output?.images?.[0]) {
+            // RunPod returns base64 image data
+            const imageData = jobStatus.output.images[0].data;
+            const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
+            const rawBuffer = Buffer.from(base64Data, 'base64');
 
             // Crop top 18% to remove head — body-only for LoRA training
             const metadata = await sharp(rawBuffer).metadata();
@@ -157,19 +140,20 @@ export async function GET(
             img.status = 'ready';
             img.anime_image_url = storagePath;
           } else if (
-            pred.status === 'failed' ||
-            pred.status === 'canceled'
+            jobStatus.status === 'FAILED' ||
+            jobStatus.status === 'CANCELLED' ||
+            jobStatus.status === 'TIMED_OUT'
           ) {
             await (supabase as any)
               .from('nsw_lora_images')
               .update({
                 status: 'rejected',
-                ai_rejection_reason: pred.error ?? `Prediction ${pred.status}`,
+                ai_rejection_reason: jobStatus.error ?? `RunPod job ${jobStatus.status}`,
               })
               .eq('id', img.id);
 
             img.status = 'rejected';
-            img.ai_rejection_reason = pred.error ?? `Prediction ${pred.status}`;
+            img.ai_rejection_reason = jobStatus.error ?? `RunPod job ${jobStatus.status}`;
           }
         } catch (err) {
           console.error('[anime-status] Check failed for', img.id, err);

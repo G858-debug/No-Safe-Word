@@ -1,12 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
+import { submitRunPodJob } from '@no-safe-word/image-gen/runpod';
 
-// adirik/realvisxl-v4.0 — Photorealistic SDXL fine-tune, great at bodies.
-// Uses versioned predictions endpoint (/v1/predictions with version field).
-const REPLICATE_MODEL_VERSION = '85a58cc71587cc27539b7c83eb1ce4aea02feedfb9a9fae0598cebc110a3d695';
+// ComfyUI workflow template for RealVisXL V5.0 + Curvy body SDXL LoRA.
+// Runs on existing RunPod ComfyUI serverless endpoint.
+function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
+  return {
+    '1': {
+      class_type: 'CheckpointLoaderSimple',
+      inputs: { ckpt_name: 'RealVisXL_V5.0.safetensors' },
+    },
+    '2': {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: 'curvy-body-sdxl.safetensors',
+        strength_model: 0.85,
+        strength_clip: 0.85,
+        model: ['1', 0],
+        clip: ['1', 1],
+      },
+    },
+    '3': {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: prompt, clip: ['2', 1] },
+    },
+    '4': {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: negativePrompt, clip: ['2', 1] },
+    },
+    '5': {
+      class_type: 'EmptyLatentImage',
+      inputs: { width: 768, height: 1152, batch_size: 1 },
+    },
+    '6': {
+      class_type: 'KSampler',
+      inputs: {
+        model: ['2', 0],
+        positive: ['3', 0],
+        negative: ['4', 0],
+        latent_image: ['5', 0],
+        seed,
+        steps: 35,
+        cfg: 5.0,
+        sampler_name: 'dpmpp_sde',
+        scheduler: 'karras',
+        denoise: 1.0,
+      },
+    },
+    '7': {
+      class_type: 'VAEDecode',
+      inputs: { samples: ['6', 0], vae: ['1', 2] },
+    },
+    '8': {
+      class_type: 'SaveImage',
+      inputs: { images: ['7', 0], filename_prefix: 'body_gen' },
+    },
+  };
+}
 
 // POST /api/lora-studio/[sessionId]/generate-anime
-// Triggers a single Replicate prediction for one anime training image.
+// Triggers a RunPod ComfyUI job for one body training image.
 // Creates (or updates on retry) an nsw_lora_images record.
 export async function POST(
   request: NextRequest,
@@ -15,12 +68,6 @@ export async function POST(
   const { sessionId } = await props.params;
 
   console.log('[generate-anime] POST hit, sessionId:', sessionId);
-
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) {
-    console.error('[generate-anime] REPLICATE_API_TOKEN not set');
-    return NextResponse.json({ error: 'REPLICATE_API_TOKEN not set' }, { status: 500 });
-  }
 
   const body = await request.json() as {
     prompt: string;
@@ -48,47 +95,25 @@ export async function POST(
     console.error('[generate-anime] Session not found:', sessionId, sessionErr?.message);
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
-  console.log('[generate-anime] Session found, creating prediction...');
+  console.log('[generate-anime] Session found, submitting RunPod job...');
 
-  // Create the Replicate prediction (async — does not wait for completion)
-  const replicateRes = await fetch(
-    'https://api.replicate.com/v1/predictions',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        Prefer: 'respond-async',
-      },
-      body: JSON.stringify({
-        version: REPLICATE_MODEL_VERSION,
-        input: {
-          prompt,
-          negative_prompt: negativePrompt,
-          width: 768,
-          height: 1152,
-          num_inference_steps: 30,
-          guidance_scale: 7.5,
-          seed: Math.floor(Math.random() * 2_147_483_647),
-          disable_safety_checker: true,
-        },
-      }),
-    },
-  );
+  const seed = Math.floor(Math.random() * 2_147_483_647);
+  const workflow = buildWorkflow(prompt, negativePrompt, seed);
 
-  if (!replicateRes.ok) {
-    const errText = await replicateRes.text();
-    console.error('[lora-studio/generate-anime] Replicate error:', errText);
+  let jobId: string;
+  try {
+    const result = await submitRunPodJob(workflow);
+    jobId = result.jobId;
+  } catch (err: any) {
+    console.error('[generate-anime] RunPod submit error:', err.message);
     return NextResponse.json(
-      { error: `Replicate API error: ${replicateRes.status}`, detail: errText },
+      { error: `RunPod API error: ${err.message}` },
       { status: 502 },
     );
   }
 
-  const prediction = await replicateRes.json();
-  const predictionId: string = prediction.id;
-
   // Upsert the nsw_lora_images record (handles retries cleanly)
+  // Store RunPod job ID in replicate_prediction_id column (reused for polling)
   const { data: existing } = await (supabase as any)
     .from('nsw_lora_images')
     .select('id')
@@ -103,7 +128,7 @@ export async function POST(
       .from('nsw_lora_images')
       .update({
         status: 'generating',
-        replicate_prediction_id: predictionId,
+        replicate_prediction_id: jobId,
         anime_image_url: null,
       })
       .eq('id', existing.id);
@@ -116,7 +141,7 @@ export async function POST(
         stage: 'anime',
         status: 'generating',
         anime_prompt: prompt,
-        replicate_prediction_id: predictionId,
+        replicate_prediction_id: jobId,
         pose_category: poseCategory,
         lighting_category: lightingCategory,
         clothing_state: clothingState,
@@ -134,6 +159,6 @@ export async function POST(
     imageId = inserted.id;
   }
 
-  console.log('[generate-anime] ✓ imageId:', imageId, 'predictionId:', predictionId);
-  return NextResponse.json({ imageId, predictionId });
+  console.log('[generate-anime] imageId:', imageId, 'runpodJobId:', jobId);
+  return NextResponse.json({ imageId, predictionId: jobId });
 }

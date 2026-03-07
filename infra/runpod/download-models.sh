@@ -122,11 +122,17 @@ VOLUME_MODELS="${VOLUME_LORAS_DIR%/loras}"  # /runpod-volume/models
 
 echo "[NSW] Cleaning up SDXL model files..."
 
-# Checkpoints dir: SDXL only (Juggernaut XL, RealVisXL, Lustify). Flux uses diffusion_models/.
+# Checkpoints dir: remove old SDXL checkpoints but keep RealVisXL V5.0 (used by LoRA Studio)
 if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
-  rm -f "${VOLUME_MODELS}/checkpoints/"*.safetensors
-  rm -f "${VOLUME_MODELS}/checkpoints/"*.ckpt
-  echo "[NSW] ✓ Cleared checkpoints/ (SDXL checkpoints removed)"
+  for ckpt_file in "${VOLUME_MODELS}/checkpoints/"*.safetensors "${VOLUME_MODELS}/checkpoints/"*.ckpt; do
+    [ -f "$ckpt_file" ] || continue
+    ckpt_name=$(basename "$ckpt_file")
+    if [ "$ckpt_name" != "RealVisXL_V5.0.safetensors" ]; then
+      echo "[NSW] Removing old checkpoint: $ckpt_name"
+      rm -f "$ckpt_file"
+    fi
+  done
+  echo "[NSW] ✓ Old SDXL checkpoints removed (kept RealVisXL V5.0)"
 fi
 
 # FaceDetailer / YOLO detection models (no longer used with Kontext)
@@ -170,6 +176,7 @@ KEEP_LORAS=(
   "flux-oiled-skin.safetensors"
   "flux-sweat-v2.safetensors"
   "flux-beauty-skin.safetensors"
+  "curvy-body-sdxl.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -206,6 +213,15 @@ download_to_volume "2585889" "flux-beauty-skin.safetensors"
 # Kontext LoRAs — downloaded at runtime (small files, < 200MB each).
 # Larger models (Flux Kontext UNET ~8GB, CLIP encoders, VAE) live on the
 # network volume and are managed via scripts/download-kontext-models.mjs
+
+# ---- LoRA Studio: RealVisXL V5.0 checkpoint + Curvy body LoRA ----
+# Used for photorealistic body image generation in the LoRA training pipeline.
+download_model \
+  "https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0.safetensors" \
+  "checkpoints" \
+  "RealVisXL_V5.0.safetensors"
+
+download_to_volume "1449869" "curvy-body-sdxl.safetensors"
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then
