@@ -204,6 +204,7 @@ export function selectKontextResources(opts: {
   const { gender, secondaryGender, isSfw, imageType, prompt, hasDualCharacter } = opts;
   const isFacebookSfw = imageType === 'facebook_sfw';
   const isNsfw = imageType === 'website_nsfw_paired';
+  const isFullBody = imageType === 'fullBody';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
   const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
   const isKissing = /\b(kiss|kissing|kisses|french.kiss|lips.meet|lips.touch)\b/i.test(prompt);
@@ -250,6 +251,7 @@ export function selectKontextResources(opts: {
     let bustsStrength = 0.7 * secondaryReduction;
     if (isFacebookSfw) bustsStrength = 0.4 * secondaryReduction;
     else if (isNsfw) bustsStrength = 0.85 * secondaryReduction;
+    else if (isFullBody) bustsStrength = 0.85 * secondaryReduction; // full figure visible — stronger effect
     loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
 
     // Hourglass body shape — strongest for NSFW since Flux has no negative prompt
@@ -257,6 +259,7 @@ export function selectKontextResources(opts: {
     let hourglassStrength = 0.9 * secondaryReduction;
     if (isFacebookSfw) hourglassStrength = 0.5 * secondaryReduction;
     else if (isNsfw) hourglassStrength = 0.95 * secondaryReduction;
+    else if (isFullBody) hourglassStrength = 1.0 * secondaryReduction; // full figure visible — maximum effect
     loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(hourglassStrength * 100) / 100, strengthClip: Math.round(hourglassStrength * 100) / 100 });
   }
 

@@ -104,7 +104,7 @@ export async function POST(
     const kontextResources = selectKontextResources({
       gender,
       isSfw: true,
-      imageType: 'portrait',
+      imageType: imageType,
       prompt: fluxPrompt,
       hasDualCharacter: false,
     });
