@@ -9,7 +9,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Check,
   Loader2,
@@ -67,9 +66,7 @@ interface ImageSlotState {
   isGenerating: boolean;
   approved: boolean;
   approvedUrl: string | null;
-  prompt: string;
-  negativePrompt: string;
-  promptEdited: boolean;
+  prompt: string; // Flux identity preview — used for approved_prompt, not displayed
   error: string | null;
   jobId: string | null;
   pollStartTime: number | null;
@@ -121,211 +118,35 @@ const ROLE_STYLES: Record<string, { label: string; className: string }> = {
 };
 
 /**
- * Ensure the age in a portrait prompt matches the canonical age from character data.
+ * Client-side mirror of buildKontextIdentityPrefix.
+ * Generates the Flux prose identity string shown in the preview and stored as approved_prompt.
+ * Flux's T5 encoder processes natural language — no emphasis weights, no tag lists.
  */
-function ensureCorrectAge(prompt: string, correctAge: string): string {
-  if (!correctAge) return prompt;
-  // Match the first standalone age number in the prompt (not inside emphasis weights like :1.3)
-  return prompt.replace(
-    /(?<=,\s)\d{1,3}(?=\s*(?:years?\s*old)?,)/,
-    correctAge
-  );
-}
-
-/** Simplify long bodyType descriptions to prevent SDXL bodybuilder exaggeration */
-function simplifyBodyType(raw: string): string {
-  if (!raw.includes(",")) return raw;
-  const buildKw = [
-    "slim", "slender", "petite", "lean", "thin",
-    "athletic", "toned", "fit", "gym-fit",
-    "muscular", "naturally muscular", "well-built",
-    "curvy", "curvaceous", "voluptuous", "full-figured",
-    "stocky", "heavyset", "broad", "tall", "short",
-  ];
-  const lower = raw.toLowerCase();
-  const matched: string[] = [];
-  for (const kw of buildKw) {
-    if (lower.includes(kw)) {
-      if (kw === "muscular" && matched.some((m) => m.includes("muscular"))) continue;
-      matched.push(kw);
-    }
-  }
-  return matched.length > 0 ? matched.slice(0, 3).join(", ") : raw.split(",")[0].trim();
-}
-
-/** Strip full-body framing cues that cause NSFW issues in head-and-shoulders portraits */
-function stripFullBodyCues(text: string): string {
-  return text.replace(/\b(?:full[- ]?body|full[- ]?length|from head to toe)\b/gi, "").replace(/\s{2,}/g, " ").trim();
-}
-
-/** Detect African male character from description fields (client-side mirror) */
-function isAfricanMaleDesc(d: Record<string, string>): boolean {
-  return (
-    d.gender === "male" &&
-    /\b(?:Black|African|Zulu|Xhosa|Ndebele|Sotho|Tswana|Venda|Tsonga)\b/i.test(d.ethnicity || "")
-  );
-}
-
-/** Client-side mirror of the server prompt builder for portrait shots */
-function buildPortraitPrompt(desc: Record<string, unknown>): string {
+function buildFluxIdentityPreview(desc: Record<string, unknown>): string {
   const d = desc as Record<string, string>;
-  const africanMale = isAfricanMaleDesc(d);
-  // Framing and face-detail tags go FIRST so CLIP gives them maximum weight
-  const parts: string[] = [
-    "masterpiece, best quality, highly detailed",
-    "(close-up head and shoulders portrait:1.4), (face in focus:1.3), (detailed facial features:1.2)",
-    "(smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)",
-  ];
+  const gender = d.gender === "male" ? "man" : d.gender === "female" ? "woman" : "person";
+  const pronoun = d.gender === "male" ? "He" : d.gender === "female" ? "She" : "They";
 
-  if (d.age) parts.push(d.age);
-  if (d.gender) parts.push(d.gender);
+  let core = "";
+  if (d.age && d.ethnicity) core = `A ${d.age}-year-old ${d.ethnicity} ${gender}`;
+  else if (d.age) core = `A ${d.age}-year-old ${gender}`;
+  else if (d.ethnicity) core = `A ${d.ethnicity} ${gender}`;
+  else core = `A ${gender}`;
 
-  if (d.ethnicity) {
-    if (africanMale) {
-      parts.push("(African male:1.3)");
-      const specific = (d.ethnicity || "").replace(/^Black\s+/i, "").trim();
-      if (specific && specific.toLowerCase() !== "african") {
-        parts.push(specific);
-      }
-    } else {
-      parts.push(d.ethnicity);
-    }
+  const details: string[] = [];
+  if (d.hairColor || d.hairStyle) {
+    const hair = [d.hairColor, d.hairStyle].filter(Boolean).join(" ");
+    details.push(/\bhair\b/i.test(hair) ? hair : `${hair} hair`);
   }
+  if (d.eyeColor) details.push(`${d.eyeColor} eyes`);
+  if (d.skinTone) details.push(`${d.skinTone} skin`);
+  if (d.distinguishingFeatures) details.push(d.distinguishingFeatures);
+  if (details.length > 0) core += ` with ${details.join(", ")}`;
 
-  if (d.bodyType) {
-    const sanitized = stripFullBodyCues(simplifyBodyType(d.bodyType));
-    if (sanitized) {
-      parts.push(/\bbody\b|build\b|figure\b|frame\b|physique\b/i.test(sanitized)
-        ? sanitized
-        : `${sanitized} body`);
-    }
-  }
-
-  if (d.hairColor && d.hairStyle) {
-    const needsSuffix = !/\bhair\b/i.test(d.hairStyle);
-    parts.push(`${d.hairColor} ${d.hairStyle}${needsSuffix ? " hair" : ""}`);
-  } else if (d.hairColor) {
-    parts.push(`${d.hairColor} hair`);
-  } else if (d.hairStyle) {
-    parts.push(/\bhair\b/i.test(d.hairStyle) ? d.hairStyle : `${d.hairStyle} hair`);
-  }
-
-  if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
-
-  if (d.skinTone) {
-    parts.push(`${d.skinTone} skin`);
-  }
-
-  if (africanMale) {
-    parts.push("full lips, strong jawline");
-  }
-
-  if (d.expression) parts.push(`${d.expression} expression`);
-  if (d.clothing) parts.push(`wearing ${d.clothing}`);
-  if (d.pose) parts.push(d.pose);
-  if (d.distinguishingFeatures) parts.push(d.distinguishingFeatures);
-
-  parts.push("(professional portrait photography:1.2), soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background");
-  parts.push("looking at camera, neutral expression, photorealistic");
-
-  return parts.filter(Boolean).join(", ");
-}
-
-/** Client-side prompt builder for full-body standing shots */
-function buildFullBodyPrompt(desc: Record<string, unknown>): string {
-  const d = desc as Record<string, string>;
-  const africanMale = isAfricanMaleDesc(d);
-  const parts: string[] = ["masterpiece, best quality, highly detailed, (smooth clear skin:1.2), (natural skin:1.1), (matte skin:1.1)"];
-
-  if (d.age) parts.push(d.age);
-  if (d.gender) parts.push(d.gender);
-
-  if (d.ethnicity) {
-    if (africanMale) {
-      parts.push("(African male:1.3)");
-      const specific = (d.ethnicity || "").replace(/^Black\s+/i, "").trim();
-      if (specific && specific.toLowerCase() !== "african") {
-        parts.push(specific);
-      }
-    } else {
-      parts.push(d.ethnicity);
-    }
-  }
-
-  // Full body: include FULL bodyType (not simplified) — the whole point is body accuracy
-  if (d.bodyType) {
-    parts.push(`${d.bodyType} body`);
-  }
-
-  if (d.hairColor && d.hairStyle) {
-    const needsSuffix = !/\bhair\b/i.test(d.hairStyle);
-    parts.push(`${d.hairColor} ${d.hairStyle}${needsSuffix ? " hair" : ""}`);
-  } else if (d.hairColor) {
-    parts.push(`${d.hairColor} hair`);
-  } else if (d.hairStyle) {
-    parts.push(/\bhair\b/i.test(d.hairStyle) ? d.hairStyle : `${d.hairStyle} hair`);
-  }
-
-  if (d.eyeColor) parts.push(`${d.eyeColor} eyes`);
-  if (d.skinTone) parts.push(`${d.skinTone} skin`);
-
-  if (africanMale) {
-    parts.push("full lips, strong jawline");
-  }
-
-  if (d.distinguishingFeatures) parts.push(d.distinguishingFeatures);
-  if (d.clothing) parts.push(`wearing ${d.clothing}`);
-
-  // Female characters always wear heels in full-body shots
-  if (d.gender?.toLowerCase() !== "male") {
-    parts.push("wearing high heels");
-  }
-
-  parts.push("full body standing pose, full body visible head to feet");
-  parts.push("standing naturally, looking at camera");
-  parts.push("soft diffused studio lighting, (seamless medium gray backdrop:1.3), plain uniform background");
-  parts.push("fashion photography style, photorealistic");
-
-  return parts.filter(Boolean).join(", ");
-}
-
-/** Client-side mirror of the server negative prompt builder for portraits */
-function buildPortraitNegativePrompt(desc: Record<string, unknown>): string {
-  const d = desc as Record<string, string>;
-  let result =
-    "(deformed, distorted, disfigured:1.3), poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands, extra fingers, missing fingers, (blurry:1.2), bad quality, watermark, text, signature, (cross-eyed:1.3), (strabismus:1.3), asymmetric eyes, different eye directions, (extra people:1.2), extra face, clone face, (3d render, cgi, illustration, cartoon, anime, painting, drawing:1.3), (bad teeth, deformed teeth:1.1), (skin blemishes:1.3), (acne:1.3), (skin spots:1.2), (pimples:1.3), (moles:1.2), (freckles:1.1), (skin imperfections:1.2)";
-
-  // Portraits are always SFW
-  result += ", (nsfw:1.5), (nude:1.5), (naked:1.5), (topless:1.5), (nipples:1.5), (breast:1.3), explicit, exposed skin";
-
-  // Reinforce head-and-shoulders framing by penalising wide/full-body compositions
-  result += ", (full body:1.4), (full length:1.4), (wide shot:1.3), (legs:1.2), (feet:1.2)";
-
-  // Enforce uniform studio background — prevent outdoor, textured, or coloured backdrops
-  result += ", (outdoor:1.3), (nature:1.2), (city:1.2), (room:1.2), (textured background:1.2), (patterned background:1.2), (colorful background:1.2)";
-
-  // African feature correction for male characters
-  if (isAfricanMaleDesc(d)) {
-    result += ", European facial features, caucasian features";
-  }
-
-  return result;
-}
-
-/** Debug levels for systematic resource testing */
-const DEBUG_LEVELS = [
-  { value: "full", label: "Full Pipeline", description: "Normal — all resources active" },
-  { value: "bare", label: "Bare", description: "No LoRAs, minimal negative, no FaceDetailer" },
-  { value: "model", label: "+ Model Selection", description: "Auto-selected model, no LoRAs, minimal negative, no FaceDetailer" },
-  { value: "loras", label: "+ LoRAs", description: "Model + LoRAs, minimal negative, no FaceDetailer" },
-  { value: "negative", label: "+ Full Negative", description: "Model + LoRAs + full negative prompt, no FaceDetailer" },
-] as const;
-
-/** Gender-based model selection: Lustify for female, RealVisXL for male */
-function getModelForGender(desc: Record<string, unknown>): string {
-  const gender = (desc as Record<string, string>).gender?.toLowerCase();
-  if (gender === "male") return "realvisxl-v5.safetensors";
-  return "lustify-v5-endgame.safetensors"; // female and any other gender
+  const sentences = [core + "."];
+  if (d.bodyType) sentences.push(`${pronoun} has a ${d.bodyType} build.`);
+  if (d.gender === "female") sentences.push("She has beautiful features and smooth, glowing skin.");
+  return sentences.join(" ");
 }
 
 const POLL_INTERVAL = 3000;
@@ -338,7 +159,6 @@ function makeSlotState(
   approvedUrl: string | null,
   seed: number | null,
   prompt: string,
-  negativePrompt: string,
 ): ImageSlotState {
   return {
     imageUrl,
@@ -347,8 +167,6 @@ function makeSlotState(
     approved,
     approvedUrl,
     prompt,
-    negativePrompt,
-    promptEdited: false,
     error: null,
     jobId: null,
     pollStartTime: null,
@@ -376,7 +194,6 @@ export default function CharacterApproval({
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for elapsed time display
-  const [debugLevel, setDebugLevel] = useState("full");
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -403,6 +220,7 @@ export default function CharacterApproval({
       const fullBodyUrl = ch.approved_fullbody_image_url || ch.pending_fullbody_image_url || null;
       const fullBodyId = ch.approved_fullbody_image_id || ch.pending_fullbody_image_id || null;
 
+      const fluxPreview = buildFluxIdentityPreview(desc);
       initial[ch.id] = {
         portrait: makeSlotState(
           portraitUrl,
@@ -410,8 +228,7 @@ export default function CharacterApproval({
           ch.approved,
           ch.approved_image_url || null,
           ch.approved_seed ?? null,
-          buildPortraitPrompt(desc),
-          buildPortraitNegativePrompt(desc),
+          fluxPreview,
         ),
         fullBody: makeSlotState(
           fullBodyUrl,
@@ -419,8 +236,7 @@ export default function CharacterApproval({
           ch.approved_fullbody ?? false,
           ch.approved_fullbody_image_url || null,
           ch.approved_fullbody_seed ?? null,
-          buildFullBodyPrompt(desc),
-          buildPortraitNegativePrompt(desc),
+          fluxPreview,
         ),
         showDescription: false,
         lora: {
@@ -662,18 +478,13 @@ export default function CharacterApproval({
 
   const handleGenerate = useCallback(
     async (storyCharId: string, type: ImageType) => {
-      console.log(`[StoryPublisher] Generating ${type} for character ${storyCharId}, debugLevel: ${debugLevel}`);
+      console.log(`[StoryPublisher] Generating ${type} for character ${storyCharId}`);
       updateSlot(storyCharId, type, { isGenerating: true, error: null });
 
       try {
         const state = charStates[storyCharId]?.[type];
-        const character = characters.find((c) => c.id === storyCharId);
-        const genderModel = character ? getModelForGender(character.characters.description) : "lustify-v5-endgame.safetensors";
         const body: Record<string, string | number> = { type };
         if (modelUrn) body.model_urn = modelUrn;
-        if (debugLevel !== "full") body.debugLevel = debugLevel;
-        body.forceModel = genderModel;
-        if (state?.promptEdited) body.negativePrompt = state.negativePrompt;
         if (state?.lockSeed && state.seed) body.seed = state.seed;
 
         const res = await fetch(
@@ -700,7 +511,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, characters, updateSlot, startPolling, modelUrn, debugLevel]
+    [charStates, updateSlot, startPolling, modelUrn]
   );
 
   const handleRegenerate = useCallback(
@@ -716,14 +527,8 @@ export default function CharacterApproval({
       });
 
       try {
-        const character = characters.find((c) => c.id === storyCharId);
-        const genderModel = character ? getModelForGender(character.characters.description) : "lustify-v5-endgame.safetensors";
         const body: Record<string, string | number> = { type };
-        if (state.promptEdited) body.prompt = state.prompt;
-        if (state.promptEdited) body.negativePrompt = state.negativePrompt;
         if (modelUrn) body.model_urn = modelUrn;
-        if (debugLevel !== "full") body.debugLevel = debugLevel;
-        body.forceModel = genderModel;
         if (state.lockSeed && state.seed) body.seed = state.seed;
 
         const res = await fetch(
@@ -748,7 +553,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [charStates, characters, updateSlot, startPolling, modelUrn, debugLevel]
+    [charStates, updateSlot, startPolling, modelUrn]
   );
 
   const handleApprove = useCallback(
@@ -763,21 +568,6 @@ export default function CharacterApproval({
       updateSlot(storyCharId, type, { error: null });
 
       try {
-        // Validate prompt age against character data before sending
-        const character = characters.find((c) => c.id === storyCharId);
-        const correctAge = (character?.characters.description as Record<string, string>)?.age;
-        const validatedPrompt = correctAge
-          ? ensureCorrectAge(state.prompt, correctAge)
-          : state.prompt;
-
-        if (validatedPrompt !== state.prompt) {
-          console.warn(
-            `[StoryPublisher] Age mismatch detected in prompt for ${storyCharId}. ` +
-            `Corrected to "${correctAge}" from character data.`
-          );
-          updateSlot(storyCharId, type, { prompt: validatedPrompt });
-        }
-
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/approve`,
           {
@@ -786,7 +576,7 @@ export default function CharacterApproval({
             body: JSON.stringify({
               image_id: state.imageId,
               seed: state.seed,
-              prompt: validatedPrompt,
+              prompt: state.prompt, // Flux identity preview stored as approved_prompt
               type,
             }),
           }
@@ -861,12 +651,9 @@ export default function CharacterApproval({
         updateSlot(ch.id, type, { isGenerating: true, error: null });
 
         const chState = charStates[ch.id]?.[type];
-        const genderModel = getModelForGender(ch.characters.description);
         const body: Record<string, string | number> = { type };
         if (modelUrn) body.model_urn = modelUrn;
-        if (debugLevel !== "full") body.debugLevel = debugLevel;
-        body.forceModel = genderModel;
-        if (chState?.promptEdited) body.negativePrompt = chState.negativePrompt;
+        if (chState?.lockSeed && chState.seed) body.seed = chState.seed;
 
         const res = await fetch(
           `/api/stories/characters/${ch.id}/generate`,
@@ -904,7 +691,7 @@ export default function CharacterApproval({
 
     setGeneratingAll(false);
     setGenerateAllProgress(null);
-  }, [characters, charStates, updateSlot, startPolling, modelUrn, debugLevel]);
+  }, [characters, charStates, updateSlot, startPolling, modelUrn]);
 
   // ------- LoRA Training Actions -------
 
@@ -1116,38 +903,6 @@ export default function CharacterApproval({
         )}
       </div>
 
-      {/* Debug resource level selector */}
-      <div className="flex flex-col gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
-            Debug Level
-          </label>
-          <select
-            value={debugLevel}
-            onChange={(e) => setDebugLevel(e.target.value)}
-            className="flex-1 rounded-md border border-yellow-500/30 bg-background px-3 py-1.5 text-sm"
-            disabled={anyGenerating}
-          >
-            {DEBUG_LEVELS.map((level) => (
-              <option key={level.value} value={level.value}>
-                {level.label}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-muted-foreground hidden sm:inline">
-            {DEBUG_LEVELS.find((l) => l.value === debugLevel)?.description}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-medium text-yellow-400 uppercase tracking-wider whitespace-nowrap">
-            Model
-          </label>
-          <span className="text-xs text-muted-foreground">
-            Auto: Lustify V5 (female) / RealVisXL V5 (male)
-          </span>
-        </div>
-      </div>
-
       {/* All approved banner */}
       {allApproved && (
         <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4">
@@ -1245,6 +1000,16 @@ export default function CharacterApproval({
                   </div>
                 )}
 
+                {/* Flux identity preview — what the model sees */}
+                <div className="rounded-md bg-blue-500/5 border border-blue-500/20 p-3">
+                  <p className="text-xs font-medium text-blue-400 uppercase tracking-wider mb-1.5">
+                    Flux Identity Preview
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed font-mono">
+                    {buildFluxIdentityPreview(ch.characters.description)}
+                  </p>
+                </div>
+
                 {/* Dual image slots: Portrait + Full Body */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {(["portrait", "fullBody"] as const).map((type) => {
@@ -1338,38 +1103,6 @@ export default function CharacterApproval({
                             {slot.error}
                           </div>
                         )}
-
-                        {/* Editable prompt */}
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                            {label} Prompt
-                          </label>
-                          <Textarea
-                            value={slot.prompt}
-                            onChange={(e) =>
-                              updateSlot(ch.id, type, { prompt: e.target.value, promptEdited: true })
-                            }
-                            rows={3}
-                            className="text-xs leading-relaxed resize-y bg-muted/30"
-                            disabled={slot.isGenerating}
-                          />
-                        </div>
-
-                        {/* Negative prompt */}
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-red-400/70 uppercase tracking-wider">
-                            Negative Prompt
-                          </label>
-                          <Textarea
-                            value={slot.negativePrompt}
-                            onChange={(e) =>
-                              updateSlot(ch.id, type, { negativePrompt: e.target.value, promptEdited: true })
-                            }
-                            rows={2}
-                            className="text-xs leading-relaxed resize-y bg-red-500/5 border-red-500/20"
-                            disabled={slot.isGenerating}
-                          />
-                        </div>
 
                         {/* Lock Seed option */}
                         <div className="flex items-center gap-2">
@@ -1529,7 +1262,7 @@ const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; descrip
   generating_dataset: { label: "Generating Dataset", color: "text-blue-400", description: "Creating training images (Nano Banana Pro + ComfyUI)" },
   evaluating: { label: "Evaluating Quality", color: "text-blue-400", description: "Claude Vision is checking face & body consistency" },
   captioning: { label: "Captioning", color: "text-blue-400", description: "Generating training captions" },
-  training: { label: "Training LoRA", color: "text-purple-400", description: "SDXL LoRA training on Replicate" },
+  training: { label: "Training LoRA", color: "text-purple-400", description: "Character LoRA training in progress" },
   validating: { label: "Validating", color: "text-purple-400", description: "Testing LoRA with sample generations" },
   deployed: { label: "Active", color: "text-green-400", description: "Character LoRA is deployed and will be used in scene generation" },
   failed: { label: "Failed", color: "text-red-400", description: "Training failed — click Retry to try again" },
