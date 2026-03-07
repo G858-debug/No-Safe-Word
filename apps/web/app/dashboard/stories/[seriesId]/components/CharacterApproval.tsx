@@ -21,6 +21,9 @@ import {
   Wand2,
   AlertCircle,
   Dna,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -92,6 +95,11 @@ interface CharState {
   fullBody: ImageSlotState;
   showDescription: boolean;
   lora: LoraTrainingState;
+  editingDescription: boolean;
+  localDescription: Record<string, string>; // saved/displayed version
+  descriptionDraft: Record<string, string>;  // in-progress edits
+  savingDescription: boolean;
+  descriptionError: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +229,9 @@ export default function CharacterApproval({
       const fullBodyId = ch.approved_fullbody_image_id || ch.pending_fullbody_image_id || null;
 
       const fluxPreview = buildFluxIdentityPreview(desc);
+      const localDesc = Object.fromEntries(
+        Object.entries(desc).map(([k, v]) => [k, String(v ?? "")])
+      );
       initial[ch.id] = {
         portrait: makeSlotState(
           portraitUrl,
@@ -250,6 +261,11 @@ export default function CharacterApproval({
           estimatedTimeRemaining: null,
           isTriggering: false,
         },
+        editingDescription: false,
+        localDescription: localDesc,
+        descriptionDraft: localDesc,
+        savingDescription: false,
+        descriptionError: null,
       };
     }
     setCharStates(initial);
@@ -313,7 +329,7 @@ export default function CharacterApproval({
   );
 
   const updateCharMeta = useCallback(
-    (id: string, updates: Partial<Pick<CharState, "showDescription">>) => {
+    (id: string, updates: Partial<Omit<CharState, "portrait" | "fullBody" | "lora">>) => {
       setCharStates((prev) => ({
         ...prev,
         [id]: { ...prev[id], ...updates },
@@ -693,6 +709,46 @@ export default function CharacterApproval({
     setGenerateAllProgress(null);
   }, [characters, charStates, updateSlot, startPolling, modelUrn]);
 
+  // ------- Description Editing -------
+
+  const handleSaveDescription = useCallback(
+    async (storyCharId: string, characterId: string) => {
+      const state = charStates[storyCharId];
+      if (!state) return;
+
+      updateCharMeta(storyCharId, { savingDescription: true, descriptionError: null });
+
+      try {
+        const res = await fetch("/api/characters", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: characterId, description: state.descriptionDraft }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Save failed");
+        }
+
+        const newPreview = buildFluxIdentityPreview(state.descriptionDraft);
+        updateCharMeta(storyCharId, {
+          savingDescription: false,
+          editingDescription: false,
+          descriptionError: null,
+          localDescription: { ...state.descriptionDraft },
+        });
+        // Update the stored prompt in both slots so approval captures the new identity
+        updateSlot(storyCharId, "portrait", { prompt: newPreview });
+        updateSlot(storyCharId, "fullBody", { prompt: newPreview });
+      } catch (err) {
+        updateCharMeta(storyCharId, {
+          savingDescription: false,
+          descriptionError: err instanceof Error ? err.message : "Save failed",
+        });
+      }
+    },
+    [charStates, updateCharMeta, updateSlot]
+  );
+
   // ------- LoRA Training Actions -------
 
   const updateLoraState = useCallback(
@@ -1000,14 +1056,117 @@ export default function CharacterApproval({
                   </div>
                 )}
 
-                {/* Flux identity preview — what the model sees */}
-                <div className="rounded-md bg-blue-500/5 border border-blue-500/20 p-3">
-                  <p className="text-xs font-medium text-blue-400 uppercase tracking-wider mb-1.5">
-                    Flux Identity Preview
-                  </p>
+                {/* Flux identity preview — editable */}
+                <div className="rounded-md bg-blue-500/5 border border-blue-500/20 p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-blue-400 uppercase tracking-wider">
+                      Flux Identity Preview
+                    </p>
+                    {!state.editingDescription ? (
+                      <button
+                        onClick={() => updateCharMeta(ch.id, {
+                          editingDescription: true,
+                          descriptionDraft: { ...state.localDescription },
+                          descriptionError: null,
+                        })}
+                        className="flex items-center gap-1 text-xs text-blue-400/70 hover:text-blue-400 transition-colors"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => updateCharMeta(ch.id, {
+                            editingDescription: false,
+                            descriptionError: null,
+                          })}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleSaveDescription(ch.id, ch.characters.id)}
+                          disabled={state.savingDescription}
+                          className="flex items-center gap-1 text-xs text-green-400 hover:text-green-300 transition-colors disabled:opacity-50"
+                        >
+                          {state.savingDescription
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <Save className="h-3 w-3" />
+                          }
+                          Save
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <p className="text-xs text-muted-foreground leading-relaxed font-mono">
-                    {buildFluxIdentityPreview(ch.characters.description)}
+                    {buildFluxIdentityPreview(
+                      state.editingDescription ? state.descriptionDraft : state.localDescription
+                    )}
                   </p>
+
+                  {state.editingDescription && (
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-2 border-t border-blue-500/20">
+                      {([
+                        { key: "age", label: "Age" },
+                        { key: "ethnicity", label: "Ethnicity" },
+                        { key: "skinTone", label: "Skin Tone" },
+                        { key: "hairColor", label: "Hair Color" },
+                        { key: "hairStyle", label: "Hair Style" },
+                        { key: "eyeColor", label: "Eye Color" },
+                        { key: "bodyType", label: "Body Type" },
+                      ] as const).map(({ key, label }) => (
+                        <div key={key} className="space-y-1">
+                          <label className="text-xs text-muted-foreground/70">{label}</label>
+                          <input
+                            type="text"
+                            value={state.descriptionDraft[key] || ""}
+                            onChange={(e) => updateCharMeta(ch.id, {
+                              descriptionDraft: { ...state.descriptionDraft, [key]: e.target.value },
+                            })}
+                            className="w-full rounded px-2 py-1 text-xs bg-background border border-muted text-foreground focus:outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                      ))}
+
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground/70">Gender</label>
+                        <select
+                          value={state.descriptionDraft.gender || "female"}
+                          onChange={(e) => updateCharMeta(ch.id, {
+                            descriptionDraft: { ...state.descriptionDraft, gender: e.target.value },
+                          })}
+                          className="w-full rounded px-2 py-1 text-xs bg-background border border-muted text-foreground focus:outline-none focus:border-blue-500/50"
+                        >
+                          <option value="female">Female</option>
+                          <option value="male">Male</option>
+                          <option value="non-binary">Non-binary</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+
+                      <div className="col-span-2 space-y-1">
+                        <label className="text-xs text-muted-foreground/70">Distinguishing Features</label>
+                        <textarea
+                          value={state.descriptionDraft.distinguishingFeatures || ""}
+                          onChange={(e) => updateCharMeta(ch.id, {
+                            descriptionDraft: { ...state.descriptionDraft, distinguishingFeatures: e.target.value },
+                          })}
+                          rows={2}
+                          className="w-full rounded px-2 py-1 text-xs bg-background border border-muted text-foreground focus:outline-none focus:border-blue-500/50 resize-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {state.descriptionError && (
+                    <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {state.descriptionError}
+                    </div>
+                  )}
                 </div>
 
                 {/* Dual image slots: Portrait + Full Body */}
