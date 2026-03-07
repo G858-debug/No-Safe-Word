@@ -23,6 +23,17 @@ export async function POST(request: NextRequest) {
       { filename: "flux-add-details.safetensors", strengthModel: 0.6, strengthClip: 0.6 },
     ];
 
+    // Body LoRAs for female subjects — same NSFW strengths as the story pipeline
+    const isFemalePrompt = /\b(woman|female|she|her|girl|lady)\b/i.test(finalPrompt);
+    if (isFemalePrompt) {
+      loras.push({ filename: "fc-flux-perfect-busts.safetensors", strengthModel: 0.85, strengthClip: 0.85 });
+      loras.push({ filename: "hourglassv32_FLUX.safetensors", strengthModel: 0.95, strengthClip: 0.95 });
+      // Inject trigger word required by the busts LoRA
+      if (!/\bwoman\b/i.test(finalPrompt)) {
+        finalPrompt = `woman, ${finalPrompt}`;
+      }
+    }
+
     const characterLoraDownloads: CharacterLoraDownload[] = [];
 
     // If a character is selected, fetch their deployed LoRA and inject it
