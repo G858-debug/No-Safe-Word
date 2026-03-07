@@ -140,7 +140,7 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     triggerWord: 'flux-fash',
     description: 'Premium fashion editorial photography — luxury magazine look, sharp cheekbones, flawless skin, high-end studio lighting (CivitAI #2138223)',
     compatibleWith: ['sfw', 'nsfw'],
-    installed: false,
+    installed: true,
     genderCategory: 'female',
   },
   {
@@ -226,9 +226,12 @@ export function selectKontextResources(opts: {
   loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
 
   // 2. Style/Detail LoRA — slot 2 swaps to a style LoRA for female characters:
-  //    • NSFW female solo (no dual) → Boudoir Style (intimate/sensual atmosphere)
-  //    • All other cases → Detail LoRA (fashion editorial not yet installed)
-  if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
+  //    • SFW female solo     → Fashion Editorial (luxury magazine look)
+  //    • NSFW female solo    → Boudoir Style (intimate/sensual atmosphere)
+  //    • All other cases     → Detail LoRA
+  if (hasFemaleCharacter && isSfw && !hasDualCharacter) {
+    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+  } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
     loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
   } else {
     let detailStrength = 0.6;
