@@ -15,7 +15,7 @@ const PORTRAIT_SCENE_DESCRIPTION =
   "Professional portrait photography with soft diffused studio lighting against a clean neutral gray backdrop. Close-up head and shoulders, looking directly at the camera with a confident expression.";
 
 const FULLBODY_SCENE_DESCRIPTION =
-  "Full body standing pose in soft studio lighting against a medium gray backdrop. Standing naturally, full body visible from head to feet.";
+  "Full body standing pose in soft studio lighting against a medium gray backdrop. She wears a form-fitting bodycon dress or tight outfit that accentuates her figure. Full body visible from head to feet, looking directly at the camera.";
 
 // POST /api/stories/characters/[storyCharId]/regenerate — Regenerate with optional custom prompt
 export async function POST(

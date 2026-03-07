@@ -232,7 +232,10 @@ export function selectKontextResources(opts: {
   //    • SFW female solo     → Fashion Editorial (luxury magazine look)
   //    • NSFW female solo    → Boudoir Style (intimate/sensual atmosphere)
   //    • All other cases     → Detail LoRA
-  if (hasFemaleCharacter && isSfw && !hasDualCharacter) {
+  if (hasFemaleCharacter && isSfw && !hasDualCharacter && !isFullBody) {
+    // Fashion editorial on portrait/close-up — but NOT full body. The editorial
+    // LoRA is trained on slim high-fashion models and fights curvy body LoRAs
+    // when the full figure is visible. Use detail LoRA for full body instead.
     loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
     pendingTriggers.push('flux-fash');
   } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
