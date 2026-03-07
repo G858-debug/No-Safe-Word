@@ -199,6 +199,7 @@ export default function GeneratePage() {
   const [dispatchProgress, setDispatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testCount, setTestCount] = useState(10);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isPolling = useRef(false);
@@ -233,11 +234,15 @@ export default function GeneratePage() {
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`/api/lora-studio/${sessionId}/anime-status`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.warn(`[fetchStatus] ${res.status} ${res.statusText}`);
+        return;
+      }
       const data = await res.json();
+      console.log(`[fetchStatus] total=${data.counts?.total} generating=${data.counts?.generating} ready=${data.counts?.ready} failed=${data.counts?.failed}`);
       applyResponse(data.images ?? [], data.signedUrls ?? {}, data.counts ?? counts);
     } catch (err) {
-      console.error("[generate] fetchStatus error:", err);
+      console.error("[fetchStatus] error:", err);
     }
   }, [sessionId, applyResponse]);
 
@@ -279,6 +284,7 @@ export default function GeneratePage() {
 
   const dispatchPrompt = useCallback(
     async (prompt: AnimePrompt) => {
+      console.log(`[dispatch] POST prompt #${prompt.id} to /api/lora-studio/${sessionId}/generate-anime`);
       const res = await fetch(`/api/lora-studio/${sessionId}/generate-anime`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -291,6 +297,7 @@ export default function GeneratePage() {
           angleCategory: prompt.angleCategory,
         }),
       });
+      console.log(`[dispatch] prompt #${prompt.id} response: ${res.status}`);
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         throw new Error(`generate-anime ${res.status}: ${body.slice(0, 200)}`);
@@ -301,41 +308,71 @@ export default function GeneratePage() {
 
   // ── Dispatch a slice of pending prompts ───────────────────────
 
+  const addDebug = useCallback((msg: string) => {
+    const ts = new Date().toLocaleTimeString();
+    setDebugLog((prev) => [...prev.slice(-19), `${ts} ${msg}`]);
+  }, []);
+
   const dispatchBatch = useCallback(
     async (limit?: number) => {
-      setIsGenerating(true);
-      setError(null);
+      try {
+        addDebug(`dispatchBatch(${limit ?? 'all'}) called`);
+        console.log(`[dispatchBatch] called with limit=${limit}`);
+        setIsGenerating(true);
+        setError(null);
 
-      const pending = ANIME_PROMPTS.filter((p) => {
-        const s = states[p.id - 1];
-        return !s.record || s.record.status === "rejected";
-      }).slice(0, limit);
+        const pending = ANIME_PROMPTS.filter((p) => {
+          const s = states[p.id - 1];
+          return !s.record || s.record.status === "rejected";
+        }).slice(0, limit);
 
-      if (pending.length === 0) {
-        setIsGenerating(false);
-        return;
-      }
+        addDebug(`${pending.length} pending prompts to dispatch`);
+        console.log(`[dispatchBatch] ${pending.length} pending prompts (ids: ${pending.slice(0, 5).map(p => p.id).join(',')}${pending.length > 5 ? '...' : ''})`);
 
-      setDispatchProgress({ done: 0, total: pending.length });
-      startPolling();
-
-      for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-        const batch = pending.slice(i, i + BATCH_SIZE);
-        const results = await Promise.allSettled(batch.map((p) => dispatchPrompt(p)));
-        const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
-        if (firstError) {
-          setError(String(firstError.reason));
-          break;
+        if (pending.length === 0) {
+          addDebug('nothing to do');
+          setIsGenerating(false);
+          return;
         }
-        setDispatchProgress({ done: Math.min(i + BATCH_SIZE, pending.length), total: pending.length });
-        if (i + BATCH_SIZE < pending.length) await sleep(BATCH_DELAY_MS);
-      }
 
-      setIsGenerating(false);
-      setDispatchProgress(null);
-      await fetchStatus();
+        setDispatchProgress({ done: 0, total: pending.length });
+        startPolling();
+
+        for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+          const batch = pending.slice(i, i + BATCH_SIZE);
+          addDebug(`dispatching batch ${i / BATCH_SIZE + 1} (${batch.length} prompts)...`);
+          console.log(`[dispatchBatch] dispatching batch ${i / BATCH_SIZE + 1} (${batch.length} prompts)`);
+          const results = await Promise.allSettled(batch.map((p) => dispatchPrompt(p)));
+          console.log(`[dispatchBatch] batch settled:`, results.map(r => r.status));
+          const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+          if (firstError) {
+            const errMsg = String(firstError.reason);
+            addDebug(`ERROR: ${errMsg.slice(0, 100)}`);
+            console.error('[dispatchBatch] error:', firstError.reason);
+            setError(errMsg);
+            break;
+          }
+          addDebug(`batch ${i / BATCH_SIZE + 1} done ✓`);
+          setDispatchProgress({ done: Math.min(i + BATCH_SIZE, pending.length), total: pending.length });
+          if (i + BATCH_SIZE < pending.length) await sleep(BATCH_DELAY_MS);
+        }
+
+        addDebug('all batches done, fetching status...');
+        console.log('[dispatchBatch] done, fetching final status');
+        setIsGenerating(false);
+        setDispatchProgress(null);
+        await fetchStatus();
+        addDebug('status fetched ✓');
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        addDebug(`UNCAUGHT ERROR: ${errMsg}`);
+        console.error('[dispatchBatch] uncaught error:', err);
+        setError(errMsg);
+        setIsGenerating(false);
+        setDispatchProgress(null);
+      }
     },
-    [states, dispatchPrompt, startPolling, fetchStatus],
+    [states, dispatchPrompt, startPolling, fetchStatus, addDebug],
   );
 
   const handleGenerateAll = useCallback(() => dispatchBatch(), [dispatchBatch]);
@@ -449,6 +486,17 @@ export default function GeneratePage() {
       {error && (
         <div className="mb-4 rounded-lg border border-red-900/30 bg-red-950/20 px-4 py-3 text-sm text-red-400">
           {error}
+        </div>
+      )}
+
+      {debugLog.length > 0 && (
+        <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3">
+          <p className="mb-1 text-[10px] font-semibold text-zinc-500">Debug Log</p>
+          <div className="max-h-32 overflow-y-auto font-mono text-[11px] text-zinc-400">
+            {debugLog.map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
         </div>
       )}
 
