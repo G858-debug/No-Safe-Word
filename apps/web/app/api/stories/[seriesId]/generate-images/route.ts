@@ -387,9 +387,17 @@ export async function POST(
         const kontextWidth = isLandscape ? 1216 : 832;
         const kontextHeight = isLandscape ? 832 : 1216;
 
-        const refImageName = kontextType === "dual"
+        // Fall back to single workflow when dual scene has no ref images
+        // (e.g. secondary character has no approved portrait yet)
+        let effectiveKontextType = kontextType;
+        if (kontextType === "dual" && kontextImages.length < 2) {
+          console.warn(`[Kontext][${imgPrompt.id}] Dual scene but only ${kontextImages.length} ref image(s) — falling back to ${kontextImages.length === 0 ? 'portrait' : 'single'} workflow`);
+          effectiveKontextType = kontextImages.length === 0 ? "portrait" : "single";
+        }
+
+        const refImageName = effectiveKontextType === "dual"
           ? (kontextImages[0]?.name || "combined_ref.png")
-          : kontextType !== "portrait" ? "primary_ref.png" : undefined;
+          : effectiveKontextType !== "portrait" ? "primary_ref.png" : undefined;
 
         // Build character identity prefix for Kontext prompts (natural-language prose)
         let identityPrefix = "";
@@ -488,7 +496,7 @@ export async function POST(
 
         // Build Kontext workflow — uses identity-prefixed scene prompt
         const kontextWorkflow = buildKontextWorkflow({
-          type: kontextType,
+          type: effectiveKontextType,
           positivePrompt: kontextPositivePrompt,
           width: kontextWidth,
           height: kontextHeight,
@@ -499,7 +507,7 @@ export async function POST(
           loras: kontextLoras,
         });
 
-        console.log(`[Kontext][${imgPrompt.id}] type=${kontextType}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}, loras=${kontextLoras.length}`);
+        console.log(`[Kontext][${imgPrompt.id}] type=${effectiveKontextType}${effectiveKontextType !== kontextType ? ` (was ${kontextType})` : ''}, sfw=${sfwMode}, dims=${kontextWidth}x${kontextHeight}, refs=${kontextImages.length}, loras=${kontextLoras.length}`);
 
         // Submit to RunPod
         const { jobId: kontextJobId } = await submitRunPodJob(
