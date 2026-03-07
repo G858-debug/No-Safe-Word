@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 
-// lucataco/sdxl — SDXL base, accepts replicate_weights for external LoRAs.
-// Must use versioned predictions endpoint (/v1/predictions with version field),
-// not the model-based endpoint (/v1/models/{name}/predictions) which returns 404.
-const REPLICATE_MODEL_VERSION = 'c86579ac5193bf45422f1c8b92742135aa859b1850a8e4c531bff222fc75273d';
-// NOTE: External LoRA (Venus Body) removed — CivitAI downloads fail on Replicate workers
-// (pget doesn't support auth). Base SDXL is sufficient for pose reference images
-// since Flux Kontext does the actual photorealistic conversion.
+// zylim0702/sdxl-lora-customize-model — Base SDXL with external LoRA loading via Lora_url.
+// Uses versioned predictions endpoint (/v1/predictions with version field).
+const REPLICATE_MODEL_VERSION = '5a2b1cff79a2cf60d2a498b424795a90e26b7a3992fbd13b340f73ff4942b81e';
+
+// CivitAI Curvy body SDXL LoRA by fellow_daoist (386MB, 5-star)
+const CIVITAI_API_TOKEN = process.env.CIVITAI_API_KEY ?? '';
+const LORA_URL = `https://civitai.com/api/download/models/1285047?type=Model&format=SafeTensor${CIVITAI_API_TOKEN ? `&token=${CIVITAI_API_TOKEN}` : ''}`;
 
 // POST /api/lora-studio/[sessionId]/generate-anime
 // Triggers a single Replicate prediction for one anime training image.
@@ -74,6 +74,9 @@ export async function POST(
           num_inference_steps: 30,
           guidance_scale: 7.5,
           seed: Math.floor(Math.random() * 2_147_483_647),
+          Lora_url: LORA_URL,
+          lora_scale: 0.85,
+          disable_safety_checker: true,
         },
       }),
     },

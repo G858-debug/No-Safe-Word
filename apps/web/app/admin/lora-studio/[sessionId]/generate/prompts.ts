@@ -41,9 +41,9 @@ export interface AnimePrompt {
 // Fixed strings
 // ─────────────────────────────────────────────────────────────────
 
-const BASE = 'venusbody, Black woman, dark skin, curvaceous figure, large breasts, wide hips, thick thighs, small waist, hourglass body, faceless, no face visible, head cropped out of frame';
-const Q = 'masterpiece, best quality, highly detailed, 8k';
-const NEG = 'face, head, eyes, nose, mouth, portrait, skinny, thin, flat chest, small breasts, narrow hips, white skin, pale skin, asian, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
+const BASE = 'photo of a Black woman, dark skin, curvaceous figure, large breasts, wide hips, thick thighs, small waist, hourglass body, faceless, no face visible, head cropped out of frame';
+const Q = 'photorealistic, professional photograph, high resolution, sharp focus, detailed skin texture, natural skin pores';
+const NEG = 'face, head, eyes, nose, mouth, portrait, skinny, thin, flat chest, small breasts, narrow hips, white skin, pale skin, asian, deformed, bad anatomy, extra limbs, worst quality, low quality, cartoon, anime, illustration, drawing, painting, 3d render, cgi';
 
 const SHOTS: Record<ShotType, string> = {
   full: 'full body from neck down to toe, head not visible',
