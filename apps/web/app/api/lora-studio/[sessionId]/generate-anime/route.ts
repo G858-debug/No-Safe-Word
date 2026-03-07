@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 
-// Replicate SDXL model with LoRA weights URL support.
-// lucataco/sdxl — SDXL base, accepts replicate_weights URL parameter for external LoRAs.
-const REPLICATE_MODEL = 'lucataco/sdxl';
+// lucataco/sdxl — SDXL base, accepts replicate_weights for external LoRAs.
+// Must use versioned predictions endpoint (/v1/predictions with version field),
+// not the model-based endpoint (/v1/models/{name}/predictions) which returns 404.
+const REPLICATE_MODEL_VERSION = 'c86579ac5193bf45422f1c8b92742135aa859b1850a8e4c531bff222fc75273d';
 const VENUS_BODY_LORA_URL = 'https://civitai.com/api/download/models/136081';
 
 // POST /api/lora-studio/[sessionId]/generate-anime
@@ -48,7 +49,7 @@ export async function POST(
 
   // Create the Replicate prediction (async — does not wait for completion)
   const replicateRes = await fetch(
-    `https://api.replicate.com/v1/models/${REPLICATE_MODEL}/predictions`,
+    'https://api.replicate.com/v1/predictions',
     {
       method: 'POST',
       headers: {
@@ -57,6 +58,7 @@ export async function POST(
         Prefer: 'respond-async',
       },
       body: JSON.stringify({
+        version: REPLICATE_MODEL_VERSION,
         input: {
           prompt,
           negative_prompt: negativePrompt,
