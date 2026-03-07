@@ -78,7 +78,7 @@ export default function ImageGeneratorPage() {
         fetch("/api/image-generator/enhance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, nsfw: true }),
         }).then((r) => r.json()),
         fetch("/api/image-generator/detect-character", {
           method: "POST",

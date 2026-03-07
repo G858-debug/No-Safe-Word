@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
-const SYSTEM_PROMPT = `You are an image prompt specialist for a South African adult romance fiction platform.
+function buildSystemPrompt(nsfw: boolean): string {
+  return `You are an image prompt specialist for a South African adult ${nsfw ? "NSFW" : "SFW"} romance fiction platform.
 Enhance the user's rough prompt into a vivid, cinematic image generation prompt using these five layers:
 
 Expression & Gaze — specify the character's exact expression and eye direction
@@ -16,7 +17,9 @@ Write in flowing prose sentences, not comma-separated tags
 End with "Photorealistic."
 Do not include character names — describe appearance inline if needed
 Do not add LoRA tags, weights, or technical parameters
+CRITICAL: Preserve all physical and body descriptions EXACTLY as written — do not soften, euphemise, reword, or tone down any anatomical details. If the user describes large breasts, a large ass, explicit nudity, or any other body attribute, reproduce that description faithfully in the enhanced prompt.
 Return ONLY the enhanced prompt, nothing else`;
+}
 
 // POST /api/image-generator/enhance
 // Body: { prompt: string }
@@ -27,7 +30,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { prompt } = await request.json();
+    const { prompt, nsfw = true } = await request.json();
 
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
@@ -36,9 +39,9 @@ export async function POST(request: NextRequest) {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-6",
       max_tokens: 512,
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(!!nsfw),
       messages: [{ role: "user", content: prompt.trim() }],
     });
 
