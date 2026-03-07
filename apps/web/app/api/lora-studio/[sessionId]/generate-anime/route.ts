@@ -25,8 +25,8 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
       class_type: 'LoraLoader',
       inputs: {
         lora_name: 'skin-realism-sdxl.safetensors',
-        strength_model: 0.35,
-        strength_clip: 0.35,
+        strength_model: 0.5,
+        strength_clip: 0.5,
         model: ['2', 0],
         clip: ['2', 1],
       },
