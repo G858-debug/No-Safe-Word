@@ -226,12 +226,9 @@ export function selectKontextResources(opts: {
   loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
 
   // 2. Style/Detail LoRA — slot 2 swaps to a style LoRA for female characters:
-  //    • SFW female     → Fashion Editorial (luxury magazine look)
   //    • NSFW female solo (no dual) → Boudoir Style (intimate/sensual atmosphere)
-  //    • All other cases → Detail LoRA as-is
-  if (hasFemaleCharacter && isSfw && !hasDualCharacter) {
-    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-  } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
+  //    • All other cases → Detail LoRA (fashion editorial not yet installed)
+  if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
     loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
   } else {
     let detailStrength = 0.6;
@@ -251,7 +248,7 @@ export function selectKontextResources(opts: {
     let bustsStrength = 0.7 * secondaryReduction;
     if (isFacebookSfw) bustsStrength = 0.4 * secondaryReduction;
     else if (isNsfw) bustsStrength = 0.85 * secondaryReduction;
-    else if (isFullBody) bustsStrength = 0.85 * secondaryReduction; // full figure visible — stronger effect
+    else if (isFullBody) bustsStrength = 1.0 * secondaryReduction; // full figure visible — maximum effect
     loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
 
     // Hourglass body shape — strongest for NSFW since Flux has no negative prompt
