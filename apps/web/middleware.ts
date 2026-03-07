@@ -14,6 +14,8 @@ const DASHBOARD_API_PREFIXES = [
   "/api/civitai",
   "/api/generate",
   "/api/webhook/story-import",
+  "/api/lora-studio",
+  "/api/admin/lora-studio",
 ];
 
 function isAccessSubdomain(host: string): boolean {
@@ -56,8 +58,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
-  // Protect /dashboard/* page routes — require admin session cookie
-  if (pathname.startsWith("/dashboard")) {
+  // Protect /dashboard/* and /admin/lora-studio/* page routes — require admin session cookie
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/admin/lora-studio")) {
     if (!(await isAdminAuthenticated(request))) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }
