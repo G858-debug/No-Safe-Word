@@ -1,6 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 
+// DELETE /api/lora-studio/[sessionId]/anime-status
+// Deletes all rejected (failed) anime image records for this session.
+export async function DELETE(
+  _request: NextRequest,
+  props: { params: Promise<{ sessionId: string }> },
+) {
+  const { sessionId } = await props.params;
+
+  const { error } = await (supabase as any)
+    .from('nsw_lora_images')
+    .delete()
+    .eq('session_id', sessionId)
+    .eq('stage', 'anime')
+    .eq('status', 'rejected');
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 const STORAGE_BUCKET = 'lora-anime-images';
 // Process at most this many generating images per poll to stay within timeout
 const MAX_TO_PROCESS = 5;

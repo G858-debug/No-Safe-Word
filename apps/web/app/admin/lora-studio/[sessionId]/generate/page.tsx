@@ -11,6 +11,7 @@ import {
   RotateCcw,
   ArrowRight,
   Play,
+  Trash2,
 } from "lucide-react";
 import { ANIME_PROMPTS } from "./prompts";
 import type { AnimePrompt } from "./prompts";
@@ -332,6 +333,11 @@ export default function GeneratePage() {
 
   // ── Retry single failed card ──────────────────────────────────
 
+  const handleDeleteFailed = useCallback(async () => {
+    await fetch(`/api/lora-studio/${sessionId}/anime-status`, { method: "DELETE" });
+    await fetchStatus();
+  }, [sessionId, fetchStatus]);
+
   const handleRetry = useCallback(
     async (prompt: AnimePrompt) => {
       await dispatchPrompt(prompt);
@@ -392,6 +398,17 @@ export default function GeneratePage() {
                 Go
               </button>
             </div>
+          )}
+
+          {counts.failed > 0 && (
+            <button
+              onClick={handleDeleteFailed}
+              disabled={isGenerating}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-900/40 bg-red-950/20 px-3 py-2 text-sm font-medium text-red-400 transition-colors hover:bg-red-950/40 disabled:opacity-40"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete {counts.failed} Failed
+            </button>
           )}
 
           <button
