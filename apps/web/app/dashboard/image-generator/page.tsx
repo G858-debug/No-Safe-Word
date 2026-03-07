@@ -23,7 +23,9 @@ import type { DetectionResult } from "@/app/api/image-generator/detect-character
 const NO_CHARACTER_VALUE = "__none__";
 
 export default function ImageGeneratorPage() {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() =>
+    typeof window !== "undefined" ? (localStorage.getItem("imggen_prompt") ?? "") : ""
+  );
   const [enhancementEnabled, setEnhancementEnabled] = useState(true);
 
   // Post-enhancement state
@@ -53,6 +55,7 @@ export default function ImageGeneratorPage() {
 
   function handlePromptChange(val: string) {
     setPrompt(val);
+    localStorage.setItem("imggen_prompt", val);
     // Reset confirmation when the prompt is edited
     if (confirmationShown) {
       setConfirmationShown(false);
