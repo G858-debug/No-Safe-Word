@@ -40,14 +40,24 @@ export function buildKontextIdentityPrefix(charData: CharacterData): string {
   }
   if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
   if (charData.skinTone) details.push(`${charData.skinTone} skin`);
-  if (charData.distinguishingFeatures) details.push(charData.distinguishingFeatures);
 
   if (details.length > 0) {
     core += ` with ${joinWithAnd(details)}`;
   }
   sentences.push(core + ".");
 
-  // ── 2. Body sentence: "She has a curvaceous figure with ..." ──
+  // ── 2. Distinguishing features sentence ──
+  // These are the most character-specific traits. A dedicated sentence gives
+  // T5 a clear semantic boundary, ensuring the model treats them as primary
+  // rather than as an afterthought appended to a long comma list.
+  if (charData.distinguishingFeatures) {
+    const pronoun2 = charData.gender === "female" ? "She" :
+                     charData.gender === "male" ? "He" : "They";
+    const verb2 = pronoun2 === "They" ? "have" : "has";
+    sentences.push(`${pronoun2} ${verb2} ${charData.distinguishingFeatures}.`);
+  }
+
+  // ── 3. Body sentence: "She has a curvaceous figure with ..." ──
   const isFemale = charData.gender === "female";
   const bt = (charData.bodyType || "").toLowerCase();
   if (bt) {
@@ -95,7 +105,7 @@ export function buildKontextIdentityPrefix(charData: CharacterData): string {
     }
   }
 
-  // ── 3. Beauty/skin sentence for female characters ──
+  // ── 4. Beauty/skin sentence for female characters ──
   // Reinforces attractiveness since Flux has no negative prompt to prevent
   // unflattering rendering and no emphasis weights for beauty tags.
   if (isFemale) {

@@ -148,10 +148,13 @@ function buildFluxIdentityPreview(desc: Record<string, unknown>): string {
   }
   if (d.eyeColor) details.push(`${d.eyeColor} eyes`);
   if (d.skinTone) details.push(`${d.skinTone} skin`);
-  if (d.distinguishingFeatures) details.push(d.distinguishingFeatures);
   if (details.length > 0) core += ` with ${details.join(", ")}`;
 
   const sentences = [core + "."];
+  if (d.distinguishingFeatures) {
+    const verb2 = pronoun === "They" ? "have" : "has";
+    sentences.push(`${pronoun} ${verb2} ${d.distinguishingFeatures}.`);
+  }
   if (d.bodyType) sentences.push(`${pronoun} has a ${d.bodyType} build.`);
   if (d.gender === "female") sentences.push("She has beautiful features and smooth, glowing skin.");
   return sentences.join(" ");
