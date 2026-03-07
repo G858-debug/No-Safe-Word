@@ -272,10 +272,8 @@ export function selectKontextResources(opts: {
 
     // NSW Curves body LoRA — custom-trained on curvaceous body proportions.
     // Replaces both perfect-busts + hourglass in a single slot.
-    let curvesStrength = 0.8 * secondaryReduction;
-    if (isFacebookSfw) curvesStrength = 0.5 * secondaryReduction;
-    else if (isNsfw) curvesStrength = 0.9 * secondaryReduction;
-    else if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
+    let curvesStrength = 0.9 * secondaryReduction;
+    if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
     loras.push({ filename: 'nsw-curves-body.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
     pendingTriggers.push('nsw_curves');
 
