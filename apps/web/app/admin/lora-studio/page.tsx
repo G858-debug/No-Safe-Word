@@ -151,7 +151,7 @@ export default function LoraStudioPage() {
             <input
               type="number"
               value={targetCount}
-              min={20}
+              min={1}
               max={500}
               onChange={(e) => setTargetCount(Number(e.target.value))}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
