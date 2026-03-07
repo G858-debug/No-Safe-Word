@@ -4,11 +4,13 @@ import archiver from 'archiver';
 import { PassThrough } from 'stream';
 
 const CONVERTED_BUCKET = 'lora-converted-images';
+const ANIME_BUCKET = 'lora-anime-images';
 const DATASET_BUCKET = 'lora-training-datasets';
 
 // POST /api/lora-studio/[sessionId]/package-dataset
-// Downloads all approved+captioned converted images, creates a ZIP in Kohya format
+// Downloads all approved+captioned images, creates a ZIP in Kohya format
 // (image.jpg + image.txt for each), and uploads to lora-training-datasets/[sessionId].zip.
+// Checks converted images first; falls back to anime images if conversion was skipped.
 // Returns: { zipUrl, imageCount, sizeBytes }
 export async function POST(
   _request: NextRequest,
@@ -16,8 +18,8 @@ export async function POST(
 ) {
   const { sessionId } = await props.params;
 
-  // Fetch all approved converted images with captions
-  const { data: images, error: fetchErr } = await (supabase as any)
+  // Try converted images first
+  const { data: convertedImages } = await (supabase as any)
     .from('nsw_lora_images')
     .select('id, converted_image_url, caption')
     .eq('session_id', sessionId)
@@ -27,11 +29,39 @@ export async function POST(
     .not('caption', 'is', null)
     .order('created_at', { ascending: true });
 
-  if (fetchErr) {
-    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
-  }
+  const useAnime = !convertedImages || convertedImages.length === 0;
+  let bucket: string;
+  let imageList: { id: string; image_url: string; caption: string }[];
 
-  const imageList = (images ?? []) as { id: string; converted_image_url: string; caption: string }[];
+  if (useAnime) {
+    const { data: animeImages, error: fetchErr } = await (supabase as any)
+      .from('nsw_lora_images')
+      .select('id, anime_image_url, caption')
+      .eq('session_id', sessionId)
+      .eq('stage', 'anime')
+      .eq('status', 'approved')
+      .not('anime_image_url', 'is', null)
+      .not('caption', 'is', null)
+      .order('created_at', { ascending: true });
+
+    if (fetchErr) {
+      return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+    }
+
+    bucket = ANIME_BUCKET;
+    imageList = ((animeImages ?? []) as any[]).map((img) => ({
+      id: img.id,
+      image_url: img.anime_image_url,
+      caption: img.caption,
+    }));
+  } else {
+    bucket = CONVERTED_BUCKET;
+    imageList = ((convertedImages ?? []) as any[]).map((img) => ({
+      id: img.id,
+      image_url: img.converted_image_url,
+      caption: img.caption,
+    }));
+  }
 
   if (imageList.length === 0) {
     return NextResponse.json(
@@ -44,8 +74,8 @@ export async function POST(
   const signedEntries = await Promise.all(
     imageList.map(async (img, idx) => {
       const { data } = await (supabase as any).storage
-        .from(CONVERTED_BUCKET)
-        .createSignedUrl(img.converted_image_url, 600);
+        .from(bucket)
+        .createSignedUrl(img.image_url, 600);
       return {
         idx,
         id: img.id,
