@@ -113,6 +113,14 @@ echo "[NSW] ========================================="
 echo "[NSW] Checking models..."
 echo "[NSW] ========================================="
 
+# Log to network volume for remote diagnostics
+NSW_LOG="/runpod-volume/nsw-download.log"
+if [ -d "/runpod-volume" ]; then
+    exec > >(tee -a "$NSW_LOG") 2>&1
+    echo ""
+    echo "[NSW] === Download run at $(date -u) ==="
+fi
+
 # ---- One-time SDXL model cleanup ----
 # Deletes SDXL-only model files from the network volume to free ~20GB.
 # Safe to re-run: rm -f is a no-op if the file is already gone.

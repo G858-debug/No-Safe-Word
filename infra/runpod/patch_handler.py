@@ -104,6 +104,33 @@ def _nsw_patched_start(config):
         return _nsw_original_start(config)
     def _nsw_wrapped(job):
         job_input = job.get("input", {})
+
+        # Diagnostic mode: return file listings of model directories
+        if job_input.get("nsw_diagnostic"):
+            diag = {}
+            for subdir in ["checkpoints", "loras", "diffusion_models", "clip", "vae"]:
+                for base in [_nsw_COMFY_DIR + "/models", "/runpod-volume/models"]:
+                    d = _nsw_os.path.join(base, subdir)
+                    key = d
+                    if _nsw_os.path.isdir(d):
+                        files = []
+                        for f in sorted(_nsw_os.listdir(d)):
+                            fp = _nsw_os.path.join(d, f)
+                            if _nsw_os.path.isfile(fp):
+                                sz = _nsw_os.path.getsize(fp) / (1024*1024)
+                                files.append(f"{f} ({sz:.1f} MB)")
+                            elif _nsw_os.path.isdir(fp):
+                                files.append(f"{f}/ (dir)")
+                        diag[key] = files
+                    else:
+                        diag[key] = "NOT FOUND"
+            # Also check for download log
+            log_path = "/runpod-volume/nsw-download.log"
+            if _nsw_os.path.isfile(log_path):
+                with open(log_path) as lf:
+                    diag["download_log_tail"] = lf.read()[-2000:]
+            return diag
+
         downloads = job_input.pop("character_lora_downloads", None)
         if downloads:
             print(f"[NSW] Job {job.get('id','?')}: {len(downloads)} character LoRA(s)")
