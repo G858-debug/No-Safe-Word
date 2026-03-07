@@ -17,6 +17,7 @@ export async function POST(
   const { sessionId } = await props.params;
 
   const token = process.env.REPLICATE_API_TOKEN;
+  console.log('[generate-anime] hit, token present:', !!token, 'sessionId:', sessionId);
   if (!token) {
     return NextResponse.json({ error: 'REPLICATE_API_TOKEN not set' }, { status: 500 });
   }
