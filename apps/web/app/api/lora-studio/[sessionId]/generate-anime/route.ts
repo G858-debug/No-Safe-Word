@@ -33,13 +33,13 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
         clip: ['2', 1],
       },
     },
-    // Back Shot LoRA — improves back-facing pose composition
+    // Back Shot LoRA — improves back-facing pose composition (low weight to preserve realism)
     '10': {
       class_type: 'LoraLoader',
       inputs: {
         lora_name: 'backshot-sdxl.safetensors',
-        strength_model: 0.4,
-        strength_clip: 0.4,
+        strength_model: 0.25,
+        strength_clip: 0.25,
         model: ['9', 0],
         clip: ['9', 1],
       },
@@ -49,19 +49,19 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
       class_type: 'LoraLoader',
       inputs: {
         lora_name: 'realfeet-sdxl.safetensors',
-        strength_model: 0.7,
-        strength_clip: 0.7,
+        strength_model: 0.4,
+        strength_clip: 0.4,
         model: ['10', 0],
         clip: ['10', 1],
       },
     },
-    // Bad Anatomy Negative LoRA — loaded separately for negative conditioning
+    // Bad Anatomy Negative LoRA — NEGATIVE weights steer away from bad anatomy
     '12': {
       class_type: 'LoraLoader',
       inputs: {
         lora_name: 'bad-anatomy-neg-sdxl.safetensors',
-        strength_model: 0.6,
-        strength_clip: 0.6,
+        strength_model: -0.5,
+        strength_clip: -0.5,
         model: ['11', 0],
         clip: ['11', 1],
       },
