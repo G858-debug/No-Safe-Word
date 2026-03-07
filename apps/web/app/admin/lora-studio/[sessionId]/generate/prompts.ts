@@ -41,7 +41,7 @@ export interface AnimePrompt {
 // Fixed strings
 // ─────────────────────────────────────────────────────────────────
 
-const BASE = 'photo of a Black woman, dark skin, curvaceous figure, large breasts, wide hips, thick thighs, small waist, hourglass body, faceless, no face visible, head cropped out of frame';
+const BASE = 'photo of a Black woman, dark skin, curvaceous figure, (large breasts:1.3), wide hips, (thick thighs:1.3), small waist, hourglass body, (large butt:1.3), faceless, no face visible, head cropped out of frame';
 const Q = 'photorealistic, professional photograph, high resolution, sharp focus, detailed skin texture, natural skin pores';
 const NEG = 'face, head, eyes, nose, mouth, portrait, skinny, thin, flat chest, small breasts, narrow hips, white skin, pale skin, asian, deformed, bad anatomy, extra limbs, worst quality, low quality, cartoon, anime, illustration, drawing, painting, 3d render, cgi';
 
