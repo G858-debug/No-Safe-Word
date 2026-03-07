@@ -3,12 +3,14 @@ import Anthropic from '@anthropic-ai/sdk';
 import { supabase } from '@no-safe-word/story-engine';
 
 const CONVERTED_BUCKET = 'lora-converted-images';
+const ANIME_BUCKET = 'lora-anime-images';
 
 const CAPTION_SYSTEM_PROMPT =
   "You are generating training captions for a Flux LoRA that will learn curvy body proportions. Look at this image of a Black woman and write a short, descriptive caption focused on body attributes and pose. Always include these tokens: 'woman, dark skin, large breasts, wide hips, thick thighs, small waist, curvy figure, hourglass body'. Then describe the specific pose, clothing state, and framing visible in the image. Keep the caption under 100 words. Do not mention image quality, style, or aesthetics — only describe what is physically depicted.";
 
 // POST /api/lora-studio/[sessionId]/caption-images
-// Runs Claude Vision captioning on all approved converted images without captions.
+// Runs Claude Vision captioning on all approved images without captions.
+// Checks converted images first; falls back to anime images if conversion was skipped.
 // Returns: { results: { id, caption }[], captioned: number, skipped: number }
 export async function POST(
   _request: NextRequest,
@@ -20,8 +22,8 @@ export async function POST(
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
   }
 
-  // Fetch all approved converted images (caption may be null or already set)
-  const { data: images, error: fetchErr } = await (supabase as any)
+  // Try converted images first (Flux conversion pipeline)
+  const { data: convertedImages } = await (supabase as any)
     .from('nsw_lora_images')
     .select('id, converted_image_url, caption')
     .eq('session_id', sessionId)
@@ -30,11 +32,40 @@ export async function POST(
     .not('converted_image_url', 'is', null)
     .order('created_at', { ascending: true });
 
-  if (fetchErr) {
-    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  // Fall back to approved anime images if no converted images exist
+  const useAnime = !convertedImages || convertedImages.length === 0;
+  let bucket: string;
+  let imageList: { id: string; image_url: string; caption: string | null }[];
+
+  if (useAnime) {
+    const { data: animeImages, error: fetchErr } = await (supabase as any)
+      .from('nsw_lora_images')
+      .select('id, anime_image_url, caption')
+      .eq('session_id', sessionId)
+      .eq('stage', 'anime')
+      .eq('status', 'approved')
+      .not('anime_image_url', 'is', null)
+      .order('created_at', { ascending: true });
+
+    if (fetchErr) {
+      return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+    }
+
+    bucket = ANIME_BUCKET;
+    imageList = ((animeImages ?? []) as any[]).map((img) => ({
+      id: img.id,
+      image_url: img.anime_image_url,
+      caption: img.caption,
+    }));
+  } else {
+    bucket = CONVERTED_BUCKET;
+    imageList = ((convertedImages ?? []) as any[]).map((img) => ({
+      id: img.id,
+      image_url: img.converted_image_url,
+      caption: img.caption,
+    }));
   }
 
-  const imageList = (images ?? []) as { id: string; converted_image_url: string; caption: string | null }[];
   const toCaption = imageList.filter((img) => !img.caption);
 
   if (toCaption.length === 0) {
@@ -48,8 +79,8 @@ export async function POST(
   const signedUrls = await Promise.all(
     toCaption.map(async (img) => {
       const { data } = await (supabase as any).storage
-        .from(CONVERTED_BUCKET)
-        .createSignedUrl(img.converted_image_url, 600);
+        .from(bucket)
+        .createSignedUrl(img.image_url, 600);
       return { id: img.id, signedUrl: data?.signedUrl ?? null };
     }),
   );
@@ -109,14 +140,16 @@ export async function POST(
 }
 
 // GET /api/lora-studio/[sessionId]/caption-images
-// Returns all approved converted images with their current caption state.
+// Returns all approved images with their current caption state.
+// Checks converted images first; falls back to anime images if conversion was skipped.
 export async function GET(
   _request: NextRequest,
   props: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await props.params;
 
-  const { data: images, error } = await (supabase as any)
+  // Try converted images first
+  const { data: convertedImages } = await (supabase as any)
     .from('nsw_lora_images')
     .select('id, converted_image_url, caption, pose_category, clothing_state, angle_category')
     .eq('session_id', sessionId)
@@ -125,19 +158,44 @@ export async function GET(
     .not('converted_image_url', 'is', null)
     .order('created_at', { ascending: true });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const useAnime = !convertedImages || convertedImages.length === 0;
 
-  const imageList = (images ?? []) as Record<string, any>[];
+  let imageList: Record<string, any>[];
+  let bucket: string;
+
+  if (useAnime) {
+    const { data: animeImages, error } = await (supabase as any)
+      .from('nsw_lora_images')
+      .select('id, anime_image_url, caption, pose_category, clothing_state, angle_category')
+      .eq('session_id', sessionId)
+      .eq('stage', 'anime')
+      .eq('status', 'approved')
+      .not('anime_image_url', 'is', null)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    bucket = ANIME_BUCKET;
+    imageList = ((animeImages ?? []) as any[]).map((img) => ({
+      ...img,
+      converted_image_url: img.anime_image_url,
+    }));
+  } else {
+    bucket = CONVERTED_BUCKET;
+    imageList = (convertedImages ?? []) as Record<string, any>[];
+  }
 
   // Generate signed URLs for thumbnails
   const signedUrls: Record<string, string> = {};
   await Promise.allSettled(
     imageList.map(async (img) => {
+      const url = img.converted_image_url || img.anime_image_url;
+      if (!url) return;
       const { data } = await (supabase as any).storage
-        .from(CONVERTED_BUCKET)
-        .createSignedUrl(img.converted_image_url, 3600);
+        .from(bucket)
+        .createSignedUrl(url, 3600);
       if (data?.signedUrl) signedUrls[img.id] = data.signedUrl;
     }),
   );
