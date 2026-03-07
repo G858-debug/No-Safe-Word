@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 
 // Replicate SDXL model with LoRA weights URL support.
-// RealVisXL V2 base — realistic proportions, accepts lora_weights URL parameter.
-const REPLICATE_MODEL = 'lucataco/realvisxl-v2-with-lora';
+// lucataco/sdxl — SDXL base, accepts replicate_weights URL parameter for external LoRAs.
+const REPLICATE_MODEL = 'lucataco/sdxl';
 const VENUS_BODY_LORA_URL = 'https://civitai.com/api/download/models/136081';
 
 // POST /api/lora-studio/[sessionId]/generate-anime
@@ -60,7 +60,7 @@ export async function POST(
         input: {
           prompt,
           negative_prompt: negativePrompt,
-          lora_weights: VENUS_BODY_LORA_URL,
+          replicate_weights: VENUS_BODY_LORA_URL,
           lora_scale: 0.75,
           width: 768,
           height: 1152,
