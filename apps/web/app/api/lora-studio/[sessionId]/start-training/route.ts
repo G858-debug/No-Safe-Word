@@ -53,7 +53,7 @@ async function ensureReplicateModel(owner: string, modelName: string): Promise<v
       owner,
       name: modelName,
       visibility: 'private',
-      hardware: 'gpu-a40-large',
+      hardware: 'gpu-l40s',
       description: 'NSW LoRA Studio — curves body LoRA',
     }),
   });
