@@ -17,6 +17,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Pencil,
 } from "lucide-react";
 import { ANIME_PROMPTS } from "./prompts";
 import type { AnimePrompt } from "./prompts";
@@ -31,6 +32,7 @@ interface ImageRecord {
   anime_image_url: string | null;
   replicate_prediction_id: string | null;
   anime_prompt: string;
+  prompt_index: number | null;
 }
 
 interface PromptState {
@@ -83,13 +85,21 @@ function PromptCard({
   state,
   onRetry,
   onClick,
+  editedPrompt,
+  onEditPrompt,
+  onResetPrompt,
 }: {
   state: PromptState;
   onRetry: (prompt: AnimePrompt) => void;
   onClick: () => void;
+  editedPrompt: string | undefined;
+  onEditPrompt: (promptId: number, text: string) => void;
+  onResetPrompt: (promptId: number) => void;
 }) {
   const { prompt, record, signedUrl } = state;
   const status = record?.status ?? "pending";
+  const [expanded, setExpanded] = useState(false);
+  const isEdited = editedPrompt !== undefined;
 
   const bgClass =
     status === "ready" || status === "approved"
@@ -103,7 +113,7 @@ function PromptCard({
   return (
     <div
       className={`flex flex-col rounded-lg border p-1.5 transition-colors ${bgClass} ${signedUrl ? "cursor-pointer hover:ring-1 hover:ring-zinc-600" : ""}`}
-      onClick={signedUrl ? onClick : undefined}
+      onClick={signedUrl && !expanded ? onClick : undefined}
     >
       {/* Thumbnail */}
       <div className="relative mb-1.5 aspect-[2/3] w-full overflow-hidden rounded bg-zinc-800">
@@ -118,8 +128,9 @@ function PromptCard({
             <StatusDot status={status} />
           </div>
         )}
-        <span className="absolute left-1 top-1 rounded bg-black/70 px-1 py-0.5 font-mono text-[9px] text-zinc-300">
+        <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/70 px-1 py-0.5 font-mono text-[9px] text-zinc-300">
           #{prompt.id}
+          {isEdited && <span className="text-amber-400">*</span>}
         </span>
         {signedUrl && (
           <span className="absolute right-1 top-1">
@@ -128,8 +139,8 @@ function PromptCard({
         )}
       </div>
 
-      {/* Metadata tags */}
-      <div className="flex flex-wrap gap-0.5">
+      {/* Metadata tags + edit toggle */}
+      <div className="flex flex-wrap items-center gap-0.5">
         {[
           prompt.shotType.replace("_", " "),
           prompt.poseCategory.replace(/_/g, " "),
@@ -144,7 +155,34 @@ function PromptCard({
             {tag}
           </span>
         ))}
+        <button
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          className={`ml-auto rounded p-0.5 transition-colors hover:bg-zinc-700 ${isEdited ? "text-amber-400" : "text-zinc-600"}`}
+          title="Edit prompt"
+        >
+          <Pencil className="h-2.5 w-2.5" />
+        </button>
       </div>
+
+      {/* Expandable prompt editor */}
+      {expanded && (
+        <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+          <textarea
+            value={editedPrompt ?? prompt.prompt}
+            onChange={(e) => onEditPrompt(prompt.id, e.target.value)}
+            rows={4}
+            className="w-full rounded bg-zinc-800 px-1.5 py-1 text-[10px] leading-tight text-zinc-300 focus:outline-none focus:ring-1 focus:ring-amber-600"
+          />
+          {isEdited && (
+            <button
+              onClick={() => onResetPrompt(prompt.id)}
+              className="mt-0.5 text-[9px] text-zinc-500 hover:text-zinc-300"
+            >
+              Reset to default
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Retry */}
       {status === "rejected" && (
@@ -171,6 +209,7 @@ function Lightbox({
   onNavigate,
   onApprove,
   onReject,
+  getEffectivePrompt,
 }: {
   states: PromptState[];
   index: number;
@@ -178,10 +217,12 @@ function Lightbox({
   onNavigate: (index: number) => void;
   onApprove: (imageId: string) => void;
   onReject: (imageId: string) => void;
+  getEffectivePrompt: (id: number) => string;
 }) {
   const state = states[index];
   const { prompt, record, signedUrl } = state;
   const status = record?.status ?? "pending";
+  const [showPrompt, setShowPrompt] = useState(false);
 
   // Find prev/next indices that have images
   const findAdjacentWithImage = (dir: -1 | 1) => {
@@ -307,6 +348,21 @@ function Lightbox({
           </div>
         </div>
 
+        {/* Prompt text (collapsible) */}
+        <div className="mt-2 w-full">
+          <button
+            onClick={() => setShowPrompt(!showPrompt)}
+            className="text-[10px] text-zinc-500 hover:text-zinc-300"
+          >
+            {showPrompt ? "Hide prompt" : "Show prompt"}
+          </button>
+          {showPrompt && (
+            <p className="mt-1 max-h-24 overflow-y-auto rounded bg-zinc-900 px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+              {getEffectivePrompt(prompt.id)}
+            </p>
+          )}
+        </div>
+
         {/* Keyboard hint */}
         <p className="mt-2 text-[10px] text-zinc-600">
           ← → navigate · Esc close
@@ -367,6 +423,13 @@ export default function GeneratePage() {
   const [testCount, setTestCount] = useState(10);
   const [debugLog, setDebugLog] = useState<string[]>([]);
 
+  // Per-prompt text overrides (ephemeral — lost on page refresh)
+  const [promptOverrides, setPromptOverrides] = useState<Record<number, string>>({});
+  const getEffectivePrompt = useCallback(
+    (id: number) => promptOverrides[id] ?? ANIME_PROMPTS[id - 1].prompt,
+    [promptOverrides],
+  );
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isPolling = useRef(false);
 
@@ -374,12 +437,20 @@ export default function GeneratePage() {
 
   const applyResponse = useCallback(
     (images: ImageRecord[], signedUrls: Record<string, string>, serverCounts: StatusCounts) => {
+      // Index-based matching (preferred) with prompt-text fallback for old records
+      const byIndex = new Map<number, ImageRecord>();
       const byPrompt = new Map<string, ImageRecord>();
-      for (const img of images) byPrompt.set(img.anime_prompt, img);
+      for (const img of images) {
+        if (img.prompt_index != null) {
+          byIndex.set(img.prompt_index, img);
+        } else {
+          byPrompt.set(img.anime_prompt, img);
+        }
+      }
 
       setStates((prev) =>
         prev.map((s) => {
-          const rec = byPrompt.get(s.prompt.prompt) ?? null;
+          const rec = byIndex.get(s.prompt.id) ?? byPrompt.get(s.prompt.prompt) ?? null;
           const freshUrl = rec ? (signedUrls[rec.id] ?? null) : null;
           return {
             ...s,
@@ -450,17 +521,19 @@ export default function GeneratePage() {
 
   const dispatchPrompt = useCallback(
     async (prompt: AnimePrompt) => {
+      const effectivePrompt = getEffectivePrompt(prompt.id);
       console.log(`[dispatch] POST prompt #${prompt.id} to /api/lora-studio/${sessionId}/generate-anime`);
       const res = await fetch(`/api/lora-studio/${sessionId}/generate-anime`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: prompt.prompt,
+          prompt: effectivePrompt,
           negativePrompt: prompt.negativePrompt,
           poseCategory: prompt.poseCategory,
           lightingCategory: prompt.lightingCategory,
           clothingState: prompt.clothingState,
           angleCategory: prompt.angleCategory,
+          promptIndex: prompt.id,
         }),
       });
       console.log(`[dispatch] prompt #${prompt.id} response: ${res.status}`);
@@ -469,7 +542,7 @@ export default function GeneratePage() {
         throw new Error(`generate-anime ${res.status}: ${body.slice(0, 200)}`);
       }
     },
-    [sessionId],
+    [sessionId, getEffectivePrompt],
   );
 
   // ── Dispatch a slice of pending prompts ───────────────────────
@@ -763,6 +836,17 @@ export default function GeneratePage() {
             state={s}
             onRetry={handleRetry}
             onClick={() => setLightboxIndex(i)}
+            editedPrompt={promptOverrides[s.prompt.id]}
+            onEditPrompt={(id, text) =>
+              setPromptOverrides((prev) => ({ ...prev, [id]: text }))
+            }
+            onResetPrompt={(id) =>
+              setPromptOverrides((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              })
+            }
           />
         ))}
       </div>
@@ -776,6 +860,7 @@ export default function GeneratePage() {
           onNavigate={setLightboxIndex}
           onApprove={handleApprove}
           onReject={handleReject}
+          getEffectivePrompt={getEffectivePrompt}
         />
       )}
 

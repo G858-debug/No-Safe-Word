@@ -76,9 +76,10 @@ export async function POST(
     lightingCategory: string;
     clothingState: string;
     angleCategory: string;
+    promptIndex?: number;
   };
 
-  const { prompt, negativePrompt, poseCategory, lightingCategory, clothingState, angleCategory } = body;
+  const { prompt, negativePrompt, poseCategory, lightingCategory, clothingState, angleCategory, promptIndex } = body;
 
   if (!prompt) {
     return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
@@ -114,12 +115,19 @@ export async function POST(
 
   // Upsert the nsw_lora_images record (handles retries cleanly)
   // Store RunPod job ID in replicate_prediction_id column (reused for polling)
-  const { data: existing } = await (supabase as any)
+  // Match by prompt_index (preferred) or fall back to anime_prompt for old records
+  let existingQuery = (supabase as any)
     .from('nsw_lora_images')
     .select('id')
-    .eq('session_id', sessionId)
-    .eq('anime_prompt', prompt)
-    .maybeSingle();
+    .eq('session_id', sessionId);
+
+  if (promptIndex != null) {
+    existingQuery = existingQuery.eq('prompt_index', promptIndex);
+  } else {
+    existingQuery = existingQuery.eq('anime_prompt', prompt);
+  }
+
+  const { data: existing } = await existingQuery.maybeSingle();
 
   let imageId: string;
 
@@ -130,6 +138,8 @@ export async function POST(
         status: 'generating',
         replicate_prediction_id: jobId,
         anime_image_url: null,
+        anime_prompt: prompt,
+        ...(promptIndex != null ? { prompt_index: promptIndex } : {}),
       })
       .eq('id', existing.id);
     imageId = existing.id;
@@ -146,6 +156,7 @@ export async function POST(
         lighting_category: lightingCategory,
         clothing_state: clothingState,
         angle_category: angleCategory,
+        ...(promptIndex != null ? { prompt_index: promptIndex } : {}),
       })
       .select('id')
       .single();
