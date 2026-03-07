@@ -470,7 +470,7 @@ export async function POST(
           ? characterDataMap.get(imgPrompt.secondary_character_id)
           : undefined;
         const secondaryGenderForKontext = secondaryCharDataForKontext?.gender as 'male' | 'female' | undefined;
-        const { loras: kontextLoras } = selectKontextResources({
+        const { loras: kontextLoras, triggerWords: kontextTriggerWords } = selectKontextResources({
           gender: primaryGenderForKontext,
           secondaryGender: secondaryGenderForKontext,
           isSfw: sfwMode,
@@ -480,21 +480,10 @@ export async function POST(
         });
         console.log(`[Kontext][${imgPrompt.id}] LoRAs (${primaryGenderForKontext}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map(l => `${l.filename}@${l.strengthModel}`).join(', ')}`);
 
-        // Inject Kontext LoRA trigger words that aren't already present in the prompt.
-        // Some Flux LoRAs require their trigger word in the prompt to activate.
-        const kontextTriggerRegistry: Record<string, string> = {
-          'fc-flux-perfect-busts.safetensors': 'woman',
-          'flux-two-people-kissing.safetensors': 'kissing',
-          'boudoir-style-flux.safetensors': 'boud01rstyle',
-          'flux-fashion-editorial.safetensors': 'flux-fash',
-          'flux-beauty-skin.safetensors': 'mdlnbaytskn',
-        };
-        for (const lora of kontextLoras) {
-          const trigger = kontextTriggerRegistry[lora.filename];
-          if (trigger && !new RegExp(`\\b${trigger}\\b`, 'i').test(kontextPositivePrompt)) {
-            kontextPositivePrompt = `${trigger}, ${kontextPositivePrompt}`;
-            console.log(`[Kontext][${imgPrompt.id}] Injected trigger word "${trigger}" for ${lora.filename}`);
-          }
+        // Prepend LoRA trigger words returned by selectKontextResources
+        if (kontextTriggerWords.length > 0) {
+          kontextPositivePrompt = `${kontextTriggerWords.join(' ')} ${kontextPositivePrompt}`;
+          console.log(`[Kontext][${imgPrompt.id}] Trigger words injected: ${kontextTriggerWords.join(', ')}`);
         }
 
         // Build Kontext workflow — uses identity-prefixed scene prompt

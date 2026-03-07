@@ -131,13 +131,21 @@ export async function POST(
 
     const seed = (typeof customSeed === "number" && customSeed > 0) ? customSeed : Math.floor(Math.random() * 2_147_483_647) + 1;
 
+    // Prepend LoRA trigger words that aren't already in the prompt
+    const finalPrompt = kontextResources.triggerWords.length > 0
+      ? `${kontextResources.triggerWords.join(' ')} ${fluxPrompt}`
+      : fluxPrompt;
+
     console.log(`[StoryPublisher] LoRAs: ${kontextResources.loras.length > 0 ? kontextResources.loras.map(l => `${l.filename}(${l.strengthModel.toFixed(2)})`).join(", ") : "NONE"}`);
+    if (kontextResources.triggerWords.length > 0) {
+      console.log(`[StoryPublisher] Trigger words injected: ${kontextResources.triggerWords.join(', ')}`);
+    }
     console.log(`[StoryPublisher] Submitting portrait regeneration (Kontext) for ${character.name}, seed: ${seed}`);
 
     // 7. Build Kontext workflow
     const workflow = buildKontextWorkflow({
       type: 'portrait',
-      positivePrompt: fluxPrompt,
+      positivePrompt: finalPrompt,
       width: 832,
       height: 1216,
       seed,

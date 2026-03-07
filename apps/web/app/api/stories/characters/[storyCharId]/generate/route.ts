@@ -109,14 +109,22 @@ export async function POST(
       hasDualCharacter: false,
     });
 
+    // Prepend LoRA trigger words that aren't already in the prompt
+    const finalPrompt = kontextResources.triggerWords.length > 0
+      ? `${kontextResources.triggerWords.join(' ')} ${fluxPrompt}`
+      : fluxPrompt;
+
     console.log(`[StoryPublisher] Kontext identity prefix: ${identityPrefix.substring(0, 80)}...`);
     console.log(`[StoryPublisher] LoRAs: ${kontextResources.loras.length > 0 ? kontextResources.loras.map(l => l.filename).join(", ") : "NONE"}`);
+    if (kontextResources.triggerWords.length > 0) {
+      console.log(`[StoryPublisher] Trigger words injected: ${kontextResources.triggerWords.join(', ')}`);
+    }
     console.log(`[StoryPublisher] Seed: ${seed}`);
 
     // 6. Build Kontext workflow
     const workflow = buildKontextWorkflow({
       type: 'portrait',
-      positivePrompt: fluxPrompt,
+      positivePrompt: finalPrompt,
       width: 832,
       height: 1216,
       seed,

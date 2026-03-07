@@ -187,6 +187,8 @@ export function getKontextLoras(gender?: 'male' | 'female' | 'neutral'): LoraEnt
 
 export interface KontextResourceSelection {
   loras: Array<{ filename: string; strengthModel: number; strengthClip: number }>;
+  /** Trigger words that must appear in the positive prompt for selected LoRAs to activate fully. */
+  triggerWords: string[];
 }
 
 /**
@@ -216,6 +218,7 @@ export function selectKontextResources(opts: {
   const hasFemaleCharacter = isFemale || secondaryGender === 'female';
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  const pendingTriggers: string[] = [];
 
   // 1. Realism LoRA — always included. Reduced for NSFW to give body LoRAs
   //    more room in the model's attention budget.
@@ -231,8 +234,10 @@ export function selectKontextResources(opts: {
   //    • All other cases     → Detail LoRA
   if (hasFemaleCharacter && isSfw && !hasDualCharacter) {
     loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+    pendingTriggers.push('flux-fash');
   } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
     loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    pendingTriggers.push('boud01rstyle');
   } else {
     let detailStrength = 0.6;
     if (isCloseUp) detailStrength = 0.8;
@@ -287,6 +292,7 @@ export function selectKontextResources(opts: {
       loras.push({ filename: 'flux-sweat-v2.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
     } else if (isCloseUp && hasFemaleCharacter) {
       loras.push({ filename: 'flux-beauty-skin.safetensors', strengthModel: 0.3, strengthClip: 0.3 });
+      pendingTriggers.push('mdlnbaytskn');
     }
   }
 
@@ -303,6 +309,11 @@ export function selectKontextResources(opts: {
     }
   }
 
-  return { loras };
+  // Filter out trigger words that are already present in the prompt
+  const triggerWords = pendingTriggers.filter(
+    (t) => !new RegExp(`\\b${t}\\b`, 'i').test(prompt)
+  );
+
+  return { loras, triggerWords };
 }
 
