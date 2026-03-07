@@ -233,6 +233,11 @@ const ANGLES: Record<AngleCategory, string[]> = {
     'photographed from slightly below, empowering low camera angle',
     'from a low angle, camera tilted upward at the body',
   ],
+  back: [
+    'back facing the camera, rear view, back of body facing the camera',
+    'back turned to camera, full rear view showing back and behind',
+    'rear-facing view, body turned completely away from camera',
+  ],
 };
 
 // ─────────────────────────────────────────────────────────────────
