@@ -186,6 +186,9 @@ KEEP_LORAS=(
   "flux-beauty-skin.safetensors"
   "curvy-body-sdxl.safetensors"
   "skin-realism-sdxl.safetensors"
+  "backshot-sdxl.safetensors"
+  "bad-anatomy-neg-sdxl.safetensors"
+  "realfeet-sdxl.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -258,6 +261,12 @@ fi
 download_to_volume "1449869" "curvy-body-sdxl.safetensors"
 # Skin Realism (pores, imperfections, natural texture) — CivitAI model 248951, version 340833
 download_to_volume "340833" "skin-realism-sdxl.safetensors"
+# Back Shot LoRA — improves back-facing pose composition — CivitAI model 658655, version 736970
+download_to_volume "736970" "backshot-sdxl.safetensors"
+# Bad Anatomy Negative LoRA — used in negative conditioning to reduce anatomy errors — CivitAI model 430961, version 486308
+download_to_volume "486308" "bad-anatomy-neg-sdxl.safetensors"
+# RealFeet SDXL — improves feet/ankle/lower leg rendering — CivitAI model 211517, version 238277
+download_to_volume "238277" "realfeet-sdxl.safetensors"
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then

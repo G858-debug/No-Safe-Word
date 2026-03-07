@@ -17,27 +17,60 @@
   },
   "9": {
     "class_type": "LoraLoader",
-    "_comment": "Skin realism — adds pores, imperfections, natural texture at low weight",
+    "_comment": "Skin realism — adds pores, imperfections, natural texture",
     "inputs": {
       "lora_name": "skin-realism-sdxl.safetensors",
-      "strength_model": 0.35,
-      "strength_clip": 0.35,
+      "strength_model": 0.5,
+      "strength_clip": 0.5,
       "model": ["2", 0],
       "clip": ["2", 1]
+    }
+  },
+  "10": {
+    "class_type": "LoraLoader",
+    "_comment": "Back Shot — improves back-facing pose composition",
+    "inputs": {
+      "lora_name": "backshot-sdxl.safetensors",
+      "strength_model": 0.4,
+      "strength_clip": 0.4,
+      "model": ["9", 0],
+      "clip": ["9", 1]
+    }
+  },
+  "11": {
+    "class_type": "LoraLoader",
+    "_comment": "RealFeet — improves feet/ankle/lower leg anatomy",
+    "inputs": {
+      "lora_name": "realfeet-sdxl.safetensors",
+      "strength_model": 0.7,
+      "strength_clip": 0.7,
+      "model": ["10", 0],
+      "clip": ["10", 1]
+    }
+  },
+  "12": {
+    "class_type": "LoraLoader",
+    "_comment": "Bad Anatomy Negative — reduces anatomy errors via negative conditioning",
+    "inputs": {
+      "lora_name": "bad-anatomy-neg-sdxl.safetensors",
+      "strength_model": 0.6,
+      "strength_clip": 0.6,
+      "model": ["11", 0],
+      "clip": ["11", 1]
     }
   },
   "3": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "POSITIVE_PROMPT",
-      "clip": ["9", 1]
+      "clip": ["12", 1]
     }
   },
   "4": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "NEGATIVE_PROMPT",
-      "clip": ["9", 1]
+      "clip": ["12", 1]
     }
   },
   "5": {
@@ -51,7 +84,7 @@
   "6": {
     "class_type": "KSampler",
     "inputs": {
-      "model": ["9", 0],
+      "model": ["12", 0],
       "positive": ["3", 0],
       "negative": ["4", 0],
       "latent_image": ["5", 0],

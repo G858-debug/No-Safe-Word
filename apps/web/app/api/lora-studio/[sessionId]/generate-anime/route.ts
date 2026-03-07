@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 import { submitRunPodJob } from '@no-safe-word/image-gen/runpod';
 
-// ComfyUI workflow template for RealVisXL V5.0 + Curvy body SDXL LoRA.
+// ComfyUI workflow template for RealVisXL V5.0 + LoRA stack.
+// Chain: Checkpoint → Curvy Body → Skin Realism → Back Shot → RealFeet (positive)
+//        + Bad Anatomy Negative LoRA (negative conditioning)
 // Runs on existing RunPod ComfyUI serverless endpoint.
 function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
   return {
@@ -31,13 +33,46 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
         clip: ['2', 1],
       },
     },
+    // Back Shot LoRA — improves back-facing pose composition
+    '10': {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: 'backshot-sdxl.safetensors',
+        strength_model: 0.4,
+        strength_clip: 0.4,
+        model: ['9', 0],
+        clip: ['9', 1],
+      },
+    },
+    // RealFeet LoRA — improves feet/ankle/lower leg anatomy
+    '11': {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: 'realfeet-sdxl.safetensors',
+        strength_model: 0.7,
+        strength_clip: 0.7,
+        model: ['10', 0],
+        clip: ['10', 1],
+      },
+    },
+    // Bad Anatomy Negative LoRA — loaded separately for negative conditioning
+    '12': {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: 'bad-anatomy-neg-sdxl.safetensors',
+        strength_model: 0.6,
+        strength_clip: 0.6,
+        model: ['11', 0],
+        clip: ['11', 1],
+      },
+    },
     '3': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: prompt, clip: ['9', 1] },
+      inputs: { text: prompt, clip: ['12', 1] },
     },
     '4': {
       class_type: 'CLIPTextEncode',
-      inputs: { text: negativePrompt, clip: ['9', 1] },
+      inputs: { text: negativePrompt, clip: ['12', 1] },
     },
     '5': {
       class_type: 'EmptyLatentImage',
@@ -46,7 +81,7 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
     '6': {
       class_type: 'KSampler',
       inputs: {
-        model: ['9', 0],
+        model: ['12', 0],
         positive: ['3', 0],
         negative: ['4', 0],
         latent_image: ['5', 0],
