@@ -8,7 +8,7 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
   return {
     '1': {
       class_type: 'CheckpointLoaderSimple',
-      inputs: { ckpt_name: 'RealVisXL_V5.0.safetensors' },
+      inputs: { ckpt_name: 'realvisxlV50_v50Bakedvae.safetensors' },
     },
     '2': {
       class_type: 'LoraLoader',

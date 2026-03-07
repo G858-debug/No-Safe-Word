@@ -127,12 +127,12 @@ if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
   for ckpt_file in "${VOLUME_MODELS}/checkpoints/"*.safetensors "${VOLUME_MODELS}/checkpoints/"*.ckpt; do
     [ -f "$ckpt_file" ] || continue
     ckpt_name=$(basename "$ckpt_file")
-    if [ "$ckpt_name" != "RealVisXL_V5.0.safetensors" ]; then
+    if [ "$ckpt_name" != "realvisxlV50_v50Bakedvae.safetensors" ]; then
       echo "[NSW] Removing old checkpoint: $ckpt_name"
       rm -f "$ckpt_file"
     fi
   done
-  echo "[NSW] ✓ Old SDXL checkpoints removed (kept RealVisXL V5.0)"
+  echo "[NSW] ✓ Old SDXL checkpoints removed (kept realvisxlV50_v50Bakedvae)"
 fi
 
 # FaceDetailer / YOLO detection models (no longer used with Kontext)
@@ -216,10 +216,35 @@ download_to_volume "2585889" "flux-beauty-skin.safetensors"
 
 # ---- LoRA Studio: RealVisXL V5.0 checkpoint + Curvy body LoRA ----
 # Used for photorealistic body image generation in the LoRA training pipeline.
-download_model \
-  "https://huggingface.co/SG161222/RealVisXL_V5.0/resolve/main/RealVisXL_V5.0.safetensors" \
-  "checkpoints" \
-  "RealVisXL_V5.0.safetensors"
+# Both downloaded to network volume so they persist across container restarts.
+# RealVisXL V5.0 BakedVAE fp16 (~6.6GB) — CivitAI version 789646.
+CKPT_DIR="/runpod-volume/models/checkpoints"
+CKPT_FILE="realvisxlV50_v50Bakedvae.safetensors"
+if [ -f "${CKPT_DIR}/${CKPT_FILE}" ]; then
+    echo "[NSW] ✓ ${CKPT_FILE} (volume checkpoint, exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${CKPT_DIR}"
+    CKPT_URL="https://civitai.com/api/download/models/789646"
+    [ -n "${CIVITAI_API_KEY:-}" ] && CKPT_URL="${CKPT_URL}?token=${CIVITAI_API_KEY}"
+    echo "[NSW] Downloading ${CKPT_FILE} to volume checkpoints..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${CKPT_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=900)
+    with open('${CKPT_DIR}/${CKPT_FILE}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${CKPT_DIR}/${CKPT_FILE}.tmp" "${CKPT_DIR}/${CKPT_FILE}" && \
+    echo "[NSW] ✓ ${CKPT_FILE} (volume checkpoint, downloaded)" || \
+    { rm -f "${CKPT_DIR}/${CKPT_FILE}.tmp"; echo "[NSW] ✗✗ ${CKPT_FILE} FAILED"; FAILED=$((FAILED + 1)); }
+else
+    echo "[NSW] Volume not mounted — skipping ${CKPT_FILE}"
+fi
 
 download_to_volume "1449869" "curvy-body-sdxl.safetensors"
 
