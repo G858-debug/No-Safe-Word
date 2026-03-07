@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Wand2 } from "lucide-react";
+import { ChevronRight, Wand2, Layers } from "lucide-react";
 import { LogoutButton } from "@/app/dashboard-components/LogoutButton";
 
 export default function StoriesLayout({
@@ -44,6 +44,13 @@ export default function StoriesLayout({
             )}
             </nav>
             <div className="flex items-center gap-2">
+              <Link
+                href="/admin/lora-studio"
+                className="inline-flex items-center gap-1.5 rounded-md border border-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                LoRA Studio
+              </Link>
               <Link
                 href="/dashboard/image-generator"
                 className="inline-flex items-center gap-1.5 rounded-md border border-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
