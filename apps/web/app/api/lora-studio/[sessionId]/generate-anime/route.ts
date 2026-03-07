@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
 
-// zylim0702/sdxl-lora-customize-model — Base SDXL with external LoRA loading via Lora_url.
+// adirik/realvisxl-v4.0 — Photorealistic SDXL fine-tune, great at bodies.
 // Uses versioned predictions endpoint (/v1/predictions with version field).
-const REPLICATE_MODEL_VERSION = '5a2b1cff79a2cf60d2a498b424795a90e26b7a3992fbd13b340f73ff4942b81e';
-
-// Curvy body SDXL LoRA by fellow_daoist (386MB) — hosted on HuggingFace
-// (CivitAI downloads fail on Replicate workers, so we mirror on HF)
-const LORA_URL = 'https://huggingface.co/G858/curvy-body-sdxl-lora/resolve/main/curvy-body-sdxl.safetensors';
+const REPLICATE_MODEL_VERSION = '85a58cc71587cc27539b7c83eb1ce4aea02feedfb9a9fae0598cebc110a3d695';
 
 // POST /api/lora-studio/[sessionId]/generate-anime
 // Triggers a single Replicate prediction for one anime training image.
@@ -74,8 +70,6 @@ export async function POST(
           num_inference_steps: 30,
           guidance_scale: 7.5,
           seed: Math.floor(Math.random() * 2_147_483_647),
-          Lora_url: LORA_URL,
-          lora_scale: 0.85,
           disable_safety_checker: true,
         },
       }),
