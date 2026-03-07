@@ -41,14 +41,14 @@ export interface AnimePrompt {
 // Fixed strings
 // ─────────────────────────────────────────────────────────────────
 
-const BASE = 'venusbody, Black woman, dark skin, curvaceous figure, large breasts, wide hips, thick thighs, small waist, hourglass body';
+const BASE = 'venusbody, Black woman, dark skin, curvaceous figure, large breasts, wide hips, thick thighs, small waist, hourglass body, faceless, no face visible, head cropped out of frame';
 const Q = 'masterpiece, best quality, highly detailed, 8k';
-const NEG = 'skinny, thin, flat chest, small breasts, narrow hips, white skin, pale skin, asian, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
+const NEG = 'face, head, eyes, nose, mouth, portrait, skinny, thin, flat chest, small breasts, narrow hips, white skin, pale skin, asian, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
 
 const SHOTS: Record<ShotType, string> = {
-  full: 'full body from head to toe',
-  three_quarter: 'three-quarter body from head to mid-thigh',
-  half: 'half body from head to hip',
+  full: 'full body from neck down to toe, head not visible',
+  three_quarter: 'body from shoulders down to mid-thigh, head cropped out',
+  half: 'body from shoulders down to hip, head not in frame',
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -62,12 +62,12 @@ const POSES: Record<PoseCategory, string[]> = {
     'standing poised with natural balance',
     'standing quietly with understated confidence',
     'standing in a relaxed neutral stance',
-    'standing with perfect posture, chin level',
+    'standing with perfect posture, shoulders back',
   ],
   standing_attitude: [
     'standing with one hand planted firmly on hip',
     'hip cocked to the side, hand on waist',
-    'standing with arms crossed and chin raised in attitude',
+    'standing with arms crossed, weight shifted to one leg',
     'both hands on hips, weight shifted to one leg',
     'leaning to one side with fierce attitude',
     'shoulder cocked, defiant stance with hand on hip',
@@ -77,7 +77,7 @@ const POSES: Record<PoseCategory, string[]> = {
     'walking with a natural fluid hip sway',
     'stepping forward with purpose and grace',
     'strolling with easy natural rhythm',
-    'walking mid-stride, head half-turned to camera',
+    'walking mid-stride with confident body movement',
   ],
   seated: [
     'seated gracefully on a chair with legs crossed',
@@ -88,9 +88,9 @@ const POSES: Record<PoseCategory, string[]> = {
     'sitting cross-legged on the floor in a relaxed pose',
   ],
   lying_down: [
-    'lying on her back with arms stretched above her head',
-    'lying on her side, head propped on one elbow',
-    'lying on her stomach, chin resting on folded hands',
+    'lying on her back with arms stretched above',
+    'lying on her side, body propped on one elbow',
+    'lying on her stomach with hands folded beneath her',
     'stretched out on her back, one knee gently raised',
     'lying on her side in a languid, curved pose',
     'lying on her back with one arm draped across her body',
@@ -103,10 +103,10 @@ const POSES: Record<PoseCategory, string[]> = {
     'leaning forward over a surface, back naturally arched',
   ],
   over_shoulder: [
-    'looking over her left shoulder with a sultry glance',
-    'turned slightly away, glancing seductively back at camera',
-    'back mostly to camera, head turned to look over right shoulder',
-    'turned away, head turned back with a soft expression',
+    'body turned away from camera, back visible',
+    'turned slightly away, showing back and shoulders',
+    'back mostly to camera, body angled away',
+    'turned away with body twisted to show curves from behind',
   ],
   crouching: [
     'crouching low with knees bent, balanced on her toes',
@@ -214,24 +214,24 @@ const LIGHTING: Record<LightingCategory, string[]> = {
 
 const ANGLES: Record<AngleCategory, string[]> = {
   front: [
-    'facing directly forward at the camera, straight frontal view',
-    'looking straight at the camera, full front-facing',
-    'direct frontal angle, body and face turned toward camera',
+    'body facing directly forward at the camera, straight frontal view',
+    'body squared to the camera, full front-facing',
+    'direct frontal angle, body turned toward camera',
   ],
   three_quarter: [
-    'at a three-quarter angle to the camera, showing depth and form',
-    'turned slightly to the right in a three-quarter view',
+    'body at a three-quarter angle to the camera, showing depth and form',
+    'body turned slightly to the right in a three-quarter view',
     'three-quarter angle from the left, beautifully composed',
-    'angled forty-five degrees to the camera, natural and dynamic',
+    'body angled forty-five degrees to the camera, natural and dynamic',
   ],
   side: [
     'in clean side profile, body fully facing sideways',
-    'full side profile view, elegant line from head to toe',
+    'full side profile view, elegant body line',
     'side view, body turned ninety degrees to camera',
   ],
   low_angle: [
     'photographed from slightly below, empowering low camera angle',
-    'from a low eye-level empowering angle, looking slightly up',
+    'from a low angle, camera tilted upward at the body',
   ],
 };
 
