@@ -7,7 +7,7 @@ const REPLICATE_MODEL_VERSION = '5a2b1cff79a2cf60d2a498b424795a90e26b7a3992fbd13
 
 // CivitAI Curvy body SDXL LoRA by fellow_daoist (386MB, 5-star)
 const CIVITAI_API_TOKEN = process.env.CIVITAI_API_KEY ?? '';
-const LORA_URL = `https://civitai.com/api/download/models/1285047?type=Model&format=SafeTensor${CIVITAI_API_TOKEN ? `&token=${CIVITAI_API_TOKEN}` : ''}`;
+const LORA_URL = `https://civitai.com/api/download/models/1449869?type=Model&format=SafeTensor${CIVITAI_API_TOKEN ? `&token=${CIVITAI_API_TOKEN}` : ''}`;
 
 // POST /api/lora-studio/[sessionId]/generate-anime
 // Triggers a single Replicate prediction for one anime training image.
