@@ -216,8 +216,6 @@ export function selectKontextResources(opts: {
   hasDualCharacter: boolean;
 }): KontextResourceSelection {
   const { gender, secondaryGender, isSfw, imageType, prompt, hasDualCharacter } = opts;
-  const isFacebookSfw = imageType === 'facebook_sfw';
-  const isNsfw = imageType === 'website_nsfw_paired';
   const isFullBody = imageType === 'fullBody';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
   const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
@@ -234,9 +232,7 @@ export function selectKontextResources(opts: {
 
   // 1. Realism LoRA — always included. Reduced for NSFW to give body LoRAs
   //    more room in the model's attention budget.
-  let realismStrength = 0.8;
-  if (isFacebookSfw) realismStrength = 0.9;
-  else if (isNsfw) realismStrength = 0.7;
+  let realismStrength = 0.7;
   if (hasDualCharacter) realismStrength = Math.min(realismStrength, 0.7);
   loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
 
@@ -278,10 +274,8 @@ export function selectKontextResources(opts: {
     pendingTriggers.push('nsw_curves');
 
     // Keep perfect-busts as a complementary LoRA at reduced strength
-    let bustsStrength = 0.4 * secondaryReduction;
-    if (isFacebookSfw) bustsStrength = 0.25 * secondaryReduction;
-    else if (isNsfw) bustsStrength = 0.5 * secondaryReduction;
-    else if (isFullBody) bustsStrength = 0.6 * secondaryReduction;
+    let bustsStrength = 0.5 * secondaryReduction;
+    if (isFullBody) bustsStrength = 0.6 * secondaryReduction;
     loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
   }
 
