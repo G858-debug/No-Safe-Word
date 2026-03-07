@@ -41,7 +41,9 @@ export default function ImageGeneratorPage() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Result
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(() =>
+    typeof window !== "undefined" ? sessionStorage.getItem("imggen_image") : null
+  );
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -150,6 +152,7 @@ export default function ImageGeneratorPage() {
             if (status.completed) {
               clearInterval(pollRef.current!);
               setImageBase64(status.imageBase64);
+              try { sessionStorage.setItem("imggen_image", status.imageBase64); } catch { /* quota */ }
               resolve();
             } else if (status.error) {
               clearInterval(pollRef.current!);
