@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@no-safe-word/story-engine';
+import sharp from 'sharp';
 
 // DELETE /api/lora-studio/[sessionId]/anime-status
 // Deletes all rejected (failed) anime image records for this session.
@@ -115,15 +116,31 @@ export async function GET(
             // Download from Replicate
             const imgRes = await fetch(replicateUrl);
             if (!imgRes.ok) return;
-            const imgBuffer = await imgRes.arrayBuffer();
-            const contentType = imgRes.headers.get('content-type') ?? 'image/jpeg';
-            const ext = contentType.includes('png') ? 'png' : 'jpg';
+            const rawBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+            // Crop top 18% to remove head — body-only for LoRA training
+            const metadata = await sharp(rawBuffer).metadata();
+            const cropTop = Math.round((metadata.height ?? 0) * 0.18);
+            const croppedBuffer = (metadata.height && cropTop > 0)
+              ? await sharp(rawBuffer)
+                  .extract({
+                    left: 0,
+                    top: cropTop,
+                    width: metadata.width ?? 768,
+                    height: (metadata.height ?? 1152) - cropTop,
+                  })
+                  .jpeg({ quality: 92 })
+                  .toBuffer()
+              : rawBuffer;
+
+            const contentType = 'image/jpeg';
+            const ext = 'jpg';
 
             // Upload to Supabase Storage (private bucket)
             const storagePath = `sessions/${sessionId}/${img.id}.${ext}`;
             const { error: uploadErr } = await (supabase as any).storage
               .from(STORAGE_BUCKET)
-              .upload(storagePath, imgBuffer, { contentType, upsert: true });
+              .upload(storagePath, croppedBuffer, { contentType, upsert: true });
 
             if (uploadErr) {
               console.error('[anime-status] Storage upload failed:', uploadErr.message);
