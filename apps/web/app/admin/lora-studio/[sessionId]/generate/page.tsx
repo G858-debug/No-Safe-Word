@@ -224,13 +224,17 @@ function Lightbox({
   getEffectivePrompt: (id: number) => string;
   onEditPrompt: (promptId: number, text: string) => void;
   onResetPrompt: (promptId: number) => void;
-  onRegenerate: (prompt: AnimePrompt) => void;
+  onRegenerate: (prompt: AnimePrompt, fixedSeed?: number) => void;
   editedPrompt: string | undefined;
 }) {
   const state = states[index];
   const { prompt, record, signedUrl } = state;
   const status = record?.status ?? "pending";
   const isEdited = editedPrompt !== undefined;
+  const [useFixedSeed, setUseFixedSeed] = useState(false);
+  const [seedValue, setSeedValue] = useState(() =>
+    Math.floor(Math.random() * 2_147_483_647),
+  );
 
   // Find prev/next indices that have images
   const findAdjacentWithImage = (dir: -1 | 1) => {
@@ -387,8 +391,27 @@ function Lightbox({
             className="mb-3 flex-1 resize-none rounded bg-zinc-800 px-3 py-2 text-xs leading-relaxed text-zinc-300 focus:outline-none focus:ring-1 focus:ring-amber-600"
             style={{ minHeight: "200px" }}
           />
+          {/* Fixed seed checkbox */}
+          <label className="mb-3 flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              checked={useFixedSeed}
+              onChange={(e) => setUseFixedSeed(e.target.checked)}
+              className="h-5 w-5 cursor-pointer rounded border-zinc-600 bg-zinc-800 text-amber-500 focus:ring-amber-600 focus:ring-offset-0"
+            />
+            <span className="text-xs text-zinc-400">Fixed seed</span>
+            {useFixedSeed && (
+              <input
+                type="number"
+                value={seedValue}
+                onChange={(e) => setSeedValue(Number(e.target.value))}
+                className="w-32 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-amber-600"
+              />
+            )}
+          </label>
+
           <button
-            onClick={() => onRegenerate(prompt)}
+            onClick={() => onRegenerate(prompt, useFixedSeed ? seedValue : undefined)}
             disabled={status === "generating"}
             className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-900/40 px-4 py-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-900/60 disabled:opacity-40"
           >
@@ -563,7 +586,7 @@ export default function GeneratePage() {
   // ── Dispatch single prompt ────────────────────────────────────
 
   const dispatchPrompt = useCallback(
-    async (prompt: AnimePrompt) => {
+    async (prompt: AnimePrompt, fixedSeed?: number) => {
       const effectivePrompt = getEffectivePrompt(prompt.id);
       console.log(`[dispatch] POST prompt #${prompt.id} to /api/lora-studio/${sessionId}/generate-anime`);
       const res = await fetch(`/api/lora-studio/${sessionId}/generate-anime`, {
@@ -577,6 +600,7 @@ export default function GeneratePage() {
           clothingState: prompt.clothingState,
           angleCategory: prompt.angleCategory,
           promptIndex: prompt.id,
+          ...(fixedSeed != null ? { seed: fixedSeed } : {}),
         }),
       });
       console.log(`[dispatch] prompt #${prompt.id} response: ${res.status}`);
@@ -915,8 +939,8 @@ export default function GeneratePage() {
               return next;
             })
           }
-          onRegenerate={async (prompt) => {
-            await dispatchPrompt(prompt);
+          onRegenerate={async (prompt, fixedSeed) => {
+            await dispatchPrompt(prompt, fixedSeed);
             startPolling();
             await fetchStatus();
           }}

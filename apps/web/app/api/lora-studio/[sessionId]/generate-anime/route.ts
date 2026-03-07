@@ -88,9 +88,10 @@ export async function POST(
     clothingState: string;
     angleCategory: string;
     promptIndex?: number;
+    seed?: number;
   };
 
-  const { prompt, negativePrompt, poseCategory, lightingCategory, clothingState, angleCategory, promptIndex } = body;
+  const { prompt, negativePrompt, poseCategory, lightingCategory, clothingState, angleCategory, promptIndex, seed: requestedSeed } = body;
 
   if (!prompt) {
     return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
@@ -109,7 +110,7 @@ export async function POST(
   }
   console.log('[generate-anime] Session found, submitting RunPod job...');
 
-  const seed = Math.floor(Math.random() * 2_147_483_647);
+  const seed = requestedSeed ?? Math.floor(Math.random() * 2_147_483_647);
   const workflow = buildWorkflow(prompt, negativePrompt, seed);
 
   let jobId: string;
