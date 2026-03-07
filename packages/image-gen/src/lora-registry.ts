@@ -272,16 +272,16 @@ export function selectKontextResources(opts: {
 
     // NSW Curves body LoRA — custom-trained on curvaceous body proportions.
     // Replaces both perfect-busts + hourglass in a single slot.
-    let curvesStrength = 0.9 * secondaryReduction;
+    let curvesStrength = 0.7 * secondaryReduction;
     if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
     loras.push({ filename: 'nsw-curves-body.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
     pendingTriggers.push('nsw_curves');
 
     // Keep perfect-busts as a complementary LoRA at reduced strength
-    let bustsStrength = 0.5 * secondaryReduction;
-    if (isFacebookSfw) bustsStrength = 0.3 * secondaryReduction;
-    else if (isNsfw) bustsStrength = 0.6 * secondaryReduction;
-    else if (isFullBody) bustsStrength = 0.7 * secondaryReduction;
+    let bustsStrength = 0.4 * secondaryReduction;
+    if (isFacebookSfw) bustsStrength = 0.25 * secondaryReduction;
+    else if (isNsfw) bustsStrength = 0.5 * secondaryReduction;
+    else if (isFullBody) bustsStrength = 0.6 * secondaryReduction;
     loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
   }
 
