@@ -97,13 +97,13 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     genderCategory: 'female',
   },
   {
-    name: 'NSW Curves Body LoRA',
-    filename: 'nsw-curves-body.safetensors',
+    name: 'BodyLicious FLUX',
+    filename: 'bodylicious-flux.safetensors',
     category: 'bodies',
     defaultStrength: 0.8,
     clipStrength: 0.8,
-    triggerWord: 'nsw_curves',
-    description: 'Custom-trained body proportions LoRA — curvaceous figure, large breasts, wide hips, thick thighs, hourglass body (191 training images, Flux Dev)',
+    triggerWord: 'huge breasts, huge hips, huge ass, narrow waist',
+    description: 'Exaggerated feminine curves LoRA — huge breasts, huge hips, huge ass, narrow waist (Flux Dev, CivitAI 238105 v979680)',
     compatibleWith: ['sfw', 'nsfw'],
     installed: false,
     genderCategory: 'female',
@@ -266,12 +266,12 @@ export function selectKontextResources(opts: {
     const isSecondaryOnly = !isFemale && secondaryGender === 'female';
     const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0; // 30% reduction when female is only secondary
 
-    // NSW Curves body LoRA — custom-trained on curvaceous body proportions.
-    // Replaces both perfect-busts + hourglass in a single slot.
+    // BodyLicious FLUX — exaggerated feminine curves (huge breasts, hips, ass, narrow waist).
+    // Replaces nsw-curves + hourglass in a single slot.
     let curvesStrength = 0.7 * secondaryReduction;
     if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
-    loras.push({ filename: 'nsw-curves-body.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
-    pendingTriggers.push('nsw_curves');
+    loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
+    pendingTriggers.push('huge breasts', 'huge hips', 'huge ass', 'narrow waist');
 
     // Keep perfect-busts as a complementary LoRA at reduced strength
     let bustsStrength = 0.5 * secondaryReduction;
