@@ -479,13 +479,10 @@ export async function POST(
           console.log(`[Kontext][${imgPrompt.id}] Prompt is already natural language — skipping LLM rewrite`);
         }
 
-        // Persist the final prompt back to the DB row
-        if (kontextPositivePrompt !== imgPrompt.prompt) {
-          await supabase
-            .from("story_image_prompts")
-            .update({ prompt: kontextPositivePrompt })
-            .eq("id", imgPrompt.id);
-        }
+        // NOTE: Do NOT persist the assembled prompt back to the DB.
+        // The DB stores scene-only text; identity prefix + atmosphere suffix
+        // are injected at generation time. Persisting would overwrite the
+        // original scene prompt and cause doubled identity on regeneration.
 
         // Select Kontext LoRAs — scene-aware selection based on gender, SFW/NSFW, shot type
         const primaryGenderForKontext = (charData?.gender as 'male' | 'female') || 'female';
