@@ -346,28 +346,38 @@ export async function POST(
 
           const { data: sc2 } = await supabase
             .from("story_characters")
-            .select("approved_image_id")
+            .select("approved_image_id, approved_fullbody_image_id")
             .eq("series_id", seriesId)
             .eq("character_id", imgPrompt.secondary_character_id)
             .single();
 
-          console.log(`[Kontext][${imgPrompt.id}] Secondary "${secondaryName}" approved_image_id: ${sc2?.approved_image_id || 'NONE'}`);
+          console.log(`[Kontext][${imgPrompt.id}] Secondary "${secondaryName}" approved_image_id: ${sc2?.approved_image_id || 'NONE'}, approved_fullbody_image_id: ${sc2?.approved_fullbody_image_id || 'NONE'}`);
 
-          if (sc2?.approved_image_id) {
-            const { data: img2 } = await supabase
-              .from("images")
-              .select("stored_url, sfw_url")
-              .eq("id", sc2.approved_image_id)
-              .single();
-
-            const secondaryRefBase64 = await fetchRefImageBase64(img2, `${secondaryName} secondary`);
-            if (secondaryRefBase64) {
-              kontextImages.push({ name: "secondary_ref.png", image: secondaryRefBase64 });
-              console.log(`[Kontext][${imgPrompt.id}] Secondary ref loaded (${Math.round(secondaryRefBase64.length / 1024)}KB base64)`);
-            }
-          } else {
-            console.warn(`[Kontext][${imgPrompt.id}] WARNING: Secondary character "${secondaryName}" has no approved_image_id — no reference image for identity`);
+          if (!sc2?.approved_image_id) {
+            throw new Error(`Secondary character "${secondaryName}" has no approved_image_id — cannot build dual scene reference`);
           }
+          if (!sc2.approved_fullbody_image_id) {
+            throw new Error(`Secondary character "${secondaryName}" has no approved_fullbody_image_id — cannot build dual scene reference. Approve a full-body portrait first.`);
+          }
+
+          const [{ data: faceImg2 }, { data: bodyImg2 }] = await Promise.all([
+            supabase.from("images").select("stored_url, sfw_url").eq("id", sc2.approved_image_id).single(),
+            supabase.from("images").select("stored_url, sfw_url").eq("id", sc2.approved_fullbody_image_id).single(),
+          ]);
+          const [faceBase64, bodyBase64] = await Promise.all([
+            fetchRefImageBase64(faceImg2, `${secondaryName} face`),
+            fetchRefImageBase64(bodyImg2, `${secondaryName} body`),
+          ]);
+
+          if (!faceBase64 || !bodyBase64) {
+            throw new Error(
+              `Secondary character "${secondaryName}" has approved image IDs but the images could not be fetched. Face: ${faceBase64 ? "OK" : "failed"}, Body: ${bodyBase64 ? "OK" : "failed"}.`
+            );
+          }
+
+          const stitchedSecondary = await concatImagesVertically(faceBase64, bodyBase64, 512);
+          kontextImages.push({ name: "secondary_ref.png", image: stitchedSecondary });
+          console.log(`[Kontext][${imgPrompt.id}] Secondary ref: face+body vertically stitched for "${secondaryName}" (${Math.round(stitchedSecondary.length / 1024)}KB base64)`);
         }
 
         // For dual scenes: combine both ref images into one server-side
