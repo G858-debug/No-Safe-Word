@@ -267,13 +267,18 @@ export function selectKontextResources(opts: {
     const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0; // 30% reduction when female is only secondary
 
     // BodyLicious FLUX — exaggerated feminine curves (huge breasts, hips, ass, narrow waist).
-    // Replaces nsw-curves + hourglass in a single slot.
     let curvesStrength = 0.7 * secondaryReduction;
     if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
     loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
     pendingTriggers.push('huge breasts', 'huge hips', 'huge ass', 'narrow waist');
 
-    // Keep perfect-busts as a complementary LoRA at reduced strength
+    // NSW Curves — custom-trained body LoRA, good curves but can cause disproportionate
+    // heads at high strength. Kept low (0.35) to complement BodyLicious without overpowering.
+    let nswCurvesStrength = 0.35 * secondaryReduction;
+    if (isFullBody) nswCurvesStrength = 0.5 * secondaryReduction;
+    loras.push({ filename: 'nsw-curves-body.safetensors', strengthModel: Math.round(nswCurvesStrength * 100) / 100, strengthClip: Math.round(nswCurvesStrength * 100) / 100 });
+
+    // Perfect-busts as a complementary LoRA at reduced strength
     let bustsStrength = 0.5 * secondaryReduction;
     if (isFullBody) bustsStrength = 0.6 * secondaryReduction;
     loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });

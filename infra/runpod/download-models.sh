@@ -190,6 +190,7 @@ KEEP_LORAS=(
   "bad-anatomy-neg-sdxl.safetensors"
   "realfeet-sdxl.safetensors"
   "bodylicious-flux.safetensors"
+  "nsw-curves-body.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -271,6 +272,37 @@ download_to_volume "238277" "realfeet-sdxl.safetensors"
 
 # BodyLicious FLUX — exaggerated feminine curves (CivitAI model 238105, version 979680)
 download_to_volume "979680" "bodylicious-flux.safetensors"
+
+# NSW Curves — custom-trained body LoRA (Replicate tar → safetensors extraction)
+NSW_CURVES_DEST="${VOLUME_LORAS_DIR}/nsw-curves-body.safetensors"
+NSW_CURVES_URL="https://replicate.delivery/xezq/2eBOTROp2kT2MKdv2IQwyQ7VYWQF9Z2MOPX01U3gC9pKekOWA/trained_model.tar"
+if [ -f "$NSW_CURVES_DEST" ]; then
+    echo "[NSW] ✓ nsw-curves-body.safetensors (volume, exists)"
+elif [ -d "${VOLUME_LORAS_DIR}" ]; then
+    echo "[NSW] Downloading nsw-curves-body LoRA from Replicate..."
+    python3 -c "
+import urllib.request, tarfile, io, sys, os, shutil
+try:
+    req = urllib.request.Request('${NSW_CURVES_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=600)
+    data = resp.read()
+    resp.close()
+    tar = tarfile.open(fileobj=io.BytesIO(data))
+    for m in tar.getmembers():
+        if m.name.endswith('.safetensors') and '/' not in m.name:
+            f = tar.extractfile(m)
+            with open('${NSW_CURVES_DEST}.tmp', 'wb') as out:
+                shutil.copyfileobj(f, out)
+            break
+    tar.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${NSW_CURVES_DEST}.tmp" "${NSW_CURVES_DEST}" && \
+    echo "[NSW] ✓ nsw-curves-body.safetensors (volume, downloaded)" || \
+    { rm -f "${NSW_CURVES_DEST}.tmp"; echo "[NSW] ✗✗ nsw-curves-body.safetensors FAILED"; }
+fi
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then
