@@ -290,7 +290,7 @@ try:
     resp.close()
     tar = tarfile.open(fileobj=io.BytesIO(data))
     for m in tar.getmembers():
-        if m.name.endswith('.safetensors') and '/' not in m.name:
+        if m.name.endswith('.safetensors') and m.isfile():
             f = tar.extractfile(m)
             with open('${NSW_CURVES_DEST}.tmp', 'wb') as out:
                 shutil.copyfileobj(f, out)
