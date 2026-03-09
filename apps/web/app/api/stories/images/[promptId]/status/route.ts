@@ -69,28 +69,37 @@ export async function GET(
       // Auto-store the image if not already stored
       let finalStoredUrl = storedUrl;
       if (!storedUrl && blobUrl) {
-        try {
-          const filename = `stories/prompt-${promptId}-${Date.now()}.jpeg`;
-          const storeRes = await fetch(
-            `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/images/store`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                blob_url: blobUrl,
-                image_id: imgPrompt.image_id,
-                filename,
-              }),
-            }
-          );
-
-          if (storeRes.ok) {
-            const storeData = await storeRes.json();
-            finalStoredUrl = storeData.stored_url;
+        const filename = `stories/prompt-${promptId}-${Date.now()}.jpeg`;
+        const storeRes = await fetch(
+          `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/images/store`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              blob_url: blobUrl,
+              image_id: imgPrompt.image_id,
+              filename,
+            }),
           }
-        } catch (err) {
-          console.warn("Failed to auto-store image:", err);
-          // Continue without stored URL
+        );
+
+        if (storeRes.ok) {
+          const storeData = await storeRes.json();
+          finalStoredUrl = storeData.stored_url;
+        } else {
+          const errText = await storeRes.text().catch(() => "unknown");
+          console.error(
+            `[PromptStatus][${promptId}] Auto-store FAILED (${storeRes.status}): ${errText}`,
+          );
+          // Don't return "generated" without a stored URL — let frontend retry
+          return NextResponse.json({
+            promptId,
+            status: "generating",
+            jobId: job.job_id,
+            blobUrl,
+            storedUrl: null,
+            error: `Image storage failed (${storeRes.status})`,
+          });
         }
       }
 

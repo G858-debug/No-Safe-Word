@@ -146,25 +146,33 @@ export async function GET(
       const buffer = base64ToBuffer(base64Data);
       const timestamp = Date.now();
       const storagePath = `stories/${jobRow.image_id}-${timestamp}.png`;
-      let finalImageUrl: string | null = null;
 
       const { error: uploadError } = await supabase.storage
         .from("story-images")
         .upload(storagePath, buffer, { contentType: "image/png", upsert: true });
 
-      if (!uploadError) {
-        const { data: { publicUrl } } = supabase.storage
-          .from("story-images")
-          .getPublicUrl(storagePath);
-
-        finalImageUrl = publicUrl;
-
-        // Update image record
-        await supabase
-          .from("images")
-          .update({ stored_url: publicUrl, sfw_url: publicUrl })
-          .eq("id", jobRow.image_id);
+      if (uploadError) {
+        console.error(
+          `[Status][${jobId}] Supabase storage upload FAILED for image ${jobRow.image_id}: ${uploadError.message}`,
+        );
+        // Do NOT mark as completed/generated — the image isn't stored.
+        // Frontend keeps polling; next poll re-fetches from RunPod cache and retries storage.
+        return NextResponse.json({
+          jobId,
+          completed: false,
+          error: `Image storage failed: ${uploadError.message}`,
+        });
       }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("story-images")
+        .getPublicUrl(storagePath);
+
+      // Update image record
+      await supabase
+        .from("images")
+        .update({ stored_url: publicUrl, sfw_url: publicUrl })
+        .eq("id", jobRow.image_id);
 
       // Update job status
       await supabase
@@ -183,7 +191,7 @@ export async function GET(
       return NextResponse.json({
         jobId,
         completed: true,
-        imageUrl: finalImageUrl,
+        imageUrl: publicUrl,
         seed,
         cost: 0,
         scheduled: true,
