@@ -77,3 +77,9 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
 1. Female characters receive attractiveness prose in the identity prefix (injected by the pipeline): beautiful face, curvaceous figure, etc.
 2. Body LoRAs (fc-flux-perfect-busts, hourglassv32_FLUX) are always loaded for scenes with female characters. These LoRAs do the heavy lifting since Flux has no negative prompt to prevent unflattering rendering.
 3. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and the pipeline adjusts enhancement accordingly.
+
+## Error Handling
+- Do NOT add silent fallbacks or default values that mask errors
+- If something fails, throw or surface the error explicitly
+- Never swallow exceptions with try/catch unless the catch block re-throws or logs with full context
+- Prefer failing loudly over degrading gracefully — this codebase needs to surface problems, not hide them
