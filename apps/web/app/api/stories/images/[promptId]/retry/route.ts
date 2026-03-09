@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob, imageUrlToBase64, buildKontextWorkflow } from "@no-safe-word/image-gen";
-import { concatImagesHorizontally } from "@/lib/server/image-concat";
-import type { KontextWorkflowType } from "@no-safe-word/image-gen";
+import { submitRunPodJob } from "@no-safe-word/image-gen";
+import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
 
 // POST /api/stories/images/[promptId]/retry — Internal retry for failed person validation
 // Called by the status route when dual-character validation detects wrong person count.
@@ -46,104 +45,28 @@ export async function POST(
       .eq("id", imgPrompt.post_id)
       .single();
 
-    const hasSecondary = !!imgPrompt.secondary_character_id;
-
-    // 3. Build Kontext workflow
-    const kontextType: KontextWorkflowType = !imgPrompt.character_id
-      ? "portrait"
-      : hasSecondary
-        ? "dual"
-        : "single";
-
-    const sfwMode = imgPrompt.image_type !== "website_nsfw_paired";
-    let kontextImages: Array<{ name: string; image: string }> = [];
-
-    if (kontextType !== "portrait" && imgPrompt.character_id && post) {
-      const { data: sc } = await supabase
-        .from("story_characters")
-        .select("approved_image_id")
-        .eq("series_id", post.series_id)
-        .eq("character_id", imgPrompt.character_id)
-        .single();
-
-      if (sc?.approved_image_id) {
-        const { data: img } = await supabase
-          .from("images")
-          .select("stored_url, sfw_url")
-          .eq("id", sc.approved_image_id)
-          .single();
-
-        const primaryRefUrl = img?.stored_url || img?.sfw_url;
-        if (primaryRefUrl) {
-          try {
-            kontextImages.push({ name: "primary_ref.png", image: await imageUrlToBase64(primaryRefUrl) });
-          } catch (err) {
-            console.warn(`[Kontext][${promptId}] Failed to fetch primary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
-          }
-        }
-      }
+    if (!post) {
+      throw new Error(`Post ${imgPrompt.post_id} not found — cannot determine series`);
     }
 
-    if (kontextType === "dual" && imgPrompt.secondary_character_id && post) {
-      const { data: sc2 } = await supabase
-        .from("story_characters")
-        .select("approved_image_id")
-        .eq("series_id", post.series_id)
-        .eq("character_id", imgPrompt.secondary_character_id)
-        .single();
+    // 3. Fetch character data for identity prefix + LoRA selection
+    const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
+      (id): id is string => id !== null,
+    );
+    const characterDataMap = await fetchCharacterDataMap(characterIds);
 
-      if (sc2?.approved_image_id) {
-        const { data: img2 } = await supabase
-          .from("images")
-          .select("stored_url, sfw_url")
-          .eq("id", sc2.approved_image_id)
-          .single();
-
-        const secondaryRefUrl = img2?.stored_url || img2?.sfw_url;
-        if (secondaryRefUrl) {
-          try {
-            kontextImages.push({ name: "secondary_ref.png", image: await imageUrlToBase64(secondaryRefUrl) });
-          } catch (err) {
-            console.warn(`[Kontext][${promptId}] Failed to fetch secondary ref image, proceeding without it:`, err instanceof Error ? err.message : err);
-          }
-        }
-      }
-    }
-
-    // For dual scenes: combine both ref images into one server-side
-    if (kontextType === "dual" && kontextImages.length === 2) {
-      try {
-        const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
-        kontextImages = [{ name: "combined_ref.png", image: combined }];
-        console.log(`[Kontext][${promptId}] Combined primary + secondary ref images server-side`);
-      } catch (err) {
-        console.warn(`[Kontext][${promptId}] Failed to combine ref images, using primary only:`, err instanceof Error ? err.message : err);
-        kontextImages = [kontextImages[0]];
-      }
-    }
-
-    const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
-    const kontextWidth = isLandscape ? 1216 : 832;
-    const kontextHeight = isLandscape ? 832 : 1216;
-
-    const refImageName = kontextType === "dual"
-      ? (kontextImages[0]?.name || "combined_ref.png")
-      : kontextType !== "portrait" ? "primary_ref.png" : undefined;
-
-    const kontextWorkflow = buildKontextWorkflow({
-      type: kontextType,
-      positivePrompt: imgPrompt.prompt,
-      width: kontextWidth,
-      height: kontextHeight,
+    // 4. Build full generation payload via shared pipeline
+    const result = await buildSceneGenerationPayload({
+      imgPrompt,
+      seriesId: post.series_id,
+      characterDataMap,
       seed: newSeed,
-      filenamePrefix: `kontext_${imgPrompt.id.substring(0, 8)}`,
-      sfwMode,
-      primaryRefImageName: refImageName,
     });
 
+    // 5. Submit to RunPod
     const { jobId: runpodJobId } = await submitRunPodJob(
-      kontextWorkflow,
-      kontextImages.length > 0 ? kontextImages : undefined,
+      result.workflow,
+      result.images.length > 0 ? result.images : undefined,
     );
 
     const newJobId = `runpod-${runpodJobId}`;
