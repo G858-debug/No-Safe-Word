@@ -21,6 +21,9 @@ export interface KontextWorkflowConfig {
   secondaryRefImageName?: string;
   /** Optional LoRA stack for Flux — injected between model loaders and sampler */
   loras?: LoraInput[];
+  /** FluxGuidance strength — higher values give more weight to text vs reference image.
+   *  Range 2.0–4.0. Default: 2.5 */
+  guidance?: number;
   /**
    * img2img only — denoise strength for the KSampler.
    * 1.0 = full generation from noise (same as text-to-image).
@@ -237,7 +240,7 @@ function buildKontextSingleWorkflow(
     class_type: 'FluxGuidance',
     inputs: {
       conditioning: ['8', 0],  // Identity-conditioned output from ReferenceLatent
-      guidance: 2.5,
+      guidance: config.guidance ?? 2.5,
     },
   };
 
@@ -433,7 +436,7 @@ function buildKontextDualWorkflow(
     class_type: 'FluxGuidance',
     inputs: {
       conditioning: ['8', 0],
-      guidance: 2.5,
+      guidance: config.guidance ?? 2.5,
     },
   };
 

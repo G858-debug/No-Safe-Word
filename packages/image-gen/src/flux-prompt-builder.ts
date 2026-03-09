@@ -190,6 +190,9 @@ export function injectFluxGazeEmphasis(prompt: string): string {
  * Replaces the stripped SDXL quality tags (cinematic lighting, 8k uhd, etc.)
  * with Flux-native prose that achieves the same effect — guiding the model
  * toward high-quality, sensual output.
+ *
+ * Includes a visibility guarantee for NSFW modes so that subjects remain
+ * well-lit even when the scene describes a dark environment.
  */
 export function buildFluxAtmosphereSuffix(
   mode: 'sfw' | 'nsfw',
@@ -200,10 +203,70 @@ export function buildFluxAtmosphereSuffix(
   }
 
   if (hasDualCharacter) {
-    return 'The chemistry between them is palpable. Intimate photography with warm golden light, soft focus on skin, and sensual atmosphere. Cinematic quality with rich warm tones.';
+    return 'The chemistry between them is palpable. Intimate photography with warm golden light, soft focus on skin, and sensual atmosphere. Cinematic quality with rich warm tones. Both subjects are clearly visible and well-lit, even when the background is dark.';
   }
 
-  return 'Intimate boudoir photography with warm golden light, soft shadows accentuating curves, and a sensual atmosphere. The image has a cinematic quality with rich warm tones.';
+  return 'Intimate boudoir photography with warm golden light, soft shadows accentuating curves, and a sensual atmosphere. The image has a cinematic quality with rich warm tones. The subject\'s skin and features are always clearly visible and well-lit, even when the background is dark.';
+}
+
+/**
+ * Extract clothing description from the scene prompt and return a reinforcement
+ * sentence. This helps override the reference image's clothing by giving T5
+ * a second, earlier mention of the intended outfit.
+ *
+ * Returns null if no clothing is detected (safe no-op).
+ */
+export function extractClothingReinforcement(scenePrompt: string): string | null {
+  // Match "wearing X" or "dressed in X" — capture until sentence boundary
+  const wearingMatch = scenePrompt.match(
+    /\b(?:wearing|dressed in|clad in)\s+([^.!?]+)/i,
+  );
+  if (wearingMatch) {
+    const clothing = wearingMatch[1].trim().replace(/,\s*(?:her|his|their)\b.*$/i, '');
+    if (clothing.length > 3) {
+      return `In this scene she is wearing ${clothing}.`;
+    }
+  }
+
+  // Match "in a [garment]" patterns (e.g., "in a black lace bra")
+  const inAMatch = scenePrompt.match(
+    /\bin\s+(?:a\s+)?(?:sheer|lace|silk|satin|leather|fitted|tight|low-cut|revealing|black|white|red|blue|pink|purple|gold|silver)[\w\s-]*?\b(lingerie|bra|panties|thong|bikini|bodysuit|corset|camisole|negligee|chemise|teddy|dress|gown|skirt|top|blouse|robe|stockings|heels)\b/i,
+  );
+  if (inAMatch) {
+    const fullMatch = inAMatch[0].trim();
+    return `In this scene she is ${fullMatch}.`;
+  }
+
+  return null;
+}
+
+// Darkness keywords that indicate a dark scene
+const DARK_SCENE_PATTERN = /\b(dark|dim|shadow|semi-dark(?:ness)?|dimly|low[- ]light|candle[- ]?lit|darkness|unlit|pitch[- ]black)\b/i;
+
+// Artistic darkness that should not be overridden
+const ARTISTIC_DARK_PATTERN = /\b(silhouette|shadow play|chiaroscuro)\b/i;
+
+// Existing light sources in the scene prompt
+const LIGHT_SOURCE_PATTERN = /\b(candle|lamp|moonlight|streetlight|neon|phone[- ]?(?:screen)?[- ]?light|screen[- ]?light|firelight|fireplace|window light|sunlight|starlight|fairy lights|string lights)\b/i;
+
+/**
+ * Inject visibility instructions for dark scenes.
+ *
+ * When a scene prompt describes a dark environment, Flux tends to generate
+ * images dominated by darkness. This function appends a light instruction
+ * to ensure the subject remains visible.
+ */
+export function injectDarkSceneVisibility(scenePrompt: string): string {
+  if (!DARK_SCENE_PATTERN.test(scenePrompt)) return scenePrompt;
+  if (ARTISTIC_DARK_PATTERN.test(scenePrompt)) return scenePrompt;
+
+  if (LIGHT_SOURCE_PATTERN.test(scenePrompt)) {
+    return scenePrompt.trimEnd() +
+      ' The light is strong enough to clearly illuminate the subject.';
+  }
+
+  return scenePrompt.trimEnd() +
+    ' Despite the dark setting, a soft directional light source illuminates the subject, keeping skin tones warm and details clearly visible.';
 }
 
 /**
@@ -229,13 +292,22 @@ export function buildFluxPrompt(
   // Enhance gaze/expression descriptions with evocative prose
   cleanedScene = injectFluxGazeEmphasis(cleanedScene);
 
+  // Inject visibility for dark scenes so subjects aren't lost in darkness
+  cleanedScene = injectDarkSceneVisibility(cleanedScene);
+
   // Check if the cleaned scene still reads like a tag list
   const needsLlmRewrite = hasHeavySdxlFormatting(cleanedScene);
 
-  // Assemble: identity paragraph + scene content + atmosphere suffix
+  // Extract clothing reinforcement to override reference image's outfit
+  const clothingReinforcement = extractClothingReinforcement(cleanedScene);
+
+  // Assemble: identity paragraph + clothing reinforcement + scene content + atmosphere suffix
   const parts: string[] = [];
   if (identityPrefix.trim()) {
     parts.push(identityPrefix.trim());
+  }
+  if (clothingReinforcement) {
+    parts.push(clothingReinforcement);
   }
   parts.push(cleanedScene);
   parts.push(buildFluxAtmosphereSuffix(mode, hasDualCharacter));
