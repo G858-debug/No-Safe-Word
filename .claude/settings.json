@@ -1,9 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls:*)",
-      "Bash(kill 2986 2987 2984)",
-      "Read(//Users/Howard/Projects/No-Safe-Word/**)"
+      "Bash(*)",
+      "WebSearch"
     ]
   }
 }
