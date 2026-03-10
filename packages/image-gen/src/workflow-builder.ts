@@ -44,9 +44,9 @@ export interface KontextWorkflowConfig {
  * - Character consistency comes from feeding approved portrait as input image
  */
 export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<string, any> {
-  // Use the same Kontext model for both SFW and NSFW — there is no separate
-  // NSFW variant. The fp8 model handles all content types.
-  const modelName = process.env.KONTEXT_SFW_MODEL || 'flux1-dev-kontext_fp8_scaled.safetensors';
+  const modelName = (!config.sfwMode && process.env.KONTEXT_NSFW_MODEL)
+    ? process.env.KONTEXT_NSFW_MODEL
+    : (process.env.KONTEXT_SFW_MODEL || 'flux1-dev-kontext_fp8_scaled.safetensors');
 
   const workflow: Record<string, any> = {};
 
