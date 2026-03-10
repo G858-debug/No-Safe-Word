@@ -224,20 +224,19 @@ async function waitForPod(podId, timeoutMs = 300_000) {
 // Build download script
 // ---------------------------------------------------------------------------
 function buildDownloadScript() {
-  const nsfwBlock = CIVITAI_TOKEN && CIVITAI_NSFW_URL
+  const NSFW_FILENAME = 'fuxCapacityNSFWPorn_51FP16.safetensors';
+  const nsfwBlock = CIVITAI_TOKEN
     ? `
-NSFW_FILENAME=$(basename "${CIVITAI_NSFW_URL}" | cut -d'?' -f1)
-if [ ! -f "/workspace/models/diffusion_models/\${NSFW_FILENAME}" ]; then
-  echo "Downloading NSFW Kontext model..."
+if [ ! -f "/workspace/models/diffusion_models/${NSFW_FILENAME}" ]; then
+  echo "Downloading Fux Capacity 5.1 FP16 (NSFW)..."
   wget --header="Authorization: Bearer ${CIVITAI_TOKEN}" \\
-    --content-disposition \\
-    -P /workspace/models/diffusion_models/ \\
-    "${CIVITAI_NSFW_URL}?token=${CIVITAI_TOKEN}" || echo "NSFW download failed (non-fatal)"
+    -O /workspace/models/diffusion_models/${NSFW_FILENAME} \\
+    "https://civitai.com/api/download/models/2605292?token=${CIVITAI_TOKEN}" || echo "NSFW download failed (non-fatal)"
 else
   echo "NSFW model already exists, skipping."
 fi
 `
-    : 'echo "Skipping NSFW model (CIVITAI_TOKEN or CIVITAI_NSFW_MODEL_URL not set)"';
+    : 'echo "Skipping NSFW model (CIVITAI_TOKEN not set)"';
 
   return `#!/bin/bash
 set -e
@@ -481,7 +480,7 @@ async function main() {
   Download Summary
 ===================================
   SFW: flux1-dev-kontext_fp8_scaled.safetensors
-  NSFW: ${CIVITAI_NSFW_URL ? "(downloaded from Civitai)" : "(skipped — set CIVITAI_NSFW_MODEL_URL)"}
+  NSFW: ${CIVITAI_TOKEN ? "fuxCapacityNSFWPorn_51FP16.safetensors (Fux Capacity 5.1 FP16)" : "(skipped — set CIVITAI_TOKEN)"}
   T5: t5xxl_fp8_e4m3fn_scaled.safetensors
   CLIP: clip_l.safetensors
   VAE: ae.safetensors
