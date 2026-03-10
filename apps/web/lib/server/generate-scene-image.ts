@@ -397,7 +397,7 @@ export async function buildSceneGenerationPayload(
   console.log(
     `[Kontext][${promptId}] Pre-rewrite prompt (${kontextPositivePrompt.length} chars, needsLlmRewrite=${needsLlmRewrite}):`,
   );
-  console.log(`  ${kontextPositivePrompt.substring(0, 300)}`);
+  console.log(`  ${kontextPositivePrompt}`);
 
   if (needsLlmRewrite) {
     const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
