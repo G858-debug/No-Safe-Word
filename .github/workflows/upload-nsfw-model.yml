@@ -38,9 +38,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.RUNPOD_S3_SECRET_KEY }}
         run: |
           echo "Downloading Fux Capacity 5.1 FP16 (~22.7 GB) and streaming to RunPod S3..."
-          wget -q --show-progress \
-            --header="Authorization: Bearer ${{ secrets.CIVITAI_TOKEN }}" \
-            -O - \
+          curl -L --fail \
+            -H "Authorization: Bearer ${{ secrets.CIVITAI_TOKEN }}" \
             "https://civitai.com/api/download/models/2605292?token=${{ secrets.CIVITAI_TOKEN }}" \
           | aws s3 cp - \
             s3://${{ secrets.RUNPOD_NETWORK_VOLUME_ID }}/models/diffusion_models/fuxCapacityNSFWPorn_51FP16.safetensors \
