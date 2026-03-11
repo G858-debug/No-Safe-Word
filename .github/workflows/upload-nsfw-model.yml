@@ -1,0 +1,66 @@
+name: Upload NSFW Model to RunPod S3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check if model already exists
+        id: check
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RUNPOD_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RUNPOD_S3_SECRET_KEY }}
+        run: |
+          SIZE=$(aws s3api head-object \
+            --endpoint-url https://s3api-eu-ro-1.runpod.io \
+            --bucket ${{ secrets.RUNPOD_NETWORK_VOLUME_ID }} \
+            --key models/diffusion_models/fuxCapacityNSFWPorn_51FP16.safetensors \
+            --query ContentLength --output text 2>/dev/null || echo "0")
+          echo "existing_size=$SIZE" >> $GITHUB_OUTPUT
+          if [ "$SIZE" -gt "21474836480" ] 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Model already exists ($(numfmt --to=iec $SIZE)). Nothing to do."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            if [ "$SIZE" != "0" ] && [ "$SIZE" != "" ]; then
+              echo "Found incomplete file ($SIZE bytes). Will overwrite."
+            fi
+          fi
+
+      - name: Stream Civitai → RunPod S3
+        if: steps.check.outputs.skip != 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RUNPOD_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RUNPOD_S3_SECRET_KEY }}
+        run: |
+          echo "Downloading Fux Capacity 5.1 FP16 (~22.7 GB) and streaming to RunPod S3..."
+          wget -q --show-progress \
+            --header="Authorization: Bearer ${{ secrets.CIVITAI_TOKEN }}" \
+            -O - \
+            "https://civitai.com/api/download/models/2605292?token=${{ secrets.CIVITAI_TOKEN }}" \
+          | aws s3 cp - \
+            s3://${{ secrets.RUNPOD_NETWORK_VOLUME_ID }}/models/diffusion_models/fuxCapacityNSFWPorn_51FP16.safetensors \
+            --endpoint-url https://s3api-eu-ro-1.runpod.io \
+            --region eu-ro-1 \
+            --expected-size 23822974976
+
+      - name: Verify upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.RUNPOD_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.RUNPOD_S3_SECRET_KEY }}
+        run: |
+          SIZE=$(aws s3api head-object \
+            --endpoint-url https://s3api-eu-ro-1.runpod.io \
+            --bucket ${{ secrets.RUNPOD_NETWORK_VOLUME_ID }} \
+            --key models/diffusion_models/fuxCapacityNSFWPorn_51FP16.safetensors \
+            --query ContentLength --output text)
+          echo "Uploaded size: $(numfmt --to=iec $SIZE)"
+          if [ "$SIZE" -lt "21474836480" ]; then
+            echo "ERROR: File too small — upload may be incomplete"
+            exit 1
+          fi
+          echo "✓ Upload verified: fuxCapacityNSFWPorn_51FP16.safetensors"
