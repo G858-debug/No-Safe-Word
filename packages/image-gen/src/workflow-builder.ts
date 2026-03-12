@@ -262,6 +262,7 @@ function buildKontextSingleWorkflow(
     inputs: {
       clip_vision: ['7', 0],   // CLIPVisionLoader output
       image: ['5', 0],         // Reference image
+      crop: 'center',          // Center-crop to CLIP Vision input size
     },
   };
 
@@ -289,6 +290,7 @@ function buildKontextSingleWorkflow(
       style_model: ['15', 0],        // Redux style model
       clip_vision_output: ['6', 0],  // CLIPVision encoding of reference
       strength: reduxStrength,
+      strength_type: 'multiply',     // Multiply strength scaling
     },
   };
 
@@ -473,6 +475,7 @@ function buildKontextDualWorkflow(
     inputs: {
       clip_vision: ['7', 0],
       image: ['5', 0],
+      crop: 'center',
     },
   };
 
@@ -500,6 +503,7 @@ function buildKontextDualWorkflow(
       style_model: ['15', 0],
       clip_vision_output: ['6', 0],
       strength: reduxStrength,
+      strength_type: 'multiply',
     },
   };
 

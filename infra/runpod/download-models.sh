@@ -155,11 +155,7 @@ if [ -d "${VOLUME_MODELS}/sams" ]; then
   echo "[NSW] ✓ Cleared sams/ (SAM segmentation removed)"
 fi
 
-# CLIP Vision (used by IPAdapter, no longer needed)
-if [ -d "${VOLUME_MODELS}/clip_vision" ]; then
-  rm -rf "${VOLUME_MODELS}/clip_vision"
-  echo "[NSW] ✓ Cleared clip_vision/ (IPAdapter CLIP Vision removed)"
-fi
+# clip_vision/ — kept for Redux conditioning (SigCLIP Vision encoder)
 
 # IPAdapter models (no longer used)
 if [ -d "${VOLUME_MODELS}/ipadapter" ]; then
