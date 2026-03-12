@@ -71,6 +71,9 @@ export interface EvalDetails {
   quality_score: number;
   verdict: 'PASS' | 'FAIL';
   issues: string[];
+  /** True when a body-category image (waist-up, full-body, body-detail) only shows the face/head.
+   *  Forces FAIL verdict — the image doesn't match the expected framing. */
+  face_only_crop?: boolean;
 }
 
 // ── Training Parameters ─────────────────────────────────────────
@@ -98,7 +101,7 @@ export const DEFAULT_TRAINING_PARAMS: TrainingParams = {
   max_train_steps: 1000,
   resolution: 1024,
   batch_size: 1,
-  use_face_detection_instead: true,
+  use_face_detection_instead: false, // false: dataset includes full-body shots; face detection would crop them out
   lr_scheduler: 'constant',
   seed: 42,
 };

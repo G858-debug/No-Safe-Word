@@ -444,6 +444,7 @@ export async function buildSceneGenerationPayload(
     primaryRefImageName: refImageName,
     loras: kontextLoras,
     guidance: 3.5,
+    sfwMode,
   });
 
   // ── Structured generation summary ──

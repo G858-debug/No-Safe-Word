@@ -128,6 +128,17 @@ const TAG_EXTRACTIONS: Array<{ pattern: RegExp; tags: string[] }> = [
   { pattern: /athletic pose/i, tags: ['athletic pose'] },
   { pattern: /confident.*stance/i, tags: ['confident stance'] },
   { pattern: /doorway/i, tags: ['standing in doorway'] },
+
+  // Body framing (describes what part of body is visible — NOT body type)
+  // These help the LoRA learn to associate identity with full-body compositions,
+  // not just face crops. Body type (curvy, slim, etc.) is filtered by PERMANENT_FEATURE_PATTERNS.
+  { pattern: /waist-up/i, tags: ['waist up'] },
+  { pattern: /full body/i, tags: ['full body'] },
+  { pattern: /showing midriff/i, tags: ['midriff visible'] },
+  { pattern: /highlighting curves/i, tags: ['curves visible'] },
+  { pattern: /showing figure/i, tags: ['figure visible'] },
+  { pattern: /head to feet/i, tags: ['head to feet'] },
+  { pattern: /full length/i, tags: ['full length'] },
 ];
 
 /**

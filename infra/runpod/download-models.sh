@@ -191,6 +191,7 @@ KEEP_LORAS=(
   "realfeet-sdxl.safetensors"
   "bodylicious-flux.safetensors"
   "nsw-curves-body.safetensors"
+  "refcontrol_pose.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -302,6 +303,91 @@ except Exception as e:
 " 2>&1 && mv "${NSW_CURVES_DEST}.tmp" "${NSW_CURVES_DEST}" && \
     echo "[NSW] ✓ nsw-curves-body.safetensors (volume, downloaded)" || \
     { rm -f "${NSW_CURVES_DEST}.tmp"; echo "[NSW] ✗✗ nsw-curves-body.safetensors FAILED"; }
+fi
+
+# RefControl Kontext Pose LoRA — identity+pose transfer for Flux Kontext
+# HuggingFace: thedeoxen/refcontrol-flux-kontext-reference-pose-lora (344 MB)
+REFCONTROL_DEST="${VOLUME_LORAS_DIR}/refcontrol_pose.safetensors"
+REFCONTROL_URL="https://huggingface.co/thedeoxen/refcontrol-flux-kontext-reference-pose-lora/resolve/main/refcontrol_pose.safetensors"
+if [ -f "$REFCONTROL_DEST" ]; then
+    echo "[NSW] ✓ refcontrol_pose.safetensors (volume, exists)"
+elif [ -d "${VOLUME_LORAS_DIR}" ]; then
+    echo "[NSW] Downloading RefControl Kontext Pose LoRA from HuggingFace..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${REFCONTROL_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${REFCONTROL_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${REFCONTROL_DEST}.tmp" "${REFCONTROL_DEST}" && \
+    echo "[NSW] ✓ refcontrol_pose.safetensors (volume, downloaded)" || \
+    { rm -f "${REFCONTROL_DEST}.tmp"; echo "[NSW] ✗✗ refcontrol_pose.safetensors FAILED"; }
+fi
+
+# ---- Flux Redux style model + CLIP Vision (for Redux conditioning pass) ----
+# Redux transfers visual identity from a reference image into new generations.
+# Requires: style model + CLIP Vision encoder on the network volume.
+
+STYLE_MODELS_DIR="/runpod-volume/models/style_models"
+CLIP_VISION_DIR="/runpod-volume/models/clip_vision"
+
+# Flux Redux Dev style model (~1.2GB) — from Black Forest Labs
+REDUX_DEST="${STYLE_MODELS_DIR}/flux1-redux-dev.safetensors"
+REDUX_URL="https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev/resolve/main/flux1-redux-dev.safetensors"
+if [ -f "$REDUX_DEST" ]; then
+    echo "[NSW] ✓ flux1-redux-dev.safetensors (volume, exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${STYLE_MODELS_DIR}"
+    echo "[NSW] Downloading Flux Redux Dev style model from HuggingFace..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${REDUX_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    token = '${HF_TOKEN:-}'
+    if token:
+        req.add_header('Authorization', f'Bearer {token}')
+    resp = urllib.request.urlopen(req, timeout=900)
+    with open('${REDUX_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${REDUX_DEST}.tmp" "${REDUX_DEST}" && \
+    echo "[NSW] ✓ flux1-redux-dev.safetensors (volume, downloaded)" || \
+    { rm -f "${REDUX_DEST}.tmp"; echo "[NSW] ✗✗ flux1-redux-dev.safetensors FAILED"; FAILED=$((FAILED + 1)); }
+fi
+
+# SigCLIP Vision encoder for Redux conditioning (~1.5GB)
+CLIPV_DEST="${CLIP_VISION_DIR}/sigclip_vision_patch14_384.safetensors"
+CLIPV_URL="https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors"
+if [ -f "$CLIPV_DEST" ]; then
+    echo "[NSW] ✓ sigclip_vision_patch14_384.safetensors (volume, exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${CLIP_VISION_DIR}"
+    echo "[NSW] Downloading SigCLIP Vision encoder from HuggingFace..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${CLIPV_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${CLIPV_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${CLIPV_DEST}.tmp" "${CLIPV_DEST}" && \
+    echo "[NSW] ✓ sigclip_vision_patch14_384.safetensors (volume, downloaded)" || \
+    { rm -f "${CLIPV_DEST}.tmp"; echo "[NSW] ✗✗ sigclip_vision_patch14_384.safetensors FAILED"; FAILED=$((FAILED + 1)); }
 fi
 
 echo "[NSW] ========================================="

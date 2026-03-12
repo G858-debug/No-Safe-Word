@@ -29,6 +29,16 @@ export interface KontextWorkflowConfig {
    * Default: 0.72
    */
   denoiseStrength?: number;
+  /** SFW mode: true → SFW checkpoint (KONTEXT_MODEL), false → NSFW checkpoint (KONTEXT_NSFW_MODEL).
+   *  Defaults to true (SFW) when not specified. */
+  sfwMode?: boolean;
+  /** Optional Redux reference image filename for style/identity conditioning.
+   *  When set, a Redux conditioning pass (nodes 30–35) merges visual identity
+   *  from this image into the text conditioning before generation. */
+  reduxRefImageName?: string;
+  /** Redux conditioning strength — how much the Redux reference influences the output.
+   *  Range 0.0–1.0. Default: 0.65 */
+  reduxStrength?: number;
 }
 
 /**
@@ -42,7 +52,12 @@ export interface KontextWorkflowConfig {
  * - Character consistency comes from feeding approved portrait as input image
  */
 export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<string, any> {
-  const modelName = process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors';
+  // SFW/NSFW checkpoint switching:
+  //   sfwMode: true  (default) → KONTEXT_MODEL (Krea Dev SFW or base)
+  //   sfwMode: false           → KONTEXT_NSFW_MODEL (Krea Dev Uncensored)
+  const modelName = config.sfwMode === false
+    ? (process.env.KONTEXT_NSFW_MODEL || process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors')
+    : (process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors');
 
   const workflow: Record<string, any> = {};
 
@@ -76,6 +91,21 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
   };
 
   // ---- Optional LoRA chain (nodes 50+) ----
+  //
+  // LoRA Slot Priority Order (max 6 slots, nodes 50–55):
+  //
+  //   Slot 1: Character LoRA (face + body identity) — highest priority weight
+  //   Slot 2: Ethnicity/skin LoRA (African Fashion Model or African Woman — CivitAI)
+  //   Slot 3: Skin texture LoRA (Flux Skin Texture — CivitAI 651043)
+  //   Slot 4: Body shape LoRA (Hourglass or BodyLicious — configurable)
+  //   Slot 5: Anatomy/NSFW LoRA (Lustly v1, strength 0.7 — NSFW intimate only)
+  //   Slot 6: Atmosphere LoRA (Boudoir Style, trigger: boud01rstyle)
+  //
+  // Budget cap: MAX_TOTAL_STRENGTH = 4.0 (all strengths scaled proportionally if exceeded)
+  // Gender: Female body LoRAs only loaded when hasFemaleCharacter is true
+  // Selection logic lives in selectKontextResources() in lora-registry.ts.
+  // This builder just chains whatever LoRAs are passed in config.loras[].
+  //
   // Chains between UNETLoader/DualCLIPLoader and CLIPTextEncode/KSampler.
   // First LoRA takes model from node 1 (UNETLoader output 0) and clip from
   // node 2 (DualCLIPLoader output 0). Subsequent LoRAs chain from the previous.
@@ -111,16 +141,76 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
     },
   };
 
-  // Pass modelRef to type-specific builders so KSampler uses the LoRA-modified model
+  // ---- Optional Redux conditioning pass (nodes 30–35) ----
+  // When reduxRefImageName is provided, Flux Redux transfers visual identity
+  // from a hero reference image into the generation via style model conditioning.
+  // The Redux conditioning is combined with the text conditioning before passing
+  // to the type-specific builders.
+  //
+  // conditioningRef tracks the conditioning output — defaults to CLIPTextEncode (node 4),
+  // but changes to ConditioningCombine (node 35) when Redux is active.
+  let conditioningRef: [string, number] = ['4', 0];
+
+  if (config.reduxRefImageName) {
+    const reduxStrength = config.reduxStrength ?? 0.65;
+
+    // Node 30: LoadImage — Redux hero reference image
+    workflow['30'] = {
+      class_type: 'LoadImage',
+      inputs: {
+        image: config.reduxRefImageName,
+      },
+    };
+
+    // Node 31: CLIPVisionLoader — load SigCLIP Vision encoder for Redux
+    workflow['31'] = {
+      class_type: 'CLIPVisionLoader',
+      inputs: {
+        clip_name: 'sigclip_vision_patch14_384.safetensors',
+      },
+    };
+
+    // Node 32: CLIPVisionEncode — encode the reference image with CLIP Vision
+    workflow['32'] = {
+      class_type: 'CLIPVisionEncode',
+      inputs: {
+        clip_vision: ['31', 0],
+        image: ['30', 0],
+      },
+    };
+
+    // Node 33: StyleModelLoader — load the Flux Redux style model
+    workflow['33'] = {
+      class_type: 'StyleModelLoader',
+      inputs: {
+        style_model_name: 'flux1-redux-dev.safetensors',
+      },
+    };
+
+    // Node 34: StyleModelApply — apply Redux style conditioning
+    workflow['34'] = {
+      class_type: 'StyleModelApply',
+      inputs: {
+        conditioning: ['4', 0],          // Text conditioning from CLIPTextEncode
+        style_model: ['33', 0],           // Loaded Redux style model
+        clip_vision_output: ['32', 0],    // CLIP Vision encoding of reference
+        strength: reduxStrength,
+      },
+    };
+
+    conditioningRef = ['34', 0];
+  }
+
+  // Pass modelRef and conditioningRef to type-specific builders
   switch (config.type) {
     case 'portrait':
-      return buildKontextPortraitWorkflow(workflow, config, modelRef);
+      return buildKontextPortraitWorkflow(workflow, config, modelRef, conditioningRef);
     case 'single':
-      return buildKontextSingleWorkflow(workflow, config, modelRef);
+      return buildKontextSingleWorkflow(workflow, config, modelRef, conditioningRef);
     case 'dual':
-      return buildKontextDualWorkflow(workflow, config, modelRef);
+      return buildKontextDualWorkflow(workflow, config, modelRef, conditioningRef);
     case 'img2img':
-      return buildKontextImg2ImgWorkflow(workflow, config, modelRef);
+      return buildKontextImg2ImgWorkflow(workflow, config, modelRef, conditioningRef);
     default:
       throw new Error(`Unknown Kontext workflow type: ${config.type}`);
   }
@@ -131,6 +221,7 @@ function buildKontextPortraitWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
+  conditioningRef: [string, number],
 ): Record<string, any> {
   // Node 5: EmptyLatentImage
   workflow['5'] = {
@@ -147,8 +238,8 @@ function buildKontextPortraitWorkflow(
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: ['4', 0],
-      negative: ['4', 0], // Kontext: same positive for negative (effectively no negative)
+      positive: conditioningRef,
+      negative: conditioningRef, // Kontext: same positive for negative (effectively no negative)
       latent_image: ['5', 0],
       seed: config.seed,
       steps: 20,
@@ -190,6 +281,7 @@ function buildKontextSingleWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
+  conditioningRef: [string, number],
 ): Record<string, any> {
   if (!config.primaryRefImageName) {
     throw new Error('Kontext single workflow requires primaryRefImageName');
@@ -226,8 +318,8 @@ function buildKontextSingleWorkflow(
   workflow['8'] = {
     class_type: 'ReferenceLatent',
     inputs: {
-      conditioning: ['4', 0],  // Text conditioning from CLIPTextEncode
-      latent: ['7', 0],        // Encoded reference image from VAEEncode
+      conditioning: conditioningRef,  // Text (or Redux-combined) conditioning
+      latent: ['7', 0],               // Encoded reference image from VAEEncode
     },
   };
 
@@ -244,7 +336,7 @@ function buildKontextSingleWorkflow(
   workflow['10'] = {
     class_type: 'ConditioningZeroOut',
     inputs: {
-      conditioning: ['4', 0],  // Original text conditioning → zeroed for negative
+      conditioning: conditioningRef,  // Same base conditioning → zeroed for negative
     },
   };
 
@@ -312,6 +404,7 @@ function buildKontextImg2ImgWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
+  conditioningRef: [string, number],
 ): Record<string, any> {
   const denoise = config.denoiseStrength ?? 0.72;
 
@@ -347,8 +440,8 @@ function buildKontextImg2ImgWorkflow(
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: ['4', 0],
-      negative: ['4', 0], // Flux has no negative prompt — mirror positive as a no-op
+      positive: conditioningRef,
+      negative: conditioningRef, // Flux has no negative prompt — mirror positive as a no-op
       latent_image: ['22', 0],
       seed: config.seed,
       steps: 25,
@@ -388,6 +481,7 @@ function buildKontextDualWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
+  conditioningRef: [string, number],
 ): Record<string, any> {
   if (!config.primaryRefImageName) {
     throw new Error('Kontext dual workflow requires primaryRefImageName (pre-combined reference image)');
@@ -422,7 +516,7 @@ function buildKontextDualWorkflow(
   workflow['8'] = {
     class_type: 'ReferenceLatent',
     inputs: {
-      conditioning: ['4', 0],
+      conditioning: conditioningRef,  // Text (or Redux-combined) conditioning
       latent: ['7', 0],
     },
   };
@@ -440,7 +534,7 @@ function buildKontextDualWorkflow(
   workflow['10'] = {
     class_type: 'ConditioningZeroOut',
     inputs: {
-      conditioning: ['4', 0],
+      conditioning: conditioningRef,  // Same base conditioning → zeroed
     },
   };
 

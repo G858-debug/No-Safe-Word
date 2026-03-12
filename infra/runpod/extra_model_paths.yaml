@@ -12,3 +12,5 @@ a_custom_path:
   loras: models/loras
   controlnet: models/controlnet
   upscale_models: models/upscale_models
+  style_models: models/style_models
+  clip_vision: models/clip_vision

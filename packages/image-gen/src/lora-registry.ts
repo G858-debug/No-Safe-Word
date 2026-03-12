@@ -189,6 +189,18 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     installed: false,
     genderCategory: 'neutral',
   },
+  {
+    name: 'RefControl Kontext Pose',
+    filename: 'refcontrol_pose.safetensors',
+    category: 'style',
+    defaultStrength: 0.9,
+    clipStrength: 0.9,
+    triggerWord: 'refcontrolpose',
+    description: 'Full character identity + pose transfer for Flux Kontext — requires ref+pose concatenated image input (HuggingFace: thedeoxen/refcontrol-flux-kontext-reference-pose-lora)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'neutral',
+  },
 ];
 
 export function getKontextLoras(gender?: 'male' | 'female' | 'neutral'): LoraEntry[] {
@@ -204,8 +216,19 @@ export interface KontextResourceSelection {
 }
 
 /**
- * Scene-aware Kontext LoRA selection. Adapts which LoRAs are loaded and their
- * strengths based on character gender, SFW/NSFW, shot type, and character count.
+ * Scene-aware Kontext LoRA selection for Flux Krea Dev Uncensored.
+ *
+ * Slot Priority Order (max 6 slots):
+ *   Slot 1: Character LoRA (face + body identity) — injected by caller, not here
+ *   Slot 2: Ethnicity/skin LoRA (African Fashion Model or African Woman)
+ *   Slot 3: Skin texture LoRA (Beauty Skin / Oiled / Sweat — situational)
+ *   Slot 4: Body shape LoRA (Hourglass or BodyLicious — configurable)
+ *   Slot 5: Anatomy/NSFW LoRA (Lustly v1, strength 0.7 — NSFW intimate only)
+ *   Slot 6: Atmosphere LoRA (Boudoir Style or Fashion Editorial)
+ *
+ * Krea Dev has built-in photorealism — Realism and Detail LoRAs removed.
+ * Character LoRA with full-body training replaces stacked body LoRAs
+ * (NSW Curves + Perfect Busts removed from default stack).
  */
 export function selectKontextResources(opts: {
   gender: 'male' | 'female';
@@ -214,107 +237,85 @@ export function selectKontextResources(opts: {
   imageType: string;
   prompt: string;
   hasDualCharacter: boolean;
+  /** Which body shape LoRA to use: 'hourglass', 'bodylicious', or 'auto' (default: bodylicious) */
+  bodyShapeLoRA?: 'hourglass' | 'bodylicious' | 'auto';
+  /** Include RefControl Kontext pose LoRA for identity+pose transfer */
+  hasRefControlPose?: boolean;
 }): KontextResourceSelection {
   const { gender, secondaryGender, isSfw, imageType, prompt, hasDualCharacter } = opts;
+  const bodyShape = opts.bodyShapeLoRA ?? 'auto';
   const isFullBody = imageType === 'fullBody';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
-  const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
-  const isKissing = /\b(kiss|kissing|kisses|french.kiss|lips.meet|lips.touch)\b/i.test(prompt);
   const isIntimate = /\b(naked|nude|sex|intimate|penetrat|straddle|undress|topless)\b/i.test(prompt);
   const isOiled = /\b(oil(?:ed)?|glistening.skin|shiny.skin|slick.skin|oily)\b/i.test(prompt);
   const isSweaty = /\b(sweat(?:y|ing)?|perspir|gym|workout|post-workout|athletic)\b/i.test(prompt);
   const isFemale = gender === 'female';
-  // Include female body LoRAs if either character is female
   const hasFemaleCharacter = isFemale || secondaryGender === 'female';
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   const pendingTriggers: string[] = [];
 
-  // 1. Realism LoRA — always included. Reduced for NSFW to give body LoRAs
-  //    more room in the model's attention budget.
-  let realismStrength = 0.7;
-  if (hasDualCharacter) realismStrength = Math.min(realismStrength, 0.7);
-  loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
+  // Slot 1: Character LoRA — injected by the caller (generate-scene-image.ts)
+  // via character_lora_downloads, not selected here. Slot reserved.
 
-  // 2. Style/Detail LoRA — slot 2 swaps to a style LoRA for female characters:
-  //    • SFW female solo     → Fashion Editorial (luxury magazine look)
-  //    • NSFW female solo    → Boudoir Style (intimate/sensual atmosphere)
-  //    • All other cases     → Detail LoRA
-  if (hasFemaleCharacter && isSfw && !hasDualCharacter && !isFullBody) {
-    // Fashion editorial on portrait/close-up — but NOT full body. The editorial
-    // LoRA is trained on slim high-fashion models and fights curvy body LoRAs
-    // when the full figure is visible. Use detail LoRA for full body instead.
-    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-    pendingTriggers.push('flux-fash');
-  } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
-    loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-    pendingTriggers.push('boud01rstyle');
-  } else {
-    let detailStrength = 0.6;
-    if (isCloseUp) detailStrength = 0.8;
-    else if (isWide) detailStrength = 0.4;
-    if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
-    loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+  // Slot 2: Skin texture LoRA — situational, mutually exclusive
+  //   Priority: oiled > sweaty > beauty skin (close-up female)
+  if (isOiled) {
+    loras.push({ filename: 'flux-oiled-skin.safetensors', strengthModel: 0.7, strengthClip: 0.7 });
+  } else if (isSweaty) {
+    loras.push({ filename: 'flux-sweat-v2.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+  } else if (isCloseUp && hasFemaleCharacter) {
+    loras.push({ filename: 'flux-beauty-skin.safetensors', strengthModel: 0.3, strengthClip: 0.3 });
+    pendingTriggers.push('mdlnbaytskn');
   }
 
-  // 3. Body LoRAs — included when ANY character is female
-  // NSW Curves is our custom-trained body LoRA that combines what perfect-busts
-  // and hourglass did separately. It takes one LoRA slot instead of two.
-  // For dual scenes with a male primary + female secondary, we still want body
-  // enhancement for the female character (at slightly reduced strength).
+  // Slot 3: Body shape LoRA — single slot, female characters only
+  //   Configurable: 'hourglass' (wide hips, thick thighs) or 'bodylicious' (exaggerated curves)
+  //   'auto' defaults to bodylicious for its stronger curve reinforcement
   if (hasFemaleCharacter) {
     const isSecondaryOnly = !isFemale && secondaryGender === 'female';
-    const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0; // 30% reduction when female is only secondary
+    const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0;
 
-    // BodyLicious FLUX — exaggerated feminine curves (huge breasts, hips, ass, narrow waist).
-    let curvesStrength = 0.7 * secondaryReduction;
-    if (isFullBody) curvesStrength = 0.95 * secondaryReduction;
-    loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(curvesStrength * 100) / 100, strengthClip: Math.round(curvesStrength * 100) / 100 });
-    pendingTriggers.push('huge breasts', 'huge hips', 'huge ass', 'narrow waist');
-
-    // NSW Curves — custom-trained body LoRA, good curves but can cause disproportionate
-    // heads at high strength. Kept low (0.35) to complement BodyLicious without overpowering.
-    let nswCurvesStrength = 0.35 * secondaryReduction;
-    if (isFullBody) nswCurvesStrength = 0.5 * secondaryReduction;
-    loras.push({ filename: 'nsw-curves-body.safetensors', strengthModel: Math.round(nswCurvesStrength * 100) / 100, strengthClip: Math.round(nswCurvesStrength * 100) / 100 });
-
-    // Perfect-busts as a complementary LoRA at reduced strength
-    let bustsStrength = 0.5 * secondaryReduction;
-    if (isFullBody) bustsStrength = 0.6 * secondaryReduction;
-    loras.push({ filename: 'fc-flux-perfect-busts.safetensors', strengthModel: Math.round(bustsStrength * 100) / 100, strengthClip: Math.round(bustsStrength * 100) / 100 });
-  }
-
-  // 4. Kissing LoRA — dual-character kissing scenes
-  if (hasDualCharacter && isKissing) {
-    let kissStrength = 0.7;
-    if (isCloseUp) kissStrength = 0.85; // stronger for close-up kisses
-    loras.push({ filename: 'flux-two-people-kissing.safetensors', strengthModel: kissStrength, strengthClip: kissStrength });
-  }
-
-  // 5. NSFW anatomy LoRA — intimate/sex scenes only
-  if (!isSfw && isIntimate) {
-    let nsfwStrength = 0.7;
-    if (hasDualCharacter) nsfwStrength = 0.6; // reduce slightly to stay under budget
-    loras.push({ filename: 'flux_lustly-ai_v1.safetensors', strengthModel: nsfwStrength, strengthClip: nsfwStrength });
-  }
-
-  // 6. Skin effect LoRA — situational, mutually exclusive, only if a slot is free
-  //    Priority: oiled > sweaty > beauty skin (close-up female)
-  //    These are installed: false until downloaded, but selection logic is always active
-  if (loras.length < 6) {
-    if (isOiled) {
-      loras.push({ filename: 'flux-oiled-skin.safetensors', strengthModel: 0.7, strengthClip: 0.7 });
-    } else if (isSweaty) {
-      loras.push({ filename: 'flux-sweat-v2.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-    } else if (isCloseUp && hasFemaleCharacter) {
-      loras.push({ filename: 'flux-beauty-skin.safetensors', strengthModel: 0.3, strengthClip: 0.3 });
-      pendingTriggers.push('mdlnbaytskn');
+    const useHourglass = bodyShape === 'hourglass';
+    if (useHourglass) {
+      let strength = 0.9 * secondaryReduction;
+      if (isCloseUp) strength = 0.5 * secondaryReduction; // less body emphasis for close-ups
+      loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
+    } else {
+      // bodylicious or auto
+      let strength = 0.7 * secondaryReduction;
+      if (isFullBody) strength = 0.95 * secondaryReduction;
+      if (isCloseUp) strength = 0.4 * secondaryReduction;
+      loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
+      pendingTriggers.push('huge breasts', 'huge hips', 'huge ass', 'narrow waist');
     }
   }
 
-  // Strength budget cap — scale down if total exceeds 4.0.
-  // Raised from 3.5: body LoRAs (busts + hourglass) were being diluted to ~77%
-  // in NSFW dual + kissing + intimate scenes, weakening body consistency.
+  // Slot 4: Anatomy/NSFW LoRA — intimate scenes only
+  if (!isSfw && isIntimate) {
+    let nsfwStrength = 0.7;
+    if (hasDualCharacter) nsfwStrength = 0.6;
+    loras.push({ filename: 'flux_lustly-ai_v1.safetensors', strengthModel: nsfwStrength, strengthClip: nsfwStrength });
+  }
+
+  // Slot 5: Atmosphere LoRA
+  //   • NSFW female → Boudoir Style (intimate/sensual atmosphere)
+  //   • SFW female (non-full-body) → Fashion Editorial (luxury magazine look)
+  if (hasFemaleCharacter && !isSfw) {
+    loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    pendingTriggers.push('boud01rstyle');
+  } else if (hasFemaleCharacter && isSfw && !isFullBody) {
+    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+    pendingTriggers.push('flux-fash');
+  }
+
+  // Slot 6: RefControl Kontext pose LoRA — optional, for identity+pose transfer
+  if (opts.hasRefControlPose && loras.length < 6) {
+    loras.push({ filename: 'refcontrol_pose.safetensors', strengthModel: 0.9, strengthClip: 0.9 });
+    pendingTriggers.push('refcontrolpose');
+  }
+
+  // Strength budget cap — scale down if total exceeds 4.0
   const MAX_TOTAL_STRENGTH = 4.0;
   const totalStrength = loras.reduce((sum, l) => sum + l.strengthModel, 0);
   if (totalStrength > MAX_TOTAL_STRENGTH) {
@@ -325,7 +326,7 @@ export function selectKontextResources(opts: {
     }
   }
 
-  // Filter out trigger words that are already present in the prompt
+  // Filter out trigger words already present in the prompt
   const triggerWords = pendingTriggers.filter(
     (t) => !new RegExp(`\\b${t}\\b`, 'i').test(prompt)
   );

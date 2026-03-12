@@ -46,11 +46,17 @@ Evaluate the generated image on these criteria:
    - Single person only — no other people visible
    - Score 7+ = training-quality image
 
+4. FACE-ONLY CROP FLAG (boolean): The image category will be provided (e.g. "full-body", "waist-up").
+   If the category indicates body should be visible but the generated image ONLY shows the head/face
+   (i.e. the body is not visible despite being requested), set face_only_crop to true.
+   For face-closeup and head-shoulders categories, always set false.
+
 Respond in JSON format only:
 {
   "face_score": 8,
   "body_score": 9,
   "quality_score": 8,
+  "face_only_crop": false,
   "verdict": "PASS",
   "issues": []
 }`;
@@ -258,9 +264,19 @@ async function evaluateSingleImage(
     // Only enforce body score floor for categories that show the body
     (category === 'face-closeup' || category === 'head-shoulders' || evalResult.body_score >= 5);
 
-  evalResult.verdict = weightedScore >= PIPELINE_CONFIG.minEvalScore && noCategryBelowFloor
-    ? 'PASS'
-    : 'FAIL';
+  // Force FAIL if a body-category image is actually a face-only crop
+  const isBodyCategory = category === 'waist-up' || category === 'full-body' || category === 'body-detail';
+  if (evalResult.face_only_crop && isBodyCategory) {
+    evalResult.verdict = 'FAIL';
+    evalResult.issues = [
+      ...(evalResult.issues || []),
+      'Image is a face-only crop — expected full/partial body framing for this category',
+    ];
+  } else {
+    evalResult.verdict = weightedScore >= PIPELINE_CONFIG.minEvalScore && noCategryBelowFloor
+      ? 'PASS'
+      : 'FAIL';
+  }
 
   // Update database record
   const evalStatus = evalResult.verdict === 'PASS' ? 'passed' : 'failed';
