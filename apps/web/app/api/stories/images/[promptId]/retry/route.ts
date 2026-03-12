@@ -67,6 +67,7 @@ export async function POST(
     const { jobId: runpodJobId } = await submitRunPodJob(
       result.workflow,
       result.images.length > 0 ? result.images : undefined,
+      result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
     );
 
     const newJobId = `runpod-${runpodJobId}`;

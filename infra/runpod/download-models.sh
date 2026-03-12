@@ -181,6 +181,8 @@ KEEP_LORAS=(
   "bodylicious-flux.safetensors"
   "nsw-curves-body.safetensors"
   "refcontrol_pose.safetensors"
+  "melanin-XL.safetensors"
+  "venus-body-xl.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -252,6 +254,15 @@ fi
 
 # BodyLicious FLUX — exaggerated feminine curves (CivitAI model 238105, version 979680)
 download_to_volume "979680" "bodylicious-flux.safetensors"
+
+# Melanin Girlfriend mix — SDXL dark skin enhancement for character face generation
+# CivitAI model 390634, version 435833. Trigger word: melanin
+download_to_volume "435833" "melanin-XL.safetensors"
+
+# Venus Body LoRA — SDXL curvaceous body shape for character body generation
+# CivitAI model (Venus Body v2). Trigger word: venusbody
+# Version ID: 136081
+download_to_volume "136081" "venus-body-xl.safetensors"
 
 # NSW Curves — custom-trained body LoRA (Replicate tar → safetensors extraction)
 NSW_CURVES_DEST="${VOLUME_LORAS_DIR}/nsw-curves-body.safetensors"

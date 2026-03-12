@@ -442,6 +442,139 @@ function buildKontextImg2ImgWorkflow(
   return workflow;
 }
 
+// ============================================================
+// SDXL Workflow Builder (RealVisXL — character approval pipeline)
+// ============================================================
+
+export interface SdxlWorkflowConfig {
+  positivePrompt: string;
+  negativePrompt: string;
+  width: number;
+  height: number;
+  seed: number;
+  steps?: number;          // default 30
+  cfg?: number;            // default 7.0
+  filenamePrefix: string;
+  checkpointName: string;  // e.g. 'realvisxlV50_v50Bakedvae.safetensors'
+  loras?: Array<{
+    filename: string;
+    strengthModel: number;
+    strengthClip: number;
+  }>;
+}
+
+/**
+ * Build an SDXL ComfyUI workflow (CheckpointLoaderSimple architecture).
+ *
+ * Used for character approval face/body generation with RealVisXL V5.0.
+ * Completely different node architecture from Flux/Kontext:
+ * - CheckpointLoaderSimple (not UNETLoader + DualCLIPLoader + VAELoader)
+ * - Two CLIPTextEncode nodes (positive + negative — SDXL supports negative prompts)
+ * - KSampler with cfg: 7.0, scheduler: karras, sampler: dpmpp_2m
+ */
+export function buildSdxlWorkflow(config: SdxlWorkflowConfig): Record<string, any> {
+  const workflow: Record<string, any> = {};
+
+  // Node 100: CheckpointLoaderSimple — loads checkpoint (model, clip, vae)
+  workflow['100'] = {
+    class_type: 'CheckpointLoaderSimple',
+    inputs: {
+      ckpt_name: config.checkpointName,
+    },
+  };
+
+  // ---- Optional LoRA chain (nodes 110+) ----
+  // LoRAs modify both model and clip, so CLIPTextEncode nodes must be built
+  // AFTER the LoRA chain using the final clipRef.
+  let modelRef: [string, number] = ['100', 0];
+  let clipRef: [string, number] = ['100', 1];
+
+  if (config.loras && config.loras.length > 0) {
+    const capped = config.loras.slice(0, 6);
+    for (let i = 0; i < capped.length; i++) {
+      const nodeId = String(110 + i);
+      const lora = capped[i];
+      workflow[nodeId] = {
+        class_type: 'LoraLoader',
+        inputs: {
+          lora_name: lora.filename,
+          strength_model: lora.strengthModel,
+          strength_clip: lora.strengthClip,
+          model: modelRef,
+          clip: clipRef,
+        },
+      };
+      modelRef = [nodeId, 0];
+      clipRef = [nodeId, 1];
+    }
+  }
+
+  // Node 101: CLIPTextEncode (positive) — uses LoRA-modified clip if LoRAs present
+  workflow['101'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: config.positivePrompt,
+      clip: clipRef,
+    },
+  };
+
+  // Node 102: CLIPTextEncode (negative) — uses LoRA-modified clip if LoRAs present
+  workflow['102'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: config.negativePrompt,
+      clip: clipRef,
+    },
+  };
+
+  // Node 103: EmptyLatentImage
+  workflow['103'] = {
+    class_type: 'EmptyLatentImage',
+    inputs: {
+      width: config.width,
+      height: config.height,
+      batch_size: 1,
+    },
+  };
+
+  // Node 104: KSampler — SDXL sampling with karras scheduler
+  workflow['104'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: modelRef,
+      positive: ['101', 0],
+      negative: ['102', 0],
+      latent_image: ['103', 0],
+      seed: config.seed,
+      steps: config.steps ?? 30,
+      cfg: config.cfg ?? 7.0,
+      sampler_name: 'dpmpp_2m',
+      scheduler: 'karras',
+      denoise: 1.0,
+    },
+  };
+
+  // Node 105: VAEDecode — vae from checkpoint output 2
+  workflow['105'] = {
+    class_type: 'VAEDecode',
+    inputs: {
+      samples: ['104', 0],
+      vae: ['100', 2],
+    },
+  };
+
+  // Node 106: SaveImage
+  workflow['106'] = {
+    class_type: 'SaveImage',
+    inputs: {
+      filename_prefix: config.filenamePrefix,
+      images: ['105', 0],
+    },
+  };
+
+  return workflow;
+}
+
 /**
  * Dual reference images — both characters combined into a single reference image server-side.
  * The route concatenates both portraits before calling this builder,

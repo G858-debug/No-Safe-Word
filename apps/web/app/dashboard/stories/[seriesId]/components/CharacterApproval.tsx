@@ -24,6 +24,7 @@ import {
   Pencil,
   Save,
   X,
+  Lock,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -647,6 +648,7 @@ export default function CharacterApproval({
     setGenerateAllProgress(null);
 
     // Build a flat list of (character, type) pairs that need generation
+    // Respects face→body sequencing: only queue fullBody if portrait is already approved
     const toGenerate: { ch: CharacterFromAPI; type: ImageType }[] = [];
     for (const ch of characters) {
       const s = charStates[ch.id];
@@ -654,7 +656,7 @@ export default function CharacterApproval({
       if (!s.portrait.imageUrl && !s.portrait.isGenerating && !s.portrait.approved) {
         toGenerate.push({ ch, type: "portrait" });
       }
-      if (!s.fullBody.imageUrl && !s.fullBody.isGenerating && !s.fullBody.approved) {
+      if (s.portrait.approved && !s.fullBody.imageUrl && !s.fullBody.isGenerating && !s.fullBody.approved) {
         toGenerate.push({ ch, type: "fullBody" });
       }
     }
@@ -881,9 +883,9 @@ export default function CharacterApproval({
 
   // ------- Derived state -------
 
-  // A character is "fully approved" when BOTH portrait AND fullBody are approved
+  // A character is "fully ready" when portrait + fullBody approved AND LoRA deployed
   const approvedCount = Object.values(charStates).filter(
-    (s) => s.portrait?.approved && s.fullBody?.approved
+    (s) => s.portrait?.approved && s.fullBody?.approved && s.lora?.status === "deployed"
   ).length;
   const totalCount = characters.length;
   const allApproved = totalCount > 0 && approvedCount === totalCount;
@@ -962,8 +964,8 @@ export default function CharacterApproval({
         )}
       </div>
 
-      {/* All approved banner */}
-      {allApproved && (
+      {/* All approved banner OR blocking reasons */}
+      {allApproved ? (
         <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -988,7 +990,29 @@ export default function CharacterApproval({
             )}
           </div>
         </div>
-      )}
+      ) : totalCount > 0 && (() => {
+        const blockers: string[] = [];
+        for (const ch of characters) {
+          const s = charStates[ch.id];
+          if (!s) continue;
+          const reasons: string[] = [];
+          if (!s.portrait.approved) reasons.push("face not approved");
+          else if (!s.fullBody.approved) reasons.push("body not approved");
+          if (s.portrait.approved && s.fullBody.approved && s.lora.status !== "deployed") {
+            const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(s.lora.status);
+            reasons.push(loraInProgress ? "LoRA training in progress" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
+          }
+          if (reasons.length > 0) blockers.push(`${ch.characters.name} (${reasons.join(", ")})`);
+        }
+        return blockers.length > 0 ? (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+            <p className="text-sm text-amber-400">
+              <span className="font-medium">Waiting for:</span>{" "}
+              {blockers.join(", ")}
+            </p>
+          </div>
+        ) : null;
+      })()}
 
       {/* Character cards */}
       <div className="space-y-6">
@@ -1033,6 +1057,37 @@ export default function CharacterApproval({
               </CardHeader>
 
               <CardContent className="space-y-4">
+                {/* Step progress indicator */}
+                <div className="flex items-center gap-1 text-xs">
+                  {(() => {
+                    const faceColor = state.portrait.approved ? "text-green-400" : state.portrait.isGenerating ? "text-amber-400" : "text-muted-foreground/40";
+                    const faceDot = state.portrait.approved ? "bg-green-400" : state.portrait.isGenerating ? "bg-amber-400" : "bg-muted-foreground/30";
+                    const bodyColor = state.fullBody.approved ? "text-green-400" : state.fullBody.isGenerating ? "text-amber-400" : "text-muted-foreground/40";
+                    const bodyDot = state.fullBody.approved ? "bg-green-400" : state.fullBody.isGenerating ? "bg-amber-400" : "bg-muted-foreground/30";
+                    const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(state.lora.status);
+                    const loraColor = state.lora.status === "deployed" ? "text-green-400" : state.lora.status === "failed" ? "text-red-400" : loraInProgress ? "text-amber-400" : "text-muted-foreground/40";
+                    const loraDot = state.lora.status === "deployed" ? "bg-green-400" : state.lora.status === "failed" ? "bg-red-400" : loraInProgress ? "bg-amber-400" : "bg-muted-foreground/30";
+                    return (
+                      <>
+                        <span className={`inline-flex items-center gap-1 ${faceColor}`}>
+                          <span className={`inline-block h-2 w-2 rounded-full ${faceDot}`} />
+                          Face{state.portrait.approved && <Check className="h-2.5 w-2.5" />}
+                        </span>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground/30" />
+                        <span className={`inline-flex items-center gap-1 ${bodyColor}`}>
+                          <span className={`inline-block h-2 w-2 rounded-full ${bodyDot}`} />
+                          Body{state.fullBody.approved && <Check className="h-2.5 w-2.5" />}
+                        </span>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground/30" />
+                        <span className={`inline-flex items-center gap-1 ${loraColor}`}>
+                          <span className={`inline-block h-2 w-2 rounded-full ${loraDot}`} />
+                          LoRA{state.lora.status === "deployed" && <Check className="h-2.5 w-2.5" />}
+                        </span>
+                      </>
+                    );
+                  })()}
+                </div>
+
                 {/* Collapsible prose description */}
                 {ch.prose_description && (
                   <div>
@@ -1182,9 +1237,16 @@ export default function CharacterApproval({
                       : slot.imageUrl;
                     const label = type === "portrait" ? "Portrait" : "Full Body";
                     const aspectClass = type === "portrait" ? "aspect-[3/4]" : "aspect-[5/8]";
+                    const isBodyLocked = type === "fullBody" && !state.portrait.approved;
 
                     return (
-                      <div key={type} className="space-y-3">
+                      <div key={type} className={`space-y-3 ${isBodyLocked ? "relative" : ""}`}>
+                        {isBodyLocked && (
+                          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-background/80 backdrop-blur-sm">
+                            <Lock className="mb-2 h-6 w-6 text-muted-foreground/50" />
+                            <p className="text-sm text-muted-foreground/70">Approve face first</p>
+                          </div>
+                        )}
                         {/* Slot label */}
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -1305,7 +1367,7 @@ export default function CharacterApproval({
                           {!hasImage && !slot.isGenerating && !slot.error && (
                             <Button
                               onClick={() => handleGenerate(ch.id, type)}
-                              disabled={generatingAll}
+                              disabled={generatingAll || isBodyLocked}
                               size="sm"
                             >
                               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
@@ -1317,7 +1379,7 @@ export default function CharacterApproval({
                             <>
                               <Button
                                 onClick={() => handleCheckStatus(ch.id, type)}
-                                disabled={generatingAll}
+                                disabled={generatingAll || isBodyLocked}
                                 size="sm"
                                 variant="outline"
                               >
@@ -1326,7 +1388,7 @@ export default function CharacterApproval({
                               </Button>
                               <Button
                                 onClick={() => handleGenerate(ch.id, type)}
-                                disabled={generatingAll}
+                                disabled={generatingAll || isBodyLocked}
                                 size="sm"
                               >
                                 <Sparkles className="mr-1.5 h-3.5 w-3.5" />
@@ -1338,7 +1400,7 @@ export default function CharacterApproval({
                           {!hasImage && !slot.isGenerating && slot.error && !slot.jobId && (
                             <Button
                               onClick={() => handleGenerate(ch.id, type)}
-                              disabled={generatingAll}
+                              disabled={generatingAll || isBodyLocked}
                               size="sm"
                             >
                               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
@@ -1349,6 +1411,7 @@ export default function CharacterApproval({
                           {hasImage && !slot.isGenerating && (
                             <Button
                               onClick={() => handleRegenerate(ch.id, type)}
+                              disabled={isBodyLocked}
                               variant="outline"
                               size="sm"
                             >
@@ -1360,6 +1423,7 @@ export default function CharacterApproval({
                           {hasImage && !slot.approved && !slot.isGenerating && (
                             <Button
                               onClick={() => handleApprove(ch.id, type)}
+                              disabled={isBodyLocked}
                               size="sm"
                               className="bg-green-600 hover:bg-green-700"
                             >
@@ -1396,15 +1460,14 @@ export default function CharacterApproval({
                   </span>
                 </div>
 
-                {/* LoRA Training Section — shows after both images approved */}
-                {fullyApproved && (
-                  <LoraTrainingSection
-                    storyCharId={ch.id}
-                    characterName={ch.characters.name}
-                    loraState={state.lora}
-                    onTrain={() => handleTrainLora(ch.id)}
-                  />
-                )}
+                {/* LoRA Training Section */}
+                <LoraTrainingSection
+                  storyCharId={ch.id}
+                  characterName={ch.characters.name}
+                  loraState={state.lora}
+                  onTrain={() => handleTrainLora(ch.id)}
+                  locked={!fullyApproved}
+                />
               </CardContent>
             </Card>
           );
@@ -1435,11 +1498,13 @@ function LoraTrainingSection({
   characterName,
   loraState,
   onTrain,
+  locked,
 }: {
   storyCharId: string;
   characterName: string;
   loraState: LoraTrainingState;
   onTrain: () => void;
+  locked: boolean;
 }) {
   const config = LORA_STATUS_CONFIG[loraState.status] || LORA_STATUS_CONFIG.no_lora;
   const isInProgress = !["no_lora", "deployed", "failed", "archived"].includes(loraState.status);
@@ -1463,27 +1528,31 @@ function LoraTrainingSection({
         {loraState.status === "no_lora" && (
           <Button
             onClick={onTrain}
-            disabled={loraState.isTriggering}
+            disabled={loraState.isTriggering || locked}
             size="sm"
             variant="outline"
             className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+            title={locked ? "Approve body first" : undefined}
           >
-            {loraState.isTriggering ? (
+            {locked ? (
+              <Lock className="mr-1.5 h-3.5 w-3.5" />
+            ) : loraState.isTriggering ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
               <Dna className="mr-1.5 h-3.5 w-3.5" />
             )}
-            Train Character LoRA
+            {locked ? "Approve body first" : "Train Character LoRA"}
           </Button>
         )}
 
         {isFailed && (
           <Button
             onClick={onTrain}
-            disabled={loraState.isTriggering}
+            disabled={loraState.isTriggering || locked}
             size="sm"
             variant="outline"
             className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+            title={locked ? "Approve body first" : undefined}
           >
             {loraState.isTriggering ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

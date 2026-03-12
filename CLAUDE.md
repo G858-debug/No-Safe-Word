@@ -3,12 +3,52 @@
 ## Image Generation Best Practices
 
 ### Character Consistency Rules
-1. **Approved characters** (anyone in the story_characters table with an approved portrait): appearance is ALWAYS defined by the approved portrait prompt tags, never by scene prompts. The pipeline injects these automatically.
+1. **Approved characters** have three approval stages that must be completed in order:
+   a. **Face** — generated via RealVisXL + Melanin LoRA. Must be approved before body.
+   b. **Body** — generated via RealVisXL + Venus Body LoRA. Must be approved before LoRA training.
+   c. **Character LoRA** — trained on Replicate using `ostris/flux-dev-lora-trainer`
+      with the approved face + body images as the dataset seed. Must be deployed before
+      any scene images can be generated for the series.
 2. **Non-character people** (background figures, unnamed extras, one-off mentions like "a waiter", "his mother", "the woman at the next table"): MUST be described inline in the scene prompt with physical details, since the pipeline has no data for them. Keep these descriptions brief — just enough for the model to render them correctly (e.g., "older woman in floral dress and doek in background" rather than full Five Layers treatment).
 3. Scene prompts describe ONLY: action, pose, clothing for this scene, setting, lighting, camera angle, composition, gaze/expression — plus any non-character people as described above.
 4. Never include physical descriptions (skin tone, hair, build, face shape) for approved characters in scene prompts — the pipeline injects these from character data.
 5. Always specify gaze direction explicitly using plain text: "looking directly at the camera" (no emphasis weights — Flux's T5 encoder ignores them).
 6. For multi-character scenes with TWO approved characters, use primary + secondary character linking. Both get their identity injected. Only describe non-character people inline.
+7. **Character LoRA injection for scene images**: The deployed character LoRA filename
+   is fetched from `character_loras` table (status = 'deployed') and injected into the
+   Kontext workflow `loras[]` array before style LoRAs. Character LoRAs are downloaded
+   at RunPod runtime via the `character_lora_downloads` handler in patch_handler.py.
+   If a character has no deployed LoRA, scene generation throws — never silently skips.
+
+### Character LoRA Training
+
+The pipeline runs 6 stages, tracked in the `character_loras` table with checkpointing
+for resume after failure:
+
+1. **Dataset generation** — Hybrid approach:
+   - Face/head shots: Nano Banana Pro (Replicate `google/nano-banana-pro`)
+     using approved portrait as reference
+   - Body shots (female): SDXL + Venus Body LoRA on Replicate → Flux Kontext img2img
+     conversion (denoise: 0.72) for photorealistic curvaceous output
+   - Body shots (male): ComfyUI/RunPod Kontext workflow directly
+
+2. **Quality evaluation** — Claude Vision scores each image; minimum score 7/10 to pass
+
+3. **Captioning** — Auto-generated from prompt templates (autocaption: false —
+   we provide captions, not Replicate)
+
+4. **Training** — `ostris/flux-dev-lora-trainer` on Replicate.
+   Default params: steps: 1500, learning_rate: 0.0004, lora_rank: 16, resolution: 512.
+   Retry params: attempt 2 → steps: 2000, lr: 0.0002; attempt 3 → lora_rank: 32
+
+5. **Validation** — Test images generated with the trained LoRA, face scored by Claude Vision
+
+6. **Deployment** — .safetensors uploaded to Supabase Storage,
+   registered in `character_loras` table with status: 'deployed'
+
+**Critical**: The trainer uses `ostris/flux-dev-lora-trainer` (Flux-compatible).
+Never use `stability-ai/sdxl` trainer — SDXL LoRAs are architecturally incompatible
+with Flux Kontext and will silently produce wrong results.
 
 ### Scene Prompt Format
 Write scene prompts as **natural-language prose** — not comma-separated tags. Flux uses a T5 text encoder that processes sentences, not tag lists.
@@ -44,9 +84,22 @@ Example (correct Flux prose — USE THIS):
 - Cultural grounding (African print fabric, specific SA locations, local objects) creates authenticity and differentiates from generic AI content
 
 ### Model Selection
-- Single model: Flux Krea Dev Uncensored (fp8_e4m3fn quantized) for all content types (SFW and NSFW)
-- Character consistency via reference image conditioning (ReferenceLatent)
-- Scene-aware LoRA stack: Realism, Detail, body LoRAs (female), Kissing (dual), NSFW anatomy (intimate)
+
+**Character Approval (face + body):**
+- Model: RealVisXL V5.0 BakedVAE (`realvisxlV50_v50Bakedvae.safetensors`) via ComfyUI on RunPod
+- Face generation: RealVisXL + Melanin Girlfriend mix LoRA (`melanin-XL.safetensors`,
+  trigger: `melanin`, strength: 0.5) for Black/African characters
+- Body generation: RealVisXL + Venus Body LoRA (`venus-body-xl.safetensors`,
+  trigger: `venusbody`, strength: 0.75) + Melanin LoRA (for Black/African female characters)
+- SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
+- Trigger words MUST appear at the start of the positive prompt
+
+**Scene Image Generation:**
+- Model: Flux Krea Dev (`flux1KreaDev_fp8E4m3fn.safetensors`) via ComfyUI on RunPod
+- Character consistency: trained character LoRA (from LoRA training pipeline) injected
+  as the FIRST LoRA in the stack at strength 0.85, before style LoRAs
+- Style LoRAs: Realism, Detail/Boudoir, body LoRAs (female), Kissing (dual), NSFW anatomy
+- Scene images require ALL characters to have a deployed LoRA — generation is blocked otherwise
 
 ### Self-Contained Prompts (Critical)
 Every image prompt must be fully self-contained. Each image is generated independently — there is NO context, NO memory, and NO reference to any other image or prompt.
@@ -75,7 +128,10 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
 
 ### Female Character Enhancement
 1. Female characters receive attractiveness prose in the identity prefix (injected by the pipeline): beautiful face, curvaceous figure, etc.
-2. Body LoRAs (fc-flux-perfect-busts, hourglassv32_FLUX) are always loaded for scenes with female characters. These LoRAs do the heavy lifting since Flux has no negative prompt to prevent unflattering rendering.
+2. **Body LoRAs for scene images**: `bodylicious-flux.safetensors` (default) or
+   `hourglassv32_FLUX.safetensors` (optional) are loaded for scenes with female characters.
+   These are SCENE IMAGE LoRAs for Flux — not used during character approval (which uses
+   RealVisXL + `venus-body-xl.safetensors` instead).
 3. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and the pipeline adjusts enhancement accordingly.
 
 ## Error Handling

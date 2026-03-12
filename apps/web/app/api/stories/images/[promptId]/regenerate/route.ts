@@ -91,6 +91,7 @@ export async function POST(
     const { jobId: kontextJobId } = await submitRunPodJob(
       result.workflow,
       result.images.length > 0 ? result.images : undefined,
+      result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
     );
 
     // 8. Create image record

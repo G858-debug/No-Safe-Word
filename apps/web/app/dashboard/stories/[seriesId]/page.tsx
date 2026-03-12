@@ -187,9 +187,45 @@ export default function SeriesDetailPage() {
     fetchData();
   }, [seriesId]);
 
+  // LoRA readiness state for all characters
+  const [loraStatus, setLoraStatus] = useState<Record<string, { name: string; deployed: boolean }>>({});
+  const [loraCheckDone, setLoraCheckDone] = useState(false);
+
+  // Check LoRA deployment status for all characters
+  useEffect(() => {
+    if (characters.length === 0) return;
+
+    async function checkLoras() {
+      const statuses: Record<string, { name: string; deployed: boolean }> = {};
+      for (const ch of characters) {
+        try {
+          const res = await fetch(`/api/stories/characters/${ch.id}/lora-progress`);
+          if (res.ok) {
+            const data = await res.json();
+            statuses[ch.id] = {
+              name: ch.characters.name,
+              deployed: data?.status === "deployed",
+            };
+          } else {
+            statuses[ch.id] = { name: ch.characters.name, deployed: false };
+          }
+        } catch {
+          statuses[ch.id] = { name: ch.characters.name, deployed: false };
+        }
+      }
+      setLoraStatus(statuses);
+      setLoraCheckDone(true);
+    }
+
+    checkLoras();
+  }, [characters]);
+
   // Derived state
   const allCharsApproved =
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
+  const allLorasDeployed =
+    loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
+  const allReadyForImages = allCharsApproved && allLorasDeployed;
 
   // Engine update handler
   async function handleEngineChange(engine: ImageEngine) {
@@ -541,8 +577,30 @@ export default function SeriesDetailPage() {
             seriesId={seriesId}
             posts={posts}
             imageUrls={data.image_urls}
-            allCharactersApproved={allCharsApproved}
+            allCharactersApproved={allReadyForImages}
           />
+          {allCharsApproved && !allLorasDeployed && loraCheckDone && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">
+              <p className="text-sm font-medium text-amber-400 mb-2">
+                LoRA training required before generating images
+              </p>
+              <ul className="text-sm text-amber-400/80 space-y-1">
+                {characters
+                  .filter((c) => !loraStatus[c.id]?.deployed)
+                  .map((c) => (
+                    <li key={c.id}>
+                      {c.characters.name} — LoRA not deployed
+                    </li>
+                  ))}
+              </ul>
+              <button
+                onClick={() => setActiveTab("characters")}
+                className="mt-3 text-sm text-amber-400 underline hover:text-amber-300"
+              >
+                Go to Character Approval
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ====================== PUBLISH TAB ======================= */}

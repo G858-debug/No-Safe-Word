@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  buildKontextWorkflow,
-  buildKontextIdentityPrefix,
-  buildFluxPrompt,
-  selectKontextResources,
+  buildSdxlWorkflow,
   submitRunPodJob,
 } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
 
-const PORTRAIT_SCENE_DESCRIPTION =
-  "Professional portrait photography with soft diffused studio lighting against a clean neutral gray backdrop. Close-up head and shoulders, looking directly at the camera with a confident expression.";
-
-const FULLBODY_SCENE_DESCRIPTION =
-  "Full body standing pose in soft studio lighting against a medium gray backdrop. She wears a form-fitting bodycon dress or tight outfit that accentuates her figure. Full body visible from head to feet, looking directly at the camera.";
+/** Case-insensitive check for Black/African ethnicity */
+function isBlackAfrican(ethnicity: string): boolean {
+  const lower = ethnicity.toLowerCase();
+  return lower.includes('black') || lower.includes('african') || lower.includes('dark');
+}
 
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait or full body
 export async function POST(
@@ -41,7 +38,7 @@ export async function POST(
       // No body or invalid JSON — use defaults
     }
 
-    console.log(`[StoryPublisher] Generating ${imageType} (Kontext) for storyCharId: ${storyCharId}`);
+    console.log(`[StoryPublisher] Generating ${imageType} (RealVisXL SDXL) for storyCharId: ${storyCharId}`);
 
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
@@ -93,43 +90,65 @@ export async function POST(
       age: desc.age || "",
     };
 
-    // 4. Build Kontext prompt
     const seed = customSeed || Math.floor(Math.random() * 2_147_483_647) + 1;
-    const identityPrefix = buildKontextIdentityPrefix(characterData);
-    const sceneDescription = imageType === "fullBody" ? FULLBODY_SCENE_DESCRIPTION : PORTRAIT_SCENE_DESCRIPTION;
-    const { prompt: fluxPrompt } = buildFluxPrompt(identityPrefix, sceneDescription, { mode: 'sfw' });
+    const sluggedName = character.name.replace(/\s+/g, "_").toLowerCase();
+    const isFemale = characterData.gender !== 'male';
+    const useMelanin = isBlackAfrican(characterData.ethnicity);
 
-    // 5. Select Kontext LoRAs
-    const gender = characterData.gender === 'male' ? 'male' : 'female';
-    const kontextResources = selectKontextResources({
-      gender,
-      isSfw: true,
-      imageType: imageType,
-      prompt: fluxPrompt,
-      hasDualCharacter: false,
-    });
+    let positivePrompt: string;
+    let negativePrompt: string;
+    let width: number;
+    let height: number;
+    let loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
 
-    // Prepend LoRA trigger words that aren't already in the prompt
-    const finalPrompt = kontextResources.triggerWords.length > 0
-      ? `${kontextResources.triggerWords.join(' ')} ${fluxPrompt}`
-      : fluxPrompt;
+    if (imageType === "portrait") {
+      // PATH A — Face portrait with RealVisXL + Melanin LoRA
+      width = 832;
+      height = 1216;
 
-    console.log(`[StoryPublisher] Kontext identity prefix: ${identityPrefix.substring(0, 80)}...`);
-    console.log(`[StoryPublisher] LoRAs: ${kontextResources.loras.length > 0 ? kontextResources.loras.map(l => l.filename).join(", ") : "NONE"}`);
-    if (kontextResources.triggerWords.length > 0) {
-      console.log(`[StoryPublisher] Trigger words injected: ${kontextResources.triggerWords.join(', ')}`);
+      const melaninTrigger = (isFemale && useMelanin) || (!isFemale && useMelanin) ? 'melanin, ' : '';
+      positivePrompt = `${melaninTrigger}photorealistic portrait of a ${characterData.age}-year-old ${characterData.ethnicity} ${isFemale ? 'woman' : 'man'}, ${characterData.skinTone} skin, ${characterData.hairStyle} ${characterData.hairColor} hair, ${characterData.eyeColor} eyes, ${characterData.distinguishingFeatures}, close-up head and shoulders, looking directly at the camera with a confident expression, soft studio lighting, neutral gray background, 8k, masterpiece, best quality, highly detailed`;
+
+      negativePrompt = `deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
+
+      if (useMelanin) {
+        loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+      }
+    } else {
+      // PATH B — Full body with RealVisXL + Venus Body LoRA + Melanin LoRA
+      width = 768;
+      height = 1152;
+
+      if (isFemale) {
+        const venusPrefix = 'venusbody, ';
+        const melaninPrefix = useMelanin ? 'melanin, ' : '';
+        positivePrompt = `${venusPrefix}${melaninPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing a form-fitting outfit, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
+
+        loras.push({ filename: 'venus-body-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
+        if (useMelanin) {
+          loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+        }
+      } else {
+        positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
+      }
+
+      negativePrompt = `skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
     }
+
+    console.log(`[StoryPublisher] SDXL positive prompt: ${positivePrompt.substring(0, 100)}...`);
+    console.log(`[StoryPublisher] LoRAs: ${loras.length > 0 ? loras.map(l => l.filename).join(", ") : "NONE"}`);
     console.log(`[StoryPublisher] Seed: ${seed}`);
 
-    // 6. Build Kontext workflow
-    const workflow = buildKontextWorkflow({
-      type: 'portrait',
-      positivePrompt: finalPrompt,
-      width: 832,
-      height: 1216,
+    // 4. Build SDXL workflow
+    const workflow = buildSdxlWorkflow({
+      positivePrompt,
+      negativePrompt,
+      width,
+      height,
       seed,
-      filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      loras: kontextResources.loras,
+      checkpointName: 'realvisxlV50_v50Bakedvae.safetensors',
+      loras,
+      filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${sluggedName}`,
     });
 
     // Submit async job to RunPod (returns immediately)
@@ -140,11 +159,11 @@ export async function POST(
       .from("images")
       .insert({
         character_id: character.id,
-        prompt: fluxPrompt,
+        prompt: positivePrompt,
         settings: {
-          width: 832,
-          height: 1216,
-          engine: "kontext",
+          width,
+          height,
+          engine: "sdxl-realvis",
           imageType,
           seed,
         },

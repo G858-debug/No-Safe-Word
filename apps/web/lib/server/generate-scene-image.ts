@@ -18,7 +18,7 @@ import {
   injectFluxFemaleEnhancement,
 } from "@no-safe-word/image-gen";
 import { concatImagesHorizontally, concatImagesVertically } from "./image-concat";
-import type { KontextWorkflowType } from "@no-safe-word/image-gen";
+import type { KontextWorkflowType, CharacterLoraDownload } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 // ── Types ──
@@ -43,6 +43,7 @@ export interface SceneGenerationResult {
   seed: number;
   width: number;
   height: number;
+  characterLoraDownloads: CharacterLoraDownload[];
 }
 
 interface GenerateSceneParams {
@@ -168,6 +169,37 @@ export async function buildSceneGenerationPayload(
     : hasSecondary
       ? "dual"
       : "single";
+
+  // ── Character LoRA preflight check ──
+  // Every referenced character must have a deployed LoRA before scene generation.
+  const characterLoraDownloads: CharacterLoraDownload[] = [];
+
+  for (const charId of [imgPrompt.character_id, imgPrompt.secondary_character_id]) {
+    if (!charId) continue;
+    const charName = characterDataMap.get(charId)?.name || "Unknown";
+
+    const { data: loraRow, error: loraError } = await supabase
+      .from("character_loras")
+      .select("filename, storage_url")
+      .eq("character_id", charId)
+      .eq("status", "deployed")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (loraError || !loraRow) {
+      throw new Error(
+        `Character "${charName}" does not have a trained LoRA yet. ` +
+        `Complete LoRA training in Character Approval before generating story images.`,
+      );
+    }
+
+    characterLoraDownloads.push({
+      filename: loraRow.filename,
+      url: loraRow.storage_url,
+    });
+    console.log(`[Kontext][${promptId}] Character LoRA found for "${charName}": ${loraRow.filename}`);
+  }
 
   // ── Reference images ──
   let kontextImages: Array<{ name: string; image: string }> = [];
@@ -421,6 +453,13 @@ export async function buildSceneGenerationPayload(
   let kontextLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   let kontextTriggerWords: string[] = [];
 
+  // Character identity LoRAs go first in the stack (highest priority)
+  const characterLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = characterLoraDownloads.map((dl) => ({
+    filename: dl.filename,
+    strengthModel: 0.85,
+    strengthClip: 0.85,
+  }));
+
   if (effectiveKontextType !== "portrait") {
     const resources = selectKontextResources({
       gender: primaryGender,
@@ -430,13 +469,16 @@ export async function buildSceneGenerationPayload(
       prompt: imgPrompt.prompt,
       hasDualCharacter: hasSecondary,
     });
-    kontextLoras = resources.loras;
+    // Character LoRAs first, then style LoRAs
+    kontextLoras = [...characterLoras, ...resources.loras];
     kontextTriggerWords = resources.triggerWords;
     console.log(
       `[Kontext][${promptId}] LoRAs (${primaryGender}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map((l) => `${l.filename}@${l.strengthModel}`).join(", ")}`,
     );
   } else {
-    console.log(`[Kontext][${promptId}] Portrait/establishing shot — no LoRAs selected`);
+    // Portrait/establishing shots still get character LoRAs (for identity) but no style LoRAs
+    kontextLoras = characterLoras;
+    console.log(`[Kontext][${promptId}] Portrait/establishing shot — character LoRAs only: ${kontextLoras.map((l) => l.filename).join(", ") || "NONE"}`);
   }
 
   // Inject trigger words near the relevant character, not at prompt start.
@@ -540,5 +582,6 @@ export async function buildSceneGenerationPayload(
     seed,
     width: kontextWidth,
     height: kontextHeight,
+    characterLoraDownloads,
   };
 }
