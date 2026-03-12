@@ -1,8 +1,6 @@
 // Stage 4: LoRA Training via Replicate API
 // Creates a ZIP of images + captions, uploads to Supabase,
-// then kicks off LoRA training on Replicate.
-// Note: Training uses Replicate's SDXL base model, but the resulting LoRAs
-// are loaded in the Flux/Kontext workflow via LoraLoader nodes.
+// then kicks off LoRA training on Replicate using ostris/flux-dev-lora-trainer.
 
 import Replicate from 'replicate';
 import archiver from 'archiver';
@@ -11,11 +9,21 @@ import { PassThrough } from 'stream';
 import type { CaptionResult, TrainingParams, TrainingResult } from './types';
 import { DEFAULT_TRAINING_PARAMS, PIPELINE_CONFIG } from './types';
 
-// Replicate training model (uses SDXL base for training, but resulting LoRAs work with Flux/Kontext)
-const LORA_TRAINING_OWNER = 'stability-ai';
-const LORA_TRAINING_MODEL = 'sdxl';
-const LORA_TRAINING_VERSION =
-  '7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc';
+// Replicate training model — Flux trainer (matches LoRA Studio)
+const LORA_TRAINING_OWNER = 'ostris';
+const LORA_TRAINING_MODEL = 'flux-dev-lora-trainer';
+
+async function getFluxTrainerVersion(): Promise<string> {
+  const resp = await fetch(
+    `https://api.replicate.com/v1/models/${LORA_TRAINING_OWNER}/${LORA_TRAINING_MODEL}`,
+    { headers: { Authorization: `Bearer ${process.env.REPLICATE_API_TOKEN}` } },
+  );
+  if (!resp.ok) throw new Error(`Could not fetch flux trainer model: ${resp.status}`);
+  const data = await resp.json();
+  const version = data.latest_version?.id as string | undefined;
+  if (!version) throw new Error('No latest_version found for flux-dev-lora-trainer');
+  return version;
+}
 
 interface TrainerDeps {
   supabase: {
@@ -93,26 +101,24 @@ export async function trainLora(
 
   await ensureReplicateModel(replicate, replicateOwner, destModel);
 
+  const trainerVersion = await getFluxTrainerVersion();
+
   const training = await replicate.trainings.create(
     LORA_TRAINING_OWNER,
     LORA_TRAINING_MODEL,
-    LORA_TRAINING_VERSION,
+    trainerVersion,
     {
       destination,
       input: {
         input_images: zipUrl,
-        token_string: params.token_string,
-        caption_prefix: '',
-        is_lora: params.is_lora,
-        lora_lr: params.lora_lr,
-        unet_learning_rate: params.unet_learning_rate,
-        text_encoder_lr: params.text_encoder_lr,
-        max_train_steps: params.max_train_steps,
-        resolution: params.resolution,
+        trigger_word: params.trigger_word,
+        steps: params.steps,
+        learning_rate: params.learning_rate,
+        lora_rank: params.lora_rank,
         batch_size: params.batch_size,
-        use_face_detection_instead: params.use_face_detection_instead,
-        lr_scheduler: params.lr_scheduler,
-        seed: params.seed,
+        resolution: params.resolution,
+        autocaption: false,
+        caption_prefix: '',
       },
     }
   );
@@ -200,11 +206,11 @@ export async function trainLora(
 export function getRetryParams(attempt: number): Partial<TrainingParams> {
   switch (attempt) {
     case 2:
-      // Lower learning rate — may have been overfitting
-      return { lora_lr: 5e-5, max_train_steps: 1200 };
+      // More steps + lower LR — may have been underfitting
+      return { steps: 2000, learning_rate: 0.0002 };
     case 3:
-      // Higher learning rate — may have been underfitting
-      return { lora_lr: 2e-4, max_train_steps: 800 };
+      // Higher fidelity rank
+      return { lora_rank: 32 };
     default:
       return {};
   }

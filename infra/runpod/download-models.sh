@@ -163,11 +163,9 @@ if [ -d "${VOLUME_MODELS}/ipadapter" ]; then
   echo "[NSW] ✓ Cleared ipadapter/ (IPAdapter models removed)"
 fi
 
-# SDXL LoRAs from /runpod-volume/models/loras/ — delete all non-Kontext LoRAs
-# Keep: flux_realism_lora, flux-add-details, fc-flux-perfect-busts, hourglassv32_FLUX,
-#        flux-two-people-kissing, flux_lustly-ai_v1, boudoir-style-flux,
-#        flux-fashion-editorial, flux-oiled-skin, flux-sweat-v2, flux-beauty-skin,
-#        characters/ (trained character LoRAs)
+# Flux-compatible LoRAs — all other .safetensors in the loras/ directory will be
+# deleted. SDXL LoRAs are not listed here because they are incompatible with
+# Flux Kontext and are no longer used in any pipeline.
 KEEP_LORAS=(
   "flux_realism_lora.safetensors"
   "flux-add-details.safetensors"
@@ -180,11 +178,6 @@ KEEP_LORAS=(
   "flux-oiled-skin.safetensors"
   "flux-sweat-v2.safetensors"
   "flux-beauty-skin.safetensors"
-  "curvy-body-sdxl.safetensors"
-  "skin-realism-sdxl.safetensors"
-  "backshot-sdxl.safetensors"
-  "bad-anatomy-neg-sdxl.safetensors"
-  "realfeet-sdxl.safetensors"
   "bodylicious-flux.safetensors"
   "nsw-curves-body.safetensors"
   "refcontrol_pose.safetensors"
@@ -256,16 +249,6 @@ except Exception as e:
 else
     echo "[NSW] Volume not mounted — skipping ${CKPT_FILE}"
 fi
-
-download_to_volume "1449869" "curvy-body-sdxl.safetensors"
-# Skin Realism (pores, imperfections, natural texture) — CivitAI model 248951, version 340833
-download_to_volume "340833" "skin-realism-sdxl.safetensors"
-# Back Shot LoRA — improves back-facing pose composition — CivitAI model 658655, version 736970
-download_to_volume "736970" "backshot-sdxl.safetensors"
-# Bad Anatomy Negative LoRA — used in negative conditioning to reduce anatomy errors — CivitAI model 430961, version 486308
-download_to_volume "486308" "bad-anatomy-neg-sdxl.safetensors"
-# RealFeet SDXL — improves feet/ankle/lower leg rendering — CivitAI model 211517, version 238277
-download_to_volume "238277" "realfeet-sdxl.safetensors"
 
 # BodyLicious FLUX — exaggerated feminine curves (CivitAI model 238105, version 979680)
 download_to_volume "979680" "bodylicious-flux.safetensors"

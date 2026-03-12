@@ -56,7 +56,7 @@ export interface LoraDatasetImageRow {
 
 // ── Hybrid Pipeline Types ───────────────────────────────────────
 
-export type ImageSource = 'nano-banana' | 'comfyui';
+export type ImageSource = 'nano-banana' | 'comfyui' | 'sdxl-img2img';
 export type ImageCategory = 'face-closeup' | 'head-shoulders' | 'waist-up' | 'full-body' | 'body-detail';
 export type PipelineType = 'story_character' | 'author_persona';
 
@@ -79,31 +79,21 @@ export interface EvalDetails {
 // ── Training Parameters ─────────────────────────────────────────
 
 export interface TrainingParams {
-  token_string: string;
-  is_lora: boolean;
-  lora_lr: number;
-  unet_learning_rate: number;
-  text_encoder_lr: number;
-  max_train_steps: number;
-  resolution: number;
-  batch_size: number;
-  use_face_detection_instead: boolean;
-  lr_scheduler: 'constant' | 'linear';
-  seed: number;
+  trigger_word: string;     // Token that identifies this character in prompts
+  steps: number;            // Training steps — 1000-2000 for character LoRAs
+  learning_rate: number;    // Default 0.0004 for Flux
+  lora_rank: number;        // 16 = balanced quality/size; 32 = higher fidelity
+  batch_size: number;       // 1
+  resolution: number;       // 512 or 1024
 }
 
 export const DEFAULT_TRAINING_PARAMS: TrainingParams = {
-  token_string: 'tok',
-  is_lora: true,
-  lora_lr: 1e-4,
-  unet_learning_rate: 1e-6,
-  text_encoder_lr: 0,
-  max_train_steps: 1000,
-  resolution: 1024,
+  trigger_word: 'tok',
+  steps: 1500,
+  learning_rate: 0.0004,
+  lora_rank: 16,
   batch_size: 1,
-  use_face_detection_instead: false, // false: dataset includes full-body shots; face detection would crop them out
-  lr_scheduler: 'constant',
-  seed: 42,
+  resolution: 512,
 };
 
 // ── Pipeline Configuration ──────────────────────────────────────

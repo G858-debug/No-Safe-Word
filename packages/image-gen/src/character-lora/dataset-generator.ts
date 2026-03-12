@@ -8,6 +8,7 @@ import Replicate from 'replicate';
 import type {
   CharacterInput,
   DatasetGenerationResult,
+  ImageSource,
   LoraDatasetImageRow,
   VariationType,
 } from './types';
@@ -27,8 +28,39 @@ import {
 } from '../index';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-pro' as const;
+const SDXL_BODY_MODEL = 'lucataco/realvisxl-v2-with-lora';
+const VENUS_BODY_LORA_URL = 'https://civitai.com/api/download/models/136081';
 const MAX_GENERATION_RETRIES = 3;
 const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
+
+const POSE_VARIANTS: Record<string, string[]> = {
+  standing_neutral: [
+    'standing tall in a composed, elegant pose',
+    'standing upright with serene confident posture',
+    'standing in a relaxed neutral stance',
+  ],
+  standing_attitude: [
+    'standing with one hand planted firmly on hip',
+    'hip cocked to the side, hand on waist',
+    'both hands on hips, weight shifted to one leg',
+  ],
+  walking: [
+    'caught mid-stride walking forward with confidence',
+    'walking with a natural fluid hip sway',
+    'stepping forward with purpose and grace',
+  ],
+  seated: [
+    'seated gracefully on a chair with legs crossed',
+    'lounging on a couch with one leg stretched out',
+    'sitting cross-legged on the floor in a relaxed pose',
+  ],
+};
+
+const ALL_POSES = Object.keys(POSE_VARIANTS);
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 interface DatasetGeneratorDeps {
   supabase: {
@@ -67,7 +99,7 @@ export async function generateDataset(
   imageRecords.push(...nbResult.records);
   failedPrompts.push(...nbResult.failures);
 
-  // ── Phase 2: ComfyUI/RunPod (body shots) ────────────────────
+  // ── Phase 2: Body shots ────────────────────────────────────────
   const cuPrompts = getComfyUIPrompts().map((p) => ({
     ...p,
     prompt: adaptPromptForGender(
@@ -77,15 +109,27 @@ export async function generateDataset(
   }));
   const cuLimited = promptLimit ? cuPrompts.slice(0, Math.ceil(promptLimit * 0.4)) : cuPrompts;
 
-  console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via ComfyUI/RunPod...`);
+  let phase2Count: number;
 
-  const cuResult = await generateComfyUIImages(character, loraId, cuLimited, deps);
-  imageRecords.push(...cuResult.records);
-  failedPrompts.push(...cuResult.failures);
+  if (character.gender === 'female') {
+    // Female: SDXL + Venus Body LoRA → Flux img2img for curvaceous body shots
+    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img...`);
+    const sdxlResult = await generateSdxlBodyShots(character, loraId, cuLimited.length, deps);
+    imageRecords.push(...sdxlResult.records);
+    failedPrompts.push(...sdxlResult.failures);
+    phase2Count = sdxlResult.records.length;
+  } else {
+    // Male: keep existing ComfyUI body shot path
+    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via ComfyUI/RunPod...`);
+    const cuResult = await generateComfyUIImages(character, loraId, cuLimited, deps);
+    imageRecords.push(...cuResult.records);
+    failedPrompts.push(...cuResult.failures);
+    phase2Count = cuResult.records.length;
+  }
 
   console.log(
     `[LoRA Dataset] Complete: ${imageRecords.length} images ` +
-    `(${nbResult.records.length} Nano Banana + ${cuResult.records.length} ComfyUI)` +
+    `(${nbResult.records.length} Nano Banana + ${phase2Count} body)` +
     (failedPrompts.length > 0 ? `, ${failedPrompts.length} failed` : '')
   );
 
@@ -103,7 +147,7 @@ export async function generateDataset(
 export async function generateReplacements(
   character: CharacterInput,
   loraId: string,
-  failedImages: Array<{ promptTemplate: string; variationType: VariationType }>,
+  failedImages: Array<{ promptTemplate: string; variationType: VariationType; source?: ImageSource }>,
   deps: DatasetGeneratorDeps,
 ): Promise<LoraDatasetImageRow[]> {
   const allPrompts = [
@@ -125,15 +169,22 @@ export async function generateReplacements(
   const replacements: LoraDatasetImageRow[] = [];
 
   for (const failed of failedImages) {
-    const original = allPrompts.find((p) => p.id === failed.promptTemplate);
-    if (!original) continue;
-
-    const replacementPrompt: DatasetPrompt = {
-      ...original,
-      id: `${original.id}_replacement`,
-    };
-
     try {
+      // SDXL→img2img replacements don't use prompt templates — generate a fresh body shot
+      if (failed.source === 'sdxl-img2img') {
+        const result = await generateSdxlBodyShots(character, loraId, 1, deps);
+        replacements.push(...result.records);
+        continue;
+      }
+
+      const original = allPrompts.find((p) => p.id === failed.promptTemplate);
+      if (!original) continue;
+
+      const replacementPrompt: DatasetPrompt = {
+        ...original,
+        id: `${original.id}_replacement`,
+      };
+
       let record: LoraDatasetImageRow;
       if (original.source === 'nano-banana') {
         record = await generateSingleNanoBanana(character, replacementPrompt, loraId, deps);
@@ -323,6 +374,197 @@ async function generateSingleComfyUI(
   const imageBuffer = Buffer.from(imageBase64, 'base64');
 
   return saveDatasetImage(imageBuffer, prompt, loraId, deps);
+}
+
+// ── SDXL + Venus Body LoRA → Flux img2img Pipeline ────────────────
+
+async function generateSdxlBodyShots(
+  character: CharacterInput,
+  loraId: string,
+  count: number,
+  deps: DatasetGeneratorDeps,
+): Promise<GenerationBatchResult> {
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+
+  const { skinTone, ethnicity, bodyType } = character.structuredData;
+  const basePositive =
+    `venusbody, ${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
+    `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
+    `full body, standing, natural pose, masterpiece, best quality, highly detailed, 8k`;
+  const negative =
+    'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
+    'bad anatomy, extra limbs, (worst quality:2), (low quality:2), nsfw, nude';
+
+  const img2imgPrompt =
+    `${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
+    `and thick thighs, photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
+
+  const records: LoraDatasetImageRow[] = [];
+  const failures: DatasetGenerationResult['failedPrompts'] = [];
+
+  for (let i = 0; i < count; i++) {
+    const poseCategory = pick(ALL_POSES);
+    const pose = pick(POSE_VARIANTS[poseCategory]);
+    const prompt = `${basePositive}, ${pose}`;
+    const promptId = `sdxl_body_${i}_${Date.now()}`;
+    let succeeded = false;
+
+    for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
+      try {
+        // Step 1: Generate SDXL body shot via Replicate
+        const replicateRes = await fetch(
+          `https://api.replicate.com/v1/models/${SDXL_BODY_MODEL}/predictions`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Prefer: 'respond-async',
+            },
+            body: JSON.stringify({
+              input: {
+                prompt,
+                negative_prompt: negative,
+                lora_weights: VENUS_BODY_LORA_URL,
+                lora_scale: 0.75,
+                width: 768,
+                height: 1152,
+                num_inference_steps: 30,
+                guidance_scale: 7.5,
+                seed: Math.floor(Math.random() * 2_147_483_647),
+              },
+            }),
+          },
+        );
+
+        if (!replicateRes.ok) {
+          throw new Error(`Replicate SDXL error: ${replicateRes.status}`);
+        }
+
+        const prediction = await replicateRes.json();
+        const predictionId: string = prediction.id;
+
+        // Poll for SDXL completion
+        const sdxlImageUrl = await pollReplicatePrediction(predictionId, token);
+
+        // Step 2: Download SDXL output as base64
+        const sdxlBase64 = await imageUrlToBase64(sdxlImageUrl);
+
+        // Step 3: Convert to photorealistic via Flux Kontext img2img
+        const workflow = buildKontextWorkflow({
+          type: 'img2img',
+          positivePrompt: img2imgPrompt,
+          width: 1024,
+          height: 1024,
+          seed: character.portraitSeed + hashCode(promptId),
+          denoiseStrength: 0.72,
+          filenamePrefix: `dataset_${loraId}`,
+        });
+
+        const { jobId } = await submitRunPodJob(workflow, [
+          { name: 'input.jpg', image: sdxlBase64 },
+        ]);
+
+        const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000);
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+
+        // Step 4: Save the img2img result
+        const category = i % 2 === 0 ? 'full-body' : 'waist-up';
+        const variationType: VariationType = i % 3 === 0 ? 'clothing' : i % 3 === 1 ? 'framing' : 'lighting';
+        const storagePath = `character-loras/datasets/${loraId}/${promptId}.png`;
+
+        const { error: uploadError } = await deps.supabase.storage
+          .from('story-images')
+          .upload(storagePath, imageBuffer, {
+            contentType: 'image/png',
+            upsert: true,
+          });
+
+        if (uploadError) {
+          throw new Error(`Supabase upload failed for ${promptId}: ${uploadError.message}`);
+        }
+
+        const { data: urlData } = deps.supabase.storage
+          .from('story-images')
+          .getPublicUrl(storagePath);
+
+        const { data: record, error: insertError } = await deps.supabase
+          .from('lora_dataset_images')
+          .insert({
+            lora_id: loraId,
+            image_url: urlData.publicUrl,
+            storage_path: storagePath,
+            prompt_template: promptId,
+            variation_type: variationType,
+            source: 'sdxl-img2img',
+            category,
+            eval_status: 'pending',
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          throw new Error(`Failed to create dataset image record: ${insertError.message}`);
+        }
+
+        console.log(`[LoRA Dataset] ✓ ${promptId} (sdxl-img2img/${category})`);
+        records.push(record as LoraDatasetImageRow);
+        succeeded = true;
+      } catch (error) {
+        const isTransient = isTransientError(error);
+        if (attempt < MAX_GENERATION_RETRIES && isTransient) {
+          const delay = RETRY_BASE_DELAY * attempt;
+          console.warn(
+            `[LoRA Dataset] SDXL body ${promptId} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
+          );
+          await sleep(delay);
+        } else {
+          console.error(`[LoRA Dataset] SDXL body failed ${promptId} after ${attempt} attempt(s): ${error}`);
+        }
+      }
+    }
+
+    if (!succeeded) {
+      failures.push({
+        promptTemplate: promptId,
+        variationType: 'framing',
+        source: 'sdxl-img2img',
+      });
+    }
+
+    // Rate limit delay between requests
+    if (i < count - 1) {
+      await sleep(PIPELINE_CONFIG.nanoBananaDelay);
+    }
+  }
+
+  return { records, failures };
+}
+
+/**
+ * Poll a Replicate prediction until it completes and return the output image URL.
+ */
+async function pollReplicatePrediction(predictionId: string, token: string): Promise<string> {
+  const maxPolls = 60; // ~5 minutes at 5s intervals
+  for (let i = 0; i < maxPolls; i++) {
+    await sleep(5000);
+    const res = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`Replicate poll error: ${res.status}`);
+    const data = await res.json();
+
+    if (data.status === 'succeeded') {
+      const output = Array.isArray(data.output) ? data.output[0] : data.output;
+      if (!output) throw new Error('Replicate prediction succeeded but no output URL');
+      return output;
+    }
+    if (data.status === 'failed' || data.status === 'canceled') {
+      throw new Error(`Replicate prediction ${data.status}: ${data.error || 'unknown error'}`);
+    }
+  }
+  throw new Error(`Replicate prediction ${predictionId} timed out after ${maxPolls * 5}s`);
 }
 
 // ── Shared Helpers ────────────────────────────────────────────────
