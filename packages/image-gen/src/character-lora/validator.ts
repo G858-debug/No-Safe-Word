@@ -97,7 +97,6 @@ export async function validateLora(
         height: 1024,
         seed: 42 + i,
         filenamePrefix: `validate_${loraId}`,
-        sfwMode: false,
         loras: [
           {
             filename: `characters/${loraFilename}`,

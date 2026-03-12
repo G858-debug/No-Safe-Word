@@ -44,7 +44,7 @@ Example (correct Flux prose — USE THIS):
 - Cultural grounding (African print fabric, specific SA locations, local objects) creates authenticity and differentiates from generic AI content
 
 ### Model Selection
-- Single model: Flux1 Dev Kontext (fp8 quantized) for all content types (SFW and NSFW)
+- Single model: Flux Krea Dev Uncensored (fp8_e4m3fn quantized) for all content types (SFW and NSFW)
 - Character consistency via reference image conditioning (ReferenceLatent)
 - Scene-aware LoRA stack: Realism, Detail, body LoRAs (female), Kissing (dual), NSFW anatomy (intimate)
 
@@ -83,3 +83,7 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
 - If something fails, throw or surface the error explicitly
 - Never swallow exceptions with try/catch unless the catch block re-throws or logs with full context
 - Prefer failing loudly over degrading gracefully — this codebase needs to surface problems, not hide them
+
+## General
+- Dont ask me to check the Railway logs
+- You have access to the Railway logs, check them yourself

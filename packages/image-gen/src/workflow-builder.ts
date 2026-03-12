@@ -13,8 +13,6 @@ export interface KontextWorkflowConfig {
   height: number;
   seed: number;
   filenamePrefix: string;
-  /** true = use SFW checkpoint, false = use NSFW checkpoint */
-  sfwMode: boolean;
   /** Primary character reference image filename (must match images[].name in RunPod request) */
   primaryRefImageName?: string;
   /** Secondary character reference image filename (dual scenes only) */
@@ -44,9 +42,7 @@ export interface KontextWorkflowConfig {
  * - Character consistency comes from feeding approved portrait as input image
  */
 export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<string, any> {
-  const modelName = (!config.sfwMode && process.env.KONTEXT_NSFW_MODEL)
-    ? process.env.KONTEXT_NSFW_MODEL
-    : (process.env.KONTEXT_SFW_MODEL || 'flux1-dev-kontext_fp8_scaled.safetensors');
+  const modelName = process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors';
 
   const workflow: Record<string, any> = {};
 

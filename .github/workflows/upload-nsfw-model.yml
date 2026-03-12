@@ -1,4 +1,4 @@
-name: Upload NSFW Model to RunPod S3
+name: Upload Flux Model to RunPod S3
 
 on:
   workflow_dispatch:
@@ -21,4 +21,4 @@ jobs:
           RUNPOD_S3_ACCESS_KEY: ${{ secrets.RUNPOD_S3_ACCESS_KEY }}
           RUNPOD_S3_SECRET_KEY: ${{ secrets.RUNPOD_S3_SECRET_KEY }}
           RUNPOD_NETWORK_VOLUME_ID: ${{ secrets.RUNPOD_NETWORK_VOLUME_ID }}
-        run: node scripts/stream-nsfw-model.mjs
+        run: node scripts/stream-model-to-s3.mjs

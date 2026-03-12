@@ -53,21 +53,16 @@ const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
 const VOLUME_ID = process.env.RUNPOD_NETWORK_VOLUME_ID;
 const HF_TOKEN = process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN;
 const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN || process.env.CIVITAI_API_KEY;
-const CIVITAI_NSFW_URL = process.env.CIVITAI_NSFW_MODEL_URL;
-
 const missing = [];
 if (!RUNPOD_API_KEY) missing.push("RUNPOD_API_KEY");
 if (!VOLUME_ID) missing.push("RUNPOD_NETWORK_VOLUME_ID");
 if (!HF_TOKEN) missing.push("HF_TOKEN or HUGGINGFACE_TOKEN");
+if (!CIVITAI_TOKEN) missing.push("CIVITAI_TOKEN or CIVITAI_API_KEY");
 
 if (missing.length > 0) {
   console.error(`\nMissing required environment variables:\n  ${missing.join("\n  ")}\n`);
   console.error("Add them to .env.local and try again.");
   process.exit(1);
-}
-
-if (!CIVITAI_TOKEN || !CIVITAI_NSFW_URL) {
-  console.warn("\nNote: CIVITAI_TOKEN or CIVITAI_NSFW_MODEL_URL not set — NSFW model download will be skipped.\n");
 }
 
 const GQL_URL = `https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}`;
@@ -224,19 +219,7 @@ async function waitForPod(podId, timeoutMs = 300_000) {
 // Build download script
 // ---------------------------------------------------------------------------
 function buildDownloadScript() {
-  const NSFW_FILENAME = 'fuxCapacityNSFWPorn_51FP16.safetensors';
-  const nsfwBlock = CIVITAI_TOKEN
-    ? `
-if [ ! -f "/workspace/models/diffusion_models/${NSFW_FILENAME}" ]; then
-  echo "Downloading Fux Capacity 5.1 FP16 (NSFW)..."
-  wget --header="Authorization: Bearer ${CIVITAI_TOKEN}" \\
-    -O /workspace/models/diffusion_models/${NSFW_FILENAME} \\
-    "https://civitai.com/api/download/models/2605292?token=${CIVITAI_TOKEN}" || echo "NSFW download failed (non-fatal)"
-else
-  echo "NSFW model already exists, skipping."
-fi
-`
-    : 'echo "Skipping NSFW model (CIVITAI_TOKEN not set)"';
+  const MODEL_FILENAME = 'flux1KreaDev_fp8E4m3fn.safetensors';
 
   return `#!/bin/bash
 set -e
@@ -245,19 +228,17 @@ mkdir -p /workspace/models/diffusion_models
 mkdir -p /workspace/models/clip
 mkdir -p /workspace/models/vae
 
-echo "=== Starting Flux Kontext model downloads ==="
+echo "=== Starting Flux Krea Dev model downloads ==="
 
-# SFW model (Comfy-Org fp8 quantized — no auth needed)
-if [ ! -f "/workspace/models/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors" ]; then
-  echo "Downloading SFW Kontext model (~12GB)..."
-  wget -O /workspace/models/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors \\
-    "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors"
+# Flux Krea Dev Uncensored fp8 (Civitai model 1830497, version 2075033)
+if [ ! -f "/workspace/models/diffusion_models/${MODEL_FILENAME}" ]; then
+  echo "Downloading Flux Krea Dev Uncensored fp8 (~12GB)..."
+  wget --header="Authorization: Bearer ${CIVITAI_TOKEN}" \\
+    -O /workspace/models/diffusion_models/${MODEL_FILENAME} \\
+    "https://civitai.com/api/download/models/2075033?token=${CIVITAI_TOKEN}"
 else
-  echo "SFW model already exists, skipping."
+  echo "Krea Dev model already exists, skipping."
 fi
-
-# NSFW model
-${nsfwBlock}
 
 # T5 text encoder (if not present)
 if [ ! -f "/workspace/models/clip/t5xxl_fp8_e4m3fn_scaled.safetensors" ]; then
@@ -479,8 +460,7 @@ async function main() {
 ===================================
   Download Summary
 ===================================
-  SFW: flux1-dev-kontext_fp8_scaled.safetensors
-  NSFW: ${CIVITAI_TOKEN ? "fuxCapacityNSFWPorn_51FP16.safetensors (Fux Capacity 5.1 FP16)" : "(skipped — set CIVITAI_TOKEN)"}
+  Model: flux1KreaDev_fp8E4m3fn.safetensors (Flux Krea Dev Uncensored fp8)
   T5: t5xxl_fp8_e4m3fn_scaled.safetensors
   CLIP: clip_l.safetensors
   VAE: ae.safetensors

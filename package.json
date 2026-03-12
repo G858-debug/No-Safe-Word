@@ -15,7 +15,7 @@
     "lint": "turbo run lint --continue",
     "test": "npm run test --workspaces --if-present",
     "download:kontext-models": "node scripts/download-kontext-models.mjs",
-    "stream:nsfw-model": "node scripts/stream-nsfw-model.mjs"
+    "stream:model-to-s3": "node scripts/stream-model-to-s3.mjs"
   },
   "engines": {
     "node": ">=20.0.0",

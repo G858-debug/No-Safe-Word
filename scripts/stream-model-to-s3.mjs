@@ -1,5 +1,5 @@
 /**
- * Stream Fux Capacity 5.1 FP16 from Civitai directly to RunPod S3 (network volume).
+ * Stream Flux Krea Dev Uncensored (fp8_e4m3fn) from Civitai directly to RunPod S3 (network volume).
  * Uses parallel HTTP Range requests to download N chunks simultaneously,
  * each uploaded as a separate S3 multipart part. No local disk storage required.
  *
@@ -44,11 +44,11 @@ const S3_REGION      = process.env.RUNPOD_S3_REGION || 'eu-ro-1';
 const BUCKET         = process.env.RUNPOD_NETWORK_VOLUME_ID;
 const S3_HOST        = new URL(S3_ENDPOINT).hostname;
 
-const NSFW_MODEL_KEY        = 'models/diffusion_models/fuxCapacityNSFWPorn_51FP16.safetensors';
-const CIVITAI_VERSION_ID    = '2605292';
+const MODEL_KEY             = 'models/diffusion_models/flux1KreaDev_fp8E4m3fn.safetensors';
+const CIVITAI_VERSION_ID    = '2075033';
 const PART_SIZE             = 100 * 1024 * 1024; // 100 MB per part
 const PARALLEL_WORKERS      = 4;
-const EXPECTED_MIN_BYTES    = 20 * 1024 * 1024 * 1024;
+const EXPECTED_MIN_BYTES    = 10 * 1024 * 1024 * 1024; // ~11.6 GB
 
 const missing = [];
 if (!CIVITAI_TOKEN)  missing.push('CIVITAI_TOKEN or CIVITAI_API_KEY');
@@ -276,16 +276,16 @@ async function deleteObject(key) {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
-  console.log(`\nTarget: s3://${BUCKET}/${NSFW_MODEL_KEY}`);
+  console.log(`\nTarget: s3://${BUCKET}/${MODEL_KEY}`);
 
-  const existingSize = await getExistingSize(NSFW_MODEL_KEY);
+  const existingSize = await getExistingSize(MODEL_KEY);
   if (existingSize !== null && existingSize >= EXPECTED_MIN_BYTES) {
     console.log(`Model already exists (${(existingSize / 1024 / 1024 / 1024).toFixed(2)} GB). Nothing to do.`);
     return;
   }
   if (existingSize !== null) {
     console.log(`Found incomplete file (${(existingSize / 1024 / 1024).toFixed(0)} MB). Deleting...`);
-    await deleteObject(NSFW_MODEL_KEY);
+    await deleteObject(MODEL_KEY);
   }
 
   // Resolve final CDN URL and content length
@@ -295,7 +295,7 @@ async function main() {
   console.log(`File: ${(contentLength / 1024 / 1024 / 1024).toFixed(2)} GB → ${totalParts} parts × ${PART_SIZE / 1024 / 1024} MB`);
   console.log(`Workers: ${PARALLEL_WORKERS} parallel\n`);
 
-  const uploadId = await createMultipartUpload(NSFW_MODEL_KEY);
+  const uploadId = await createMultipartUpload(MODEL_KEY);
   console.log(`Multipart upload: ${uploadId.slice(0, 40)}...\n`);
 
   const parts = new Array(totalParts);
@@ -329,7 +329,7 @@ async function main() {
         }
       }
 
-      const etag = await uploadPart(NSFW_MODEL_KEY, uploadId, partNumber, data);
+      const etag = await uploadPart(MODEL_KEY, uploadId, partNumber, data);
       parts[partIdx] = { partNumber, etag };
       completed++;
 
@@ -350,16 +350,16 @@ async function main() {
     if (parts.some(p => !p)) throw new Error('Some parts did not complete');
 
     console.log(`\nCompleting multipart upload (${totalParts} parts)...`);
-    await completeMultipartUpload(NSFW_MODEL_KEY, uploadId, parts);
+    await completeMultipartUpload(MODEL_KEY, uploadId, parts);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
     console.log(`\n✓ Upload complete: ${(contentLength / 1024 / 1024 / 1024).toFixed(2)} GB in ${elapsed}s`);
-    console.log(`  File: /workspace/${NSFW_MODEL_KEY}`);
-    console.log(`  KONTEXT_NSFW_MODEL is already set — NSFW generations will use Fux Capacity.\n`);
+    console.log(`  File: /workspace/${MODEL_KEY}`);
+    console.log(`  Set KONTEXT_MODEL=flux1KreaDev_fp8E4m3fn.safetensors in your environment.\n`);
 
   } catch (err) {
     console.error('\nUpload failed:', err.message);
-    await abortMultipartUpload(NSFW_MODEL_KEY, uploadId);
+    await abortMultipartUpload(MODEL_KEY, uploadId);
     process.exit(1);
   }
 }

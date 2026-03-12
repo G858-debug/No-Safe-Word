@@ -129,7 +129,6 @@ export async function POST(
       height: 1216,
       seed,
       filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      sfwMode: true,
       loras: kontextResources.loras,
     });
 

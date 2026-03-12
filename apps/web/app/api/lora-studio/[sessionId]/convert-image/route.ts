@@ -103,7 +103,6 @@ export async function POST(
     height: 1152,
     seed: Math.floor(Math.random() * 2_147_483_647),
     filenamePrefix: `lora-converted/${sessionId}/${imageId}`,
-    sfwMode: true,
     loras: CONVERSION_LORAS,
     denoiseStrength: 0.72,
   });

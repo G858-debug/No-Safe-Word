@@ -307,7 +307,6 @@ async function generateSingleComfyUI(
     height: 1024,
     seed: character.portraitSeed + hashCode(prompt.id),
     filenamePrefix: `dataset_${loraId}`,
-    sfwMode: !prompt.checkpoint || prompt.checkpoint !== 'lustify',
     primaryRefImageName: 'ref_portrait.png',
     loras: [
       { filename: 'flux_realism_lora.safetensors', strengthModel: 0.8, strengthClip: 0.8 },

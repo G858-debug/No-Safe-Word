@@ -73,7 +73,6 @@ export async function POST(request: NextRequest) {
       height: 1216,
       seed,
       filenamePrefix: "imggen_test",
-      sfwMode: false,
       loras,
     });
 
