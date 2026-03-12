@@ -350,7 +350,7 @@ import urllib.request, sys, shutil
 try:
     req = urllib.request.Request('${REDUX_URL}')
     req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
-    token = '${HF_TOKEN:-}'
+    token = '${HUGGINGFACE_TOKEN:-${HF_TOKEN:-}}'
     if token:
         req.add_header('Authorization', f'Bearer {token}')
     resp = urllib.request.urlopen(req, timeout=900)
