@@ -94,12 +94,12 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
   //
   // LoRA Slot Priority Order (max 6 slots, nodes 50–55):
   //
-  //   Slot 1: Character LoRA (face + body identity) — highest priority weight
-  //   Slot 2: Ethnicity/skin LoRA (African Fashion Model or African Woman — CivitAI)
-  //   Slot 3: Skin texture LoRA (Flux Skin Texture — CivitAI 651043)
-  //   Slot 4: Body shape LoRA (Hourglass or BodyLicious — configurable)
-  //   Slot 5: Anatomy/NSFW LoRA (Lustly v1, strength 0.7 — NSFW intimate only)
-  //   Slot 6: Atmosphere LoRA (Boudoir Style, trigger: boud01rstyle)
+  //   Slot 1: Realism LoRA (always loaded — quality backbone)
+  //   Slot 2: Detail/Style LoRA (Detail, Fashion Editorial SFW, Boudoir NSFW)
+  //   Slot 3: Skin texture LoRA (Beauty Skin / Oiled / Sweat — situational)
+  //   Slot 4: Body shape LoRA (BodyLicious or Hourglass — female only)
+  //   Slot 5: Kissing / NSFW anatomy LoRA (situational)
+  //   Slot 6: RefControl pose LoRA (optional)
   //
   // Budget cap: MAX_TOTAL_STRENGTH = 4.0 (all strengths scaled proportionally if exceeded)
   // Gender: Female body LoRAs only loaded when hasFemaleCharacter is true

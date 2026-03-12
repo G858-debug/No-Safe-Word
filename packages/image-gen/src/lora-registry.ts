@@ -219,16 +219,15 @@ export interface KontextResourceSelection {
  * Scene-aware Kontext LoRA selection for Flux Krea Dev Uncensored.
  *
  * Slot Priority Order (max 6 slots):
- *   Slot 1: Character LoRA (face + body identity) — injected by caller, not here
- *   Slot 2: Ethnicity/skin LoRA (African Fashion Model or African Woman)
+ *   Slot 1: Realism LoRA (always loaded — Krea Dev still needs it for quality)
+ *   Slot 2: Detail/Style LoRA (Detail for general, Fashion Editorial SFW, Boudoir NSFW)
  *   Slot 3: Skin texture LoRA (Beauty Skin / Oiled / Sweat — situational)
- *   Slot 4: Body shape LoRA (Hourglass or BodyLicious — configurable)
- *   Slot 5: Anatomy/NSFW LoRA (Lustly v1, strength 0.7 — NSFW intimate only)
- *   Slot 6: Atmosphere LoRA (Boudoir Style or Fashion Editorial)
+ *   Slot 4: Body shape LoRA (BodyLicious default, Hourglass optional — female only)
+ *   Slot 5: Kissing LoRA (dual kissing scenes) / NSFW anatomy (Lustly, intimate only)
+ *   Slot 6: RefControl pose LoRA (optional, identity+pose transfer)
  *
- * Krea Dev has built-in photorealism — Realism and Detail LoRAs removed.
- * Character LoRA with full-body training replaces stacked body LoRAs
- * (NSW Curves + Perfect Busts removed from default stack).
+ * Character LoRA (face + body identity) is injected by the caller, not selected here.
+ * NSW Curves + Perfect Busts removed — single BodyLicious replaces stacked body LoRAs.
  */
 export function selectKontextResources(opts: {
   gender: 'male' | 'female';
@@ -252,13 +251,37 @@ export function selectKontextResources(opts: {
   const isFemale = gender === 'female';
   const hasFemaleCharacter = isFemale || secondaryGender === 'female';
 
+  const isKissing = /\b(kiss|kissing|kisses|french.kiss|lips.meet|lips.touch)\b/i.test(prompt);
+  const isWide = /\b(wide|establishing|panoram|full.body)\b/i.test(prompt);
+
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   const pendingTriggers: string[] = [];
 
-  // Slot 1: Character LoRA — injected by the caller (generate-scene-image.ts)
-  // via character_lora_downloads, not selected here. Slot reserved.
+  // Slot 1: Realism LoRA — always included. Krea Dev still needs this for
+  // photorealistic quality. Without it, output is blurry and degraded.
+  let realismStrength = 0.7;
+  if (hasDualCharacter) realismStrength = Math.min(realismStrength, 0.7);
+  loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
 
-  // Slot 2: Skin texture LoRA — situational, mutually exclusive
+  // Slot 2: Detail/Style LoRA — style LoRA for female, detail for others
+  //   • SFW female solo (non-full-body) → Fashion Editorial (luxury magazine look)
+  //   • NSFW female solo → Boudoir Style (intimate/sensual atmosphere)
+  //   • All other cases → Detail LoRA
+  if (hasFemaleCharacter && isSfw && !hasDualCharacter && !isFullBody) {
+    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+    pendingTriggers.push('flux-fash');
+  } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
+    loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    pendingTriggers.push('boud01rstyle');
+  } else {
+    let detailStrength = 0.6;
+    if (isCloseUp) detailStrength = 0.8;
+    else if (isWide) detailStrength = 0.4;
+    if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
+    loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+  }
+
+  // Slot 3: Skin texture LoRA — situational, mutually exclusive
   //   Priority: oiled > sweaty > beauty skin (close-up female)
   if (isOiled) {
     loras.push({ filename: 'flux-oiled-skin.safetensors', strengthModel: 0.7, strengthClip: 0.7 });
@@ -269,7 +292,7 @@ export function selectKontextResources(opts: {
     pendingTriggers.push('mdlnbaytskn');
   }
 
-  // Slot 3: Body shape LoRA — single slot, female characters only
+  // Slot 4: Body shape LoRA — single slot, female characters only
   //   Configurable: 'hourglass' (wide hips, thick thighs) or 'bodylicious' (exaggerated curves)
   //   'auto' defaults to bodylicious for its stronger curve reinforcement
   if (hasFemaleCharacter) {
@@ -291,25 +314,21 @@ export function selectKontextResources(opts: {
     }
   }
 
-  // Slot 4: Anatomy/NSFW LoRA — intimate scenes only
+  // Slot 5: Kissing LoRA — dual-character kissing scenes
+  if (hasDualCharacter && isKissing) {
+    let kissStrength = 0.7;
+    if (isCloseUp) kissStrength = 0.85;
+    loras.push({ filename: 'flux-two-people-kissing.safetensors', strengthModel: kissStrength, strengthClip: kissStrength });
+  }
+
+  // Slot 5/6: Anatomy/NSFW LoRA — intimate scenes only
   if (!isSfw && isIntimate) {
     let nsfwStrength = 0.7;
     if (hasDualCharacter) nsfwStrength = 0.6;
     loras.push({ filename: 'flux_lustly-ai_v1.safetensors', strengthModel: nsfwStrength, strengthClip: nsfwStrength });
   }
 
-  // Slot 5: Atmosphere LoRA
-  //   • NSFW female → Boudoir Style (intimate/sensual atmosphere)
-  //   • SFW female (non-full-body) → Fashion Editorial (luxury magazine look)
-  if (hasFemaleCharacter && !isSfw) {
-    loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-    pendingTriggers.push('boud01rstyle');
-  } else if (hasFemaleCharacter && isSfw && !isFullBody) {
-    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-    pendingTriggers.push('flux-fash');
-  }
-
-  // Slot 6: RefControl Kontext pose LoRA — optional, for identity+pose transfer
+  // RefControl Kontext pose LoRA — optional, for identity+pose transfer
   if (opts.hasRefControlPose && loras.length < 6) {
     loras.push({ filename: 'refcontrol_pose.safetensors', strengthModel: 0.9, strengthClip: 0.9 });
     pendingTriggers.push('refcontrolpose');
