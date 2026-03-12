@@ -32,11 +32,8 @@ export interface KontextWorkflowConfig {
   /** SFW mode: true → SFW checkpoint (KONTEXT_MODEL), false → NSFW checkpoint (KONTEXT_NSFW_MODEL).
    *  Defaults to true (SFW) when not specified. */
   sfwMode?: boolean;
-  /** Optional Redux reference image filename for style/identity conditioning.
-   *  When set, a Redux conditioning pass (nodes 30–35) merges visual identity
-   *  from this image into the text conditioning before generation. */
-  reduxRefImageName?: string;
-  /** Redux conditioning strength — how much the Redux reference influences the output.
+  /** Redux conditioning strength — how much the reference image influences the output.
+   *  Higher = stronger identity preservation, lower = more creative freedom.
    *  Range 0.0–1.0. Default: 0.65 */
   reduxStrength?: number;
 }
@@ -47,9 +44,9 @@ export interface KontextWorkflowConfig {
  * Architecture:
  * - LoadDiffusionModel (UNETLoader) instead of CheckpointLoaderSimple
  * - DualCLIPLoader for text encoders
- * - Reference image conditioning via ReferenceLatent + FluxGuidance
+ * - Redux conditioning for character identity (CLIPVision + StyleModel)
  * - No negative prompts, no IPAdapter, no FaceDetailer
- * - Character consistency comes from feeding approved portrait as input image
+ * - Character consistency comes from Redux semantic identity transfer
  */
 export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<string, any> {
   // SFW/NSFW checkpoint switching:
@@ -141,76 +138,16 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
     },
   };
 
-  // ---- Optional Redux conditioning pass (nodes 30–35) ----
-  // When reduxRefImageName is provided, Flux Redux transfers visual identity
-  // from a hero reference image into the generation via style model conditioning.
-  // The Redux conditioning is combined with the text conditioning before passing
-  // to the type-specific builders.
-  //
-  // conditioningRef tracks the conditioning output — defaults to CLIPTextEncode (node 4),
-  // but changes to ConditioningCombine (node 35) when Redux is active.
-  let conditioningRef: [string, number] = ['4', 0];
-
-  if (config.reduxRefImageName) {
-    const reduxStrength = config.reduxStrength ?? 0.65;
-
-    // Node 30: LoadImage — Redux hero reference image
-    workflow['30'] = {
-      class_type: 'LoadImage',
-      inputs: {
-        image: config.reduxRefImageName,
-      },
-    };
-
-    // Node 31: CLIPVisionLoader — load SigCLIP Vision encoder for Redux
-    workflow['31'] = {
-      class_type: 'CLIPVisionLoader',
-      inputs: {
-        clip_name: 'sigclip_vision_patch14_384.safetensors',
-      },
-    };
-
-    // Node 32: CLIPVisionEncode — encode the reference image with CLIP Vision
-    workflow['32'] = {
-      class_type: 'CLIPVisionEncode',
-      inputs: {
-        clip_vision: ['31', 0],
-        image: ['30', 0],
-      },
-    };
-
-    // Node 33: StyleModelLoader — load the Flux Redux style model
-    workflow['33'] = {
-      class_type: 'StyleModelLoader',
-      inputs: {
-        style_model_name: 'flux1-redux-dev.safetensors',
-      },
-    };
-
-    // Node 34: StyleModelApply — apply Redux style conditioning
-    workflow['34'] = {
-      class_type: 'StyleModelApply',
-      inputs: {
-        conditioning: ['4', 0],          // Text conditioning from CLIPTextEncode
-        style_model: ['33', 0],           // Loaded Redux style model
-        clip_vision_output: ['32', 0],    // CLIP Vision encoding of reference
-        strength: reduxStrength,
-      },
-    };
-
-    conditioningRef = ['34', 0];
-  }
-
-  // Pass modelRef and conditioningRef to type-specific builders
+  // Pass modelRef to type-specific builders
   switch (config.type) {
     case 'portrait':
-      return buildKontextPortraitWorkflow(workflow, config, modelRef, conditioningRef);
+      return buildKontextPortraitWorkflow(workflow, config, modelRef);
     case 'single':
-      return buildKontextSingleWorkflow(workflow, config, modelRef, conditioningRef);
+      return buildKontextSingleWorkflow(workflow, config, modelRef);
     case 'dual':
-      return buildKontextDualWorkflow(workflow, config, modelRef, conditioningRef);
+      return buildKontextDualWorkflow(workflow, config, modelRef);
     case 'img2img':
-      return buildKontextImg2ImgWorkflow(workflow, config, modelRef, conditioningRef);
+      return buildKontextImg2ImgWorkflow(workflow, config, modelRef);
     default:
       throw new Error(`Unknown Kontext workflow type: ${config.type}`);
   }
@@ -221,7 +158,6 @@ function buildKontextPortraitWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
-  conditioningRef: [string, number],
 ): Record<string, any> {
   // Node 5: EmptyLatentImage
   workflow['5'] = {
@@ -233,13 +169,30 @@ function buildKontextPortraitWorkflow(
     },
   };
 
-  // Node 6: KSampler — Kontext text-to-image uses CFG 1.0, guidance comes from model
+  // Node 9: FluxGuidance — applies Flux-native guidance
+  workflow['9'] = {
+    class_type: 'FluxGuidance',
+    inputs: {
+      conditioning: ['4', 0],
+      guidance: config.guidance ?? 2.5,
+    },
+  };
+
+  // Node 10: ConditioningZeroOut — zero out negative
+  workflow['10'] = {
+    class_type: 'ConditioningZeroOut',
+    inputs: {
+      conditioning: ['4', 0],
+    },
+  };
+
+  // Node 6: KSampler
   workflow['6'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: conditioningRef,
-      negative: conditioningRef, // Kontext: same positive for negative (effectively no negative)
+      positive: ['9', 0],
+      negative: ['10', 0],
       latent_image: ['5', 0],
       seed: config.seed,
       steps: 20,
@@ -271,21 +224,29 @@ function buildKontextPortraitWorkflow(
   return workflow;
 }
 
-/** Single reference image — one character with portrait as reference.
- *  Uses the official Kontext conditioning chain:
- *    LoadImage → VAEEncode → ReferenceLatent (binds identity into conditioning)
- *    CLIPTextEncode → ReferenceLatent → FluxGuidance (applies Flux-native guidance)
- *    ConditioningZeroOut (zeros out negative — Flux has no negative prompt)
- *    KSampler receives identity-conditioned prompt + reference latent */
+/**
+ * Single reference image — one character with Redux identity conditioning.
+ *
+ * Uses Flux Redux to transfer character identity from the reference image
+ * via CLIPVision semantic encoding, NOT ReferenceLatent. This preserves
+ * identity features (face, skin tone, hair) without constraining spatial
+ * composition — so scene descriptions actually work.
+ *
+ * Redux chain:
+ *   LoadImage(5) → CLIPVisionEncode(6) → StyleModelApply(8) → FluxGuidance(9)
+ *   CLIPVisionLoader(7)   StyleModelLoader(15)
+ *   ConditioningZeroOut(10)   EmptyLatentImage(11) → KSampler(12) → VAEDecode(13) → SaveImage(14)
+ */
 function buildKontextSingleWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
-  conditioningRef: [string, number],
 ): Record<string, any> {
   if (!config.primaryRefImageName) {
     throw new Error('Kontext single workflow requires primaryRefImageName');
   }
+
+  const reduxStrength = config.reduxStrength ?? 0.65;
 
   // Node 5: LoadImage — primary character reference
   workflow['5'] = {
@@ -295,39 +256,47 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 6: FluxKontextImageScale — Kontext-aware scaling that preserves aspect ratio.
-  // Unlike ImageScale with crop:disabled, this won't stretch the reference image.
+  // Node 6: CLIPVisionEncode — encode reference image semantically (identity, not composition)
   workflow['6'] = {
-    class_type: 'FluxKontextImageScale',
+    class_type: 'CLIPVisionEncode',
     inputs: {
-      image: ['5', 0],
+      clip_vision: ['7', 0],   // CLIPVisionLoader output
+      image: ['5', 0],         // Reference image
     },
   };
 
-  // Node 7: VAEEncode — encode scaled reference image to latent for identity conditioning
+  // Node 7: CLIPVisionLoader — load SigCLIP Vision encoder for Redux
   workflow['7'] = {
-    class_type: 'VAEEncode',
+    class_type: 'CLIPVisionLoader',
     inputs: {
-      pixels: ['6', 0],
-      vae: ['3', 0],
+      clip_name: 'sigclip_vision_patch14_384.safetensors',
     },
   };
 
-  // Node 8: ReferenceLatent — binds reference image identity into the text conditioning.
-  // Takes text conditioning + encoded reference latent, outputs identity-aware CONDITIONING.
+  // Node 15: StyleModelLoader — load the Flux Redux style model
+  workflow['15'] = {
+    class_type: 'StyleModelLoader',
+    inputs: {
+      style_model_name: 'flux1-redux-dev.safetensors',
+    },
+  };
+
+  // Node 8: StyleModelApply — merge reference identity into text conditioning
   workflow['8'] = {
-    class_type: 'ReferenceLatent',
+    class_type: 'StyleModelApply',
     inputs: {
-      conditioning: conditioningRef,  // Text (or Redux-combined) conditioning
-      latent: ['7', 0],               // Encoded reference image from VAEEncode
+      conditioning: ['4', 0],        // Text conditioning from CLIPTextEncode
+      style_model: ['15', 0],        // Redux style model
+      clip_vision_output: ['6', 0],  // CLIPVision encoding of reference
+      strength: reduxStrength,
     },
   };
 
-  // Node 9: FluxGuidance — applies Flux-native guidance (replaces CFG for Flux models)
+  // Node 9: FluxGuidance — applies Flux-native guidance
   workflow['9'] = {
     class_type: 'FluxGuidance',
     inputs: {
-      conditioning: ['8', 0],  // Identity-conditioned output from ReferenceLatent
+      conditioning: ['8', 0],  // Redux-conditioned output
       guidance: config.guidance ?? 2.5,
     },
   };
@@ -336,12 +305,11 @@ function buildKontextSingleWorkflow(
   workflow['10'] = {
     class_type: 'ConditioningZeroOut',
     inputs: {
-      conditioning: conditioningRef,  // Same base conditioning → zeroed for negative
+      conditioning: ['4', 0],  // Zero out the text-only conditioning for negative
     },
   };
 
-  // Node 11: EmptyLatentImage — clean latent at the desired output dimensions.
-  // Separate from the reference VAEEncode so output isn't distorted by ref aspect ratio.
+  // Node 11: EmptyLatentImage — clean latent at the desired output dimensions
   workflow['11'] = {
     class_type: 'EmptyLatentImage',
     inputs: {
@@ -351,12 +319,12 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 12: KSampler — generates with identity-conditioned prompt at correct dimensions
+  // Node 12: KSampler — generates with Redux-conditioned prompt at correct dimensions
   workflow['12'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: ['9', 0],      // FluxGuidance output (identity + text + guidance)
+      positive: ['9', 0],      // FluxGuidance output (Redux identity + text + guidance)
       negative: ['10', 0],     // Zeroed-out conditioning
       latent_image: ['11', 0], // Clean latent at correct output dimensions
       seed: config.seed,
@@ -404,7 +372,6 @@ function buildKontextImg2ImgWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
-  conditioningRef: [string, number],
 ): Record<string, any> {
   const denoise = config.denoiseStrength ?? 0.72;
 
@@ -440,8 +407,8 @@ function buildKontextImg2ImgWorkflow(
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: conditioningRef,
-      negative: conditioningRef, // Flux has no negative prompt — mirror positive as a no-op
+      positive: ['4', 0],       // Text conditioning only (no Redux for img2img)
+      negative: ['4', 0],       // Flux has no negative prompt — mirror positive as a no-op
       latent_image: ['22', 0],
       seed: config.seed,
       steps: 25,
@@ -473,19 +440,24 @@ function buildKontextImg2ImgWorkflow(
   return workflow;
 }
 
-/** Dual reference images — both characters combined into a single reference image server-side.
- *  The route concatenates both portraits horizontally before calling this builder,
- *  so the workflow receives a single pre-combined image via primaryRefImageName.
- *  Uses the same official Kontext conditioning chain as the single workflow. */
+/**
+ * Dual reference images — both characters combined into a single reference image server-side.
+ * The route concatenates both portraits before calling this builder,
+ * so the workflow receives a single pre-combined image via primaryRefImageName.
+ *
+ * Uses the same Redux conditioning chain as the single workflow —
+ * CLIPVision extracts semantic identity from both characters in the combined reference.
+ */
 function buildKontextDualWorkflow(
   workflow: Record<string, any>,
   config: KontextWorkflowConfig,
   modelRef: [string, number],
-  conditioningRef: [string, number],
 ): Record<string, any> {
   if (!config.primaryRefImageName) {
     throw new Error('Kontext dual workflow requires primaryRefImageName (pre-combined reference image)');
   }
+
+  const reduxStrength = config.reduxStrength ?? 0.65;
 
   // Node 5: LoadImage — combined reference (both characters side by side)
   workflow['5'] = {
@@ -495,29 +467,39 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 6: FluxKontextImageScale — Kontext-aware scaling that preserves aspect ratio
+  // Node 6: CLIPVisionEncode — encode combined reference semantically
   workflow['6'] = {
-    class_type: 'FluxKontextImageScale',
+    class_type: 'CLIPVisionEncode',
     inputs: {
+      clip_vision: ['7', 0],
       image: ['5', 0],
     },
   };
 
-  // Node 7: VAEEncode — encode reference to latent for identity conditioning
+  // Node 7: CLIPVisionLoader — SigCLIP Vision encoder
   workflow['7'] = {
-    class_type: 'VAEEncode',
+    class_type: 'CLIPVisionLoader',
     inputs: {
-      pixels: ['6', 0],
-      vae: ['3', 0],
+      clip_name: 'sigclip_vision_patch14_384.safetensors',
     },
   };
 
-  // Node 8: ReferenceLatent — binds both characters' identity into conditioning
-  workflow['8'] = {
-    class_type: 'ReferenceLatent',
+  // Node 15: StyleModelLoader — Flux Redux style model
+  workflow['15'] = {
+    class_type: 'StyleModelLoader',
     inputs: {
-      conditioning: conditioningRef,  // Text (or Redux-combined) conditioning
-      latent: ['7', 0],
+      style_model_name: 'flux1-redux-dev.safetensors',
+    },
+  };
+
+  // Node 8: StyleModelApply — merge reference identity into text conditioning
+  workflow['8'] = {
+    class_type: 'StyleModelApply',
+    inputs: {
+      conditioning: ['4', 0],
+      style_model: ['15', 0],
+      clip_vision_output: ['6', 0],
+      strength: reduxStrength,
     },
   };
 
@@ -534,7 +516,7 @@ function buildKontextDualWorkflow(
   workflow['10'] = {
     class_type: 'ConditioningZeroOut',
     inputs: {
-      conditioning: conditioningRef,  // Same base conditioning → zeroed
+      conditioning: ['4', 0],
     },
   };
 
@@ -548,14 +530,14 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 12: KSampler — identity-conditioned generation at correct dimensions
+  // Node 12: KSampler — Redux-conditioned generation at correct dimensions
   workflow['12'] = {
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
       positive: ['9', 0],
       negative: ['10', 0],
-      latent_image: ['11', 0], // Clean latent at correct output dimensions
+      latent_image: ['11', 0],
       seed: config.seed,
       steps: 20,
       cfg: 1.0,
