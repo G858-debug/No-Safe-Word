@@ -415,22 +415,65 @@ export async function buildSceneGenerationPayload(
     ? characterDataMap.get(imgPrompt.secondary_character_id)
     : undefined;
   const secondaryGender = secondaryCharData?.gender as "male" | "female" | undefined;
-  const { loras: kontextLoras, triggerWords: kontextTriggerWords } = selectKontextResources({
-    gender: primaryGender,
-    secondaryGender,
-    isSfw: sfwMode,
-    imageType: imgPrompt.image_type,
-    prompt: imgPrompt.prompt,
-    hasDualCharacter: hasSecondary,
-  });
-  console.log(
-    `[Kontext][${promptId}] LoRAs (${primaryGender}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map((l) => `${l.filename}@${l.strengthModel}`).join(", ")}`,
-  );
 
-  // Prepend trigger words
+  // Portrait/establishing shots (no character) get no LoRAs — body LoRAs + triggers
+  // would distort landscapes and generic scenes.
+  let kontextLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  let kontextTriggerWords: string[] = [];
+
+  if (effectiveKontextType !== "portrait") {
+    const resources = selectKontextResources({
+      gender: primaryGender,
+      secondaryGender,
+      isSfw: sfwMode,
+      imageType: imgPrompt.image_type,
+      prompt: imgPrompt.prompt,
+      hasDualCharacter: hasSecondary,
+    });
+    kontextLoras = resources.loras;
+    kontextTriggerWords = resources.triggerWords;
+    console.log(
+      `[Kontext][${promptId}] LoRAs (${primaryGender}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map((l) => `${l.filename}@${l.strengthModel}`).join(", ")}`,
+    );
+  } else {
+    console.log(`[Kontext][${promptId}] Portrait/establishing shot — no LoRAs selected`);
+  }
+
+  // Inject trigger words near the relevant character, not at prompt start.
+  // For male-primary + female-secondary scenes, body triggers (huge breasts, etc.)
+  // must appear AFTER the secondary (female) identity prefix, not before the male's.
   if (kontextTriggerWords.length > 0) {
-    kontextPositivePrompt = `${kontextTriggerWords.join(" ")} ${kontextPositivePrompt}`;
-    console.log(`[Kontext][${promptId}] Trigger words injected: ${kontextTriggerWords.join(", ")}`);
+    const bodyTriggers = kontextTriggerWords.filter((t) =>
+      /\b(breasts|hips|ass|waist|bust)\b/i.test(t),
+    );
+    const otherTriggers = kontextTriggerWords.filter(
+      (t) => !/\b(breasts|hips|ass|waist|bust)\b/i.test(t),
+    );
+
+    // Non-body triggers (style triggers like boud01rstyle, mdlnbaytskn) go at the start
+    if (otherTriggers.length > 0) {
+      kontextPositivePrompt = `${otherTriggers.join(" ")} ${kontextPositivePrompt}`;
+    }
+
+    // Body triggers go after the secondary character prefix (if present), else at start
+    if (bodyTriggers.length > 0) {
+      const secondaryMarker = "The second person in this scene is:";
+      const markerIdx = kontextPositivePrompt.indexOf(secondaryMarker);
+      if (markerIdx !== -1) {
+        // Find end of the secondary identity prefix paragraph (next double newline or scene text start)
+        const afterMarker = kontextPositivePrompt.indexOf("\n", markerIdx + secondaryMarker.length + 10);
+        const insertPos = afterMarker !== -1 ? afterMarker : kontextPositivePrompt.length;
+        kontextPositivePrompt =
+          kontextPositivePrompt.slice(0, insertPos) +
+          " " + bodyTriggers.join(" ") +
+          kontextPositivePrompt.slice(insertPos);
+      } else {
+        // No secondary character — prepend body triggers normally
+        kontextPositivePrompt = `${bodyTriggers.join(" ")} ${kontextPositivePrompt}`;
+      }
+    }
+
+    console.log(`[Kontext][${promptId}] Trigger words injected: ${kontextTriggerWords.join(", ")}${bodyTriggers.length > 0 && kontextPositivePrompt.includes("The second person") ? " (body triggers placed after secondary identity)" : ""}`);
   }
 
   // ── Workflow ──
