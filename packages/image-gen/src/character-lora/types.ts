@@ -85,6 +85,7 @@ export interface TrainingParams {
   lora_rank: number;        // 16 = balanced quality/size; 32 = higher fidelity
   batch_size: number;       // 1
   resolution: number;       // 512 or 1024
+  lr_scheduler: string;     // 'constant' or 'linear'
 }
 
 export const DEFAULT_TRAINING_PARAMS: TrainingParams = {
@@ -94,6 +95,7 @@ export const DEFAULT_TRAINING_PARAMS: TrainingParams = {
   lora_rank: 16,
   batch_size: 1,
   resolution: 512,
+  lr_scheduler: 'constant',
 };
 
 // ── Pipeline Configuration ──────────────────────────────────────

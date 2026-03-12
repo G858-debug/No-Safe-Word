@@ -600,6 +600,140 @@ export interface Database {
           },
         ];
       };
+      character_loras: {
+        Row: {
+          id: string;
+          character_id: string;
+          filename: string;
+          storage_path: string;
+          storage_url: string | null;
+          file_size_bytes: number | null;
+          trigger_word: string;
+          base_model: string;
+          training_provider: string;
+          training_id: string | null;
+          training_params: Record<string, unknown>;
+          dataset_size: number;
+          validation_score: number | null;
+          training_attempts: number;
+          status: string;
+          error: string | null;
+          pipeline_type: string;
+          completed_stage: string | null;
+          created_at: string;
+          updated_at: string;
+          deployed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          character_id: string;
+          filename?: string;
+          storage_path?: string;
+          storage_url?: string | null;
+          file_size_bytes?: number | null;
+          trigger_word?: string;
+          base_model?: string;
+          training_provider?: string;
+          training_id?: string | null;
+          training_params?: Record<string, unknown>;
+          dataset_size?: number;
+          validation_score?: number | null;
+          training_attempts?: number;
+          status?: string;
+          error?: string | null;
+          pipeline_type?: string;
+          completed_stage?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deployed_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          character_id?: string;
+          filename?: string;
+          storage_path?: string;
+          storage_url?: string | null;
+          file_size_bytes?: number | null;
+          trigger_word?: string;
+          base_model?: string;
+          training_provider?: string;
+          training_id?: string | null;
+          training_params?: Record<string, unknown>;
+          dataset_size?: number;
+          validation_score?: number | null;
+          training_attempts?: number;
+          status?: string;
+          error?: string | null;
+          pipeline_type?: string;
+          completed_stage?: string | null;
+          updated_at?: string;
+          deployed_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "character_loras_character_id_fkey";
+            columns: ["character_id"];
+            isOneToOne: false;
+            referencedRelation: "characters";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      lora_dataset_images: {
+        Row: {
+          id: string;
+          lora_id: string;
+          image_url: string;
+          storage_path: string;
+          prompt_template: string;
+          variation_type: string;
+          source: string;
+          category: string;
+          eval_status: string;
+          eval_score: number | null;
+          eval_details: Record<string, unknown> | null;
+          caption: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          lora_id: string;
+          image_url: string;
+          storage_path: string;
+          prompt_template: string;
+          variation_type: string;
+          source?: string;
+          category?: string;
+          eval_status?: string;
+          eval_score?: number | null;
+          eval_details?: Record<string, unknown> | null;
+          caption?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          lora_id?: string;
+          image_url?: string;
+          storage_path?: string;
+          prompt_template?: string;
+          variation_type?: string;
+          source?: string;
+          category?: string;
+          eval_status?: string;
+          eval_score?: number | null;
+          eval_details?: Record<string, unknown> | null;
+          caption?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "lora_dataset_images_lora_id_fkey";
+            columns: ["lora_id"];
+            isOneToOne: false;
+            referencedRelation: "character_loras";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -682,3 +816,13 @@ export type StoryImagePromptRow =
   Database["public"]["Tables"]["story_image_prompts"]["Row"];
 export type StoryImagePromptInsert =
   Database["public"]["Tables"]["story_image_prompts"]["Insert"];
+export type CharacterLoraRow =
+  Database["public"]["Tables"]["character_loras"]["Row"];
+export type CharacterLoraInsert =
+  Database["public"]["Tables"]["character_loras"]["Insert"];
+export type CharacterLoraUpdate =
+  Database["public"]["Tables"]["character_loras"]["Update"];
+export type LoraDatasetImageRow =
+  Database["public"]["Tables"]["lora_dataset_images"]["Row"];
+export type LoraDatasetImageInsert =
+  Database["public"]["Tables"]["lora_dataset_images"]["Insert"];

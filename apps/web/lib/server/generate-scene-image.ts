@@ -194,6 +194,13 @@ export async function buildSceneGenerationPayload(
       );
     }
 
+    if (!loraRow.storage_url) {
+      throw new Error(
+        `Character "${charName}" LoRA is deployed but has no storage URL. ` +
+        `Re-deploy the LoRA to fix this.`,
+      );
+    }
+
     characterLoraDownloads.push({
       filename: loraRow.filename,
       url: loraRow.storage_url,
