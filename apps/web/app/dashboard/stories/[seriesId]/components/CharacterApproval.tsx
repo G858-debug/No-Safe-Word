@@ -70,6 +70,7 @@ interface ImageSlotState {
   isGenerating: boolean;
   approved: boolean;
   approvedUrl: string | null;
+  previewUrl?: string; // stitched face+body composite — display only
   prompt: string; // Flux identity preview — used for approved_prompt, not displayed
   error: string | null;
   jobId: string | null;
@@ -459,6 +460,29 @@ export default function CharacterApproval({
                   seed: completedSeed,
                   runpodStatus: null,
                 });
+
+                // For fullBody images, stitch approved face on top for preview
+                if (type === "fullBody") {
+                  try {
+                    const stitchRes = await fetch(
+                      `/api/stories/characters/${storyCharId}/stitch-preview`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ body_image_url: storeData.stored_url }),
+                      }
+                    );
+                    if (stitchRes.ok) {
+                      const stitchData = await stitchRes.json();
+                      if (stitchData.preview_url) {
+                        updateSlot(storyCharId, type, { previewUrl: stitchData.preview_url });
+                        console.log(`[StoryPublisher] Stitched face+body preview ready`);
+                      }
+                    }
+                  } catch (stitchErr) {
+                    console.warn(`[StoryPublisher] Stitching failed — showing body only:`, stitchErr);
+                  }
+                }
               } else {
                 console.warn(`[StoryPublisher] Storage failed, using blob URL as fallback`);
                 updateSlot(storyCharId, type, {
@@ -1234,7 +1258,8 @@ export default function CharacterApproval({
                     const hasImage = !!slot.imageUrl;
                     const displayUrl = slot.approved
                       ? slot.approvedUrl || slot.imageUrl
-                      : slot.imageUrl;
+                      : (type === "fullBody" && slot.previewUrl) ? slot.previewUrl : slot.imageUrl;
+                    const showingComposite = !slot.approved && type === "fullBody" && !!slot.previewUrl && displayUrl === slot.previewUrl;
                     const label = type === "portrait" ? "Portrait" : "Full Body";
                     const aspectClass = type === "portrait" ? "aspect-[3/4]" : "aspect-[5/8]";
                     const isBodyLocked = type === "fullBody" && !state.portrait.approved;
@@ -1296,20 +1321,25 @@ export default function CharacterApproval({
                               })()}
                             </div>
                           ) : displayUrl ? (
-                            <div className="relative overflow-hidden rounded-lg">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={displayUrl}
-                                alt={`${label} of ${ch.characters.name}`}
-                                className={`h-full w-full object-cover rounded-lg ${slot.approved ? "ring-2 ring-green-500/50" : ""}`}
-                                style={{ aspectRatio: type === "portrait" ? "3/4" : "5/8" }}
-                              />
-                              {slot.approved && (
-                                <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-sm">
-                                  <Check className="h-3 w-3" />
-                                </div>
+                            <>
+                              <div className="relative overflow-hidden rounded-lg">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={displayUrl}
+                                  alt={`${label} of ${ch.characters.name}`}
+                                  className={`h-full w-full ${showingComposite ? "object-contain" : "object-cover"} rounded-lg ${slot.approved ? "ring-2 ring-green-500/50" : ""}`}
+                                  style={showingComposite ? undefined : { aspectRatio: type === "portrait" ? "3/4" : "5/8" }}
+                                />
+                                {slot.approved && (
+                                  <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-sm">
+                                    <Check className="h-3 w-3" />
+                                  </div>
+                                )}
+                              </div>
+                              {showingComposite && (
+                                <p className="text-zinc-500 text-xs mt-1">Preview: face + body composite</p>
                               )}
-                            </div>
+                            </>
                           ) : (
                             <div className={`flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 ${aspectClass}`}>
                               <User className="mb-2 h-8 w-8 text-muted-foreground/50" />
