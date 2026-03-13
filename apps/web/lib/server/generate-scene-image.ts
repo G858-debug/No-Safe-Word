@@ -429,7 +429,7 @@ export async function buildSceneGenerationPayload(
   // ── Unlinked character audit ──
   // Warn if a named character from the series appears in the prompt but is not
   // linked as primary or secondary. These will be rendered from text alone.
-  for (const [charId, charData] of characterDataMap) {
+  for (const [charId, charData] of Array.from(characterDataMap)) {
     if (charId === imgPrompt.character_id || charId === imgPrompt.secondary_character_id) continue;
     if (charData.name && new RegExp(`\\b${charData.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(sceneForFlux)) {
       console.warn(
