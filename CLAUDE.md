@@ -29,11 +29,12 @@
    Kontext workflow `loras[]` array before style LoRAs. Character LoRAs are downloaded
    at RunPod runtime via the `character_lora_downloads` handler in patch_handler.py.
    If a character has no deployed LoRA, scene generation throws — never silently skips.
-9. **Male ethnicity normalisation**: Male characters whose ethnicity or skin tone
+9. **Ethnicity normalisation**: All characters whose ethnicity or skin tone
    indicates Black/African descent have their ethnicity label replaced with
-   "African American" in the generated prompt. This is AI-classified at generation
-   time using Claude Haiku — not keyword-matched. Female characters are unaffected.
-   The original stored character data is never modified.
+   "African American" in the generated prompt — in both SDXL character approval
+   prompts and Flux scene generation prompts. This is AI-classified at generation
+   time using Claude Haiku — not keyword-matched. The original stored character
+   data is never modified.
 
 ### Character LoRA Training
 

@@ -25,7 +25,7 @@ export { validatePersonCount, canRetryValidation, buildRetrySettings, generateRe
 export type { PersonValidationResult } from './person-validator';
 
 // Kontext identity prefix for natural-language character description
-export { buildKontextIdentityPrefix } from './kontext-identity';
+export { buildKontextIdentityPrefix, resolvePromptEthnicity } from './kontext-identity';
 
 // Flux prompt rewriter — converts tag-style prompts to Flux natural language
 export { rewritePromptForFlux } from './flux-prompt-rewriter';

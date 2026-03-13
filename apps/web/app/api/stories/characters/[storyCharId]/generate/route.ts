@@ -3,6 +3,7 @@ import { supabase } from "@no-safe-word/story-engine";
 import {
   buildSdxlWorkflow,
   submitRunPodJob,
+  resolvePromptEthnicity,
 } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
@@ -99,6 +100,14 @@ export async function POST(
     const isFemale = characterData.gender !== 'male';
     const useMelanin = isBlackAfrican(characterData.ethnicity);
 
+    // Normalize ethnicity label for the prompt — AI-classifies Black/African descent
+    // and replaces with "African American" for better RealVisXL photorealism.
+    const resolvedEthnicity = await resolvePromptEthnicity(
+      characterData.ethnicity,
+      characterData.gender,
+      characterData.skinTone,
+    );
+
     let positivePrompt: string;
     let negativePrompt: string;
     let width: number;
@@ -113,7 +122,7 @@ export async function POST(
       const melaninTrigger = useMelanin ? 'melanin, ' : '';
       const skinToneTrigger = useMelanin ? 'dark chocolate skin tone style, ' : '';
       const skinRealismTrigger = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-      positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}photorealistic portrait of a ${characterData.age}-year-old ${characterData.ethnicity} ${isFemale ? 'woman' : 'man'}, ${characterData.skinTone} skin, ${characterData.hairStyle} ${characterData.hairColor} hair, ${characterData.eyeColor} eyes, ${characterData.distinguishingFeatures}, close-up head and shoulders, looking directly at the camera with a confident expression, soft studio lighting, neutral gray background, 8k, masterpiece, best quality, highly detailed`;
+      positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}photorealistic portrait of a ${characterData.age}-year-old ${resolvedEthnicity} ${isFemale ? 'woman' : 'man'}, ${characterData.skinTone} skin, ${characterData.hairStyle} ${characterData.hairColor} hair, ${characterData.eyeColor} eyes, ${characterData.distinguishingFeatures}, close-up head and shoulders, looking directly at the camera with a confident expression, soft studio lighting, neutral gray background, 8k, masterpiece, best quality, highly detailed`;
 
       negativePrompt = `deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
 
@@ -132,7 +141,7 @@ export async function POST(
         const melaninPrefix = useMelanin ? 'melanin, ' : '';
         const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
         const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-        positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing a form-fitting outfit, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
+        positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing a form-fitting outfit, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
 
         loras.push({ filename: 'venus-body-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
         if (useMelanin) {
@@ -141,7 +150,7 @@ export async function POST(
           loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
         }
       } else {
-        positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
+        positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
       }
 
       negativePrompt = `skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;

@@ -3,25 +3,26 @@ import type { CharacterData } from "@no-safe-word/shared";
 
 const anthropic = new Anthropic();
 
-// In-memory cache: `${gender}:${ethnicity}:${skinTone}` → resolved ethnicity label
+// In-memory cache: `${ethnicity}:${skinTone}` → resolved ethnicity label
 const ethnicityCache = new Map<string, string>();
 
 /**
- * AI-classify whether a male character's ethnicity indicates Black/African descent,
+ * AI-classify whether a character's ethnicity indicates Black/African descent,
  * and if so return "African American" as the prompt-friendly label.
  *
- * Female characters are returned unchanged immediately (no API call).
- * The result is cached by (gender, ethnicity, skinTone) to avoid repeat calls.
+ * Applies to ALL genders — SDXL and Flux both produce better photorealistic
+ * Black skin when prompted with "African American" rather than country-specific
+ * or continent-specific ethnicity labels.
+ * The result is cached by (ethnicity, skinTone) to avoid repeat calls.
  */
-async function resolvePromptEthnicity(
+export async function resolvePromptEthnicity(
   ethnicity: string,
   gender: string,
   skinTone: string,
 ): Promise<string> {
-  if (gender !== "male") return ethnicity;
   if (!ethnicity) return ethnicity;
 
-  const cacheKey = `${gender}:${ethnicity}:${skinTone}`;
+  const cacheKey = `${ethnicity}:${skinTone}`;
   if (ethnicityCache.has(cacheKey)) return ethnicityCache.get(cacheKey)!;
 
   try {
@@ -41,7 +42,7 @@ async function resolvePromptEthnicity(
     const resolved = answer === "YES" ? "African American" : ethnicity;
 
     if (resolved !== ethnicity) {
-      console.log(`[Identity] Male ethnicity normalized for prompt: "${ethnicity}" → "African American"`);
+      console.log(`[Identity] Ethnicity normalized for prompt: "${ethnicity}" (${gender}) → "African American"`);
     }
 
     ethnicityCache.set(cacheKey, resolved);
