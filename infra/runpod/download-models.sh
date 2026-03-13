@@ -181,6 +181,7 @@ KEEP_LORAS=(
   "bodylicious-flux.safetensors"
   "nsw-curves-body.safetensors"
   "refcontrol_pose.safetensors"
+  "flux-cinematic-finisher.safetensors"
   "melanin-XL.safetensors"
   "venus-body-xl.safetensors"
 )
@@ -215,6 +216,39 @@ download_to_volume "2418642" "flux-fashion-editorial.safetensors"
 download_to_volume "861452"  "flux-oiled-skin.safetensors"
 download_to_volume "1188867" "flux-sweat-v2.safetensors"
 download_to_volume "2585889" "flux-beauty-skin.safetensors"
+
+# Flux Realism Cinematic Finisher — editorial skin textures, dramatic lighting, fabric sharpness
+# CivitAI model 1902557, version 2153525. Trigger word: realism_cinema (~292MB)
+CINEMATIC_DEST="${VOLUME_LORAS_DIR}/flux-cinematic-finisher.safetensors"
+if [ -f "$CINEMATIC_DEST" ]; then
+    echo "[LoRA] ✓ flux-cinematic-finisher.safetensors (exists)"
+elif [ -d "${VOLUME_LORAS_DIR}" ]; then
+    echo "[LoRA] Downloading flux-cinematic-finisher.safetensors..."
+    CINEMATIC_URL="https://civitai.com/api/download/models/2153525"
+    [ -n "${CIVITAI_API_KEY:-}" ] && CINEMATIC_URL="${CINEMATIC_URL}?token=${CIVITAI_API_KEY}"
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${CINEMATIC_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${CINEMATIC_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${CINEMATIC_DEST}.tmp" "${CINEMATIC_DEST}" || \
+    { rm -f "${CINEMATIC_DEST}.tmp"; echo "[LoRA] ERROR: flux-cinematic-finisher download failed"; exit 1; }
+    # Sanity check: file must be > 100MB
+    CINEMATIC_SIZE=$(stat -c%s "${CINEMATIC_DEST}" 2>/dev/null || stat -f%z "${CINEMATIC_DEST}" 2>/dev/null || echo 0)
+    if [ "$CINEMATIC_SIZE" -lt 104857600 ]; then
+        echo "[LoRA] ERROR: flux-cinematic-finisher download failed or file is too small (${CINEMATIC_SIZE} bytes)"
+        rm -f "${CINEMATIC_DEST}"
+        exit 1
+    fi
+    echo "[LoRA] flux-cinematic-finisher.safetensors downloaded successfully"
+fi
 
 # Kontext LoRAs — downloaded at runtime (small files, < 200MB each).
 # Larger models (Flux Kontext UNET ~8GB, CLIP encoders, VAE) live on the

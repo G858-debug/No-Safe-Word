@@ -530,6 +530,10 @@ export default function CharacterApproval({
         const body: Record<string, string | number> = { type };
         if (modelUrn) body.model_urn = modelUrn;
         if (state?.lockSeed && state.seed) body.seed = state.seed;
+        const slotPrompt = state?.prompt;
+        if (slotPrompt && slotPrompt.trim().length > 20) {
+          body.customPrompt = slotPrompt;
+        }
 
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/generate`,
@@ -1142,7 +1146,7 @@ export default function CharacterApproval({
                 <div className="rounded-md bg-blue-500/5 border border-blue-500/20 p-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium text-blue-400 uppercase tracking-wider">
-                      Flux Identity Preview
+                      SDXL Identity Preview
                     </p>
                     {!state.editingDescription ? (
                       <button

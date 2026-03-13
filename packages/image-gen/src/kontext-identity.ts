@@ -1,4 +1,57 @@
+import Anthropic from "@anthropic-ai/sdk";
 import type { CharacterData } from "@no-safe-word/shared";
+
+const anthropic = new Anthropic();
+
+// In-memory cache: `${gender}:${ethnicity}:${skinTone}` → resolved ethnicity label
+const ethnicityCache = new Map<string, string>();
+
+/**
+ * AI-classify whether a male character's ethnicity indicates Black/African descent,
+ * and if so return "African American" as the prompt-friendly label.
+ *
+ * Female characters are returned unchanged immediately (no API call).
+ * The result is cached by (gender, ethnicity, skinTone) to avoid repeat calls.
+ */
+async function resolvePromptEthnicity(
+  ethnicity: string,
+  gender: string,
+  skinTone: string,
+): Promise<string> {
+  if (gender !== "male") return ethnicity;
+  if (!ethnicity) return ethnicity;
+
+  const cacheKey = `${gender}:${ethnicity}:${skinTone}`;
+  if (ethnicityCache.has(cacheKey)) return ethnicityCache.get(cacheKey)!;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-3-5-20251001",
+      max_tokens: 5,
+      system: "You are a classifier. Answer only with the single word YES or NO. No explanation, no punctuation, nothing else.",
+      messages: [
+        {
+          role: "user",
+          content: `Is this person Black or of African descent? Ethnicity: ${ethnicity}. Skin tone: ${skinTone}. Answer YES or NO.`,
+        },
+      ],
+    });
+
+    const answer = (response.content[0] as { type: string; text: string }).text.trim().toUpperCase();
+    const resolved = answer === "YES" ? "African American" : ethnicity;
+
+    if (resolved !== ethnicity) {
+      console.log(`[Identity] Male ethnicity normalized for prompt: "${ethnicity}" → "African American"`);
+    }
+
+    ethnicityCache.set(cacheKey, resolved);
+    return resolved;
+  } catch (err) {
+    console.warn(`[Identity] Ethnicity classification failed for "${ethnicity}" — using original:`, err);
+    ethnicityCache.set(cacheKey, ethnicity);
+    return ethnicity;
+  }
+}
 
 /**
  * Build a natural-language identity prefix for Kontext/Flux prompts.
@@ -12,7 +65,7 @@ import type { CharacterData } from "@no-safe-word/shared";
  *
  * Returns a multi-sentence prose string ending with a newline.
  */
-export function buildKontextIdentityPrefix(charData: CharacterData): string {
+export async function buildKontextIdentityPrefix(charData: CharacterData): Promise<string> {
   const sentences: string[] = [];
 
   // ── 1. Core identity sentence: "A 26-year-old African woman with ..." ──
@@ -20,13 +73,19 @@ export function buildKontextIdentityPrefix(charData: CharacterData): string {
     charData.gender === "female" ? "woman" :
     charData.gender === "male" ? "man" : "person";
 
+  const resolvedEthnicity = await resolvePromptEthnicity(
+    charData.ethnicity,
+    charData.gender,
+    charData.skinTone,
+  );
+
   let core = "";
-  if (charData.age && charData.ethnicity) {
-    core = `A ${charData.age}-year-old ${charData.ethnicity} ${gender}`;
+  if (charData.age && resolvedEthnicity) {
+    core = `A ${charData.age}-year-old ${resolvedEthnicity} ${gender}`;
   } else if (charData.age) {
     core = `A ${charData.age}-year-old ${gender}`;
-  } else if (charData.ethnicity) {
-    core = `${article(charData.ethnicity)} ${charData.ethnicity} ${gender}`;
+  } else if (resolvedEthnicity) {
+    core = `${article(resolvedEthnicity)} ${resolvedEthnicity} ${gender}`;
   } else {
     core = `A ${gender}`;
   }

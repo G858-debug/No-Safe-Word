@@ -23,9 +23,10 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    // Parse optional seed and type from request body
+    // Parse optional seed, type, and customPrompt from request body
     let customSeed: number | undefined;
     let imageType: ImageType = "portrait";
+    let customPrompt: string | undefined;
     try {
       const body = await request.json();
       if (typeof body.seed === "number" && body.seed > 0) {
@@ -33,6 +34,9 @@ export async function POST(
       }
       if (body.type === "fullBody") {
         imageType = "fullBody";
+      }
+      if (typeof body.customPrompt === 'string' && body.customPrompt.trim().length > 20) {
+        customPrompt = body.customPrompt.trim();
       }
     } catch {
       // No body or invalid JSON — use defaults
@@ -135,6 +139,19 @@ export async function POST(
       negativePrompt = `skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
     }
 
+    if (customPrompt) {
+      // User has provided a custom prompt — use it directly.
+      // Still ensure LoRA trigger words are prepended if not already present.
+      positivePrompt = customPrompt;
+      if (useMelanin && !/\bmelanin\b/i.test(positivePrompt)) {
+        positivePrompt = `melanin, ${positivePrompt}`;
+      }
+      if (imageType === 'fullBody' && isFemale && !/\bvenusbody\b/i.test(positivePrompt)) {
+        positivePrompt = `venusbody, ${positivePrompt}`;
+      }
+    }
+
+    console.log(`[StoryPublisher] Prompt source: ${customPrompt ? 'custom override' : 'auto-built from description'}`);
     console.log(`[StoryPublisher] SDXL positive prompt: ${positivePrompt.substring(0, 100)}...`);
     console.log(`[StoryPublisher] LoRAs: ${loras.length > 0 ? loras.map(l => l.filename).join(", ") : "NONE"}`);
     console.log(`[StoryPublisher] Seed: ${seed}`);

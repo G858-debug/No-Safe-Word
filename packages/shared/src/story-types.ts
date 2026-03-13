@@ -64,6 +64,8 @@ export interface PostImagesImport {
 export interface FacebookSfwImage {
   position: number;
   character_name: string | null;
+  // For scenes with 3+ characters: link only the 2 most prominent here.
+  // Describe remaining characters inline in the prompt text.
   secondary_character_name?: string;
   prompt: string;
 }
@@ -71,6 +73,8 @@ export interface FacebookSfwImage {
 export interface WebsiteNsfwPairedImage {
   pairs_with_facebook: number; // position number of the facebook_sfw image
   character_name: string | null;
+  // For scenes with 3+ characters: link only the 2 most prominent here.
+  // Describe remaining characters inline in the prompt text.
   secondary_character_name?: string;
   prompt: string;
 }
@@ -78,6 +82,8 @@ export interface WebsiteNsfwPairedImage {
 export interface WebsiteOnlyImage {
   position_after_word: number;
   character_name: string | null;
+  // For scenes with 3+ characters: link only the 2 most prominent here.
+  // Describe remaining characters inline in the prompt text.
   secondary_character_name?: string;
   prompt: string;
 }

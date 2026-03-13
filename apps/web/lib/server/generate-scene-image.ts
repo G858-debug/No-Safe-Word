@@ -385,7 +385,7 @@ export async function buildSceneGenerationPayload(
   // ── Identity prefix ──
   let identityPrefix = "";
   if (imgPrompt.character_id) {
-    identityPrefix = buildKontextIdentityPrefix(charData);
+    identityPrefix = await buildKontextIdentityPrefix(charData);
     if (identityPrefix) {
       console.log(`[Kontext][${promptId}] Identity prefix for primary: ${identityPrefix.trim()}`);
     }
@@ -393,7 +393,7 @@ export async function buildSceneGenerationPayload(
   if (imgPrompt.secondary_character_id) {
     const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
     if (secondaryCharData) {
-      const secondaryPrefix = buildKontextIdentityPrefix(secondaryCharData);
+      const secondaryPrefix = await buildKontextIdentityPrefix(secondaryCharData);
       if (secondaryPrefix) {
         identityPrefix += `The second person in this scene is: ${secondaryPrefix}`;
         console.log(`[Kontext][${promptId}] Identity prefix for secondary: ${secondaryPrefix.trim()}`);
@@ -423,6 +423,20 @@ export async function buildSceneGenerationPayload(
       !/looking at (him|her|each other|one another)/i.test(sceneForFlux)
     ) {
       sceneForFlux += " Both people are looking at each other, not at the camera.";
+    }
+  }
+
+  // ── Unlinked character audit ──
+  // Warn if a named character from the series appears in the prompt but is not
+  // linked as primary or secondary. These will be rendered from text alone.
+  for (const [charId, charData] of characterDataMap) {
+    if (charId === imgPrompt.character_id || charId === imgPrompt.secondary_character_id) continue;
+    if (charData.name && new RegExp(`\\b${charData.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(sceneForFlux)) {
+      console.warn(
+        `[Kontext][${promptId}] ⚠ Unlinked character detected in prompt: "${charData.name}". ` +
+        `Treating as inline background figure — no LoRA or identity prefix will be injected ` +
+        `for this character. Ensure their appearance is fully described in the scene prompt.`
+      );
     }
   }
 

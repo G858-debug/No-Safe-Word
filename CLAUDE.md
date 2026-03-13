@@ -14,11 +14,26 @@
 4. Never include physical descriptions (skin tone, hair, build, face shape) for approved characters in scene prompts — the pipeline injects these from character data.
 5. Always specify gaze direction explicitly using plain text: "looking directly at the camera" (no emphasis weights — Flux's T5 encoder ignores them).
 6. For multi-character scenes with TWO approved characters, use primary + secondary character linking. Both get their identity injected. Only describe non-character people inline.
-7. **Character LoRA injection for scene images**: The deployed character LoRA filename
+7. **Three or more characters in a scene (Option B):** The pipeline supports a maximum
+   of two linked characters per image prompt. For scenes with three or more named characters:
+   - Link only the two characters with the most visual/narrative significance in this
+     specific image using `character_name` and `secondary_character_name`
+   - All additional characters MUST be described inline in the scene prompt with enough
+     physical detail for the model to render them (e.g., "an older woman in a floral dress
+     and doek stands near the door, watching them").
+   - These inline characters receive no LoRA, no identity prefix, and no character reference
+     image — they are rendered from prompt description alone.
+   - Story image prompts in the JSON export must never have a third character field.
+8. **Character LoRA injection for scene images**: The deployed character LoRA filename
    is fetched from `character_loras` table (status = 'deployed') and injected into the
    Kontext workflow `loras[]` array before style LoRAs. Character LoRAs are downloaded
    at RunPod runtime via the `character_lora_downloads` handler in patch_handler.py.
    If a character has no deployed LoRA, scene generation throws — never silently skips.
+9. **Male ethnicity normalisation**: Male characters whose ethnicity or skin tone
+   indicates Black/African descent have their ethnicity label replaced with
+   "African American" in the generated prompt. This is AI-classified at generation
+   time using Claude Haiku — not keyword-matched. Female characters are unaffected.
+   The original stored character data is never modified.
 
 ### Character LoRA Training
 
@@ -98,7 +113,14 @@ Example (correct Flux prose — USE THIS):
 - Model: Flux Krea Dev (`flux1KreaDev_fp8E4m3fn.safetensors`) via ComfyUI on RunPod
 - Character consistency: trained character LoRA (from LoRA training pipeline) injected
   as the FIRST LoRA in the stack at strength 0.85, before style LoRAs
-- Style LoRAs: Realism, Detail/Boudoir, body LoRAs (female), Kissing (dual), NSFW anatomy
+- Style LoRAs — slot priority order:
+  - Slot 1: Realism LoRA (always)
+  - Slot 2: Detail/Style LoRA (Fashion Editorial SFW / Boudoir NSFW / Add Details)
+  - Slot 3: Skin texture LoRA (Beauty Skin / Oiled / Sweat — situational)
+  - Slot 4: Body shape LoRA (BodyLicious / Hourglass — female only)
+  - Slot 5: Kissing LoRA / Lustly NSFW anatomy
+  - Slot 6: RefControl pose LoRA (optional)
+  - Slot 7: Cinematic Finisher (interior/night OR clothing — not close-up/wide)
 - Scene images require ALL characters to have a deployed LoRA — generation is blocked otherwise
 
 ### Self-Contained Prompts (Critical)

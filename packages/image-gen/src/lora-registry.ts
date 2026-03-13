@@ -190,6 +190,18 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     genderCategory: 'neutral',
   },
   {
+    name: 'Flux Realism Cinematic Finisher',
+    filename: 'flux-cinematic-finisher.safetensors',
+    category: 'cinematic',
+    defaultStrength: 0.5,
+    clipStrength: 0.5,
+    triggerWord: 'realism_cinema',
+    description: 'Cinematic realism enhancement — editorial skin textures, dramatic directional lighting, and sharp fabric/clothing detail. Covers interior mood lighting and African print/textile sharpness in one LoRA. (CivitAI #1902557 v2153525, trigger: realism_cinema)',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: true,
+    genderCategory: 'neutral',
+  },
+  {
     name: 'RefControl Kontext Pose',
     filename: 'refcontrol_pose.safetensors',
     category: 'style',
@@ -218,13 +230,14 @@ export interface KontextResourceSelection {
 /**
  * Scene-aware Kontext LoRA selection for Flux Krea Dev Uncensored.
  *
- * Slot Priority Order (max 6 slots):
+ * Slot Priority Order (max 7 slots):
  *   Slot 1: Realism LoRA (always loaded — Krea Dev still needs it for quality)
- *   Slot 2: Detail/Style LoRA (Detail for general, Fashion Editorial SFW, Boudoir NSFW)
+ *   Slot 2: Detail/Style LoRA (Fashion Editorial SFW / Boudoir NSFW / Add Details)
  *   Slot 3: Skin texture LoRA (Beauty Skin / Oiled / Sweat — situational)
- *   Slot 4: Body shape LoRA (BodyLicious default, Hourglass optional — female only)
- *   Slot 5: Kissing LoRA (dual kissing scenes) / NSFW anatomy (Lustly, intimate only)
- *   Slot 6: RefControl pose LoRA (optional, identity+pose transfer)
+ *   Slot 4: Body shape LoRA (BodyLicious / Hourglass — female only)
+ *   Slot 5: Kissing LoRA / Lustly NSFW anatomy
+ *   Slot 6: RefControl pose LoRA (optional)
+ *   Slot 7: Cinematic Finisher (interior/night OR clothing — not close-up/wide)
  *
  * Character LoRA (face + body identity) is injected by the caller, not selected here.
  * NSW Curves + Perfect Busts removed — single BodyLicious replaces stacked body LoRAs.
@@ -332,6 +345,16 @@ export function selectKontextResources(opts: {
   if (opts.hasRefControlPose && loras.length < 6) {
     loras.push({ filename: 'refcontrol_pose.safetensors', strengthModel: 0.9, strengthClip: 0.9 });
     pendingTriggers.push('refcontrolpose');
+  }
+
+  // Slot 7: Cinematic Finisher — interior/night mood OR clothing/fabric sharpness
+  //   Skip for close-up (would distort skin pores) and wide/establishing shots.
+  const isInteriorOrNight = /\b(night|evening|dusk|candlelight|amber|interior|bedroom|restaurant|bar|club|kitchen|lounge|workshop|office|low.light|dim)\b/i.test(prompt);
+  const hasClothing = /\b(dress|top|blouse|shirt|blazer|jeans|skirt|fabric|african.print|shweshwe|lace|silk|denim|cloth|outfit|wearing|dressed)\b/i.test(prompt);
+  if (!isCloseUp && !isWide && (isInteriorOrNight || hasClothing)) {
+    const cinematicStrength = hasDualCharacter ? 0.4 : 0.5;
+    loras.push({ filename: 'flux-cinematic-finisher.safetensors', strengthModel: cinematicStrength, strengthClip: cinematicStrength });
+    pendingTriggers.push('realism_cinema');
   }
 
   // Strength budget cap — scale down if total exceeds 4.0

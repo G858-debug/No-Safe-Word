@@ -114,7 +114,7 @@ export async function POST(
       // Custom prompt is used as-is (caller is responsible for Flux-style prose)
       fluxPrompt = customPrompt;
     } else {
-      const identityPrefix = buildKontextIdentityPrefix(characterData);
+      const identityPrefix = await buildKontextIdentityPrefix(characterData);
       const sceneDescription = imageType === "fullBody" ? FULLBODY_SCENE_DESCRIPTION : PORTRAIT_SCENE_DESCRIPTION;
       ({ prompt: fluxPrompt } = buildFluxPrompt(identityPrefix, sceneDescription, { mode: 'sfw' }));
     }
