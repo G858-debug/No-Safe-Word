@@ -106,17 +106,21 @@ export async function POST(
     let loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
 
     if (imageType === "portrait") {
-      // PATH A — Face portrait with RealVisXL + Melanin LoRA
+      // PATH A — Face portrait with RealVisXL + Melanin LoRA + Skin LoRAs (Black/African)
       width = 832;
       height = 1216;
 
-      const melaninTrigger = (isFemale && useMelanin) || (!isFemale && useMelanin) ? 'melanin, ' : '';
-      positivePrompt = `${melaninTrigger}photorealistic portrait of a ${characterData.age}-year-old ${characterData.ethnicity} ${isFemale ? 'woman' : 'man'}, ${characterData.skinTone} skin, ${characterData.hairStyle} ${characterData.hairColor} hair, ${characterData.eyeColor} eyes, ${characterData.distinguishingFeatures}, close-up head and shoulders, looking directly at the camera with a confident expression, soft studio lighting, neutral gray background, 8k, masterpiece, best quality, highly detailed`;
+      const melaninTrigger = useMelanin ? 'melanin, ' : '';
+      const skinToneTrigger = useMelanin ? 'dark chocolate skin tone style, ' : '';
+      const skinRealismTrigger = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
+      positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}photorealistic portrait of a ${characterData.age}-year-old ${characterData.ethnicity} ${isFemale ? 'woman' : 'man'}, ${characterData.skinTone} skin, ${characterData.hairStyle} ${characterData.hairColor} hair, ${characterData.eyeColor} eyes, ${characterData.distinguishingFeatures}, close-up head and shoulders, looking directly at the camera with a confident expression, soft studio lighting, neutral gray background, 8k, masterpiece, best quality, highly detailed`;
 
       negativePrompt = `deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
 
       if (useMelanin) {
         loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+        loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+        loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
       }
     } else {
       // PATH B — Full body with RealVisXL + Venus Body LoRA + Melanin LoRA
@@ -126,11 +130,15 @@ export async function POST(
       if (isFemale) {
         const venusPrefix = 'venusbody, ';
         const melaninPrefix = useMelanin ? 'melanin, ' : '';
-        positivePrompt = `${venusPrefix}${melaninPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing a form-fitting outfit, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
+        const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
+        const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
+        positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing a form-fitting outfit, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
 
         loras.push({ filename: 'venus-body-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
         if (useMelanin) {
           loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+          loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+          loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
         }
       } else {
         positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${characterData.ethnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
@@ -145,6 +153,12 @@ export async function POST(
       positivePrompt = customPrompt;
       if (useMelanin && !/\bmelanin\b/i.test(positivePrompt)) {
         positivePrompt = `melanin, ${positivePrompt}`;
+      }
+      if (useMelanin && !/dark chocolate skin tone style/i.test(positivePrompt)) {
+        positivePrompt = `dark chocolate skin tone style, ${positivePrompt}`;
+      }
+      if (useMelanin && !/Detailed natural skin/i.test(positivePrompt)) {
+        positivePrompt = `Detailed natural skin and blemishes without-makeup and acne, ${positivePrompt}`;
       }
       if (imageType === 'fullBody' && isFemale && !/\bvenusbody\b/i.test(positivePrompt)) {
         positivePrompt = `venusbody, ${positivePrompt}`;

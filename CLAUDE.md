@@ -103,7 +103,11 @@ Example (correct Flux prose — USE THIS):
 **Character Approval (face + body):**
 - Model: RealVisXL V5.0 BakedVAE (`realvisxlV50_v50Bakedvae.safetensors`) via ComfyUI on RunPod
 - Face generation: RealVisXL + Melanin Girlfriend mix LoRA (`melanin-XL.safetensors`,
-  trigger: `melanin`, strength: 0.5) for Black/African characters
+  trigger: `melanin`, strength: 0.5) + Skin Tone XL (`sdxl-skin-tone-xl.safetensors`,
+  trigger: `dark chocolate skin tone style`, strength: 0.6) + Skin Realism
+  (`sdxl-skin-realism.safetensors`, trigger: `Detailed natural skin and blemishes
+  without-makeup and acne`, strength: 0.4) — all three for Black/African characters.
+  Skin Realism strength capped at 0.4 to prevent age regression artifact.
 - Body generation: RealVisXL + Venus Body LoRA (`venus-body-xl.safetensors`,
   trigger: `venusbody`, strength: 0.75) + Melanin LoRA (for Black/African female characters)
 - SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
