@@ -14,9 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
-RUN cd /comfyui/custom_nodes && \
-    GIT_TERMINAL_PROMPT=0 git clone --depth=1 https://github.com/Gourieff/comfyui-reactor-node.git && \
-    cd comfyui-reactor-node && \
+RUN curl -fsSL https://github.com/Gourieff/comfyui-reactor-node/archive/refs/heads/main.tar.gz \
+    -o /tmp/reactor.tar.gz && \
+    tar -xzf /tmp/reactor.tar.gz -C /comfyui/custom_nodes/ && \
+    mv /comfyui/custom_nodes/comfyui-reactor-node-main /comfyui/custom_nodes/comfyui-reactor-node && \
+    rm /tmp/reactor.tar.gz && \
+    cd /comfyui/custom_nodes/comfyui-reactor-node && \
     pip install -r requirements.txt && \
     pip install insightface>=0.7 onnxruntime-gpu
 
