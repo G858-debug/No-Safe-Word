@@ -1674,7 +1674,7 @@ function LoraTrainingSection({
         </div>
 
         {/* Action buttons */}
-        {loraState.status === "no_lora" && (
+        {(loraState.status === "no_lora" || loraState.status === "archived") && (
           <Button
             onClick={onTrain}
             disabled={loraState.isTriggering || locked}
@@ -1797,7 +1797,7 @@ function LoraTrainingSection({
       )}
 
       {/* Not started description */}
-      {loraState.status === "no_lora" && (
+      {(loraState.status === "no_lora" || loraState.status === "archived") && (
         <p className="text-xs text-muted-foreground/50">
           {config.description}
         </p>
