@@ -126,7 +126,9 @@ export async function buildCharacterGenerationPayload(
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
 
   if (imageType === "portrait") {
-    // PATH A — Face portrait: RealVisXL + Melanin/Skin LoRAs (Black/African)
+    // PATH A — Face portrait with RealVisXL + Melanin LoRA + Skin LoRAs (Black/African)
+    // Only face-relevant fields: age, ethnicity, skin tone, hair, eyes, distinguishing features.
+    // Body type and beauty descriptors are excluded to prevent chest/nudity rendering.
     width = 832;
     height = 1216;
 
@@ -144,7 +146,7 @@ export async function buildCharacterGenerationPayload(
       loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
     }
   } else {
-    // PATH B — Full body: RealVisXL + Venus Body LoRA + Melanin LoRA
+    // PATH B — Full body with RealVisXL + Venus Body LoRA + Melanin LoRA
     width = 768;
     height = 1152;
 

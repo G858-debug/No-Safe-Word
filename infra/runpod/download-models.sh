@@ -105,8 +105,9 @@ except Exception as e:
         [ $attempt -le 3 ] && sleep 5
     done
 
-    echo "[NSW] ✗✗ ${filename} FAILED — will be missing from pipeline"
-    return 0  # non-fatal: LoRA is optional, pipeline skips uninstalled LoRAs
+    echo "[NSW] ✗✗ ${filename} FAILED after 3 attempts — will be missing from pipeline"
+    FAILED=$((FAILED + 1))
+    return 1
 }
 
 echo "[NSW] ========================================="
@@ -163,9 +164,8 @@ if [ -d "${VOLUME_MODELS}/ipadapter" ]; then
   echo "[NSW] ✓ Cleared ipadapter/ (IPAdapter models removed)"
 fi
 
-# Flux-compatible LoRAs — all other .safetensors in the loras/ directory will be
-# deleted. SDXL LoRAs are not listed here because they are incompatible with
-# Flux Kontext and are no longer used in any pipeline.
+# LoRAs to keep — all other .safetensors in the loras/ directory will be deleted.
+# Includes both Flux scene LoRAs and SDXL character approval LoRAs.
 KEEP_LORAS=(
   "flux_realism_lora.safetensors"
   "flux-add-details.safetensors"
@@ -303,51 +303,18 @@ download_to_volume "136081" "venus-body-xl.safetensors"
 # Skin Tone Style XL — CivitAI model 562884 v627184
 # Trigger: dark chocolate skin tone style | Strength: 0.6 | Size: ~435MB
 # Use for Black/African characters in SDXL face + body generation
-SKIN_TONE_DEST="${VOLUME_LORAS_DIR}/sdxl-skin-tone-xl.safetensors"
-if [ -f "$SKIN_TONE_DEST" ]; then
-    echo "[LoRA] ✓ sdxl-skin-tone-xl.safetensors (exists)"
-elif [ -d "${VOLUME_LORAS_DIR}" ]; then
-    echo "[LoRA] Downloading sdxl-skin-tone-xl.safetensors..."
-    curl --location \
-        --header "Authorization: Bearer ${CIVITAI_API_KEY:-}" \
-        --output "${SKIN_TONE_DEST}.tmp" \
-        "https://civitai.com/api/download/models/627184" && \
-    mv "${SKIN_TONE_DEST}.tmp" "${SKIN_TONE_DEST}" || \
-    { rm -f "${SKIN_TONE_DEST}.tmp"; echo "[LoRA] ERROR: sdxl-skin-tone-xl download failed"; exit 1; }
-    # Sanity check: file must be > 100MB
-    SKIN_TONE_SIZE=$(stat -c%s "${SKIN_TONE_DEST}" 2>/dev/null || stat -f%z "${SKIN_TONE_DEST}" 2>/dev/null || echo 0)
-    if [ "$SKIN_TONE_SIZE" -lt 104857600 ]; then
-        echo "[LoRA] ERROR: sdxl-skin-tone-xl download failed or file is too small (${SKIN_TONE_SIZE} bytes)"
-        rm -f "${SKIN_TONE_DEST}"
-        exit 1
-    fi
-    echo "[LoRA] sdxl-skin-tone-xl.safetensors downloaded successfully"
-fi
+download_to_volume "627184" "sdxl-skin-tone-xl.safetensors"
 
 # Skin Realism SDXL — CivitAI model 248951 v340833
 # Trigger: Detailed natural skin and blemishes without-makeup and acne
 # Strength: 0.4 (keep below 0.5 — higher weights skew younger) | Size: ~218MB
 # Use for all characters in SDXL face + body generation
-SKIN_REALISM_DEST="${VOLUME_LORAS_DIR}/sdxl-skin-realism.safetensors"
-if [ -f "$SKIN_REALISM_DEST" ]; then
-    echo "[LoRA] ✓ sdxl-skin-realism.safetensors (exists)"
-elif [ -d "${VOLUME_LORAS_DIR}" ]; then
-    echo "[LoRA] Downloading sdxl-skin-realism.safetensors..."
-    curl --location \
-        --header "Authorization: Bearer ${CIVITAI_API_KEY:-}" \
-        --output "${SKIN_REALISM_DEST}.tmp" \
-        "https://civitai.com/api/download/models/340833" && \
-    mv "${SKIN_REALISM_DEST}.tmp" "${SKIN_REALISM_DEST}" || \
-    { rm -f "${SKIN_REALISM_DEST}.tmp"; echo "[LoRA] ERROR: sdxl-skin-realism download failed"; exit 1; }
-    # Sanity check: file must be > 100MB
-    SKIN_REALISM_SIZE=$(stat -c%s "${SKIN_REALISM_DEST}" 2>/dev/null || stat -f%z "${SKIN_REALISM_DEST}" 2>/dev/null || echo 0)
-    if [ "$SKIN_REALISM_SIZE" -lt 104857600 ]; then
-        echo "[LoRA] ERROR: sdxl-skin-realism download failed or file is too small (${SKIN_REALISM_SIZE} bytes)"
-        rm -f "${SKIN_REALISM_DEST}"
-        exit 1
-    fi
-    echo "[LoRA] sdxl-skin-realism.safetensors downloaded successfully"
+# Clean up old filename variant if it exists on the volume
+if [ -f "${VOLUME_LORAS_DIR}/skin-realism-sdxl.safetensors" ] && [ ! -f "${VOLUME_LORAS_DIR}/sdxl-skin-realism.safetensors" ]; then
+    mv "${VOLUME_LORAS_DIR}/skin-realism-sdxl.safetensors" "${VOLUME_LORAS_DIR}/sdxl-skin-realism.safetensors"
+    echo "[NSW] Renamed skin-realism-sdxl.safetensors → sdxl-skin-realism.safetensors"
 fi
+download_to_volume "340833" "sdxl-skin-realism.safetensors"
 
 # NSW Curves — custom-trained body LoRA (Replicate tar → safetensors extraction)
 NSW_CURVES_DEST="${VOLUME_LORAS_DIR}/nsw-curves-body.safetensors"
