@@ -128,15 +128,28 @@ def _nsw_patched_start(config):
             custom_nodes_dir = _nsw_os.path.join(_nsw_COMFY_DIR, "custom_nodes")
             if _nsw_os.path.isdir(custom_nodes_dir):
                 diag["custom_nodes"] = sorted(_nsw_os.listdir(custom_nodes_dir))
-            # Query ComfyUI /object_info for registered nodes
-            try:
-                r = _nsw_requests.get(f"http://{_nsw_COMFY_HOST}/object_info", timeout=15)
-                all_nodes = list(r.json().keys())
-                diag["comfyui_pulid_nodes"] = [n for n in all_nodes if "pulid" in n.lower()]
-                diag["comfyui_face_nodes"] = [n for n in all_nodes if any(x in n.lower() for x in ["face", "insight", "reactor"])]
-                diag["comfyui_total_nodes"] = len(all_nodes)
-            except Exception as e:
-                diag["comfyui_object_info_error"] = str(e)
+            # Query ComfyUI /object_info for registered nodes — wait up to 5 min for startup
+            import time as _nsw_time
+            comfy_ready = False
+            for _attempt in range(30):
+                try:
+                    r = _nsw_requests.get(f"http://{_nsw_COMFY_HOST}/object_info", timeout=10)
+                    if r.status_code == 200:
+                        comfy_ready = True
+                        break
+                except Exception:
+                    pass
+                _nsw_time.sleep(10)
+            if comfy_ready:
+                try:
+                    all_nodes = list(r.json().keys())
+                    diag["comfyui_pulid_nodes"] = [n for n in all_nodes if "pulid" in n.lower()]
+                    diag["comfyui_face_nodes"] = [n for n in all_nodes if any(x in n.lower() for x in ["face", "insight", "reactor"])]
+                    diag["comfyui_total_nodes"] = len(all_nodes)
+                except Exception as e:
+                    diag["comfyui_object_info_error"] = str(e)
+            else:
+                diag["comfyui_object_info_error"] = "ComfyUI did not start within 5 minutes"
             # Also check for download log
             log_path = "/runpod-volume/nsw-download.log"
             if _nsw_os.path.isfile(log_path):
