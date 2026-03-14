@@ -461,6 +461,10 @@ export interface SdxlWorkflowConfig {
     strengthModel: number;
     strengthClip: number;
   }>;
+  /** When set, adds ReActor face-swap post-processing after VAEDecode.
+   *  The value is the image filename passed in RunPod's images[] array (e.g. 'source_face.png').
+   *  The approved face portrait is swapped onto the generated body. */
+  reactorSourceImageName?: string;
 }
 
 /**
@@ -563,12 +567,48 @@ export function buildSdxlWorkflow(config: SdxlWorkflowConfig): Record<string, an
     },
   };
 
+  // ---- Optional ReActor face-swap (nodes 120-121) ----
+  // When reactorSourceImageName is set, insert ReActor between VAEDecode and SaveImage.
+  // The approved face portrait (source) is swapped onto the generated body (target).
+  let saveImageInput: [string, number] = ['105', 0];
+
+  if (config.reactorSourceImageName) {
+    // Node 121: LoadImage — approved face portrait (source face for swap)
+    workflow['121'] = {
+      class_type: 'LoadImage',
+      inputs: {
+        image: config.reactorSourceImageName,
+      },
+    };
+
+    // Node 120: ReActorFaceSwap — swap detected face in body output with source face
+    workflow['120'] = {
+      class_type: 'ReActorFaceSwap',
+      inputs: {
+        input_image: ['105', 0],        // SDXL body output (VAEDecode)
+        source_image: ['121', 0],       // Approved face portrait
+        swap_model: 'inswapper_128.onnx',
+        facedetection: 'retinaface_resnet50',
+        face_restore_model: 'none',
+        face_restore_visibility: 1,
+        codeformer_weight: 0.5,
+        detect_gender_input: 'no',
+        detect_gender_source: 'no',
+        input_faces_index: '0',
+        source_faces_index: '0',
+        console_log_level: 1,
+      },
+    };
+
+    saveImageInput = ['120', 0];
+  }
+
   // Node 106: SaveImage
   workflow['106'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['105', 0],
+      images: saveImageInput,
     },
   };
 

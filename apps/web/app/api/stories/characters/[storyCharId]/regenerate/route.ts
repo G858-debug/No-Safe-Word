@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, runNanoBanana } from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
 
 type ImageType = "portrait" | "fullBody";
+type GenerationStage = "face" | "body";
 
 // POST /api/stories/characters/[storyCharId]/regenerate — Regenerate with optional custom prompt and seed
 export async function POST(
@@ -17,13 +18,12 @@ export async function POST(
     const body = await request.json();
     const { prompt: customPrompt, seed: customSeed } = body as { prompt?: string; seed?: number };
     const imageType: ImageType = body.type === "fullBody" ? "fullBody" : "portrait";
+    const stage: GenerationStage = body.stage === "body" ? "body" : "face";
 
-    console.log(`[StoryPublisher] Regenerating ${imageType} (RealVisXL SDXL) for character ${storyCharId}, customPrompt: ${!!customPrompt}`);
-
-    // 1. Fetch the story_character row
+    // 1. Fetch the story_character row (include face_url for body stage)
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
-      .select("id, character_id")
+      .select("id, character_id, face_url")
       .eq("id", storyCharId)
       .single();
 
@@ -47,6 +47,11 @@ export async function POST(
         { status: 404 }
       );
     }
+
+    const desc = character.description as Record<string, string>;
+    const isMale = desc.gender === 'male';
+
+    console.log(`[StoryPublisher] Regenerating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name}`);
 
     // 3. Clean up old images from storage
     try {
@@ -77,62 +82,140 @@ export async function POST(
       console.warn("Failed to clean up old character images:", err);
     }
 
-    // 4. Build generation payload (prompt, LoRAs, workflow)
+    // 4. Build generation payload
     const payload = await buildCharacterGenerationPayload({
       character: {
         id: character.id,
         name: character.name,
-        description: character.description as Record<string, string>,
+        description: desc,
       },
       imageType,
+      stage,
       seed: (typeof customSeed === "number" && customSeed > 0) ? customSeed : undefined,
       customPrompt: (typeof customPrompt === 'string' && customPrompt.trim().length > 0)
         ? customPrompt.trim()
         : undefined,
+      approvedFaceUrl: stage === 'body' ? (storyChar.face_url ?? undefined) : undefined,
     });
 
-    console.log(`[StoryPublisher] LoRAs: ${payload.loras.length > 0 ? payload.loras.map(l => `${l.filename}(${l.strength.toFixed(2)})`).join(", ") : "NONE"}`);
-    console.log(`[StoryPublisher] Submitting ${imageType} regeneration (SDXL) for ${character.name}, seed: ${payload.seed}`);
+    console.log(`[StoryPublisher] Engine: ${payload.engine}, Seed: ${payload.seed}`);
 
-    // 5. Submit async job to RunPod
-    const { jobId } = await submitRunPodJob(payload.workflow);
+    // 5. Branch by engine
+    if (payload.engine === 'replicate') {
+      // ---- Replicate path (Nano Banana Pro — synchronous) ----
+      const imageBuffer = await runNanoBanana(
+        payload.positivePrompt,
+        payload.referenceImageUrl,
+      );
 
-    // 6. Create image record (stored_url will be set when status polling completes)
-    const { data: imageRow, error: imgError } = await supabase
-      .from("images")
-      .insert({
-        character_id: character.id,
-        prompt: payload.positivePrompt,
-        settings: {
-          width: payload.width,
-          height: payload.height,
-          engine: "sdxl-realvis",
-          imageType,
-          seed: payload.seed,
-        },
-        mode: "sfw",
-      })
-      .select("id")
-      .single();
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: payload.positivePrompt,
+          settings: {
+            engine: "nano-banana",
+            imageType,
+            stage,
+            seed: payload.seed,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
 
-    if (imgError || !imageRow) {
-      throw new Error(`Failed to create image record: ${imgError?.message}`);
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      const storagePath = `characters/${imageRow.id}.png`;
+      const { error: uploadError } = await supabase.storage
+        .from("story-images")
+        .upload(storagePath, imageBuffer, {
+          contentType: "image/png",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        throw new Error(`Storage upload failed: ${uploadError.message}`);
+      }
+
+      const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(storagePath);
+      const publicUrl = urlData.publicUrl;
+
+      await supabase
+        .from("images")
+        .update({ stored_url: publicUrl })
+        .eq("id", imageRow.id);
+
+      await supabase.from("generation_jobs").insert({
+        job_id: `replicate-instant-${imageRow.id}`,
+        image_id: imageRow.id,
+        status: "completed",
+        cost: 0,
+      });
+
+      console.log(`[StoryPublisher] Nano Banana Pro regeneration complete: ${imageRow.id}`);
+
+      return NextResponse.json({
+        jobId: `replicate-instant-${imageRow.id}`,
+        imageId: imageRow.id,
+        storedUrl: publicUrl,
+        instant: true,
+      });
+    } else {
+      // ---- RunPod path (Flux Krea or SDXL via ComfyUI) ----
+      let runpodImages: Array<{ name: string; image: string }> | undefined;
+      if (stage === 'body' && !isMale && storyChar.face_url) {
+        const faceBase64 = await imageUrlToBase64(storyChar.face_url);
+        runpodImages = [{ name: 'source_face.png', image: faceBase64 }];
+      }
+
+      if (payload.images) {
+        runpodImages = [...(runpodImages || []), ...payload.images];
+      }
+
+      const { jobId } = await submitRunPodJob(
+        payload.workflow,
+        runpodImages,
+      );
+
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: payload.positivePrompt,
+          settings: {
+            width: payload.width,
+            height: payload.height,
+            engine: stage === 'face' && !isMale ? 'flux-krea' : 'sdxl-realvis',
+            imageType,
+            stage,
+            seed: payload.seed,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      await supabase.from("generation_jobs").insert({
+        job_id: `runpod-${jobId}`,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+      });
+
+      console.log(`[StoryPublisher] ${stage} regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
+
+      return NextResponse.json({
+        jobId: `runpod-${jobId}`,
+        imageId: imageRow.id,
+      });
     }
-
-    // 7. Create generation job record for status polling
-    await supabase.from("generation_jobs").insert({
-      job_id: `runpod-${jobId}`,
-      image_id: imageRow.id,
-      status: "pending",
-      cost: 0,
-    });
-
-    console.log(`[StoryPublisher] ${imageType === "fullBody" ? "Full body" : "Portrait"} regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
-
-    return NextResponse.json({
-      jobId: `runpod-${jobId}`,
-      imageId: imageRow.id,
-    });
   } catch (err) {
     console.error("Character portrait regeneration failed:", err);
     return NextResponse.json(

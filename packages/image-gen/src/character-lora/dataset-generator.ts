@@ -26,6 +26,7 @@ import {
   waitForRunPodResult,
   imageUrlToBase64,
 } from '../index';
+import { readReplicateOutput } from '../replicate-client';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-pro' as const;
 const SDXL_BODY_MODEL = 'lucataco/realvisxl-v2-with-lora';
@@ -621,40 +622,7 @@ async function saveDatasetImage(
   return record as LoraDatasetImageRow;
 }
 
-/**
- * Read a Replicate FileOutput (ReadableStream) or legacy URL string into a Buffer.
- * Replicate SDK v1.x returns FileOutput objects from replicate.run() instead of
- * plain URL strings. FileOutput implements ReadableStream, so we consume the stream
- * directly — no intermediate URL download needed.
- */
-async function readReplicateOutput(output: unknown): Promise<Buffer> {
-  // Unwrap arrays (e.g., [FileOutput] or [url])
-  const value = Array.isArray(output) ? output[0] : output;
-
-  if (!value) {
-    throw new Error('Replicate returned empty output');
-  }
-
-  // FileOutput is a ReadableStream — read it directly
-  if (typeof value === 'object' && typeof (value as any)[Symbol.asyncIterator] === 'function') {
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of value as AsyncIterable<Uint8Array>) {
-      chunks.push(chunk);
-    }
-    return Buffer.concat(chunks);
-  }
-
-  // Legacy: plain URL string — download it
-  if (typeof value === 'string' && value.startsWith('http')) {
-    const response = await fetch(value);
-    if (!response.ok) {
-      throw new Error(`Failed to download image: ${response.status}`);
-    }
-    return Buffer.from(await response.arrayBuffer());
-  }
-
-  throw new Error(`Unexpected Replicate output format: ${typeof value}`);
-}
+// readReplicateOutput is imported from ../replicate-client
 
 function hashCode(str: string): number {
   let hash = 0;

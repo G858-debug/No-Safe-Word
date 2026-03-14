@@ -438,6 +438,7 @@ export interface Database {
           approved_fullbody_prompt: string | null;
           regen_count: number;
           active_lora_id: string | null;
+          face_url: string | null;
         };
         Insert: {
           id?: string;
@@ -455,6 +456,7 @@ export interface Database {
           approved_fullbody_prompt?: string | null;
           regen_count?: number;
           active_lora_id?: string | null;
+          face_url?: string | null;
         };
         Update: {
           id?: string;
@@ -472,6 +474,7 @@ export interface Database {
           approved_fullbody_prompt?: string | null;
           regen_count?: number;
           active_lora_id?: string | null;
+          face_url?: string | null;
         };
         Relationships: [
           {

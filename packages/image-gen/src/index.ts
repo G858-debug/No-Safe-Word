@@ -30,6 +30,9 @@ export { buildKontextIdentityPrefix, resolvePromptEthnicity } from './kontext-id
 // Flux prompt rewriter — converts tag-style prompts to Flux natural language
 export { rewritePromptForFlux } from './flux-prompt-rewriter';
 
+// Replicate client — Nano Banana Pro for male character portraits
+export { runNanoBanana, readReplicateOutput } from './replicate-client';
+
 // Flux-native prompt builder — assembles prose prompts, strips legacy syntax, and enhances sensuality
 export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFemaleEnhancement, injectFluxGazeEmphasis, buildFluxAtmosphereSuffix } from './flux-prompt-builder';
 

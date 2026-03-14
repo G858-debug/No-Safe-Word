@@ -43,6 +43,7 @@ export interface CharacterFromAPI {
   approved_fullbody: boolean;
   approved_fullbody_image_id: string | null;
   approved_fullbody_seed: number | null;
+  face_url: string | null;
   characters: {
     id: string;
     name: string;
@@ -522,12 +523,13 @@ export default function CharacterApproval({
 
   const handleGenerate = useCallback(
     async (storyCharId: string, type: ImageType) => {
-      console.log(`[StoryPublisher] Generating ${type} for character ${storyCharId}`);
+      const stage = type === "fullBody" ? "body" : "face";
+      console.log(`[StoryPublisher] Generating ${stage} (${type}) for character ${storyCharId}`);
       updateSlot(storyCharId, type, { isGenerating: true, error: null });
 
       try {
         const state = charStates[storyCharId]?.[type];
-        const body: Record<string, string | number> = { type };
+        const body: Record<string, string | number> = { type, stage };
         if (modelUrn) body.model_urn = modelUrn;
         if (state?.lockSeed && state.seed) body.seed = state.seed;
         const slotPrompt = state?.prompt;
@@ -549,8 +551,38 @@ export default function CharacterApproval({
           throw new Error((err.error || "Generation failed") + detail);
         }
         const data = await res.json();
-        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, type: ${type}`);
-        startPolling(storyCharId, type, data.jobId, data.imageId);
+        console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, type: ${type}, instant: ${!!data.instant}`);
+
+        // Nano Banana Pro returns instantly — no polling needed
+        if (data.instant && data.storedUrl) {
+          updateSlot(storyCharId, type, {
+            isGenerating: false,
+            imageUrl: data.storedUrl,
+            imageId: data.imageId,
+            error: null,
+            jobId: null,
+            pollStartTime: null,
+            seed: data.seed ?? null,
+            runpodStatus: null,
+          });
+
+          // Persist as pending image
+          try {
+            await fetch(`/api/stories/characters/${storyCharId}/set-pending-image`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                image_id: data.imageId,
+                image_url: data.storedUrl,
+                type,
+              }),
+            });
+          } catch {
+            // Non-fatal
+          }
+        } else {
+          startPolling(storyCharId, type, data.jobId, data.imageId);
+        }
       } catch (err) {
         console.error(`[StoryPublisher] Error in handleGenerate:`, err);
         updateSlot(storyCharId, type, {
@@ -567,6 +599,8 @@ export default function CharacterApproval({
       const state = charStates[storyCharId]?.[type];
       if (!state) return;
 
+      const stage = type === "fullBody" ? "body" : "face";
+
       updateSlot(storyCharId, type, {
         isGenerating: true,
         error: null,
@@ -575,7 +609,7 @@ export default function CharacterApproval({
       });
 
       try {
-        const body: Record<string, string | number> = { type };
+        const body: Record<string, string | number> = { type, stage };
         if (modelUrn) body.model_urn = modelUrn;
         if (state.lockSeed && state.seed) body.seed = state.seed;
 
@@ -593,7 +627,22 @@ export default function CharacterApproval({
           throw new Error((err.error || "Regeneration failed") + detail);
         }
         const data = await res.json();
-        startPolling(storyCharId, type, data.jobId, data.imageId);
+
+        // Nano Banana Pro returns instantly
+        if (data.instant && data.storedUrl) {
+          updateSlot(storyCharId, type, {
+            isGenerating: false,
+            imageUrl: data.storedUrl,
+            imageId: data.imageId,
+            error: null,
+            jobId: null,
+            pollStartTime: null,
+            seed: data.seed ?? null,
+            runpodStatus: null,
+          });
+        } else {
+          startPolling(storyCharId, type, data.jobId, data.imageId);
+        }
       } catch (err) {
         updateSlot(storyCharId, type, {
           isGenerating: false,
@@ -700,7 +749,8 @@ export default function CharacterApproval({
         updateSlot(ch.id, type, { isGenerating: true, error: null });
 
         const chState = charStates[ch.id]?.[type];
-        const body: Record<string, string | number> = { type };
+        const stage = type === "fullBody" ? "body" : "face";
+        const body: Record<string, string | number> = { type, stage };
         if (modelUrn) body.model_urn = modelUrn;
         if (chState?.lockSeed && chState.seed) body.seed = chState.seed;
 
@@ -720,7 +770,22 @@ export default function CharacterApproval({
         }
 
         const data = await res.json();
-        startPolling(ch.id, type, data.jobId, data.imageId);
+
+        // Nano Banana Pro returns instantly — no polling needed
+        if (data.instant && data.storedUrl) {
+          updateSlot(ch.id, type, {
+            isGenerating: false,
+            imageUrl: data.storedUrl,
+            imageId: data.imageId,
+            error: null,
+            jobId: null,
+            pollStartTime: null,
+            seed: data.seed ?? null,
+            runpodStatus: null,
+          });
+        } else {
+          startPolling(ch.id, type, data.jobId, data.imageId);
+        }
 
         // Wait 4 seconds before starting the next one to avoid rate limits
         if (i < toGenerate.length - 1) {
@@ -1146,7 +1211,7 @@ export default function CharacterApproval({
                 <div className="rounded-md bg-blue-500/5 border border-blue-500/20 p-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium text-blue-400 uppercase tracking-wider">
-                      SDXL Identity Preview
+                      Character Identity Preview
                     </p>
                     {!state.editingDescription ? (
                       <button
@@ -1264,7 +1329,7 @@ export default function CharacterApproval({
                       ? slot.approvedUrl || slot.imageUrl
                       : (type === "fullBody" && slot.previewUrl) ? slot.previewUrl : slot.imageUrl;
                     const showingComposite = !slot.approved && type === "fullBody" && !!slot.previewUrl && displayUrl === slot.previewUrl;
-                    const label = type === "portrait" ? "Portrait" : "Full Body";
+                    const label = type === "portrait" ? "Face Portrait" : "Full Body";
                     const aspectClass = type === "portrait" ? "aspect-[3/4]" : "aspect-[5/8]";
                     const isBodyLocked = type === "fullBody" && !state.portrait.approved;
 
@@ -1303,7 +1368,9 @@ export default function CharacterApproval({
                                 {slot.runpodStatus === "IN_QUEUE"
                                   ? "Waiting for GPU worker..."
                                   : slot.runpodStatus === "IN_PROGRESS"
-                                    ? `Rendering ${label.toLowerCase()}...`
+                                    ? type === "fullBody"
+                                      ? "Rendering body with face swap..."
+                                      : `Rendering ${label.toLowerCase()}...`
                                     : "Submitting to GPU..."}
                               </p>
                               {slot.pollStartTime && (() => {
@@ -1462,7 +1529,7 @@ export default function CharacterApproval({
                               className="bg-green-600 hover:bg-green-700"
                             >
                               <Check className="mr-1.5 h-3.5 w-3.5" />
-                              Approve
+                              Approve {type === "portrait" ? "Face" : "Body"}
                             </Button>
                           )}
                         </div>
@@ -1474,7 +1541,7 @@ export default function CharacterApproval({
                 {/* Combined status line */}
                 <div className="flex items-center gap-3 text-xs text-muted-foreground border-t border-muted/50 pt-3">
                   <span>
-                    Portrait: {state.portrait.approved ? (
+                    Face: {state.portrait.approved ? (
                       <span className="text-green-400">Approved</span>
                     ) : state.portrait.imageUrl ? (
                       <span className="text-blue-400">Pending approval</span>

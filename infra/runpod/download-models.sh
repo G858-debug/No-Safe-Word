@@ -144,11 +144,7 @@ if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
   echo "[NSW] ✓ Old SDXL checkpoints removed (kept realvisxlV50_v50Bakedvae)"
 fi
 
-# FaceDetailer / YOLO detection models (no longer used with Kontext)
-if [ -d "${VOLUME_MODELS}/ultralytics" ]; then
-  rm -rf "${VOLUME_MODELS}/ultralytics"
-  echo "[NSW] ✓ Cleared ultralytics/ (YOLO face/person detection removed)"
-fi
+# FaceDetailer YOLO models no longer cleaned up — ultralytics/ may be needed by ReActor
 
 # SAM segmentation models (used by FaceDetailer, no longer needed)
 if [ -d "${VOLUME_MODELS}/sams" ]; then
@@ -430,6 +426,34 @@ except Exception as e:
 " 2>&1 && mv "${CLIPV_DEST}.tmp" "${CLIPV_DEST}" && \
     echo "[NSW] ✓ sigclip_vision_patch14_384.safetensors (volume, downloaded)" || \
     { rm -f "${CLIPV_DEST}.tmp"; echo "[NSW] ✗✗ sigclip_vision_patch14_384.safetensors FAILED"; FAILED=$((FAILED + 1)); }
+fi
+
+# ---- ReActor Face-Swap Models ----
+# InsightFace inswapper model (~370MB) — core face-swap engine used by ReActor node.
+# Downloaded from HuggingFace (ezioruan/inswapper_128.onnx mirror).
+INSIGHTFACE_DIR="/runpod-volume/models/insightface"
+INSWAPPER_DEST="${INSIGHTFACE_DIR}/inswapper_128.onnx"
+INSWAPPER_URL="https://huggingface.co/ezioruan/inswapper_128.onnx/resolve/main/inswapper_128.onnx"
+if [ -f "$INSWAPPER_DEST" ]; then
+    echo "[NSW] ✓ inswapper_128.onnx (exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${INSIGHTFACE_DIR}"
+    echo "[NSW] Downloading inswapper_128.onnx for ReActor face-swap..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${INSWAPPER_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${INSWAPPER_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${INSWAPPER_DEST}.tmp" "${INSWAPPER_DEST}" && \
+    echo "[NSW] ✓ inswapper_128.onnx (downloaded)" || \
+    { rm -f "${INSWAPPER_DEST}.tmp"; echo "[NSW] ✗✗ inswapper_128.onnx FAILED"; FAILED=$((FAILED + 1)); }
 fi
 
 echo "[NSW] ========================================="

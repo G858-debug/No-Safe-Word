@@ -6,6 +6,13 @@ RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/pamparamm/ComfyUI-ppm.git && \
     cd ComfyUI-ppm && git checkout ebb35c7
 
+# ReActor: face-swap node for stitching approved face onto SDXL body portraits.
+# Uses InsightFace for face detection/alignment and inswapper for face replacement.
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/Gourieff/comfyui-reactor-node.git && \
+    cd comfyui-reactor-node && \
+    pip install insightface>=0.7 onnxruntime-gpu
+
 # ---- Runtime Model Download ----
 # Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
 # on first startup to keep the image buildable on GitHub Actions runners.

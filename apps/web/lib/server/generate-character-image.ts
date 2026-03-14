@@ -1,10 +1,12 @@
 import {
   buildSdxlWorkflow,
+  buildKontextWorkflow,
   resolvePromptEthnicity,
 } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
+type GenerationStage = "face" | "body";
 
 /** Case-insensitive check for Black/African ethnicity */
 function isBlackAfrican(ethnicity: string): boolean {
@@ -12,8 +14,47 @@ function isBlackAfrican(ethnicity: string): boolean {
   return lower.includes('black') || lower.includes('african') || lower.includes('dark');
 }
 
+// ---------------------------------------------------------------------------
+// Prompt Builders
+// ---------------------------------------------------------------------------
+
 /**
- * Build the SDXL positive prompt for face portrait generation.
+ * Build the Flux Krea face portrait prompt for FEMALE characters.
+ * Uses natural prose style (no tags, no weights, no negative prompt).
+ * Only face-relevant fields — NO bodyType.
+ */
+function buildFluxFacePrompt(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+): string {
+  const details: string[] = [];
+
+  if (charData.hairStyle || charData.hairColor) {
+    const hair = [charData.hairStyle, charData.hairColor].filter(Boolean).join(' ');
+    details.push(`${hair} hair`);
+  }
+  if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
+  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
+
+  const age = charData.age ? `${charData.age}-year-old ` : '';
+  const core = details.length > 0
+    ? `A ${age}${resolvedEthnicity} woman with ${details.join(', ')}`
+    : `A ${age}${resolvedEthnicity} woman`;
+
+  const sentences = [core + '.'];
+  if (charData.distinguishingFeatures) {
+    sentences.push(`She has ${charData.distinguishingFeatures}.`);
+  }
+  sentences.push(
+    'Close-up beauty portrait, face and shoulders only, soft diffused studio lighting, ' +
+    'warm golden fill, clean cream background, beauty editorial photography, photorealistic.'
+  );
+
+  return sentences.join(' ');
+}
+
+/**
+ * Build the SDXL positive prompt for face portrait generation (used for SDXL-only face path).
  * Only includes face-relevant fields: age, ethnicity, skin tone, hair, eyes,
  * distinguishing features. Body type and beauty descriptors are explicitly
  * excluded to prevent SDXL from rendering body content in head-and-shoulders shots.
@@ -52,6 +93,71 @@ function buildSdxlFacePrompt(
   return sentences.join(' ');
 }
 
+/**
+ * Build Nano Banana Pro face prompt for MALE characters.
+ */
+function buildMaleNanoBananaFacePrompt(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+): string {
+  const details: string[] = [];
+
+  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
+  if (charData.hairStyle || charData.hairColor) {
+    const hair = [charData.hairStyle, charData.hairColor].filter(Boolean).join(' ');
+    details.push(`${hair} hair`);
+  }
+  if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
+
+  const age = charData.age ? `${charData.age}-year-old ` : '';
+  const core = details.length > 0
+    ? `A ${age}${resolvedEthnicity} man with ${details.join(', ')}`
+    : `A ${age}${resolvedEthnicity} man`;
+
+  const sentences = [core + '.'];
+  if (charData.distinguishingFeatures) {
+    sentences.push(`He has ${charData.distinguishingFeatures}.`);
+  }
+  sentences.push(
+    'Close-up portrait, face and shoulders, natural lighting, photorealistic, handsome.'
+  );
+
+  return sentences.join(' ');
+}
+
+/**
+ * Build Nano Banana Pro body prompt for MALE characters.
+ */
+function buildMaleNanoBananaBodyPrompt(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+): string {
+  const details: string[] = [];
+
+  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
+  if (charData.bodyType) details.push(`${charData.bodyType} build`);
+  if (charData.hairStyle || charData.hairColor) {
+    const hair = [charData.hairStyle, charData.hairColor].filter(Boolean).join(' ');
+    details.push(`${hair} hair`);
+  }
+
+  const age = charData.age ? `${charData.age}-year-old ` : '';
+  const core = details.length > 0
+    ? `A ${age}${resolvedEthnicity} man with ${details.join(', ')}`
+    : `A ${age}${resolvedEthnicity} man`;
+
+  const sentences = [core + '.'];
+  sentences.push(
+    'Full body portrait, standing, wearing casual clothing, photorealistic.'
+  );
+
+  return sentences.join(' ');
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 export interface CharacterGenerationInput {
   character: {
     id: string;
@@ -59,11 +165,16 @@ export interface CharacterGenerationInput {
     description: Record<string, string>;
   };
   imageType: ImageType;
+  stage?: GenerationStage;
   seed?: number;
   customPrompt?: string;
+  /** Approved face URL — needed for body stage (ReActor source for female, Nano Banana ref for male) */
+  approvedFaceUrl?: string;
 }
 
-export interface CharacterGenerationPayload {
+/** RunPod-based generation (SDXL or Flux Krea via ComfyUI) */
+export interface RunPodGenerationPayload {
+  engine: 'runpod';
   workflow: Record<string, any>;
   positivePrompt: string;
   negativePrompt: string;
@@ -71,19 +182,42 @@ export interface CharacterGenerationPayload {
   width: number;
   height: number;
   loras: Array<{ filename: string; strength: number }>;
+  /** Additional images to pass in RunPod's images[] array (e.g. source face for ReActor) */
+  images?: Array<{ name: string; image: string }>;
 }
 
+/** Replicate-based generation (Nano Banana Pro) */
+export interface ReplicateGenerationPayload {
+  engine: 'replicate';
+  model: string;
+  positivePrompt: string;
+  seed: number;
+  /** Reference image URL for Nano Banana Pro (approved face for body gen) */
+  referenceImageUrl?: string;
+}
+
+export type CharacterGenerationPayload = RunPodGenerationPayload | ReplicateGenerationPayload;
+
+// ---------------------------------------------------------------------------
+// Main Entry Point
+// ---------------------------------------------------------------------------
+
 /**
- * Build the complete SDXL character generation payload — prompt, LoRAs,
- * negative prompt, dimensions, and ComfyUI workflow.
+ * Build the character generation payload — prompt, LoRAs, workflow/API params.
  *
- * This is the single source of truth for all character image generation logic.
- * Both /generate and /regenerate routes call this function.
+ * Dispatches by gender + stage:
+ * | Gender | Stage | Engine    | Model                                      |
+ * |--------|-------|-----------|--------------------------------------------|
+ * | Female | face  | RunPod    | Flux Krea (Kontext portrait, no Redux)     |
+ * | Female | body  | RunPod    | SDXL RealVisXL + Curvy Body LoRA + ReActor |
+ * | Male   | face  | Replicate | Nano Banana Pro                            |
+ * | Male   | body  | Replicate | Nano Banana Pro (with face reference)      |
  */
 export async function buildCharacterGenerationPayload(
   params: CharacterGenerationInput,
 ): Promise<CharacterGenerationPayload> {
-  const { character, imageType, customPrompt } = params;
+  const { character, customPrompt } = params;
+  const stage = params.stage ?? 'face';
   const desc = character.description;
 
   // 1. Build CharacterData from description JSON
@@ -105,75 +239,150 @@ export async function buildCharacterGenerationPayload(
     age: desc.age || "",
   };
 
-  // 2. Gender resolution
-  const isFemale = characterData.gender !== 'male';
+  // 2. Gender + ethnicity resolution
+  const isMale = characterData.gender === 'male';
   const useMelanin = isBlackAfrican(characterData.ethnicity);
-
-  // 3. Ethnicity normalization via AI classification
   const resolvedEthnicity = await resolvePromptEthnicity(
     characterData.ethnicity,
     characterData.gender,
     characterData.skinTone,
   );
 
-  // 4. Seed
+  // 3. Seed
   const seed = params.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
+  const sluggedName = character.name.replace(/\s+/g, "_").toLowerCase();
 
-  // 5. Build prompt, LoRAs, negative prompt, and dimensions per image type
-  let positivePrompt: string;
-  let negativePrompt: string;
-  let width: number;
-  let height: number;
-  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-
-  if (imageType === "portrait") {
-    // PATH A — Face portrait with RealVisXL + Melanin LoRA + Skin LoRAs (Black/African)
-    // Only face-relevant fields: age, ethnicity, skin tone, hair, eyes, distinguishing features.
-    // Body type and beauty descriptors are excluded to prevent chest/nudity rendering.
-    width = 832;
-    height = 1216;
-
-    const melaninTrigger = useMelanin ? 'melanin, ' : '';
-    const skinToneTrigger = useMelanin ? 'dark chocolate skin tone style, ' : '';
-    const skinRealismTrigger = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-    const faceDesc = buildSdxlFacePrompt(characterData, resolvedEthnicity, isFemale);
-    positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}${faceDesc}`;
-
-    negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
-
-    if (useMelanin) {
-      loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-      loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-      loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
-    }
+  // 4. Dispatch by gender + stage
+  if (isMale) {
+    return buildMalePayload(characterData, resolvedEthnicity, stage, seed, customPrompt, params.approvedFaceUrl);
   } else {
-    // PATH B — Full body with RealVisXL + Curvy Body LoRA + Melanin LoRA
-    // venus-body-xl was removed from CivitAI — curvy-body-sdxl serves the same purpose
-    width = 768;
-    height = 1152;
+    return buildFemalePayload(characterData, resolvedEthnicity, useMelanin, stage, seed, sluggedName, customPrompt, params.approvedFaceUrl);
+  }
+}
 
-    if (isFemale) {
-      const melaninPrefix = useMelanin ? 'melanin, ' : '';
-      const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
-      const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-      positivePrompt = `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair. She is wearing a stylish fitted outfit — a form-fitting bodycon dress or high-waisted jeans with a fitted top that clearly shows her body shape and proportions. Fully clothed. Full body shot from head to toe. Standing pose, confident stance. Clean studio background with soft professional lighting. 8k, masterpiece, best quality`;
+// ---------------------------------------------------------------------------
+// Male Pipeline — Nano Banana Pro (Replicate)
+// ---------------------------------------------------------------------------
 
-      loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
-      if (useMelanin) {
-        loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-        loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-        loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
-      }
-    } else {
-      positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
-    }
+function buildMalePayload(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+  stage: GenerationStage,
+  seed: number,
+  customPrompt?: string,
+  approvedFaceUrl?: string,
+): ReplicateGenerationPayload {
+  let prompt: string;
 
-    negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
+  if (stage === 'face') {
+    prompt = customPrompt || buildMaleNanoBananaFacePrompt(charData, resolvedEthnicity);
+  } else {
+    prompt = customPrompt || buildMaleNanoBananaBodyPrompt(charData, resolvedEthnicity);
   }
 
-  // 6. Custom prompt override — still ensure LoRA trigger words are present
+  return {
+    engine: 'replicate',
+    model: 'google/nano-banana-pro',
+    positivePrompt: prompt,
+    seed,
+    referenceImageUrl: stage === 'body' ? approvedFaceUrl : undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Female Pipeline — Flux Krea (face) + SDXL+ReActor (body)
+// ---------------------------------------------------------------------------
+
+async function buildFemalePayload(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+  useMelanin: boolean,
+  stage: GenerationStage,
+  seed: number,
+  sluggedName: string,
+  customPrompt?: string,
+  approvedFaceUrl?: string,
+): Promise<RunPodGenerationPayload> {
+  if (stage === 'face') {
+    return buildFemaleFacePayload(charData, resolvedEthnicity, useMelanin, seed, sluggedName, customPrompt);
+  } else {
+    return buildFemaleBodyPayload(charData, resolvedEthnicity, useMelanin, seed, sluggedName, customPrompt, approvedFaceUrl);
+  }
+}
+
+/**
+ * Female face — Flux Krea Kontext portrait (text-to-image, no Redux).
+ * Uses Melanin LoRA for Black/African characters.
+ */
+function buildFemaleFacePayload(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+  useMelanin: boolean,
+  seed: number,
+  sluggedName: string,
+  customPrompt?: string,
+): RunPodGenerationPayload {
+  const positivePrompt = customPrompt || buildFluxFacePrompt(charData, resolvedEthnicity);
+  const width = 832;
+  const height = 1216;
+
+  // Flux Krea LoRAs for face portraits
+  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  if (useMelanin) {
+    loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+  }
+
+  const workflow = buildKontextWorkflow({
+    type: 'portrait',
+    positivePrompt,
+    width,
+    height,
+    seed,
+    filenamePrefix: `face_${sluggedName}`,
+    loras,
+  });
+
+  return {
+    engine: 'runpod',
+    workflow,
+    positivePrompt,
+    negativePrompt: '', // Flux has no negative prompt
+    seed,
+    width,
+    height,
+    loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
+  };
+}
+
+/**
+ * Female body — SDXL RealVisXL + Curvy Body LoRA + ReActor face-swap.
+ * When approvedFaceUrl is provided, the workflow includes ReActor nodes
+ * to swap the approved Flux face onto the SDXL body output.
+ */
+function buildFemaleBodyPayload(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+  useMelanin: boolean,
+  seed: number,
+  sluggedName: string,
+  customPrompt?: string,
+  approvedFaceUrl?: string,
+): RunPodGenerationPayload {
+  const width = 768;
+  const height = 1152;
+
+  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
+  if (useMelanin) {
+    loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+    loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
+  }
+
+  let positivePrompt: string;
   if (customPrompt) {
     positivePrompt = customPrompt;
+    // Ensure LoRA trigger words are present
     if (useMelanin && !/\bmelanin\b/i.test(positivePrompt)) {
       positivePrompt = `melanin, ${positivePrompt}`;
     }
@@ -183,11 +392,18 @@ export async function buildCharacterGenerationPayload(
     if (useMelanin && !/Detailed natural skin/i.test(positivePrompt)) {
       positivePrompt = `Detailed natural skin and blemishes without-makeup and acne, ${positivePrompt}`;
     }
-    // curvy-body-sdxl has no trigger word — no prefix needed for body shots
+  } else {
+    const melaninPrefix = useMelanin ? 'melanin, ' : '';
+    const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
+    const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
+    positivePrompt = `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${charData.age}-year-old ${resolvedEthnicity} woman, ${charData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${charData.hairStyle} ${charData.hairColor} hair. She is wearing a stylish fitted outfit — a form-fitting bodycon dress or high-waisted jeans with a fitted top that clearly shows her body shape and proportions. Fully clothed. Full body shot from head to toe. Standing pose, confident stance. Clean studio background with soft professional lighting. 8k, masterpiece, best quality`;
   }
 
-  // 7. Build SDXL ComfyUI workflow
-  const sluggedName = character.name.replace(/\s+/g, "_").toLowerCase();
+  const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
+
+  // Add ReActor source face when approved face is available
+  const reactorSourceImageName = approvedFaceUrl ? 'source_face.png' : undefined;
+
   const workflow = buildSdxlWorkflow({
     positivePrompt,
     negativePrompt,
@@ -196,10 +412,12 @@ export async function buildCharacterGenerationPayload(
     seed,
     checkpointName: 'realvisxlV50_v50Bakedvae.safetensors',
     loras,
-    filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${sluggedName}`,
+    filenamePrefix: `fullbody_${sluggedName}`,
+    reactorSourceImageName,
   });
 
   return {
+    engine: 'runpod',
     workflow,
     positivePrompt,
     negativePrompt,
@@ -207,5 +425,6 @@ export async function buildCharacterGenerationPayload(
     width,
     height,
     loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
+    // The face image will be fetched and base64-encoded by the route before submitting to RunPod
   };
 }

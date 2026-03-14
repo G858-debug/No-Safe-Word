@@ -136,6 +136,8 @@ export async function POST(
           approved_image_id: image_id,
           approved_seed: resolvedSeed,
           approved_prompt: prompt ?? null,
+          // Save face URL separately for use in body generation (ReActor/Nano Banana ref)
+          face_url: publicUrl,
         };
     const { data: updated, error: updateError } = await supabase
       .from("story_characters")
