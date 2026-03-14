@@ -11,7 +11,7 @@ RUN cd /comfyui/custom_nodes && \
 # cmake + libgl are required to build insightface from source.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN cd /comfyui/custom_nodes && \
