@@ -82,7 +82,7 @@ interface ImageSlotState {
 }
 
 interface LoraTrainingState {
-  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "captioning" | "training" | "validating" | "deployed" | "failed";
+  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "captioning" | "training" | "validating" | "deployed" | "failed" | "archived";
   loraId: string | null;
   datasetGenerated: number;
   datasetApproved: number;
@@ -1640,6 +1640,7 @@ const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; descrip
   validating: { label: "Validating", color: "text-purple-400", description: "Testing LoRA with sample generations" },
   deployed: { label: "Active", color: "text-green-400", description: "Character LoRA is deployed and will be used in scene generation" },
   failed: { label: "Failed", color: "text-red-400", description: "Training failed — click Retry to try again" },
+  archived: { label: "Not Started", color: "text-muted-foreground/50", description: "Previous LoRA archived — ready for retraining" },
 };
 
 function LoraTrainingSection({
