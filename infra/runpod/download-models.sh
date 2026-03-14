@@ -82,10 +82,19 @@ download_to_volume() {
     local tmp_path="${dest}.tmp"
     local attempt=1
     while [ $attempt -le 3 ]; do
-        if curl -sL \
-            -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
-            -o "${tmp_path}" \
-            "${url}" && [ -s "${tmp_path}" ]; then
+        if python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${url}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${tmp_path}', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1; then
             mv "${tmp_path}" "$dest"
             echo "[NSW] ✓ ${filename} (volume, downloaded)"
             return 0
