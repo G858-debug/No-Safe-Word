@@ -391,14 +391,17 @@ async function generateSdxlBodyShots(
   const basePositive =
     `venusbody, ${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
     `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
+    `wearing a form-fitting bodycon dress that shows her curves clearly, fully clothed, ` +
     `full body, standing, natural pose, masterpiece, best quality, highly detailed, 8k`;
   const negative =
+    'nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, underwear, ' +
     'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
-    'bad anatomy, extra limbs, (worst quality:2), (low quality:2), nsfw, nude';
+    'bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
 
   const img2imgPrompt =
     `${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
-    `and thick thighs, photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
+    `and thick thighs, wearing a fitted dress, fully clothed, ` +
+    `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
 
   const records: LoraDatasetImageRow[] = [];
   const failures: DatasetGenerationResult['failedPrompts'] = [];

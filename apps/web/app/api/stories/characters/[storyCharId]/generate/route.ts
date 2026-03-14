@@ -15,6 +15,45 @@ function isBlackAfrican(ethnicity: string): boolean {
   return lower.includes('black') || lower.includes('african') || lower.includes('dark');
 }
 
+/**
+ * Build the SDXL positive prompt for face portrait generation.
+ * Only includes face-relevant fields: age, ethnicity, skin tone, hair, eyes,
+ * distinguishing features. Body type and beauty descriptors are explicitly
+ * excluded to prevent SDXL from rendering body content in head-and-shoulders shots.
+ */
+function buildSdxlFacePrompt(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+  isFemale: boolean,
+): string {
+  const genderWord = isFemale ? 'woman' : 'man';
+  const details: string[] = [];
+
+  if (charData.hairStyle || charData.hairColor) {
+    const hair = [charData.hairStyle, charData.hairColor].filter(Boolean).join(' ');
+    details.push(`${hair} hair`);
+  }
+  if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
+  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
+
+  const age = charData.age ? `${charData.age}-year-old ` : '';
+  const core = details.length > 0
+    ? `A ${age}${resolvedEthnicity} ${genderWord} with ${details.join(', ')}`
+    : `A ${age}${resolvedEthnicity} ${genderWord}`;
+
+  const sentences = [core + '.'];
+  if (charData.distinguishingFeatures) {
+    const pronoun = isFemale ? 'She' : 'He';
+    sentences.push(`${pronoun} has ${charData.distinguishingFeatures}.`);
+  }
+  sentences.push(
+    'Studio portrait. Head and shoulders only. Looking directly at the camera. ' +
+    'Clean grey studio background. Professional portrait lighting. 8k, masterpiece, best quality, highly detailed.'
+  );
+
+  return sentences.join(' ');
+}
+
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait or full body
 export async function POST(
   request: NextRequest,
@@ -116,15 +155,18 @@ export async function POST(
 
     if (imageType === "portrait") {
       // PATH A — Face portrait with RealVisXL + Melanin LoRA + Skin LoRAs (Black/African)
+      // Only face-relevant fields: age, ethnicity, skin tone, hair, eyes, distinguishing features.
+      // Body type and beauty descriptors are excluded to prevent chest/nudity rendering.
       width = 832;
       height = 1216;
 
       const melaninTrigger = useMelanin ? 'melanin, ' : '';
       const skinToneTrigger = useMelanin ? 'dark chocolate skin tone style, ' : '';
       const skinRealismTrigger = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-      positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}photorealistic portrait of a ${characterData.age}-year-old ${resolvedEthnicity} ${isFemale ? 'woman' : 'man'}, ${characterData.skinTone} skin, ${characterData.hairStyle} ${characterData.hairColor} hair, ${characterData.eyeColor} eyes, ${characterData.distinguishingFeatures}, close-up head and shoulders, looking directly at the camera with a confident expression, soft studio lighting, neutral gray background, 8k, masterpiece, best quality, highly detailed`;
+      const faceDesc = buildSdxlFacePrompt(characterData, resolvedEthnicity, isFemale);
+      positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}${faceDesc}`;
 
-      negativePrompt = `deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
+      negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
 
       if (useMelanin) {
         loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
@@ -141,7 +183,7 @@ export async function POST(
         const melaninPrefix = useMelanin ? 'melanin, ' : '';
         const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
         const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-        positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing a form-fitting outfit, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
+        positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair. She is wearing a stylish fitted outfit — a form-fitting bodycon dress or high-waisted jeans with a fitted top that clearly shows her body shape and proportions. Fully clothed. Full body shot from head to toe. Standing pose, confident stance. Clean studio background with soft professional lighting. 8k, masterpiece, best quality`;
 
         loras.push({ filename: 'venus-body-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
         if (useMelanin) {
@@ -153,7 +195,7 @@ export async function POST(
         positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
       }
 
-      negativePrompt = `skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
+      negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
     }
 
     if (customPrompt) {

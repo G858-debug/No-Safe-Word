@@ -5,7 +5,16 @@
 ### Character Consistency Rules
 1. **Approved characters** have three approval stages that must be completed in order:
    a. **Face** — generated via RealVisXL + Melanin LoRA. Must be approved before body.
+      Face portrait prompts (PATH A): contain ONLY face-relevant fields — age, ethnicity,
+      skin tone, hair, eyes, distinguishing features. Body type and beauty descriptors are
+      explicitly excluded to prevent exposed chest rendering. Negative prompt always blocks
+      nudity (nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage).
    b. **Body** — generated via RealVisXL + Venus Body LoRA. Must be approved before LoRA training.
+      Body shot prompts (PATH B): include body type descriptors but always include explicit
+      clothing language ("form-fitting bodycon dress" or "fitted top and jeans, fully clothed")
+      and a nudity-blocking negative prompt. The goal is visible body proportions through
+      clothing, not nudity — LoRA training benefits more from clothed full-body shots with
+      a clear silhouette.
    c. **Character LoRA** — trained on Replicate using `ostris/flux-dev-lora-trainer`
       with the approved face + body images as the dataset seed. Must be deployed before
       any scene images can be generated for the series.
