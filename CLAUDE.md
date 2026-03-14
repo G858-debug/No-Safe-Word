@@ -118,8 +118,8 @@ Example (correct Flux prose — USE THIS):
   (`sdxl-skin-realism.safetensors`, trigger: `Detailed natural skin and blemishes
   without-makeup and acne`, strength: 0.4) — all three for Black/African characters.
   Skin Realism strength capped at 0.4 to prevent age regression artifact.
-- Body generation: RealVisXL + Venus Body LoRA (`venus-body-xl.safetensors`,
-  trigger: `venusbody`, strength: 0.75) + Melanin LoRA (for Black/African female characters)
+- Body generation: RealVisXL + Curvy Body LoRA (`curvy-body-sdxl.safetensors`,
+  strength: 0.75, no trigger word) + Melanin LoRA (for Black/African female characters)
 - SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
 - Trigger words MUST appear at the start of the positive prompt
 

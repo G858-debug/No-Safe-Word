@@ -146,18 +146,18 @@ export async function buildCharacterGenerationPayload(
       loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
     }
   } else {
-    // PATH B — Full body with RealVisXL + Venus Body LoRA + Melanin LoRA
+    // PATH B — Full body with RealVisXL + Curvy Body LoRA + Melanin LoRA
+    // venus-body-xl was removed from CivitAI — curvy-body-sdxl serves the same purpose
     width = 768;
     height = 1152;
 
     if (isFemale) {
-      const venusPrefix = 'venusbody, ';
       const melaninPrefix = useMelanin ? 'melanin, ' : '';
       const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
       const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-      positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair. She is wearing a stylish fitted outfit — a form-fitting bodycon dress or high-waisted jeans with a fitted top that clearly shows her body shape and proportions. Fully clothed. Full body shot from head to toe. Standing pose, confident stance. Clean studio background with soft professional lighting. 8k, masterpiece, best quality`;
+      positivePrompt = `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair. She is wearing a stylish fitted outfit — a form-fitting bodycon dress or high-waisted jeans with a fitted top that clearly shows her body shape and proportions. Fully clothed. Full body shot from head to toe. Standing pose, confident stance. Clean studio background with soft professional lighting. 8k, masterpiece, best quality`;
 
-      loras.push({ filename: 'venus-body-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
+      loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
       if (useMelanin) {
         loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
         loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
@@ -182,9 +182,7 @@ export async function buildCharacterGenerationPayload(
     if (useMelanin && !/Detailed natural skin/i.test(positivePrompt)) {
       positivePrompt = `Detailed natural skin and blemishes without-makeup and acne, ${positivePrompt}`;
     }
-    if (imageType === 'fullBody' && isFemale && !/\bvenusbody\b/i.test(positivePrompt)) {
-      positivePrompt = `venusbody, ${positivePrompt}`;
-    }
+    // curvy-body-sdxl has no trigger word — no prefix needed for body shots
   }
 
   // 7. Build SDXL ComfyUI workflow

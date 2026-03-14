@@ -82,19 +82,10 @@ download_to_volume() {
     local tmp_path="${dest}.tmp"
     local attempt=1
     while [ $attempt -le 3 ]; do
-        if python3 -c "
-import urllib.request, sys, shutil
-try:
-    req = urllib.request.Request('${url}')
-    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
-    resp = urllib.request.urlopen(req, timeout=600)
-    with open('${tmp_path}', 'wb') as f:
-        shutil.copyfileobj(resp, f)
-    resp.close()
-except Exception as e:
-    print(f'Error: {e}', file=sys.stderr)
-    sys.exit(1)
-" 2>&1; then
+        if curl -sL \
+            -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
+            -o "${tmp_path}" \
+            "${url}" && [ -s "${tmp_path}" ]; then
             mv "${tmp_path}" "$dest"
             echo "[NSW] ✓ ${filename} (volume, downloaded)"
             return 0
@@ -183,9 +174,10 @@ KEEP_LORAS=(
   "refcontrol_pose.safetensors"
   "flux-cinematic-finisher.safetensors"
   "melanin-XL.safetensors"
-  "venus-body-xl.safetensors"
+  "curvy-body-sdxl.safetensors"
   "sdxl-skin-tone-xl.safetensors"
   "sdxl-skin-realism.safetensors"
+  "skin-realism-sdxl.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -295,10 +287,9 @@ download_to_volume "979680" "bodylicious-flux.safetensors"
 # CivitAI model 390634, version 435833. Trigger word: melanin
 download_to_volume "435833" "melanin-XL.safetensors"
 
-# Venus Body LoRA — SDXL curvaceous body shape for character body generation
-# CivitAI model (Venus Body v2). Trigger word: venusbody
-# Version ID: 136081
-download_to_volume "136081" "venus-body-xl.safetensors"
+# Curvy Body SDXL — curvaceous body shape for character body generation
+# Already present on volume as curvy-body-sdxl.safetensors (pre-installed).
+# Replaces venus-body-xl which was removed from CivitAI.
 
 # Skin Tone Style XL — CivitAI model 562884 v627184
 # Trigger: dark chocolate skin tone style | Strength: 0.6 | Size: ~435MB
