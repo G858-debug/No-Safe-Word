@@ -408,7 +408,7 @@ function buildFemaleBodyPayload(
     filenamePrefix: `fullbody_${sluggedName}`,
     faceRefImageName: 'face_reference.png',
     pulidWeight: 0.95,
-    pulidDenoise: 0.82,
+    pulidDenoise: 0.85,
     fluxPositivePrompt,
     sfwMode: true,
   });
