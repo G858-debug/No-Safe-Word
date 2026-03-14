@@ -30,7 +30,8 @@ RUN pip install --upgrade "cython>=3.0" && \
     pip install --force-reinstall "insightface==0.7.3" && \
     cd /comfyui/custom_nodes && \
     git clone https://github.com/lldacing/ComfyUI_PuLID_Flux_ll && \
-    pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt
+    pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt && \
+    pip install facenet-pytorch --no-deps
 
 # ---- Runtime Model Download ----
 # Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
