@@ -208,6 +208,7 @@ export default function CharacterApproval({
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generateAllProgress, setGenerateAllProgress] = useState<string | null>(null);
   const [, setTick] = useState(0); // Force re-render for elapsed time display
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   // Initialize state from props (runs once)
   useEffect(() => {
@@ -1401,7 +1402,10 @@ export default function CharacterApproval({
                             </div>
                           ) : displayUrl ? (
                             <>
-                              <div className="relative overflow-hidden rounded-lg">
+                              <div
+                                className="relative overflow-hidden rounded-lg cursor-zoom-in"
+                                onClick={() => setLightboxUrl(displayUrl)}
+                              >
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
                                   src={displayUrl}
@@ -1579,6 +1583,28 @@ export default function CharacterApproval({
           );
         })}
       </div>
+
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            onClick={() => setLightboxUrl(null)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="Enlarged portrait"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
