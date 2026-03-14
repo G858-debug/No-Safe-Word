@@ -122,6 +122,7 @@ export async function POST(
       const imageBuffer = await runNanoBanana(
         payload.positivePrompt,
         payload.referenceImageUrl,
+        payload.seed,
       );
 
       const { data: imageRow, error: imgError } = await supabase
@@ -177,6 +178,7 @@ export async function POST(
         jobId: `replicate-instant-${imageRow.id}`,
         imageId: imageRow.id,
         storedUrl: publicUrl,
+        seed: payload.seed,
         instant: true,
       });
     } else {

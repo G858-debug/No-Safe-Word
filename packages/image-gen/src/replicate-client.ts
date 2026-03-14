@@ -43,10 +43,12 @@ export async function readReplicateOutput(output: unknown): Promise<Buffer> {
  *
  * @param prompt - Text prompt describing the portrait
  * @param referenceImageUrl - Optional reference image URL (e.g. approved face for body generation)
+ * @param seed - Optional seed for reproducible generation
  */
 export async function runNanoBanana(
   prompt: string,
   referenceImageUrl?: string,
+  seed?: number,
 ): Promise<Buffer> {
   if (!process.env.REPLICATE_API_TOKEN) {
     throw new Error('Missing REPLICATE_API_TOKEN environment variable');
@@ -63,6 +65,10 @@ export async function runNanoBanana(
 
   if (referenceImageUrl) {
     input.image_input = [referenceImageUrl];
+  }
+
+  if (seed !== undefined) {
+    input.seed = seed;
   }
 
   const output = await replicate.run(NANO_BANANA_MODEL, { input });

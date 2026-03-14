@@ -546,9 +546,13 @@ export default function CharacterApproval({
           }
         );
         if (!res.ok) {
-          const err = await res.json();
-          const detail = err.details ? ` — ${err.details}` : "";
-          throw new Error((err.error || "Generation failed") + detail);
+          let errMsg = `Generation failed (HTTP ${res.status})`;
+          try {
+            const err = await res.json();
+            const detail = err.details ? ` — ${err.details}` : "";
+            errMsg = (err.error || "Generation failed") + detail;
+          } catch { /* server returned non-JSON (HTML error page) */ }
+          throw new Error(errMsg);
         }
         const data = await res.json();
         console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, type: ${type}, instant: ${!!data.instant}`);
@@ -622,9 +626,13 @@ export default function CharacterApproval({
           }
         );
         if (!res.ok) {
-          const err = await res.json();
-          const detail = err.details ? ` — ${err.details}` : "";
-          throw new Error((err.error || "Regeneration failed") + detail);
+          let errMsg = `Regeneration failed (HTTP ${res.status})`;
+          try {
+            const err = await res.json();
+            const detail = err.details ? ` — ${err.details}` : "";
+            errMsg = (err.error || "Regeneration failed") + detail;
+          } catch { /* server returned non-JSON (HTML error page) */ }
+          throw new Error(errMsg);
         }
         const data = await res.json();
 
