@@ -123,6 +123,21 @@ Example (correct Flux prose — USE THIS):
 - SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
 - Trigger words MUST appear at the start of the positive prompt
 
+All character image generation logic (prompt building, LoRA selection, negative
+prompts, workflow construction) lives in a single shared module:
+`apps/web/lib/server/generate-character-image.ts`
+
+Both the /generate route (first-time generation) and the /regenerate route
+(user-triggered redo with optional fixed seed) call this module. Changes to
+the pipeline — new LoRAs, prompt fixes, clothing rules, skin improvements —
+must be made ONLY in generate-character-image.ts. The routes are thin wrappers
+that handle HTTP, database reads/writes, and RunPod submission only.
+
+The only behavioural difference:
+  - /generate: random seed, sets generated state on success
+  - /regenerate: accepts optional fixed seed from client, does not change
+    approval state
+
 **Scene Image Generation:**
 - Model: Flux Krea Dev (`flux1KreaDev_fp8E4m3fn.safetensors`) via ComfyUI on RunPod
 - Character consistency: trained character LoRA (from LoRA training pipeline) injected

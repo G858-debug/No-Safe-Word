@@ -1,23 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import {
-  buildKontextWorkflow,
-  buildKontextIdentityPrefix,
-  buildFluxPrompt,
-  selectKontextResources,
-  submitRunPodJob,
-} from "@no-safe-word/image-gen";
-import type { CharacterData } from "@no-safe-word/shared";
+import { submitRunPodJob } from "@no-safe-word/image-gen";
+import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
 
 type ImageType = "portrait" | "fullBody";
 
-const PORTRAIT_SCENE_DESCRIPTION =
-  "Professional portrait photography with soft diffused studio lighting against a clean neutral gray backdrop. Close-up head and shoulders, looking directly at the camera with a confident expression.";
-
-const FULLBODY_SCENE_DESCRIPTION =
-  "Full body standing pose in soft studio lighting against a medium gray backdrop. She wears a form-fitting bodycon dress or tight outfit that accentuates her figure. Full body visible from head to feet, looking directly at the camera.";
-
-// POST /api/stories/characters/[storyCharId]/regenerate — Regenerate with optional custom prompt
+// POST /api/stories/characters/[storyCharId]/regenerate — Regenerate with optional custom prompt and seed
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
@@ -30,7 +18,7 @@ export async function POST(
     const { prompt: customPrompt, seed: customSeed } = body as { prompt?: string; seed?: number };
     const imageType: ImageType = body.type === "fullBody" ? "fullBody" : "portrait";
 
-    console.log(`[StoryPublisher] Regenerating ${imageType} (Kontext) for character ${storyCharId}, customPrompt: ${!!customPrompt}`);
+    console.log(`[StoryPublisher] Regenerating ${imageType} (RealVisXL SDXL) for character ${storyCharId}, customPrompt: ${!!customPrompt}`);
 
     // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
@@ -60,25 +48,7 @@ export async function POST(
       );
     }
 
-    // 3. Build CharacterData from the stored description JSON
-    const desc = character.description as Record<string, string>;
-    const characterData: CharacterData = {
-      name: character.name,
-      gender: (['male', 'female', 'non-binary', 'other'].includes(desc.gender) ? desc.gender as CharacterData["gender"] : 'female') as CharacterData["gender"],
-      ethnicity: desc.ethnicity || "",
-      bodyType: desc.bodyType || "",
-      hairColor: desc.hairColor || "",
-      hairStyle: desc.hairStyle || "",
-      eyeColor: desc.eyeColor || "",
-      skinTone: desc.skinTone || "",
-      distinguishingFeatures: desc.distinguishingFeatures || "",
-      clothing: desc.clothing || "",
-      pose: desc.pose || "",
-      expression: desc.expression || "",
-      age: desc.age || "",
-    };
-
-    // 4. Clean up old image from storage if it exists
+    // 3. Clean up old images from storage
     try {
       const { data: oldImages } = await supabase
         .from("images")
@@ -107,67 +77,38 @@ export async function POST(
       console.warn("Failed to clean up old character images:", err);
     }
 
-    // 5. Build Kontext prompt
-    let fluxPrompt: string;
-
-    if (customPrompt) {
-      // Custom prompt is used as-is (caller is responsible for Flux-style prose)
-      fluxPrompt = customPrompt;
-    } else {
-      const identityPrefix = await buildKontextIdentityPrefix(characterData);
-      const sceneDescription = imageType === "fullBody" ? FULLBODY_SCENE_DESCRIPTION : PORTRAIT_SCENE_DESCRIPTION;
-      ({ prompt: fluxPrompt } = buildFluxPrompt(identityPrefix, sceneDescription, { mode: 'sfw' }));
-    }
-
-    // 6. Select Kontext LoRAs
-    const gender = characterData.gender === 'male' ? 'male' : 'female';
-    const kontextResources = selectKontextResources({
-      gender,
-      isSfw: true,
-      imageType: imageType,
-      prompt: fluxPrompt,
-      hasDualCharacter: false,
+    // 4. Build generation payload (prompt, LoRAs, workflow)
+    const payload = await buildCharacterGenerationPayload({
+      character: {
+        id: character.id,
+        name: character.name,
+        description: character.description as Record<string, string>,
+      },
+      imageType,
+      seed: (typeof customSeed === "number" && customSeed > 0) ? customSeed : undefined,
+      customPrompt: (typeof customPrompt === 'string' && customPrompt.trim().length > 0)
+        ? customPrompt.trim()
+        : undefined,
     });
 
-    const seed = (typeof customSeed === "number" && customSeed > 0) ? customSeed : Math.floor(Math.random() * 2_147_483_647) + 1;
+    console.log(`[StoryPublisher] LoRAs: ${payload.loras.length > 0 ? payload.loras.map(l => `${l.filename}(${l.strength.toFixed(2)})`).join(", ") : "NONE"}`);
+    console.log(`[StoryPublisher] Submitting ${imageType} regeneration (SDXL) for ${character.name}, seed: ${payload.seed}`);
 
-    // Prepend LoRA trigger words that aren't already in the prompt
-    const finalPrompt = kontextResources.triggerWords.length > 0
-      ? `${kontextResources.triggerWords.join(' ')} ${fluxPrompt}`
-      : fluxPrompt;
+    // 5. Submit async job to RunPod
+    const { jobId } = await submitRunPodJob(payload.workflow);
 
-    console.log(`[StoryPublisher] LoRAs: ${kontextResources.loras.length > 0 ? kontextResources.loras.map(l => `${l.filename}(${l.strengthModel.toFixed(2)})`).join(", ") : "NONE"}`);
-    if (kontextResources.triggerWords.length > 0) {
-      console.log(`[StoryPublisher] Trigger words injected: ${kontextResources.triggerWords.join(', ')}`);
-    }
-    console.log(`[StoryPublisher] Submitting portrait regeneration (Kontext) for ${character.name}, seed: ${seed}`);
-
-    // 7. Build Kontext workflow
-    const workflow = buildKontextWorkflow({
-      type: 'portrait',
-      positivePrompt: finalPrompt,
-      width: 832,
-      height: 1216,
-      seed,
-      filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${character.name.replace(/\s+/g, "_").toLowerCase()}`,
-      loras: kontextResources.loras,
-    });
-
-    // Submit async job to RunPod (returns immediately)
-    const { jobId } = await submitRunPodJob(workflow);
-
-    // Create image record (stored_url will be set when status polling completes)
+    // 6. Create image record (stored_url will be set when status polling completes)
     const { data: imageRow, error: imgError } = await supabase
       .from("images")
       .insert({
         character_id: character.id,
-        prompt: fluxPrompt,
+        prompt: payload.positivePrompt,
         settings: {
-          width: 832,
-          height: 1216,
-          engine: "kontext",
+          width: payload.width,
+          height: payload.height,
+          engine: "sdxl-realvis",
           imageType,
-          seed,
+          seed: payload.seed,
         },
         mode: "sfw",
       })
@@ -178,7 +119,7 @@ export async function POST(
       throw new Error(`Failed to create image record: ${imgError?.message}`);
     }
 
-    // Create generation job record for status polling
+    // 7. Create generation job record for status polling
     await supabase.from("generation_jobs").insert({
       job_id: `runpod-${jobId}`,
       image_id: imageRow.id,

@@ -1,58 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import {
-  buildSdxlWorkflow,
-  submitRunPodJob,
-  resolvePromptEthnicity,
-} from "@no-safe-word/image-gen";
-import type { CharacterData } from "@no-safe-word/shared";
+import { submitRunPodJob } from "@no-safe-word/image-gen";
+import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
 
 type ImageType = "portrait" | "fullBody";
-
-/** Case-insensitive check for Black/African ethnicity */
-function isBlackAfrican(ethnicity: string): boolean {
-  const lower = ethnicity.toLowerCase();
-  return lower.includes('black') || lower.includes('african') || lower.includes('dark');
-}
-
-/**
- * Build the SDXL positive prompt for face portrait generation.
- * Only includes face-relevant fields: age, ethnicity, skin tone, hair, eyes,
- * distinguishing features. Body type and beauty descriptors are explicitly
- * excluded to prevent SDXL from rendering body content in head-and-shoulders shots.
- */
-function buildSdxlFacePrompt(
-  charData: CharacterData,
-  resolvedEthnicity: string,
-  isFemale: boolean,
-): string {
-  const genderWord = isFemale ? 'woman' : 'man';
-  const details: string[] = [];
-
-  if (charData.hairStyle || charData.hairColor) {
-    const hair = [charData.hairStyle, charData.hairColor].filter(Boolean).join(' ');
-    details.push(`${hair} hair`);
-  }
-  if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
-  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
-
-  const age = charData.age ? `${charData.age}-year-old ` : '';
-  const core = details.length > 0
-    ? `A ${age}${resolvedEthnicity} ${genderWord} with ${details.join(', ')}`
-    : `A ${age}${resolvedEthnicity} ${genderWord}`;
-
-  const sentences = [core + '.'];
-  if (charData.distinguishingFeatures) {
-    const pronoun = isFemale ? 'She' : 'He';
-    sentences.push(`${pronoun} has ${charData.distinguishingFeatures}.`);
-  }
-  sentences.push(
-    'Studio portrait. Head and shoulders only. Looking directly at the camera. ' +
-    'Clean grey studio background. Professional portrait lighting. 8k, masterpiece, best quality, highly detailed.'
-  );
-
-  return sentences.join(' ');
-}
 
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait or full body
 export async function POST(
@@ -116,138 +67,38 @@ export async function POST(
 
     console.log(`[StoryPublisher] Generating for character: ${character.name} (${character.id})`);
 
-    // 3. Build CharacterData from the stored description JSON
-    const desc = character.description as Record<string, string>;
-    const characterData: CharacterData = {
-      name: character.name,
-      gender: (['male', 'female', 'non-binary', 'other'].includes(desc.gender) ? desc.gender as CharacterData["gender"] : 'female') as CharacterData["gender"],
-      ethnicity: desc.ethnicity || "",
-      bodyType: desc.bodyType || "",
-      hairColor: desc.hairColor || "",
-      hairStyle: desc.hairStyle || "",
-      eyeColor: desc.eyeColor || "",
-      skinTone: desc.skinTone || "",
-      distinguishingFeatures: desc.distinguishingFeatures || "",
-      clothing: desc.clothing || "",
-      pose: desc.pose || "",
-      expression: desc.expression || "",
-      age: desc.age || "",
-    };
-
-    const seed = customSeed || Math.floor(Math.random() * 2_147_483_647) + 1;
-    const sluggedName = character.name.replace(/\s+/g, "_").toLowerCase();
-    const isFemale = characterData.gender !== 'male';
-    const useMelanin = isBlackAfrican(characterData.ethnicity);
-
-    // Normalize ethnicity label for the prompt — AI-classifies Black/African descent
-    // and replaces with "African American" for better RealVisXL photorealism.
-    const resolvedEthnicity = await resolvePromptEthnicity(
-      characterData.ethnicity,
-      characterData.gender,
-      characterData.skinTone,
-    );
-
-    let positivePrompt: string;
-    let negativePrompt: string;
-    let width: number;
-    let height: number;
-    let loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-
-    if (imageType === "portrait") {
-      // PATH A — Face portrait with RealVisXL + Melanin LoRA + Skin LoRAs (Black/African)
-      // Only face-relevant fields: age, ethnicity, skin tone, hair, eyes, distinguishing features.
-      // Body type and beauty descriptors are excluded to prevent chest/nudity rendering.
-      width = 832;
-      height = 1216;
-
-      const melaninTrigger = useMelanin ? 'melanin, ' : '';
-      const skinToneTrigger = useMelanin ? 'dark chocolate skin tone style, ' : '';
-      const skinRealismTrigger = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-      const faceDesc = buildSdxlFacePrompt(characterData, resolvedEthnicity, isFemale);
-      positivePrompt = `${melaninTrigger}${skinToneTrigger}${skinRealismTrigger}${faceDesc}`;
-
-      negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), blurry, watermark, asian features, european features, pale skin, white skin, light skin, caucasian`;
-
-      if (useMelanin) {
-        loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-        loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-        loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
-      }
-    } else {
-      // PATH B — Full body with RealVisXL + Venus Body LoRA + Melanin LoRA
-      width = 768;
-      height = 1152;
-
-      if (isFemale) {
-        const venusPrefix = 'venusbody, ';
-        const melaninPrefix = useMelanin ? 'melanin, ' : '';
-        const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
-        const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-        positivePrompt = `${venusPrefix}${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} woman, ${characterData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${characterData.hairStyle} ${characterData.hairColor} hair. She is wearing a stylish fitted outfit — a form-fitting bodycon dress or high-waisted jeans with a fitted top that clearly shows her body shape and proportions. Fully clothed. Full body shot from head to toe. Standing pose, confident stance. Clean studio background with soft professional lighting. 8k, masterpiece, best quality`;
-
-        loras.push({ filename: 'venus-body-xl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
-        if (useMelanin) {
-          loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-          loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-          loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
-        }
-      } else {
-        positivePrompt = `photorealistic full body photo of a ${characterData.age}-year-old ${resolvedEthnicity} man, ${characterData.skinTone} skin, ${characterData.bodyType || 'athletic build'}, ${characterData.hairStyle} ${characterData.hairColor} hair, wearing casual clothing, full body visible head to toe, standing, studio lighting, neutral gray background, 8k, masterpiece, best quality`;
-      }
-
-      negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
-    }
-
-    if (customPrompt) {
-      // User has provided a custom prompt — use it directly.
-      // Still ensure LoRA trigger words are prepended if not already present.
-      positivePrompt = customPrompt;
-      if (useMelanin && !/\bmelanin\b/i.test(positivePrompt)) {
-        positivePrompt = `melanin, ${positivePrompt}`;
-      }
-      if (useMelanin && !/dark chocolate skin tone style/i.test(positivePrompt)) {
-        positivePrompt = `dark chocolate skin tone style, ${positivePrompt}`;
-      }
-      if (useMelanin && !/Detailed natural skin/i.test(positivePrompt)) {
-        positivePrompt = `Detailed natural skin and blemishes without-makeup and acne, ${positivePrompt}`;
-      }
-      if (imageType === 'fullBody' && isFemale && !/\bvenusbody\b/i.test(positivePrompt)) {
-        positivePrompt = `venusbody, ${positivePrompt}`;
-      }
-    }
-
-    console.log(`[StoryPublisher] Prompt source: ${customPrompt ? 'custom override' : 'auto-built from description'}`);
-    console.log(`[StoryPublisher] SDXL positive prompt: ${positivePrompt.substring(0, 100)}...`);
-    console.log(`[StoryPublisher] LoRAs: ${loras.length > 0 ? loras.map(l => l.filename).join(", ") : "NONE"}`);
-    console.log(`[StoryPublisher] Seed: ${seed}`);
-
-    // 4. Build SDXL workflow
-    const workflow = buildSdxlWorkflow({
-      positivePrompt,
-      negativePrompt,
-      width,
-      height,
-      seed,
-      checkpointName: 'realvisxlV50_v50Bakedvae.safetensors',
-      loras,
-      filenamePrefix: `${imageType === "fullBody" ? "fullbody" : "portrait"}_${sluggedName}`,
+    // 3. Build generation payload (prompt, LoRAs, workflow)
+    const payload = await buildCharacterGenerationPayload({
+      character: {
+        id: character.id,
+        name: character.name,
+        description: character.description as Record<string, string>,
+      },
+      imageType,
+      seed: customSeed,
+      customPrompt,
     });
 
-    // Submit async job to RunPod (returns immediately)
-    const { jobId } = await submitRunPodJob(workflow);
+    console.log(`[StoryPublisher] Prompt source: ${customPrompt ? 'custom override' : 'auto-built from description'}`);
+    console.log(`[StoryPublisher] SDXL positive prompt: ${payload.positivePrompt.substring(0, 100)}...`);
+    console.log(`[StoryPublisher] LoRAs: ${payload.loras.length > 0 ? payload.loras.map(l => l.filename).join(", ") : "NONE"}`);
+    console.log(`[StoryPublisher] Seed: ${payload.seed}`);
 
-    // Create image record (stored_url will be set when status polling completes)
+    // 4. Submit async job to RunPod
+    const { jobId } = await submitRunPodJob(payload.workflow);
+
+    // 5. Create image record (stored_url will be set when status polling completes)
     const { data: imageRow, error: imgError } = await supabase
       .from("images")
       .insert({
         character_id: character.id,
-        prompt: positivePrompt,
+        prompt: payload.positivePrompt,
         settings: {
-          width,
-          height,
+          width: payload.width,
+          height: payload.height,
           engine: "sdxl-realvis",
           imageType,
-          seed,
+          seed: payload.seed,
         },
         mode: "sfw",
       })
@@ -258,7 +109,7 @@ export async function POST(
       throw new Error(`Failed to create image record: ${imgError?.message}`);
     }
 
-    // Create generation job record for status polling
+    // 6. Create generation job record for status polling
     await supabase.from("generation_jobs").insert({
       job_id: `runpod-${jobId}`,
       image_id: imageRow.id,
