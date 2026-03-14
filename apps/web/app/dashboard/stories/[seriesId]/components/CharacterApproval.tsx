@@ -876,9 +876,16 @@ export default function CharacterApproval({
       updateLoraState(storyCharId, { isTriggering: true, error: null });
 
       try {
+        const currentState = charStates[storyCharId]?.lora;
+        const isRetrain = currentState?.status === 'deployed';
+
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/train-lora`,
-          { method: "POST", headers: { "Content-Type": "application/json" } }
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(isRetrain ? { retrain: true } : {}),
+          }
         );
 
         if (!res.ok) {
@@ -887,6 +894,12 @@ export default function CharacterApproval({
         }
 
         const data = await res.json();
+
+        // Reset state so polling picks up the new pipeline progress
+        if (isRetrain) {
+          updateLoraState(storyCharId, { status: 'no_lora', loraId: null });
+        }
+
         updateLoraState(storyCharId, {
           isTriggering: false,
           status: "pending",
@@ -902,7 +915,7 @@ export default function CharacterApproval({
         });
       }
     },
-    [updateLoraState]
+    [updateLoraState, charStates]
   );
 
   const loraPollingTimers = useRef<Record<string, NodeJS.Timeout>>({});
@@ -1696,10 +1709,26 @@ function LoraTrainingSection({
         )}
 
         {isDeployed && (
-          <span className="flex items-center gap-1 text-xs text-green-400">
-            <Check className="h-3 w-3" />
-            LoRA Active
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-xs text-green-400">
+              <Check className="h-3 w-3" />
+              LoRA Active
+            </span>
+            <Button
+              onClick={onTrain}
+              disabled={loraState.isTriggering}
+              size="sm"
+              variant="outline"
+              className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+            >
+              {loraState.isTriggering ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Retrain
+            </Button>
+          </div>
         )}
       </div>
 

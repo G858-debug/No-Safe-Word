@@ -14,6 +14,9 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
+    // Read body early (stream can only be consumed once)
+    const body = await request.json().catch(() => ({}));
+
     // 1. Fetch the story character with its character data
     // Note: active_lora_id not in generated types yet, so use 'as any'
     const { data: storyChar, error: scError } = await (supabase as any)
@@ -58,10 +61,25 @@ export async function POST(
 
     if (existingProgress) {
       if (existingProgress.status === 'deployed') {
-        return NextResponse.json(
-          { error: "LoRA already deployed for this character", loraId: existingProgress.loraId },
-          { status: 409 }
-        );
+        if (!body.retrain) {
+          return NextResponse.json(
+            { error: "LoRA already deployed for this character. Send { retrain: true } to retrain.", loraId: existingProgress.loraId },
+            { status: 409 }
+          );
+        }
+
+        // Archive the existing deployed LoRA so a new one can be trained
+        console.log(`[LoRA Train] Archiving existing deployed LoRA ${existingProgress.loraId} for retrain`);
+        await supabase
+          .from('character_loras')
+          .update({ status: 'archived' })
+          .eq('id', existingProgress.loraId);
+
+        // Clear the active_lora_id so it doesn't reference the archived one
+        await supabase
+          .from('story_characters')
+          .update({ active_lora_id: null } as any)
+          .eq('id', storyCharId);
       }
       if (!['failed', 'archived'].includes(existingProgress.status)) {
         return NextResponse.json(
