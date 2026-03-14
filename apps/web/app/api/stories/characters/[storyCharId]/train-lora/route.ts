@@ -69,7 +69,7 @@ export async function POST(
         }
 
         // Archive the existing deployed LoRA so a new one can be trained
-        console.log(`[LoRA Train] Archiving existing deployed LoRA ${existingProgress.loraId} for retrain`);
+        console.log(`[LoRA Train] Retrain requested, archiving existing LoRA ${existingProgress.loraId}`);
         await supabase
           .from('character_loras')
           .update({ status: 'archived' })
@@ -80,8 +80,7 @@ export async function POST(
           .from('story_characters')
           .update({ active_lora_id: null } as any)
           .eq('id', storyCharId);
-      }
-      if (!['failed', 'archived'].includes(existingProgress.status)) {
+      } else if (!['failed', 'archived'].includes(existingProgress.status)) {
         return NextResponse.json(
           {
             error: "LoRA training already in progress",

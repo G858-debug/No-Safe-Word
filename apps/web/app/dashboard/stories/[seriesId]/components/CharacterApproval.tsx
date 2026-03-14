@@ -879,6 +879,10 @@ export default function CharacterApproval({
         const currentState = charStates[storyCharId]?.lora;
         const isRetrain = currentState?.status === 'deployed';
 
+        if (isRetrain) {
+          console.log('[Retrain] Sending retrain request for', storyCharId);
+        }
+
         const res = await fetch(
           `/api/stories/characters/${storyCharId}/train-lora`,
           {
