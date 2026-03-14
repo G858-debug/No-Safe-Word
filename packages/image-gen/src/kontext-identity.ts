@@ -27,7 +27,7 @@ export async function resolvePromptEthnicity(
 
   try {
     const response = await anthropic.messages.create({
-      model: "claude-haiku-3-5-20251001",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 5,
       system: "You are a classifier. Answer only with the single word YES or NO. No explanation, no punctuation, nothing else.",
       messages: [
