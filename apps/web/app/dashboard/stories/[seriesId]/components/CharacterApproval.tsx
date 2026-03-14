@@ -1781,7 +1781,7 @@ function LoraTrainingSection({
       )}
 
       {/* Error display */}
-      {isFailed && loraState.error && (
+      {loraState.error && (
         <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {loraState.error}
