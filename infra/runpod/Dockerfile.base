@@ -6,24 +6,18 @@ RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/pamparamm/ComfyUI-ppm.git && \
     cd ComfyUI-ppm && git checkout ebb35c7
 
-# ReActor: face-swap node for stitching approved face onto SDXL body portraits.
-# Uses InsightFace for face detection/alignment and inswapper for face replacement.
-# cmake + libgl are required to build insightface from source.
+# InsightFace + PuLID dependencies
+# cmake + libgl required to build insightface from source.
+# onnxruntime-gpu used by InsightFace face detection.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     curl \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
-ARG GITHUB_TOKEN
-RUN cd /comfyui/custom_nodes && \
-    git clone https://x-access-token:${GITHUB_TOKEN}@github.com/Gourieff/comfyui-reactor-node.git && \
-    cd comfyui-reactor-node && \
-    pip install -r requirements.txt && \
-    pip install insightface>=0.7 onnxruntime-gpu
+RUN pip install insightface>=0.7 onnxruntime-gpu
 
 # PuLID: Face identity injection for Flux (portrait pipeline + scene refinement).
-# InsightFace is already installed above via ReActor. PuLID reuses it.
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/cubiq/PuLID_ComfyUI
 
