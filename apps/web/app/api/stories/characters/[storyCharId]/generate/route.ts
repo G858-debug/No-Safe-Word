@@ -90,6 +90,17 @@ export async function POST(
     console.log(`[StoryPublisher] Engine: ${payload.engine}, Prompt: ${payload.positivePrompt.substring(0, 100)}...`);
     console.log(`[StoryPublisher] Seed: ${payload.seed}`);
 
+    // 4a. Pre-flight: for body stage with a face reference, verify the image exists in storage
+    if (stage === 'body' && payload.engine === 'replicate' && payload.referenceImageUrl) {
+      const headRes = await fetch(payload.referenceImageUrl, { method: 'HEAD' });
+      if (!headRes.ok) {
+        return NextResponse.json(
+          { error: "Face reference image not found — please regenerate and re-approve the face portrait first, then retry the body." },
+          { status: 422 },
+        );
+      }
+    }
+
     // 4. Branch by engine
     if (payload.engine === 'replicate') {
       // ---- Replicate path (Nano Banana Pro — synchronous) ----
