@@ -33,6 +33,22 @@ RUN pip install --upgrade "cython>=3.0" && \
     pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt && \
     pip install facenet-pytorch --no-deps
 
+# Diagnostic: verify PuLID module imports correctly at build time.
+# If this fails the build log will show the exact Python traceback.
+RUN cd /comfyui && python3 - <<'EOF'
+import sys
+sys.path.insert(0, '/comfyui')
+try:
+    import folder_paths
+    from custom_nodes.ComfyUI_PuLID_Flux_ll import pulidflux
+    print("PuLID import SUCCESS:", list(pulidflux.NODE_CLASS_MAPPINGS.keys()))
+except Exception as e:
+    import traceback
+    print("PuLID import FAILED:", e)
+    traceback.print_exc()
+    sys.exit(1)
+EOF
+
 # ---- Runtime Model Download ----
 # Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
 # on first startup to keep the image buildable on GitHub Actions runners.
