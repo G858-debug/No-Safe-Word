@@ -44,8 +44,9 @@ function buildSdxlFacePrompt(
     sentences.push(`${pronoun} has ${charData.distinguishingFeatures}.`);
   }
   sentences.push(
-    'Studio portrait. Head and shoulders only. Looking directly at the camera. ' +
-    'Clean grey studio background. Professional portrait lighting. 8k, masterpiece, best quality, highly detailed.'
+    'Beauty-editorial studio portrait. Head and shoulders only. Looking directly at the camera. ' +
+    'Warm natural daylight with soft fill light. Clean warm-toned background with subtle depth. ' +
+    '8k, masterpiece, best quality, highly detailed.'
   );
 
   return sentences.join(' ');
