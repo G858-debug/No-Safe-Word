@@ -8,9 +8,16 @@ RUN cd /comfyui/custom_nodes && \
 
 # ReActor: face-swap node for stitching approved face onto SDXL body portraits.
 # Uses InsightFace for face detection/alignment and inswapper for face replacement.
+# cmake + libgl are required to build insightface from source.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/Gourieff/comfyui-reactor-node.git && \
     cd comfyui-reactor-node && \
+    pip install -r requirements.txt && \
     pip install insightface>=0.7 onnxruntime-gpu
 
 # ---- Runtime Model Download ----

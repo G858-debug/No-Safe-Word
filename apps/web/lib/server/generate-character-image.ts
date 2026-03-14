@@ -380,7 +380,9 @@ function buildFemaleBodyPayload(
 
   const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
 
-  // ReActor face-swap is disabled — node not available on RunPod instance
+  // Add ReActor source face when approved face is available
+  const reactorSourceImageName = approvedFaceUrl ? 'source_face.png' : undefined;
+
   const workflow = buildSdxlWorkflow({
     positivePrompt,
     negativePrompt,
@@ -390,6 +392,7 @@ function buildFemaleBodyPayload(
     checkpointName: 'realvisxlV50_v50Bakedvae.safetensors',
     loras,
     filenamePrefix: `fullbody_${sluggedName}`,
+    reactorSourceImageName,
   });
 
   return {

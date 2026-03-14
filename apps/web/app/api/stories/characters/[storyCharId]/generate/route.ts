@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob, runNanoBanana } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, runNanoBanana } from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
 
 type ImageType = "portrait" | "fullBody";
@@ -175,8 +175,13 @@ export async function POST(
       const engineLabel = stage === 'face' && !isMale ? 'Flux Krea' : 'SDXL RealVisXL';
       console.log(`[StoryPublisher] Submitting to RunPod (${engineLabel})...`);
 
-      // ReActor face-swap is disabled — include only images from the payload
+      // For female body with ReActor: fetch face image and pass it in images[] array
       let runpodImages: Array<{ name: string; image: string }> | undefined;
+      if (stage === 'body' && !isMale && storyChar.face_url) {
+        console.log(`[StoryPublisher] Fetching approved face for ReActor: ${storyChar.face_url}`);
+        const faceBase64 = await imageUrlToBase64(storyChar.face_url);
+        runpodImages = [{ name: 'source_face.png', image: faceBase64 }];
+      }
 
       // Also include any images from the payload (for future extensibility)
       if (payload.images) {

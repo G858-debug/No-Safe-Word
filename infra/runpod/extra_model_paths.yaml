@@ -14,3 +14,4 @@ a_custom_path:
   upscale_models: models/upscale_models
   style_models: models/style_models
   clip_vision: models/clip_vision
+  insightface: models/insightface

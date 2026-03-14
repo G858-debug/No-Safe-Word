@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob, runNanoBanana } from "@no-safe-word/image-gen";
+import { submitRunPodJob, imageUrlToBase64, runNanoBanana } from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
 
 type ImageType = "portrait" | "fullBody";
@@ -181,8 +181,11 @@ export async function POST(
       });
     } else {
       // ---- RunPod path (SDXL via ComfyUI) ----
-      // ReActor face-swap is disabled — include only images from the payload
       let runpodImages: Array<{ name: string; image: string }> | undefined;
+      if (stage === 'body' && !isMale && storyChar.face_url) {
+        const faceBase64 = await imageUrlToBase64(storyChar.face_url);
+        runpodImages = [{ name: 'source_face.png', image: faceBase64 }];
+      }
 
       if (payload.images) {
         runpodImages = [...(runpodImages || []), ...payload.images];
