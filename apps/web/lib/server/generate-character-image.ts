@@ -396,6 +396,13 @@ function buildFemaleBodyPayload(
     'curvaceous figure, wearing a fitted outfit, fully clothed, photorealistic',
   ].filter(Boolean).join(', ');
 
+  // Flux body LoRAs for the PuLID pass — reinforces curvaceous body shape
+  // that text prompting alone cannot consistently produce.
+  const fluxLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
+    { filename: 'hourglassv32_FLUX.safetensors', strengthModel: 0.9, strengthClip: 0.9 },
+    { filename: 'fc-flux-perfect-busts.safetensors', strengthModel: 0.7, strengthClip: 0.7 },
+  ];
+
   const workflow = buildSdxlPulidPortraitWorkflow({
     positivePrompt,
     negativePrompt,
@@ -410,6 +417,7 @@ function buildFemaleBodyPayload(
     pulidDenoise: 0.85,
     fluxPositivePrompt,
     sfwMode: true,
+    fluxLoras,
   });
 
   return {

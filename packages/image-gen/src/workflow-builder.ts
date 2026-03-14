@@ -1005,6 +1005,9 @@ export interface SdxlPulidPortraitConfig {
   fluxPositivePrompt?: string;
   /** SFW mode for Flux model selection. Default: false (use NSFW checkpoint for body portraits) */
   sfwMode?: boolean;
+  /** Optional Flux LoRA stack for the PuLID pass — body shape, realism, etc.
+   *  Chained between UNETLoader/DualCLIPLoader and their downstream consumers. */
+  fluxLoras?: Array<{ filename: string; strengthModel: number; strengthClip: number }>;
 }
 
 /**
@@ -1136,15 +1139,6 @@ export function buildSdxlPulidPortraitWorkflow(
     inputs: { vae_name: 'ae.safetensors' },
   };
 
-  // Node 4: CLIPTextEncode — minimal Flux prompt (PuLID carries identity)
-  workflow['4'] = {
-    class_type: 'CLIPTextEncode',
-    inputs: {
-      text: config.fluxPositivePrompt ?? 'A full body portrait photograph, fully clothed, photorealistic, high quality.',
-      clip: ['2', 0],
-    },
-  };
-
   // Node 200: LoadImage — approved face portrait (identity reference for PuLID)
   workflow['200'] = {
     class_type: 'LoadImage',
@@ -1163,20 +1157,55 @@ export function buildSdxlPulidPortraitWorkflow(
     inputs: {},
   };
 
-  // Node 220: PulidInsightFaceLoader — face detection/alignment
-  workflow['220'] = {
+  // Node 210: PulidInsightFaceLoader — face detection/alignment
+  workflow['210'] = {
     class_type: 'PulidFluxInsightFaceLoader',
     inputs: { provider: 'CUDA' },
+  };
+
+  // ---- Optional Flux LoRA chain (nodes 220+) ----
+  // Body shape / realism LoRAs for the PuLID pass. Chained between
+  // UNETLoader(1)/DualCLIPLoader(2) and their downstream consumers
+  // (CLIPTextEncode node 4, ApplyPulidFlux node 203).
+  let fluxModelRef: [string, number] = ['1', 0];
+  let fluxClipRef: [string, number] = ['2', 0];
+
+  if (config.fluxLoras && config.fluxLoras.length > 0) {
+    for (let i = 0; i < config.fluxLoras.length; i++) {
+      const nodeId = String(220 + i);
+      const lora = config.fluxLoras[i];
+      workflow[nodeId] = {
+        class_type: 'LoraLoader',
+        inputs: {
+          lora_name: lora.filename,
+          strength_model: lora.strengthModel,
+          strength_clip: lora.strengthClip,
+          model: fluxModelRef,
+          clip: fluxClipRef,
+        },
+      };
+      fluxModelRef = [nodeId, 0];
+      fluxClipRef = [nodeId, 1];
+    }
+  }
+
+  // Node 4: CLIPTextEncode — minimal Flux prompt (uses LoRA-modified clip if LoRAs present)
+  workflow['4'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: config.fluxPositivePrompt ?? 'A full body portrait photograph, fully clothed, photorealistic, high quality.',
+      clip: fluxClipRef,
+    },
   };
 
   // Node 203: ApplyPulid — patch Flux model with face identity
   workflow['203'] = {
     class_type: 'ApplyPulidFlux',
     inputs: {
-      model: ['1', 0],
+      model: fluxModelRef,
       pulid_flux: ['201', 0],
       eva_clip: ['202', 0],
-      face_analysis: ['220', 0],
+      face_analysis: ['210', 0],
       image: ['200', 0],
       weight: pulidWeight,
       start_at: 0.0,
