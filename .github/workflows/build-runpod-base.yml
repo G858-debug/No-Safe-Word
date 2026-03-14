@@ -71,6 +71,7 @@ jobs:
         run: |
           docker build \
             --build-arg CIVITAI_API_KEY="${{ secrets.CIVITAI_API_KEY }}" \
+            --build-arg GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -f ./infra/runpod/Dockerfile.base \
             -t ${{ steps.tags.outputs.latest }} \
             -t ${{ steps.tags.outputs.sha }} \
