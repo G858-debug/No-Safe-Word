@@ -33,6 +33,17 @@ RUN pip install --upgrade "cython>=3.0" && \
     pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt && \
     pip install facenet-pytorch --no-deps
 
+# InsightFace buffalo_l — required by PulidFluxInsightFaceLoader at workflow runtime.
+# FaceAnalysis(name="buffalo_l") downloads ~230MB of ONNX models to ~/.insightface/models/buffalo_l/
+# on first call. Pre-download at build time so cold starts never hit the CDN.
+# ctx_id=-1 forces CPU mode (no CUDA available at build time on GitHub Actions runners).
+RUN python3 -c "from insightface.app import FaceAnalysis; m = FaceAnalysis(name='buffalo_l'); m.prepare(ctx_id=-1, det_size=(640, 640)); print('InsightFace buffalo_l ready:', sorted(m.models.keys()))"
+# Fail the build loudly if buffalo_l models are missing
+RUN echo "=== buffalo_l verification ===" && \
+    ls /root/.insightface/models/buffalo_l/ && \
+    echo "=== buffalo_l OK ===" || \
+    (echo "=== buffalo_l FAILED — aborting build ===" && exit 1)
+
 # ---- Runtime Model Download ----
 # Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
 # on first startup to keep the image buildable on GitHub Actions runners.

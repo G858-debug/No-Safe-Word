@@ -1335,8 +1335,8 @@ export default function CharacterApproval({
                     const hasImage = !!slot.imageUrl;
                     const displayUrl = slot.approved
                       ? slot.approvedUrl || slot.imageUrl
-                      : (type === "fullBody" && slot.previewUrl) ? slot.previewUrl : slot.imageUrl;
-                    const showingComposite = !slot.approved && type === "fullBody" && !!slot.previewUrl && displayUrl === slot.previewUrl;
+                      : slot.imageUrl;
+                    const showingComposite = false; // stitch-preview no longer used as primary display
                     const label = type === "portrait" ? "Face Portrait" : "Full Body";
                     const aspectClass = type === "portrait" ? "aspect-[3/4]" : "aspect-[5/8]";
                     const isBodyLocked = type === "fullBody" && !state.portrait.approved;
@@ -1406,8 +1406,8 @@ export default function CharacterApproval({
                                 <img
                                   src={displayUrl}
                                   alt={`${label} of ${ch.characters.name}`}
-                                  className={`h-full w-full ${showingComposite ? "object-contain" : "object-cover"} rounded-lg ${slot.approved ? "ring-2 ring-green-500/50" : ""}`}
-                                  style={showingComposite ? undefined : { aspectRatio: type === "portrait" ? "3/4" : "5/8" }}
+                                  className={`h-full w-full object-cover rounded-lg ${slot.approved ? "ring-2 ring-green-500/50" : ""}`}
+                                  style={{ aspectRatio: type === "portrait" ? "3/4" : "5/8" }}
                                 />
                                 {slot.approved && (
                                   <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-sm">
@@ -1415,9 +1415,6 @@ export default function CharacterApproval({
                                   </div>
                                 )}
                               </div>
-                              {showingComposite && (
-                                <p className="text-zinc-500 text-xs mt-1">Preview: face + body composite</p>
-                              )}
                             </>
                           ) : (
                             <div className={`flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 ${aspectClass}`}>

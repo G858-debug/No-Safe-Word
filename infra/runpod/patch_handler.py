@@ -150,6 +150,12 @@ def _nsw_patched_start(config):
                     diag["comfyui_object_info_error"] = str(e)
             else:
                 diag["comfyui_object_info_error"] = "ComfyUI did not start within 5 minutes"
+            # Check InsightFace buffalo_l models — required by PulidFluxInsightFaceLoader at runtime
+            buffalo_l_dir = "/root/.insightface/models/buffalo_l"
+            if _nsw_os.path.isdir(buffalo_l_dir):
+                diag["insightface_buffalo_l"] = sorted(_nsw_os.listdir(buffalo_l_dir))
+            else:
+                diag["insightface_buffalo_l"] = "NOT FOUND — PulidFluxInsightFaceLoader will download at runtime"
             # Read PuLID startup import test log (written by start-wrapper.sh)
             pulid_log = "/tmp/pulid_import.log"
             if _nsw_os.path.isfile(pulid_log):
