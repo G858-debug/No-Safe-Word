@@ -393,8 +393,7 @@ function buildFemaleBodyPayload(
   const fluxPositivePrompt = [
     'full body portrait of a woman',
     hairDesc ? `with ${hairDesc} hair` : null,
-    charData.bodyType ? charData.bodyType : 'curvaceous figure',
-    'fully clothed, photorealistic',
+    'curvaceous figure, wearing a fitted outfit, fully clothed, photorealistic',
   ].filter(Boolean).join(', ');
 
   const workflow = buildSdxlPulidPortraitWorkflow({

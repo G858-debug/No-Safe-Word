@@ -3,7 +3,8 @@
     "allow": [
       "Bash(*)",
       "WebSearch",
-      "WebFetch(domain:comfyai.run)"
+      "WebFetch(domain:comfyai.run)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }
