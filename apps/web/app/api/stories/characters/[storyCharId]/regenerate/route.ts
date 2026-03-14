@@ -66,6 +66,11 @@ export async function POST(
 
         for (const img of oldImages) {
           if (img.stored_url) {
+            // When regenerating body, preserve the approved face image so it can
+            // be used as the reference for Nano Banana Pro / ReActor.
+            if (stage === 'body' && storyChar.face_url && img.stored_url === storyChar.face_url) {
+              continue;
+            }
             const urlParts = img.stored_url.split("/story-images/");
             if (urlParts.length === 2) {
               pathsToDelete.push(urlParts[1]);
