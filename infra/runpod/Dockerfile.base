@@ -19,7 +19,8 @@ RUN pip install insightface>=0.7 onnxruntime-gpu
 
 # PuLID: Face identity injection for Flux (portrait pipeline + scene refinement).
 RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/cubiq/PuLID_ComfyUI
+    git clone https://github.com/cubiq/PuLID_ComfyUI && \
+    pip install -r PuLID_ComfyUI/requirements.txt
 
 # ---- Runtime Model Download ----
 # Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded

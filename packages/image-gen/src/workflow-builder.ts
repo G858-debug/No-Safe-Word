@@ -383,26 +383,34 @@ function buildKontextSingleWorkflow(
       inputs: { image: config.pulid.primaryFaceImageName },
     };
 
-    // Node 301: PuLIDModelLoader
+    // Node 301: PulidModelLoader
     workflow['301'] = {
-      class_type: 'PuLIDModelLoader',
+      class_type: 'PulidModelLoader',
       inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
     };
 
-    // Node 302: EVACLIPLoader
+    // Node 302: PulidEvaClipLoader (no required inputs)
     workflow['302'] = {
-      class_type: 'EVACLIPLoader',
-      inputs: { model_name: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+      class_type: 'PulidEvaClipLoader',
+      inputs: {},
     };
 
-    // Node 303: ApplyPulidFlux — patch Flux model with face identity
+    // Node 315: PulidInsightFaceLoader — face detection/alignment (reuses InsightFace)
+    workflow['315'] = {
+      class_type: 'PulidInsightFaceLoader',
+      inputs: { provider: 'CUDA' },
+    };
+
+    // Node 303: ApplyPulid — patch Flux model with face identity
     workflow['303'] = {
-      class_type: 'ApplyPulidFlux',
+      class_type: 'ApplyPulid',
       inputs: {
         model: modelRef,
         pulid: ['301', 0],
         eva_clip: ['302', 0],
-        face_image: ['300', 0],
+        face_analysis: ['315', 0],
+        image: ['300', 0],
+        method: 'fidelity',
         weight: pulidWeight,
         start_at: 0.0,
         end_at: 1.0,
@@ -850,14 +858,18 @@ function buildKontextDualWorkflow(
     const pulidWeight = config.pulid.weight ?? 0.85;
     const pulidDenoise = config.pulid.denoiseStrength ?? 0.5;
 
-    // Shared nodes — PuLID model + EVA CLIP loaded once, reused by both passes
+    // Shared nodes — PuLID model + EVA CLIP + InsightFace loaded once, reused by both passes
     workflow['301'] = {
-      class_type: 'PuLIDModelLoader',
+      class_type: 'PulidModelLoader',
       inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
     };
     workflow['302'] = {
-      class_type: 'EVACLIPLoader',
-      inputs: { model_name: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+      class_type: 'PulidEvaClipLoader',
+      inputs: {},
+    };
+    workflow['315'] = {
+      class_type: 'PulidInsightFaceLoader',
+      inputs: { provider: 'CUDA' },
     };
 
     // ── Pass 1: Primary character face ──
@@ -866,12 +878,14 @@ function buildKontextDualWorkflow(
       inputs: { image: config.pulid.primaryFaceImageName },
     };
     workflow['303'] = {
-      class_type: 'ApplyPulidFlux',
+      class_type: 'ApplyPulid',
       inputs: {
         model: modelRef,
         pulid: ['301', 0],
         eva_clip: ['302', 0],
-        face_image: ['300', 0],
+        face_analysis: ['315', 0],
+        image: ['300', 0],
+        method: 'fidelity',
         weight: pulidWeight,
         start_at: 0.0,
         end_at: 1.0,
@@ -908,12 +922,14 @@ function buildKontextDualWorkflow(
         inputs: { image: config.pulid.secondaryFaceImageName },
       };
       workflow['311'] = {
-        class_type: 'ApplyPulidFlux',
+        class_type: 'ApplyPulid',
         inputs: {
           model: modelRef,    // Apply to base model, not pass-1 patched model
           pulid: ['301', 0],
           eva_clip: ['302', 0],
-          face_image: ['310', 0],
+          face_analysis: ['315', 0],
+          image: ['310', 0],
+          method: 'fidelity',
           weight: pulidWeight,
           start_at: 0.0,
           end_at: 1.0,
@@ -1136,26 +1152,34 @@ export function buildSdxlPulidPortraitWorkflow(
     inputs: { image: config.faceRefImageName },
   };
 
-  // Node 201: PuLIDModelLoader
+  // Node 201: PulidModelLoader
   workflow['201'] = {
-    class_type: 'PuLIDModelLoader',
+    class_type: 'PulidModelLoader',
     inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
   };
 
-  // Node 202: EVACLIPLoader
+  // Node 202: PulidEvaClipLoader (no required inputs)
   workflow['202'] = {
-    class_type: 'EVACLIPLoader',
-    inputs: { model_name: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+    class_type: 'PulidEvaClipLoader',
+    inputs: {},
   };
 
-  // Node 203: ApplyPulidFlux — patch Flux model with face identity
+  // Node 220: PulidInsightFaceLoader — face detection/alignment
+  workflow['220'] = {
+    class_type: 'PulidInsightFaceLoader',
+    inputs: { provider: 'CUDA' },
+  };
+
+  // Node 203: ApplyPulid — patch Flux model with face identity
   workflow['203'] = {
-    class_type: 'ApplyPulidFlux',
+    class_type: 'ApplyPulid',
     inputs: {
       model: ['1', 0],
       pulid: ['201', 0],
       eva_clip: ['202', 0],
-      face_image: ['200', 0],
+      face_analysis: ['220', 0],
+      image: ['200', 0],
+      method: 'fidelity',
       weight: pulidWeight,
       start_at: 0.0,
       end_at: 1.0,
