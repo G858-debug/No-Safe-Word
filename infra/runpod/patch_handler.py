@@ -105,10 +105,10 @@ def _nsw_patched_start(config):
     def _nsw_wrapped(job):
         job_input = job.get("input", {})
 
-        # Diagnostic mode: return file listings of model directories
+        # Diagnostic mode: return file listings of model directories + ComfyUI node info
         if job_input.get("nsw_diagnostic"):
             diag = {}
-            for subdir in ["checkpoints", "loras", "diffusion_models", "clip", "vae"]:
+            for subdir in ["checkpoints", "loras", "diffusion_models", "clip", "vae", "pulid", "insightface"]:
                 for base in [_nsw_COMFY_DIR + "/models", "/runpod-volume/models"]:
                     d = _nsw_os.path.join(base, subdir)
                     key = d
@@ -124,6 +124,19 @@ def _nsw_patched_start(config):
                         diag[key] = files
                     else:
                         diag[key] = "NOT FOUND"
+            # Check custom_nodes directory
+            custom_nodes_dir = _nsw_os.path.join(_nsw_COMFY_DIR, "custom_nodes")
+            if _nsw_os.path.isdir(custom_nodes_dir):
+                diag["custom_nodes"] = sorted(_nsw_os.listdir(custom_nodes_dir))
+            # Query ComfyUI /object_info for registered nodes
+            try:
+                r = _nsw_requests.get(f"http://{_nsw_COMFY_HOST}/object_info", timeout=15)
+                all_nodes = list(r.json().keys())
+                diag["comfyui_pulid_nodes"] = [n for n in all_nodes if "pulid" in n.lower()]
+                diag["comfyui_face_nodes"] = [n for n in all_nodes if any(x in n.lower() for x in ["face", "insight", "reactor"])]
+                diag["comfyui_total_nodes"] = len(all_nodes)
+            except Exception as e:
+                diag["comfyui_object_info_error"] = str(e)
             # Also check for download log
             log_path = "/runpod-volume/nsw-download.log"
             if _nsw_os.path.isfile(log_path):
