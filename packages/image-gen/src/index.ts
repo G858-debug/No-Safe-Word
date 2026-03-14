@@ -10,8 +10,8 @@ export {
 } from './runpod';
 export type { CharacterLoraDownload } from './runpod';
 
-export { buildKontextWorkflow, buildSdxlWorkflow } from './workflow-builder';
-export type { KontextWorkflowConfig, KontextWorkflowType, SdxlWorkflowConfig } from './workflow-builder';
+export { buildKontextWorkflow, buildSdxlWorkflow, buildSdxlPulidPortraitWorkflow } from './workflow-builder';
+export type { KontextWorkflowConfig, KontextWorkflowType, SdxlWorkflowConfig, SdxlPulidPortraitConfig } from './workflow-builder';
 
 export { classifyScene } from './scene-classifier';
 export type { SceneClassification, ImageType, InteractionType } from './scene-classifier';

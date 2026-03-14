@@ -428,6 +428,68 @@ except Exception as e:
     { rm -f "${CLIPV_DEST}.tmp"; echo "[NSW] ✗✗ sigclip_vision_patch14_384.safetensors FAILED"; FAILED=$((FAILED + 1)); }
 fi
 
+# ---- PuLID Models ----
+
+# PuLID Flux v0.9.1 — face identity injection model (~577MB).
+# HuggingFace: guozinan/PuLID. ComfyUI folder_paths["pulid"] → /runpod-volume/models/pulid/
+PULID_DIR="/runpod-volume/models/pulid"
+PULID_DEST="${PULID_DIR}/pulid_flux_v0.9.1.safetensors"
+PULID_URL="https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors"
+if [ -f "$PULID_DEST" ]; then
+    echo "[NSW] ✓ pulid_flux_v0.9.1.safetensors (exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${PULID_DIR}"
+    echo "[NSW] Downloading pulid_flux_v0.9.1.safetensors from HuggingFace..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${PULID_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    token = '${HUGGINGFACE_TOKEN:-${HF_TOKEN:-}}'
+    if token:
+        req.add_header('Authorization', f'Bearer {token}')
+    resp = urllib.request.urlopen(req, timeout=600)
+    with open('${PULID_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${PULID_DEST}.tmp" "${PULID_DEST}" && \
+    echo "[NSW] ✓ pulid_flux_v0.9.1.safetensors (downloaded)" || \
+    { rm -f "${PULID_DEST}.tmp"; echo "[NSW] ✗✗ pulid_flux_v0.9.1.safetensors FAILED"; FAILED=$((FAILED + 1)); }
+fi
+
+# EVA02 CLIP L 336 — required by PuLID for face encoding (~1.3GB).
+# HuggingFace: QuanSun/EVA-CLIP. ComfyUI folder_paths["clip"] → /runpod-volume/models/clip/
+EVACLIP_DIR="/runpod-volume/models/clip"
+EVACLIP_DEST="${EVACLIP_DIR}/EVA02_CLIP_L_336_psz14_s6B.pt"
+EVACLIP_URL="https://huggingface.co/QuanSun/EVA-CLIP/resolve/main/EVA02_CLIP_L_336_psz14_s6B.pt"
+if [ -f "$EVACLIP_DEST" ]; then
+    echo "[NSW] ✓ EVA02_CLIP_L_336_psz14_s6B.pt (exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${EVACLIP_DIR}"
+    echo "[NSW] Downloading EVA02_CLIP_L_336_psz14_s6B.pt from HuggingFace..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${EVACLIP_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    token = '${HUGGINGFACE_TOKEN:-${HF_TOKEN:-}}'
+    if token:
+        req.add_header('Authorization', f'Bearer {token}')
+    resp = urllib.request.urlopen(req, timeout=900)
+    with open('${EVACLIP_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${EVACLIP_DEST}.tmp" "${EVACLIP_DEST}" && \
+    echo "[NSW] ✓ EVA02_CLIP_L_336_psz14_s6B.pt (downloaded)" || \
+    { rm -f "${EVACLIP_DEST}.tmp"; echo "[NSW] ✗✗ EVA02_CLIP_L_336_psz14_s6B.pt FAILED"; FAILED=$((FAILED + 1)); }
+fi
+
 # ---- ReActor Face-Swap Models ----
 # InsightFace inswapper model (~370MB) — core face-swap engine used by ReActor node.
 # Downloaded from HuggingFace (ezioruan/inswapper_128.onnx mirror).

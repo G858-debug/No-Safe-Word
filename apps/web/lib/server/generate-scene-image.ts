@@ -211,10 +211,14 @@ export async function buildSceneGenerationPayload(
   // ── Reference images ──
   let kontextImages: Array<{ name: string; image: string }> = [];
 
+  // Track face reference URLs for PuLID (separate from Redux combined ref images)
+  let primaryFaceUrl: string | null = null;
+  let secondaryFaceUrl: string | null = null;
+
   if (kontextType !== "portrait" && imgPrompt.character_id) {
     const { data: sc } = await supabase
       .from("story_characters")
-      .select("approved_image_id, approved_fullbody_image_id")
+      .select("approved_image_id, approved_fullbody_image_id, face_url")
       .eq("series_id", seriesId)
       .eq("character_id", imgPrompt.character_id)
       .single();
@@ -251,6 +255,14 @@ export async function buildSceneGenerationPayload(
       const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
       kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
       console.log(`[Kontext][${promptId}] Combined face + body ref images vertically for "${charName}"`);
+
+      // Capture face_url for PuLID face reference
+      if (sc.face_url) {
+        primaryFaceUrl = sc.face_url;
+        const primaryFaceRefBase64 = await imageUrlToBase64(sc.face_url);
+        kontextImages.push({ name: "face_reference.png", image: primaryFaceRefBase64 });
+        console.log(`[Kontext][${promptId}] PuLID face reference added for "${charName}"`);
+      }
     } else {
       // Dual-character: face + body for primary
       console.log(
@@ -275,6 +287,13 @@ export async function buildSceneGenerationPayload(
           } else if (faceBase64) {
             kontextImages.push({ name: "primary_ref.png", image: faceBase64 });
             console.warn(`[Kontext][${promptId}] Primary ref: face only (body fetch failed)`);
+          }
+          // Capture face_url for PuLID face reference (dual primary)
+          if (sc.face_url) {
+            primaryFaceUrl = sc.face_url;
+            const primaryFaceRefBase64 = await imageUrlToBase64(sc.face_url);
+            kontextImages.push({ name: "face_reference.png", image: primaryFaceRefBase64 });
+            console.log(`[Kontext][${promptId}] PuLID face reference added for primary "${charName}"`);
           }
         } else {
           const { data: img } = await supabase
@@ -310,7 +329,7 @@ export async function buildSceneGenerationPayload(
 
     const { data: sc2 } = await supabase
       .from("story_characters")
-      .select("approved_image_id, approved_fullbody_image_id")
+      .select("approved_image_id, approved_fullbody_image_id, face_url")
       .eq("series_id", seriesId)
       .eq("character_id", imgPrompt.secondary_character_id)
       .single();
@@ -350,6 +369,14 @@ export async function buildSceneGenerationPayload(
     console.log(
       `[Kontext][${promptId}] Secondary ref: face+body vertically stitched for "${secondaryName}" (${Math.round(stitchedSecondary.length / 1024)}KB base64)`,
     );
+
+    // Capture face_url for PuLID secondary face reference
+    if (sc2.face_url) {
+      secondaryFaceUrl = sc2.face_url;
+      const secondaryFaceRefBase64 = await imageUrlToBase64(sc2.face_url);
+      kontextImages.push({ name: "secondary_face_reference.png", image: secondaryFaceRefBase64 });
+      console.log(`[Kontext][${promptId}] PuLID secondary face reference added for "${secondaryName}"`);
+    }
   }
 
   // ── Dual scene: require both refs, combine, no silent fallback ──
@@ -540,6 +567,25 @@ export async function buildSceneGenerationPayload(
   }
 
   // ── Workflow ──
+  // Build PuLID config when face references are available.
+  // Falls back to Redux-only (no PuLID) if face_url is missing for a character.
+  const pulidConfig = primaryFaceUrl
+    ? {
+        primaryFaceImageName: 'face_reference.png',
+        secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.png' : undefined,
+        weight: 0.85,
+        denoiseStrength: 0.5,
+      }
+    : undefined;
+
+  if (effectiveKontextType !== 'portrait') {
+    if (primaryFaceUrl) {
+      console.log(`[Kontext][${promptId}] PuLID enabled: primary face ref present${secondaryFaceUrl ? ', secondary face ref present' : ', secondary face ref absent (single PuLID pass)'}`);
+    } else {
+      console.log(`[Kontext][${promptId}] PuLID disabled: no face_url for primary character — Redux-only identity`);
+    }
+  }
+
   const kontextWorkflow = buildKontextWorkflow({
     type: effectiveKontextType,
     positivePrompt: kontextPositivePrompt,
@@ -551,6 +597,7 @@ export async function buildSceneGenerationPayload(
     loras: kontextLoras,
     guidance: 3.5,
     sfwMode,
+    pulid: pulidConfig,
   });
 
   // ── Structured generation summary ──

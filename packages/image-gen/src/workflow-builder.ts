@@ -36,6 +36,25 @@ export interface KontextWorkflowConfig {
    *  Higher = stronger identity preservation, lower = more creative freedom.
    *  Range 0.0–1.0. Default: 0.65 */
   reduxStrength?: number;
+  /**
+   * Optional PuLID face identity refinement pass.
+   * When set, a second KSampler pass is appended after the main generation.
+   * The pass applies ApplyPulidFlux to the Flux model using the provided face
+   * reference images, then re-samples with partial denoise to refine face identity
+   * while preserving scene composition.
+   *
+   * Image names must match entries in the RunPod images[] array.
+   */
+  pulid?: {
+    /** Primary character face reference image name (e.g. 'face_reference.png') */
+    primaryFaceImageName: string;
+    /** Secondary character face reference (dual scenes only) */
+    secondaryFaceImageName?: string;
+    /** PuLID model influence strength. Default: 0.85 */
+    weight?: number;
+    /** KSampler denoise for the refinement pass. Default: 0.5 */
+    denoiseStrength?: number;
+  };
 }
 
 /**
@@ -347,14 +366,102 @@ function buildKontextSingleWorkflow(
     },
   };
 
-  // Node 14: SaveImage
-  workflow['14'] = {
-    class_type: 'SaveImage',
-    inputs: {
-      filename_prefix: config.filenamePrefix,
-      images: ['13', 0],
-    },
-  };
+  // ---- Optional PuLID face identity refinement pass (nodes 300–307) ----
+  // When pulid config is set, append a second KSampler pass that patches the
+  // Flux model with ApplyPulidFlux using the character's approved face reference.
+  // The main generation output (node 13) is re-encoded as the starting latent,
+  // then re-sampled at partial denoise to refine face identity while preserving
+  // scene composition. Node 14 (SaveImage) is only added when PuLID is NOT used;
+  // the PuLID pass adds its own SaveImage at node 307.
+  if (config.pulid) {
+    const pulidWeight = config.pulid.weight ?? 0.85;
+    const pulidDenoise = config.pulid.denoiseStrength ?? 0.5;
+
+    // Node 300: LoadImage — primary character face reference
+    workflow['300'] = {
+      class_type: 'LoadImage',
+      inputs: { image: config.pulid.primaryFaceImageName },
+    };
+
+    // Node 301: PuLIDModelLoader
+    workflow['301'] = {
+      class_type: 'PuLIDModelLoader',
+      inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
+    };
+
+    // Node 302: EVACLIPLoader
+    workflow['302'] = {
+      class_type: 'EVACLIPLoader',
+      inputs: { model_name: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+    };
+
+    // Node 303: ApplyPulidFlux — patch Flux model with face identity
+    workflow['303'] = {
+      class_type: 'ApplyPulidFlux',
+      inputs: {
+        model: modelRef,
+        pulid: ['301', 0],
+        eva_clip: ['302', 0],
+        face_image: ['300', 0],
+        weight: pulidWeight,
+        start_at: 0.0,
+        end_at: 1.0,
+      },
+    };
+
+    // Node 304: VAEEncode — re-encode main generation output as latent for refinement
+    workflow['304'] = {
+      class_type: 'VAEEncode',
+      inputs: {
+        pixels: ['13', 0],
+        vae: ['3', 0],
+      },
+    };
+
+    // Node 305: KSampler — refinement pass with PuLID-patched model
+    workflow['305'] = {
+      class_type: 'KSampler',
+      inputs: {
+        model: ['303', 0],
+        positive: ['9', 0],    // Reuse main FluxGuidance conditioning
+        negative: ['10', 0],   // Reuse zeroed negative
+        latent_image: ['304', 0],
+        seed: config.seed + 1,
+        steps: 20,
+        cfg: 1.0,
+        sampler_name: 'euler',
+        scheduler: 'simple',
+        denoise: pulidDenoise,
+      },
+    };
+
+    // Node 306: VAEDecode
+    workflow['306'] = {
+      class_type: 'VAEDecode',
+      inputs: {
+        samples: ['305', 0],
+        vae: ['3', 0],
+      },
+    };
+
+    // Node 307: SaveImage (final output — replaces node 14)
+    workflow['307'] = {
+      class_type: 'SaveImage',
+      inputs: {
+        filename_prefix: config.filenamePrefix,
+        images: ['306', 0],
+      },
+    };
+  } else {
+    // Node 14: SaveImage (no PuLID — direct output from main KSampler)
+    workflow['14'] = {
+      class_type: 'SaveImage',
+      inputs: {
+        filename_prefix: config.filenamePrefix,
+        images: ['13', 0],
+      },
+    };
+  }
 
   return workflow;
 }
@@ -733,12 +840,378 @@ function buildKontextDualWorkflow(
     },
   };
 
-  // Node 14: SaveImage
-  workflow['14'] = {
+  // ---- Optional PuLID face identity refinement — dual scene (two sequential passes) ----
+  // Pass 1 refines the primary character's face; pass 2 refines the secondary.
+  // Both passes apply PuLID to the same base modelRef (not compounded) to prevent
+  // one character's identity from contaminating the other.
+  // Note: without spatial masking, each pass affects the full image. The second pass
+  // may slightly alter the first character's face. Spatial masking can be added later.
+  if (config.pulid) {
+    const pulidWeight = config.pulid.weight ?? 0.85;
+    const pulidDenoise = config.pulid.denoiseStrength ?? 0.5;
+
+    // Shared nodes — PuLID model + EVA CLIP loaded once, reused by both passes
+    workflow['301'] = {
+      class_type: 'PuLIDModelLoader',
+      inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
+    };
+    workflow['302'] = {
+      class_type: 'EVACLIPLoader',
+      inputs: { model_name: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+    };
+
+    // ── Pass 1: Primary character face ──
+    workflow['300'] = {
+      class_type: 'LoadImage',
+      inputs: { image: config.pulid.primaryFaceImageName },
+    };
+    workflow['303'] = {
+      class_type: 'ApplyPulidFlux',
+      inputs: {
+        model: modelRef,
+        pulid: ['301', 0],
+        eva_clip: ['302', 0],
+        face_image: ['300', 0],
+        weight: pulidWeight,
+        start_at: 0.0,
+        end_at: 1.0,
+      },
+    };
+    workflow['304'] = {
+      class_type: 'VAEEncode',
+      inputs: { pixels: ['13', 0], vae: ['3', 0] },
+    };
+    workflow['305'] = {
+      class_type: 'KSampler',
+      inputs: {
+        model: ['303', 0],
+        positive: ['9', 0],
+        negative: ['10', 0],
+        latent_image: ['304', 0],
+        seed: config.seed + 1,
+        steps: 20,
+        cfg: 1.0,
+        sampler_name: 'euler',
+        scheduler: 'simple',
+        denoise: pulidDenoise,
+      },
+    };
+    workflow['306'] = {
+      class_type: 'VAEDecode',
+      inputs: { samples: ['305', 0], vae: ['3', 0] },
+    };
+
+    if (config.pulid.secondaryFaceImageName) {
+      // ── Pass 2: Secondary character face ──
+      workflow['310'] = {
+        class_type: 'LoadImage',
+        inputs: { image: config.pulid.secondaryFaceImageName },
+      };
+      workflow['311'] = {
+        class_type: 'ApplyPulidFlux',
+        inputs: {
+          model: modelRef,    // Apply to base model, not pass-1 patched model
+          pulid: ['301', 0],
+          eva_clip: ['302', 0],
+          face_image: ['310', 0],
+          weight: pulidWeight,
+          start_at: 0.0,
+          end_at: 1.0,
+        },
+      };
+      workflow['312'] = {
+        class_type: 'VAEEncode',
+        inputs: { pixels: ['306', 0], vae: ['3', 0] },  // pass-1 output as input
+      };
+      workflow['313'] = {
+        class_type: 'KSampler',
+        inputs: {
+          model: ['311', 0],
+          positive: ['9', 0],
+          negative: ['10', 0],
+          latent_image: ['312', 0],
+          seed: config.seed + 2,
+          steps: 20,
+          cfg: 1.0,
+          sampler_name: 'euler',
+          scheduler: 'simple',
+          denoise: pulidDenoise,
+        },
+      };
+      workflow['314'] = {
+        class_type: 'VAEDecode',
+        inputs: { samples: ['313', 0], vae: ['3', 0] },
+      };
+      workflow['14'] = {
+        class_type: 'SaveImage',
+        inputs: { filename_prefix: config.filenamePrefix, images: ['314', 0] },
+      };
+    } else {
+      // Only primary face — single PuLID pass on dual scene
+      workflow['14'] = {
+        class_type: 'SaveImage',
+        inputs: { filename_prefix: config.filenamePrefix, images: ['306', 0] },
+      };
+    }
+  } else {
+    // Node 14: SaveImage (no PuLID)
+    workflow['14'] = {
+      class_type: 'SaveImage',
+      inputs: {
+        filename_prefix: config.filenamePrefix,
+        images: ['13', 0],
+      },
+    };
+  }
+
+  return workflow;
+}
+
+// ============================================================
+// Combined SDXL body + Flux PuLID portrait workflow
+// ============================================================
+
+export interface SdxlPulidPortraitConfig {
+  // SDXL body generation section
+  positivePrompt: string;
+  negativePrompt: string;
+  width: number;
+  height: number;
+  seed: number;
+  checkpointName: string;
+  loras?: Array<{ filename: string; strengthModel: number; strengthClip: number }>;
+  filenamePrefix: string;
+  // Flux + PuLID face injection section
+  /** Approved face portrait image name — must match images[].name in RunPod request */
+  faceRefImageName: string;
+  /** PuLID model influence strength. Default: 0.95 */
+  pulidWeight?: number;
+  /** KSampler denoise for PuLID pass — preserves SDXL body, repaints face. Default: 0.65 */
+  pulidDenoise?: number;
+  /** SFW mode for Flux model selection. Default: false (use NSFW checkpoint for body portraits) */
+  sfwMode?: boolean;
+}
+
+/**
+ * Build a combined SDXL body + Flux PuLID portrait workflow.
+ *
+ * Architecture (one ComfyUI graph, one RunPod job):
+ *
+ *   SDXL section (nodes 100–115):
+ *     CheckpointLoaderSimple → LoRA chain → CLIPTextEncode × 2
+ *     → EmptyLatentImage → KSampler → VAEDecode (body pixels)
+ *
+ *   Flux + PuLID section (nodes 1–4, 200–209):
+ *     UNETLoader + DualCLIPLoader + VAELoader → CLIPTextEncode
+ *     PuLIDModelLoader + EVACLIPLoader + LoadImage(face_ref)
+ *     → ApplyPulidFlux (patches Flux model with face identity)
+ *     → VAEEncode(SDXL body) → KSampler(denoise=0.65) → VAEDecode → SaveImage
+ *
+ * ComfyUI unloads SDXL before loading Flux, so VRAM is not additive.
+ * The SDXL body is never saved — it's an intermediate pixel buffer only.
+ */
+export function buildSdxlPulidPortraitWorkflow(
+  config: SdxlPulidPortraitConfig,
+): Record<string, any> {
+  const workflow: Record<string, any> = {};
+  const pulidWeight = config.pulidWeight ?? 0.95;
+  const pulidDenoise = config.pulidDenoise ?? 0.65;
+
+  const fluxModelName = config.sfwMode === false
+    ? (process.env.KONTEXT_NSFW_MODEL || process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors')
+    : (process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors');
+
+  // ── SDXL section ──────────────────────────────────────────────────────
+
+  // Node 100: CheckpointLoaderSimple — RealVisXL V5.0
+  workflow['100'] = {
+    class_type: 'CheckpointLoaderSimple',
+    inputs: { ckpt_name: config.checkpointName },
+  };
+
+  // LoRA chain (nodes 110+) — curvy-body, melanin, skin LoRAs etc.
+  let sdxlModelRef: [string, number] = ['100', 0];
+  let sdxlClipRef: [string, number] = ['100', 1];
+
+  if (config.loras && config.loras.length > 0) {
+    const capped = config.loras.slice(0, 6);
+    for (let i = 0; i < capped.length; i++) {
+      const nodeId = String(110 + i);
+      const lora = capped[i];
+      workflow[nodeId] = {
+        class_type: 'LoraLoader',
+        inputs: {
+          lora_name: lora.filename,
+          strength_model: lora.strengthModel,
+          strength_clip: lora.strengthClip,
+          model: sdxlModelRef,
+          clip: sdxlClipRef,
+        },
+      };
+      sdxlModelRef = [nodeId, 0];
+      sdxlClipRef = [nodeId, 1];
+    }
+  }
+
+  // Node 101: CLIPTextEncode positive (SDXL body prompt)
+  workflow['101'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: config.positivePrompt, clip: sdxlClipRef },
+  };
+
+  // Node 102: CLIPTextEncode negative
+  workflow['102'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: config.negativePrompt, clip: sdxlClipRef },
+  };
+
+  // Node 103: EmptyLatentImage
+  workflow['103'] = {
+    class_type: 'EmptyLatentImage',
+    inputs: { width: config.width, height: config.height, batch_size: 1 },
+  };
+
+  // Node 104: KSampler — SDXL body generation
+  workflow['104'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: sdxlModelRef,
+      positive: ['101', 0],
+      negative: ['102', 0],
+      latent_image: ['103', 0],
+      seed: config.seed,
+      steps: 30,
+      cfg: 7.0,
+      sampler_name: 'dpmpp_2m',
+      scheduler: 'karras',
+      denoise: 1.0,
+    },
+  };
+
+  // Node 105: VAEDecode — SDXL body → pixel buffer (intermediate, not saved)
+  workflow['105'] = {
+    class_type: 'VAEDecode',
+    inputs: {
+      samples: ['104', 0],
+      vae: ['100', 2],  // SDXL checkpoint VAE output
+    },
+  };
+
+  // ── Flux + PuLID section ──────────────────────────────────────────────
+
+  // Node 1: UNETLoader — Flux Krea Dev (NSFW for body portraits)
+  workflow['1'] = {
+    class_type: 'UNETLoader',
+    inputs: { unet_name: fluxModelName, weight_dtype: 'fp8_e4m3fn' },
+  };
+
+  // Node 2: DualCLIPLoader — T5 + CLIP-L text encoders
+  workflow['2'] = {
+    class_type: 'DualCLIPLoader',
+    inputs: {
+      clip_name1: 't5xxl_fp8_e4m3fn_scaled.safetensors',
+      clip_name2: 'clip_l.safetensors',
+      type: 'flux',
+    },
+  };
+
+  // Node 3: VAELoader — Flux VAE
+  workflow['3'] = {
+    class_type: 'VAELoader',
+    inputs: { vae_name: 'ae.safetensors' },
+  };
+
+  // Node 4: CLIPTextEncode — minimal Flux prompt (PuLID carries identity)
+  workflow['4'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: {
+      text: 'A full body portrait photograph, fully clothed, photorealistic, high quality.',
+      clip: ['2', 0],
+    },
+  };
+
+  // Node 200: LoadImage — approved face portrait (identity reference for PuLID)
+  workflow['200'] = {
+    class_type: 'LoadImage',
+    inputs: { image: config.faceRefImageName },
+  };
+
+  // Node 201: PuLIDModelLoader
+  workflow['201'] = {
+    class_type: 'PuLIDModelLoader',
+    inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
+  };
+
+  // Node 202: EVACLIPLoader
+  workflow['202'] = {
+    class_type: 'EVACLIPLoader',
+    inputs: { model_name: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+  };
+
+  // Node 203: ApplyPulidFlux — patch Flux model with face identity
+  workflow['203'] = {
+    class_type: 'ApplyPulidFlux',
+    inputs: {
+      model: ['1', 0],
+      pulid: ['201', 0],
+      eva_clip: ['202', 0],
+      face_image: ['200', 0],
+      weight: pulidWeight,
+      start_at: 0.0,
+      end_at: 1.0,
+    },
+  };
+
+  // Node 204: VAEEncode — encode SDXL body pixels using Flux VAE
+  workflow['204'] = {
+    class_type: 'VAEEncode',
+    inputs: {
+      pixels: ['105', 0],  // SDXL body pixel output
+      vae: ['3', 0],       // Flux VAE
+    },
+  };
+
+  // Node 205: FluxGuidance
+  workflow['205'] = {
+    class_type: 'FluxGuidance',
+    inputs: { conditioning: ['4', 0], guidance: 2.5 },
+  };
+
+  // Node 206: ConditioningZeroOut — Flux has no negative prompt
+  workflow['206'] = {
+    class_type: 'ConditioningZeroOut',
+    inputs: { conditioning: ['4', 0] },
+  };
+
+  // Node 207: KSampler — Flux img2img with PuLID identity injection
+  workflow['207'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: ['203', 0],         // PuLID-patched Flux model
+      positive: ['205', 0],
+      negative: ['206', 0],
+      latent_image: ['204', 0],  // SDXL body as starting latent
+      seed: config.seed + 1,
+      steps: 20,
+      cfg: 1.0,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: pulidDenoise,
+    },
+  };
+
+  // Node 208: VAEDecode
+  workflow['208'] = {
+    class_type: 'VAEDecode',
+    inputs: { samples: ['207', 0], vae: ['3', 0] },
+  };
+
+  // Node 209: SaveImage — final portrait output
+  workflow['209'] = {
     class_type: 'SaveImage',
     inputs: {
       filename_prefix: config.filenamePrefix,
-      images: ['13', 0],
+      images: ['208', 0],
     },
   };
 

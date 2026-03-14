@@ -67,7 +67,7 @@ export async function POST(
         for (const img of oldImages) {
           if (img.stored_url) {
             // When regenerating body, preserve the approved face image so it can
-            // be used as the reference for Nano Banana Pro / ReActor.
+            // be used as the reference for Nano Banana Pro / PuLID.
             if (stage === 'body' && storyChar.face_url && img.stored_url === storyChar.face_url) {
               continue;
             }
@@ -185,8 +185,9 @@ export async function POST(
       // ---- RunPod path (SDXL via ComfyUI) ----
       let runpodImages: Array<{ name: string; image: string }> | undefined;
       if (stage === 'body' && !isMale && storyChar.face_url) {
+        console.log(`[StoryPublisher] Fetching approved face for PuLID: ${storyChar.face_url}`);
         const faceBase64 = await imageUrlToBase64(storyChar.face_url);
-        runpodImages = [{ name: 'source_face.png', image: faceBase64 }];
+        runpodImages = [{ name: 'face_reference.png', image: faceBase64 }];
       }
 
       if (payload.images) {

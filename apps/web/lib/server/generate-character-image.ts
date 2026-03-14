@@ -1,5 +1,5 @@
 import {
-  buildSdxlWorkflow,
+  buildSdxlPulidPortraitWorkflow,
   buildKontextWorkflow,
   resolvePromptEthnicity,
 } from "@no-safe-word/image-gen";
@@ -334,9 +334,12 @@ function buildFemaleFacePayload(
 }
 
 /**
- * Female body — SDXL RealVisXL + Curvy Body LoRA + ReActor face-swap.
- * When approvedFaceUrl is provided, the workflow includes ReActor nodes
- * to swap the approved Flux face onto the SDXL body output.
+ * Female body — SDXL RealVisXL + Curvy Body LoRA for body composition, then
+ * Flux + PuLID face injection using the approved face portrait.
+ * The two stages run as one ComfyUI workflow (one RunPod job).
+ * The SDXL body intermediate is never saved — PuLID output is the final result.
+ *
+ * Requires approvedFaceUrl — throws if missing (face must be approved first).
  */
 function buildFemaleBodyPayload(
   charData: CharacterData,
@@ -347,6 +350,12 @@ function buildFemaleBodyPayload(
   customPrompt?: string,
   approvedFaceUrl?: string,
 ): RunPodGenerationPayload {
+  if (!approvedFaceUrl) {
+    throw new Error(
+      'Female body stage requires an approved face portrait. Approve the face portrait first, then generate the body.',
+    );
+  }
+
   const width = 768;
   const height = 1152;
 
@@ -380,10 +389,7 @@ function buildFemaleBodyPayload(
 
   const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
 
-  // Add ReActor source face when approved face is available
-  const reactorSourceImageName = approvedFaceUrl ? 'source_face.png' : undefined;
-
-  const workflow = buildSdxlWorkflow({
+  const workflow = buildSdxlPulidPortraitWorkflow({
     positivePrompt,
     negativePrompt,
     width,
@@ -392,7 +398,10 @@ function buildFemaleBodyPayload(
     checkpointName: 'realvisxlV50_v50Bakedvae.safetensors',
     loras,
     filenamePrefix: `fullbody_${sluggedName}`,
-    reactorSourceImageName,
+    faceRefImageName: 'face_reference.png',
+    pulidWeight: 0.95,
+    pulidDenoise: 0.65,
+    sfwMode: false,
   });
 
   return {
@@ -404,6 +413,6 @@ function buildFemaleBodyPayload(
     width,
     height,
     loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
-    // The face image will be fetched and base64-encoded by the route before submitting to RunPod
+    // face_reference.png is fetched and base64-encoded by the route before submitting to RunPod
   };
 }

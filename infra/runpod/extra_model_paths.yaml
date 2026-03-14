@@ -15,3 +15,4 @@ a_custom_path:
   style_models: models/style_models
   clip_vision: models/clip_vision
   insightface: models/insightface
+  pulid: models/pulid
