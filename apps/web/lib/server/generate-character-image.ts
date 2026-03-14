@@ -207,7 +207,7 @@ export type CharacterGenerationPayload = RunPodGenerationPayload | ReplicateGene
  * Dispatches by gender + stage:
  * | Gender | Stage | Engine    | Model                                      |
  * |--------|-------|-----------|--------------------------------------------|
- * | Female | face  | RunPod    | Flux Krea (Kontext portrait, no Redux)     |
+ * | Female | face  | Replicate | Nano Banana Pro                            |
  * | Female | body  | RunPod    | SDXL RealVisXL + Curvy Body LoRA + ReActor |
  * | Male   | face  | Replicate | Nano Banana Pro                            |
  * | Male   | body  | Replicate | Nano Banana Pro (with face reference)      |
@@ -293,7 +293,7 @@ function buildMalePayload(
 }
 
 // ---------------------------------------------------------------------------
-// Female Pipeline — Flux Krea (face) + SDXL+ReActor (body)
+// Female Pipeline — Nano Banana Pro (face) + SDXL+ReActor (body)
 // ---------------------------------------------------------------------------
 
 async function buildFemalePayload(
@@ -305,55 +305,31 @@ async function buildFemalePayload(
   sluggedName: string,
   customPrompt?: string,
   approvedFaceUrl?: string,
-): Promise<RunPodGenerationPayload> {
+): Promise<CharacterGenerationPayload> {
   if (stage === 'face') {
-    return buildFemaleFacePayload(charData, resolvedEthnicity, useMelanin, seed, sluggedName, customPrompt);
+    return buildFemaleFacePayload(charData, resolvedEthnicity, seed, customPrompt);
   } else {
     return buildFemaleBodyPayload(charData, resolvedEthnicity, useMelanin, seed, sluggedName, customPrompt, approvedFaceUrl);
   }
 }
 
 /**
- * Female face — Flux Krea Kontext portrait (text-to-image, no Redux).
- * Uses Melanin LoRA for Black/African characters.
+ * Female face — Nano Banana Pro (Replicate), same engine as male face.
+ * Uses the existing prose face prompt.
  */
 function buildFemaleFacePayload(
   charData: CharacterData,
   resolvedEthnicity: string,
-  useMelanin: boolean,
   seed: number,
-  sluggedName: string,
   customPrompt?: string,
-): RunPodGenerationPayload {
-  const positivePrompt = customPrompt || buildFluxFacePrompt(charData, resolvedEthnicity);
-  const width = 832;
-  const height = 1216;
-
-  // Flux Krea LoRAs for face portraits
-  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-  if (useMelanin) {
-    loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-  }
-
-  const workflow = buildKontextWorkflow({
-    type: 'portrait',
-    positivePrompt,
-    width,
-    height,
-    seed,
-    filenamePrefix: `face_${sluggedName}`,
-    loras,
-  });
+): ReplicateGenerationPayload {
+  const prompt = customPrompt || buildFluxFacePrompt(charData, resolvedEthnicity);
 
   return {
-    engine: 'runpod',
-    workflow,
-    positivePrompt,
-    negativePrompt: '', // Flux has no negative prompt
+    engine: 'replicate',
+    model: 'google/nano-banana-pro',
+    positivePrompt: prompt,
     seed,
-    width,
-    height,
-    loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
   };
 }
 
