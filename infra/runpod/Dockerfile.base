@@ -7,18 +7,28 @@ RUN cd /comfyui/custom_nodes && \
     cd ComfyUI-ppm && git checkout ebb35c7
 
 # InsightFace + PuLID dependencies
-# cmake + libgl required to build insightface from source.
-# onnxruntime-gpu used by InsightFace face detection.
+# cmake + libgl required by ComfyUI ecosystem.
+# build-essential + python3-dev needed to compile insightface from source.
+# insightface 0.7.x has no pre-built Python 3.12 wheels (source-only).
+# The base image ships insightface 0.2.1 which lacks insightface.app
+# (added in 0.4.1); PuLID requires insightface.app.FaceAnalysis.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     curl \
     libgl1 \
     libglib2.0-0 \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install insightface>=0.7 onnxruntime-gpu
 
 # PuLID: Face identity injection for Flux (portrait pipeline + scene refinement).
-RUN cd /comfyui/custom_nodes && \
+# Combined into one RUN to prevent Docker layer caching of partial installs:
+#   1. Upgrade Cython (needed to compile insightface's face3d mesh extension)
+#   2. Force-reinstall insightface 0.7.3 from source, overriding the 0.2.1 in the base image
+#   3. Clone PuLID_ComfyUI and install its remaining dependencies
+RUN pip install --upgrade "cython>=3.0" && \
+    pip install --force-reinstall "insightface==0.7.3" && \
+    cd /comfyui/custom_nodes && \
     git clone https://github.com/cubiq/PuLID_ComfyUI && \
     pip install -r PuLID_ComfyUI/requirements.txt
 
