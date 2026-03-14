@@ -46,8 +46,7 @@ function buildFluxFacePrompt(
     sentences.push(`She has ${charData.distinguishingFeatures}.`);
   }
   sentences.push(
-    'Close-up beauty portrait, face and shoulders only, soft diffused studio lighting, ' +
-    'warm golden fill, clean cream background, beauty editorial photography, photorealistic.'
+    'Close-up portrait, face and shoulders only, professional fashion photography, editorial lighting, sharp focus, photorealistic.'
   );
 
   return sentences.join(' ');
