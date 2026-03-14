@@ -389,6 +389,10 @@ function buildFemaleBodyPayload(
 
   const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
 
+  const fluxPositivePrompt = charData.bodyType
+    ? `full body portrait of a woman with ${charData.bodyType}, fully clothed, photorealistic`
+    : 'full body portrait of a woman with a curvaceous figure, fully clothed, photorealistic';
+
   const workflow = buildSdxlPulidPortraitWorkflow({
     positivePrompt,
     negativePrompt,
@@ -400,7 +404,8 @@ function buildFemaleBodyPayload(
     filenamePrefix: `fullbody_${sluggedName}`,
     faceRefImageName: 'face_reference.png',
     pulidWeight: 0.95,
-    pulidDenoise: 0.65,
+    pulidDenoise: 0.82,
+    fluxPositivePrompt,
     sfwMode: false,
   });
 

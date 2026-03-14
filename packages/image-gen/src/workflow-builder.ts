@@ -1001,6 +1001,8 @@ export interface SdxlPulidPortraitConfig {
   pulidWeight?: number;
   /** KSampler denoise for PuLID pass — preserves SDXL body, repaints face. Default: 0.65 */
   pulidDenoise?: number;
+  /** Flux text prompt for the PuLID pass. Defaults to a minimal body prompt. Use to maintain body shape at higher denoise. */
+  fluxPositivePrompt?: string;
   /** SFW mode for Flux model selection. Default: false (use NSFW checkpoint for body portraits) */
   sfwMode?: boolean;
 }
@@ -1138,7 +1140,7 @@ export function buildSdxlPulidPortraitWorkflow(
   workflow['4'] = {
     class_type: 'CLIPTextEncode',
     inputs: {
-      text: 'A full body portrait photograph, fully clothed, photorealistic, high quality.',
+      text: config.fluxPositivePrompt ?? 'A full body portrait photograph, fully clothed, photorealistic, high quality.',
       clip: ['2', 0],
     },
   };
