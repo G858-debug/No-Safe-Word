@@ -119,7 +119,7 @@ function buildMaleNanoBananaFacePrompt(
     sentences.push(`He has ${charData.distinguishingFeatures}.`);
   }
   sentences.push(
-    'Close-up portrait, face and shoulders, natural lighting, photorealistic, handsome.'
+    'Handsome, striking facial features, strong jawline. Close-up portrait, face and shoulders, professional fashion photography, editorial lighting, sharp focus, photorealistic.'
   );
 
   return sentences.join(' ');
@@ -148,7 +148,7 @@ function buildMaleNanoBananaBodyPrompt(
 
   const sentences = [core + '.'];
   sentences.push(
-    'Full body portrait, standing, wearing casual clothing, photorealistic.'
+    'Handsome, striking facial features. Full body portrait, standing, wearing stylish fitted clothing. Professional fashion photography, editorial lighting, sharp focus, photorealistic.'
   );
 
   return sentences.join(' ');
@@ -242,11 +242,15 @@ export async function buildCharacterGenerationPayload(
   // 2. Gender + ethnicity resolution
   const isMale = characterData.gender === 'male';
   const useMelanin = isBlackAfrican(characterData.ethnicity);
-  const resolvedEthnicity = await resolvePromptEthnicity(
-    characterData.ethnicity,
-    characterData.gender,
-    characterData.skinTone,
-  );
+  // Ethnicity normalisation (African American substitution) is female-only —
+  // male portraits use the stored ethnicity label directly.
+  const resolvedEthnicity = isMale
+    ? characterData.ethnicity
+    : await resolvePromptEthnicity(
+        characterData.ethnicity,
+        characterData.gender,
+        characterData.skinTone,
+      );
 
   // 3. Seed
   const seed = params.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
