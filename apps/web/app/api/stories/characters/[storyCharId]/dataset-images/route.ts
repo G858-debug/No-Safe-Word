@@ -126,3 +126,121 @@ export async function GET(
     );
   }
 }
+
+// DELETE /api/stories/characters/[storyCharId]/dataset-images
+// Bulk-deletes dataset images by ID. Body: { imageIds: string[] }
+export async function DELETE(
+  request: NextRequest,
+  props: { params: Promise<{ storyCharId: string }> }
+) {
+  const params = await props.params;
+  const { storyCharId } = params;
+
+  try {
+    const body = await request.json();
+    const { imageIds } = body;
+
+    if (!Array.isArray(imageIds) || imageIds.length === 0) {
+      return NextResponse.json(
+        { error: "imageIds must be a non-empty array" },
+        { status: 400 }
+      );
+    }
+
+    // Resolve story character → LoRA
+    const { data: storyChar, error: scError } = await (supabase as any)
+      .from("story_characters")
+      .select("character_id, active_lora_id")
+      .eq("id", storyCharId)
+      .single();
+
+    if (scError || !storyChar) {
+      return NextResponse.json(
+        { error: "Story character not found" },
+        { status: 404 }
+      );
+    }
+
+    let loraQuery = supabase
+      .from("character_loras")
+      .select("id")
+      .eq("character_id", storyChar.character_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (storyChar.active_lora_id) {
+      loraQuery = supabase
+        .from("character_loras")
+        .select("id")
+        .eq("id", storyChar.active_lora_id)
+        .single();
+    }
+
+    const { data: lora, error: loraError } = await loraQuery;
+    if (loraError || !lora) {
+      return NextResponse.json(
+        { error: "No LoRA found" },
+        { status: 404 }
+      );
+    }
+
+    // Fetch storage paths for the images to delete
+    const { data: imagesToDelete, error: fetchError } = await supabase
+      .from("lora_dataset_images")
+      .select("id, storage_path")
+      .eq("lora_id", lora.id)
+      .in("id", imageIds);
+
+    if (fetchError) {
+      return NextResponse.json(
+        { error: `Failed to fetch images: ${fetchError.message}` },
+        { status: 500 }
+      );
+    }
+
+    if (!imagesToDelete || imagesToDelete.length === 0) {
+      return NextResponse.json({ success: true, deleted: 0 });
+    }
+
+    // Delete from storage
+    const storagePaths = imagesToDelete
+      .map((img: any) => img.storage_path)
+      .filter(Boolean);
+
+    if (storagePaths.length > 0) {
+      const { error: storageError } = await supabase.storage
+        .from("story-images")
+        .remove(storagePaths);
+
+      if (storageError) {
+        console.warn(
+          `[Dataset Images DELETE] Storage deletion partially failed: ${storageError.message}`
+        );
+      }
+    }
+
+    // Delete database records
+    const idsToDelete = imagesToDelete.map((img: any) => img.id);
+    const { error: deleteError } = await supabase
+      .from("lora_dataset_images")
+      .delete()
+      .eq("lora_id", lora.id)
+      .in("id", idsToDelete);
+
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Failed to delete images: ${deleteError.message}` },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true, deleted: idsToDelete.length });
+  } catch (err) {
+    console.error("[Dataset Images DELETE] Failed:", err);
+    return NextResponse.json(
+      { error: "Failed to delete images" },
+      { status: 500 }
+    );
+  }
+}

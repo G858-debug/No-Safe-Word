@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Save,
   Check,
+  Trash2,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ interface Stats {
   minRequired: number;
 }
 
-type FilterTab = "all" | "pending" | "approved" | "rejected";
+type FilterTab = "all" | "approved" | "rejected" | "needs_review";
 
 // ─────────────────────────────────────────────────────────────────
 // Helpers
@@ -71,6 +72,12 @@ function approvalStatus(img: DatasetImage): "approved" | "rejected" | "pending" 
 function scoreColor(score: number): string {
   if (score >= 8) return "text-emerald-400";
   if (score >= 7) return "text-amber-400";
+  return "text-red-400";
+}
+
+function evalScoreColor(score: number): string {
+  if (score >= 7) return "text-emerald-400";
+  if (score >= 5) return "text-amber-400";
   return "text-red-400";
 }
 
@@ -95,6 +102,7 @@ function ImageLightbox({
   onReject,
   onImageUpdate,
   onImageRegenerated,
+  onImageDeleted,
   readOnly,
 }: {
   image: DatasetImage;
@@ -107,6 +115,7 @@ function ImageLightbox({
   onReject: (id: string) => void;
   onImageUpdate: (id: string, updates: Partial<DatasetImage>) => void;
   onImageRegenerated: (oldId: string, newImage: DatasetImage) => void;
+  onImageDeleted: (id: string) => void;
   readOnly?: boolean;
 }) {
   const [editedCaption, setEditedCaption] = useState(image.caption || "");
@@ -115,6 +124,9 @@ function ImageLightbox({
   const [captionSaved, setCaptionSaved] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [approvingImage, setApprovingImage] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Reset local state when image changes (navigation)
   useEffect(() => {
@@ -122,6 +134,7 @@ function ImageLightbox({
     setEditedPrompt(image.resolvedPrompt || "");
     setCaptionSaved(false);
     setRegenError(null);
+    setDeleteConfirm(false);
   }, [image.id, image.caption, image.resolvedPrompt]);
 
   // Keyboard: Escape to close, arrows to navigate (when not in textarea)
@@ -201,7 +214,46 @@ function ImageLightbox({
     setRegenerating(false);
   };
 
+  const handleApproveImage = async () => {
+    setApprovingImage(true);
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${storyCharId}/dataset-images/${image.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ human_approved: true, eval_status: "passed" }),
+        }
+      );
+      if (res.ok) {
+        onImageUpdate(image.id, { human_approved: true, eval_status: "passed" });
+      }
+    } catch {
+      // ignore
+    }
+    setApprovingImage(false);
+  };
+
+  const handleDeleteImage = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${storyCharId}/dataset-images/${image.id}`,
+        { method: "DELETE" }
+      );
+      if (res.ok) {
+        onImageDeleted(image.id);
+        onClose();
+      }
+    } catch {
+      // ignore
+    }
+    setDeleting(false);
+    setDeleteConfirm(false);
+  };
+
   const status = approvalStatus(image);
+  const isApproved = image.human_approved === true;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
 
@@ -273,16 +325,35 @@ function ImageLightbox({
           <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">
             {fmtTag(image.variation_type)}
           </span>
-          {status !== "pending" && (
-            <span
-              className={`rounded px-2 py-0.5 text-[10px] font-medium ${
-                status === "approved" ? "bg-emerald-900/50 text-emerald-300" : "bg-red-900/50 text-red-300"
-              }`}
-            >
-              {status}
-            </span>
-          )}
+          {/* Human approval status */}
+          <span
+            className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+              image.human_approved === true
+                ? "bg-emerald-900/50 text-emerald-300"
+                : image.human_approved === false
+                ? "bg-red-900/50 text-red-300"
+                : "bg-zinc-800 text-zinc-500"
+            }`}
+          >
+            {image.human_approved === true
+              ? "Human Approved"
+              : image.human_approved === false
+              ? "Human Rejected"
+              : "Pending Review"}
+          </span>
         </div>
+
+        {/* AI Score (prominent) */}
+        {image.eval_score != null && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+              AI Score:{" "}
+            </span>
+            <span className={`text-lg font-bold ${evalScoreColor(image.eval_score)}`}>
+              {image.eval_score}/10
+            </span>
+          </div>
+        )}
 
         {/* Template ID */}
         {image.prompt_template && (
@@ -352,11 +423,11 @@ function ImageLightbox({
           </button>
         </div>
 
-        {/* Eval scores */}
+        {/* Eval details */}
         {image.eval_details && (
           <div>
             <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
-              Eval Scores
+              Eval Breakdown
             </label>
             <div className="flex gap-3 text-xs">
               <span className={scoreColor(image.eval_details.face_score)}>
@@ -369,6 +440,11 @@ function ImageLightbox({
                 Quality {image.eval_details.quality_score}
               </span>
             </div>
+            {image.eval_details.verdict && (
+              <p className="mt-1 text-[10px] leading-snug text-zinc-400">
+                Verdict: {image.eval_details.verdict}
+              </p>
+            )}
             {image.eval_details.issues.length > 0 && (
               <p className="mt-1 text-[10px] leading-snug text-red-400/70">
                 {image.eval_details.issues.join(", ")}
@@ -377,8 +453,37 @@ function ImageLightbox({
           </div>
         )}
 
-        {/* Regenerate */}
-        <div>
+        {/* Action buttons: Approve → Regenerate → Delete */}
+        <div className="space-y-2">
+          {/* Approve */}
+          <button
+            onClick={handleApproveImage}
+            disabled={isApproved || approvingImage}
+            className={`inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              isApproved
+                ? "border border-emerald-600/50 bg-emerald-950/40 text-emerald-300"
+                : "border border-emerald-500/30 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-900/30 disabled:opacity-50"
+            }`}
+          >
+            {approvingImage ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Approving...
+              </>
+            ) : isApproved ? (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                Approved
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                Approve Image
+              </>
+            )}
+          </button>
+
+          {/* Regenerate */}
           <button
             onClick={handleRegenerate}
             disabled={regenerating}
@@ -399,35 +504,42 @@ function ImageLightbox({
           {regenError && (
             <p className="mt-1 text-xs text-red-400">{regenError}</p>
           )}
-        </div>
 
-        {/* Approve / Reject */}
-        {!readOnly && (
-          <div className="flex gap-2">
+          {/* Delete */}
+          {deleteConfirm ? (
+            <div className="rounded-lg border border-red-800/50 bg-red-950/30 p-3">
+              <p className="mb-2 text-xs text-red-300">Delete this training image?</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setDeleteConfirm(false)}
+                  className="flex-1 rounded px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteImage}
+                  disabled={deleting}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 rounded bg-red-800 px-3 py-1.5 text-xs font-medium text-red-100 hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3 w-3" />
+                  )}
+                  Delete
+                </button>
+              </div>
+            </div>
+          ) : (
             <button
-              onClick={() => onApprove(image.id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
-                status === "approved"
-                  ? "bg-emerald-700 text-emerald-100"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-emerald-900/50 hover:text-emerald-300"
-              }`}
+              onClick={() => setDeleteConfirm(true)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-800/30 bg-red-950/20 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-900/20"
             >
-              <CheckCircle2 className="h-4 w-4" />
-              Approve
+              <Trash2 className="h-4 w-4" />
+              Delete Image
             </button>
-            <button
-              onClick={() => onReject(image.id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
-                status === "rejected"
-                  ? "bg-red-800 text-red-200"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-red-900/50 hover:text-red-300"
-              }`}
-            >
-              <XCircle className="h-4 w-4" />
-              Reject
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -452,16 +564,17 @@ function DatasetImageCard({
   onZoom: (img: DatasetImage) => void;
   readOnly?: boolean;
 }) {
-  const status = approvalStatus(img);
+  const isFailed = img.eval_status === "failed";
+  const isPassed = img.eval_status === "passed";
+  const isHumanApproved = img.human_approved === true;
 
-  const borderClass =
-    status === "approved"
-      ? "border-emerald-600"
-      : status === "rejected"
-      ? "border-red-700 opacity-70"
-      : focused
-      ? "border-blue-500"
-      : "border-zinc-700";
+  const borderClass = isHumanApproved
+    ? "border-emerald-600"
+    : isFailed
+    ? "border-red-700"
+    : focused
+    ? "border-blue-500"
+    : "border-zinc-700";
 
   return (
     <div
@@ -472,7 +585,7 @@ function DatasetImageCard({
         <img
           src={img.image_url}
           alt={`Dataset ${img.category}`}
-          className="h-full w-full object-cover"
+          className={`h-full w-full object-cover${isFailed && !isHumanApproved ? " opacity-60" : ""}`}
         />
         <div
           className="absolute inset-0 cursor-zoom-in"
@@ -486,15 +599,31 @@ function DatasetImageCard({
           <ZoomIn className="h-3.5 w-3.5" />
         </button>
 
-        {/* Status badge */}
-        {status === "approved" && (
-          <span className="absolute left-1.5 top-1.5 rounded bg-emerald-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-100">
-            Approved
+        {/* Eval status badge */}
+        {isPassed && isHumanApproved ? (
+          <span className="absolute left-1.5 top-1.5 flex items-center gap-0.5 rounded bg-emerald-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-100">
+            <CheckCircle2 className="h-3 w-3" />
+          </span>
+        ) : isPassed && !isHumanApproved ? (
+          <span className="absolute left-1.5 top-1.5 rounded bg-orange-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-orange-100">
+            AI ✓
+          </span>
+        ) : isFailed ? (
+          <span className="absolute left-1.5 top-1.5 flex items-center rounded bg-red-800/80 px-1.5 py-0.5 text-[9px] font-semibold text-red-200">
+            <XCircle className="h-3 w-3" />
+          </span>
+        ) : (
+          <span className="absolute left-1.5 top-1.5 rounded bg-zinc-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-400">
+            ?
           </span>
         )}
-        {status === "rejected" && (
-          <span className="absolute left-1.5 top-1.5 rounded bg-red-800/80 px-1.5 py-0.5 text-[9px] font-semibold text-red-200">
-            Rejected
+
+        {/* Eval score pill */}
+        {img.eval_score != null && (
+          <span
+            className={`absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold ${evalScoreColor(img.eval_score)}`}
+          >
+            {img.eval_score}/10
           </span>
         )}
       </div>
@@ -581,6 +710,8 @@ export default function DatasetApprovalPage() {
   const [zoomImage, setZoomImage] = useState<DatasetImage | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [approveAllConfirm, setApproveAllConfirm] = useState(false);
+  const [deleteRejectedConfirm, setDeleteRejectedConfirm] = useState(false);
+  const [deletingRejected, setDeletingRejected] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
 
@@ -613,10 +744,19 @@ export default function DatasetApprovalPage() {
 
   // ── Filtered images ─────────────────────────────────────────
 
+  const rejected = images.filter(
+    (i) => i.eval_status === "failed" && i.human_approved !== true
+  );
+  const needsReview = images.filter(
+    (i) => i.eval_status === "passed" && i.human_approved !== true
+  );
+
   const filteredImages = images.filter((img) => {
-    if (filter === "pending") return img.human_approved === null;
     if (filter === "approved") return img.human_approved === true;
-    if (filter === "rejected") return img.human_approved === false;
+    if (filter === "rejected")
+      return img.eval_status === "failed" && img.human_approved !== true;
+    if (filter === "needs_review")
+      return img.eval_status === "passed" && img.human_approved !== true;
     return true;
   });
 
@@ -665,6 +805,10 @@ export default function DatasetApprovalPage() {
     setZoomImage(newImage);
   }, []);
 
+  const handleImageDeleted = useCallback((id: string) => {
+    setImages((prev) => prev.filter((img) => img.id !== id));
+  }, []);
+
   // ── Zoom handlers ─────────────────────────────────────────
 
   const handleZoom = useCallback(
@@ -689,15 +833,48 @@ export default function DatasetApprovalPage() {
 
   // ── Approve all pending ─────────────────────────────────────
 
-  const handleApproveAllRemaining = useCallback(async () => {
+  const handleApproveAllAIPassed = useCallback(async () => {
     setApproveAllConfirm(false);
-    const pendingIds = images
-      .filter((i) => i.human_approved === null)
+    const aiPassedIds = images
+      .filter((i) => i.eval_status === "passed" && i.human_approved !== true)
       .map((i) => i.id);
-    if (pendingIds.length > 0) {
-      await updateApproval(pendingIds, true);
+    if (aiPassedIds.length > 0) {
+      await updateApproval(aiPassedIds, true);
     }
   }, [images, updateApproval]);
+
+  // ── Delete all rejected ───────────────────────────────────────
+
+  const handleDeleteAllRejected = useCallback(async () => {
+    setDeleteRejectedConfirm(false);
+    setDeletingRejected(true);
+    const rejectedIds = images
+      .filter((i) => i.eval_status === "failed" && i.human_approved !== true)
+      .map((i) => i.id);
+
+    if (rejectedIds.length === 0) {
+      setDeletingRejected(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${storyCharId}/dataset-images`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageIds: rejectedIds }),
+        }
+      );
+
+      if (res.ok) {
+        setImages((prev) => prev.filter((img) => !rejectedIds.includes(img.id)));
+      }
+    } catch {
+      // ignore — images remain in grid
+    }
+    setDeletingRejected(false);
+  }, [images, storyCharId]);
 
   // ── Resume training ─────────────────────────────────────────
 
@@ -732,7 +909,7 @@ export default function DatasetApprovalPage() {
   focusedRef.current = focusedIndex;
 
   useEffect(() => {
-    if (zoomImage || approveAllConfirm) return;
+    if (zoomImage || approveAllConfirm || deleteRejectedConfirm) return;
 
     const handler = (e: KeyboardEvent) => {
       const visible = filteredImages;
@@ -758,7 +935,7 @@ export default function DatasetApprovalPage() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [filteredImages, zoomImage, approveAllConfirm, handleApprove, handleReject]);
+  }, [filteredImages, zoomImage, approveAllConfirm, deleteRejectedConfirm, handleApprove, handleReject]);
 
   useEffect(() => {
     setFocusedIndex(0);
@@ -770,9 +947,9 @@ export default function DatasetApprovalPage() {
 
   const TABS: { key: FilterTab; label: string; count: number }[] = [
     { key: "all", label: "All", count: images.length },
-    { key: "pending", label: "Pending", count: humanPending },
     { key: "approved", label: "Approved", count: humanApproved },
-    { key: "rejected", label: "Rejected", count: humanRejected },
+    { key: "rejected", label: "Rejected", count: rejected.length },
+    { key: "needs_review", label: "Needs Review", count: needsReview.length },
   ];
 
   return (
@@ -790,6 +967,7 @@ export default function DatasetApprovalPage() {
           onReject={handleReject}
           onImageUpdate={handleImageUpdate}
           onImageRegenerated={handleImageRegenerated}
+          onImageDeleted={handleImageDeleted}
           readOnly={readOnly}
         />
       )}
@@ -798,10 +976,10 @@ export default function DatasetApprovalPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
             <h3 className="mb-2 text-base font-semibold text-zinc-100">
-              Approve all pending?
+              Approve all AI-passed images?
             </h3>
             <p className="mb-5 text-sm text-zinc-400">
-              This will approve all {humanPending} remaining pending images.
+              This will approve all {needsReview.length} images that passed AI evaluation.
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -811,10 +989,39 @@ export default function DatasetApprovalPage() {
                 Cancel
               </button>
               <button
-                onClick={handleApproveAllRemaining}
+                onClick={handleApproveAllAIPassed}
                 className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-600"
               >
-                Approve All {humanPending}
+                Approve All {needsReview.length}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteRejectedConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-sm rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="mb-2 text-base font-semibold text-zinc-100">
+              Delete all rejected images?
+            </h3>
+            <p className="mb-5 text-sm text-zinc-400">
+              This will permanently delete {rejected.length} images that failed AI evaluation.
+              This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteRejectedConfirm(false)}
+                className="rounded-lg px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAllRejected}
+                disabled={deletingRejected}
+                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-red-100 hover:bg-red-600 disabled:opacity-50"
+              >
+                {deletingRejected ? "Deleting..." : `Delete ${rejected.length} Images`}
               </button>
             </div>
           </div>
@@ -882,8 +1089,8 @@ export default function DatasetApprovalPage() {
           { label: "Total", value: images.length, color: "text-zinc-100" },
           { label: "AI Passed", value: stats?.passed ?? 0, color: "text-blue-400" },
           { label: "Approved", value: humanApproved, color: "text-emerald-400" },
-          { label: "Rejected", value: humanRejected, color: "text-red-400" },
-          { label: "Pending", value: humanPending, color: "text-zinc-400" },
+          { label: "Rejected", value: rejected.length, color: "text-red-400" },
+          { label: "Needs Review", value: needsReview.length, color: "text-orange-400" },
           {
             label: `Min Required`,
             value: `${humanApproved}/${minRequired}`,
@@ -921,13 +1128,22 @@ export default function DatasetApprovalPage() {
 
         <div className="flex items-center gap-2">
           {isApprovalMode && (
-            <button
-              onClick={() => setApproveAllConfirm(true)}
-              disabled={humanPending === 0}
-              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-            >
-              Approve All Remaining ({humanPending})
-            </button>
+            <>
+              <button
+                onClick={() => setApproveAllConfirm(true)}
+                disabled={needsReview.length === 0}
+                className="rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-900/30 hover:text-emerald-300 disabled:opacity-40"
+              >
+                Approve All AI-Passed ({needsReview.length})
+              </button>
+              <button
+                onClick={() => setDeleteRejectedConfirm(true)}
+                disabled={rejected.length === 0}
+                className="rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-1.5 text-xs text-red-400 hover:bg-red-900/30 hover:text-red-300 disabled:opacity-40"
+              >
+                Delete Rejected ({rejected.length})
+              </button>
+            </>
           )}
           <button
             onClick={loadImages}
