@@ -114,6 +114,11 @@ export async function runPipeline(
       passedCount = result.passed;
 
       await checkpoint(loraId, 'evaluation', deps);
+
+      // Pause for human dataset review — resume path skips this block
+      console.log(`[LoRA Pipeline] ✋ Paused: dataset ready for review (${passedCount} images passed)`);
+      await updateStatus(loraId, 'awaiting_dataset_approval', deps);
+      return;
     } else {
       // Fresh start — generate + evaluate
       await updateStatus(loraId, 'generating_dataset', deps);
@@ -139,6 +144,11 @@ export async function runPipeline(
       passedCount = result.passed;
 
       await checkpoint(loraId, 'evaluation', deps);
+
+      // Pause for human dataset review — resume path skips this block
+      console.log(`[LoRA Pipeline] ✋ Paused: dataset ready for review (${passedCount} images passed)`);
+      await updateStatus(loraId, 'awaiting_dataset_approval', deps);
+      return;
     }
 
     if (passedCount < PIPELINE_CONFIG.minPassedImages) {

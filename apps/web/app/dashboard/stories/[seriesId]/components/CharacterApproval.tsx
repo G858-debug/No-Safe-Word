@@ -25,6 +25,8 @@ import {
   Save,
   X,
   Lock,
+  Eye,
+  XCircle,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -82,7 +84,7 @@ interface ImageSlotState {
 }
 
 interface LoraTrainingState {
-  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "captioning" | "training" | "validating" | "deployed" | "failed" | "archived";
+  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "awaiting_dataset_approval" | "captioning" | "training" | "validating" | "deployed" | "failed" | "archived";
   loraId: string | null;
   datasetGenerated: number;
   datasetApproved: number;
@@ -922,6 +924,34 @@ export default function CharacterApproval({
     [updateLoraState, charStates]
   );
 
+  const handleApproveDataset = useCallback(
+    async (storyCharId: string, rejectedImageIds: string[]) => {
+      updateLoraState(storyCharId, { isTriggering: true, error: null });
+      try {
+        const res = await fetch(
+          `/api/stories/characters/${storyCharId}/approve-dataset`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rejectedImageIds }),
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to approve dataset");
+        }
+        updateLoraState(storyCharId, { isTriggering: false, status: "captioning" });
+        startLoraPolling(storyCharId);
+      } catch (err) {
+        updateLoraState(storyCharId, {
+          isTriggering: false,
+          error: err instanceof Error ? err.message : "Failed to approve dataset",
+        });
+      }
+    },
+    [updateLoraState]
+  );
+
   const loraPollingTimers = useRef<Record<string, NodeJS.Timeout>>({});
 
   const startLoraPolling = useCallback(
@@ -951,8 +981,8 @@ export default function CharacterApproval({
             estimatedTimeRemaining: data.estimatedTimeRemaining,
           });
 
-          // Stop polling when terminal state reached
-          if (["deployed", "failed", "archived"].includes(data.status)) {
+          // Stop polling when terminal state or awaiting human action
+          if (["deployed", "failed", "archived", "awaiting_dataset_approval"].includes(data.status)) {
             clearInterval(loraPollingTimers.current[storyCharId]);
             delete loraPollingTimers.current[storyCharId];
           }
@@ -984,8 +1014,8 @@ export default function CharacterApproval({
                 estimatedTimeRemaining: data.estimatedTimeRemaining,
               });
 
-              // If still in progress, start polling
-              if (!["deployed", "failed", "archived", "no_lora"].includes(data.status)) {
+              // If still in progress, start polling (not for human-action states)
+              if (!["deployed", "failed", "archived", "awaiting_dataset_approval", "no_lora"].includes(data.status)) {
                 startLoraPolling(ch.id);
               }
             }
@@ -1119,7 +1149,8 @@ export default function CharacterApproval({
           else if (!s.fullBody.approved) reasons.push("body not approved");
           if (s.portrait.approved && s.fullBody.approved && s.lora.status !== "deployed") {
             const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(s.lora.status);
-            reasons.push(loraInProgress ? "LoRA training in progress" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
+            const loraAwaitingApproval = s.lora.status === "awaiting_dataset_approval";
+            reasons.push(loraInProgress ? "LoRA training in progress" : loraAwaitingApproval ? "Dataset review required" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
           }
           if (reasons.length > 0) blockers.push(`${ch.characters.name} (${reasons.join(", ")})`);
         }
@@ -1593,6 +1624,7 @@ export default function CharacterApproval({
                   characterName={ch.characters.name}
                   loraState={state.lora}
                   onTrain={() => handleTrainLora(ch.id)}
+                  onApproveDataset={(rejectedIds) => handleApproveDataset(ch.id, rejectedIds)}
                   locked={!fullyApproved}
                 />
               </CardContent>
@@ -1635,6 +1667,7 @@ const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; descrip
   pending: { label: "Starting...", color: "text-blue-400", description: "Initializing pipeline" },
   generating_dataset: { label: "Generating Dataset", color: "text-blue-400", description: "Creating training images (Nano Banana Pro + ComfyUI)" },
   evaluating: { label: "Evaluating Quality", color: "text-blue-400", description: "Claude Vision is checking face & body consistency" },
+  awaiting_dataset_approval: { label: "Review Required", color: "text-amber-400", description: "Dataset ready — review and approve images before training begins" },
   captioning: { label: "Captioning", color: "text-blue-400", description: "Generating training captions" },
   training: { label: "Training LoRA", color: "text-purple-400", description: "Character LoRA training in progress" },
   validating: { label: "Validating", color: "text-purple-400", description: "Testing LoRA with sample generations" },
@@ -1643,23 +1676,73 @@ const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; descrip
   archived: { label: "Not Started", color: "text-muted-foreground/50", description: "Previous LoRA archived — ready for retraining" },
 };
 
+interface DatasetImage {
+  id: string;
+  image_url: string;
+  category: string;
+  variation_type: string;
+  eval_score: number | null;
+  eval_status: string;
+  caption: string | null;
+}
+
 function LoraTrainingSection({
   storyCharId,
   characterName,
   loraState,
   onTrain,
+  onApproveDataset,
   locked,
 }: {
   storyCharId: string;
   characterName: string;
   loraState: LoraTrainingState;
   onTrain: () => void;
+  onApproveDataset: (rejectedIds: string[]) => Promise<void>;
   locked: boolean;
 }) {
+  const [showDatasetModal, setShowDatasetModal] = useState(false);
+  const [datasetImages, setDatasetImages] = useState<DatasetImage[]>([]);
+  const [loadingDataset, setLoadingDataset] = useState(false);
+  const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set());
+  const [approvingDataset, setApprovingDataset] = useState(false);
+
+  const handleOpenDatasetReview = async () => {
+    setLoadingDataset(true);
+    setRejectedIds(new Set());
+    try {
+      const res = await fetch(`/api/stories/characters/${storyCharId}/dataset-images`);
+      const data = await res.json();
+      setDatasetImages((data.images || []).filter((img: DatasetImage) => img.eval_status === "passed"));
+      setShowDatasetModal(true);
+    } finally {
+      setLoadingDataset(false);
+    }
+  };
+
+  const toggleReject = (id: string) => {
+    setRejectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirmApprove = async () => {
+    setApprovingDataset(true);
+    try {
+      await onApproveDataset(Array.from(rejectedIds));
+      setShowDatasetModal(false);
+    } finally {
+      setApprovingDataset(false);
+    }
+  };
+
   const config = LORA_STATUS_CONFIG[loraState.status] || LORA_STATUS_CONFIG.no_lora;
-  const isInProgress = !["no_lora", "deployed", "failed", "archived"].includes(loraState.status);
+  const isInProgress = !["no_lora", "deployed", "failed", "archived", "awaiting_dataset_approval"].includes(loraState.status);
   const isDeployed = loraState.status === "deployed";
   const isFailed = loraState.status === "failed";
+  const isAwaitingApproval = loraState.status === "awaiting_dataset_approval";
 
   return (
     <div className="border-t border-muted/50 pt-3 mt-1 space-y-2">
@@ -1736,6 +1819,137 @@ function LoraTrainingSection({
           </div>
         )}
       </div>
+
+      {/* Dataset approval panel */}
+      {isAwaitingApproval && (
+        <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-2.5 space-y-2">
+          <p className="text-xs text-amber-300">{config.description}</p>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {loraState.datasetApproved} images passed quality check
+            </span>
+            <Button
+              onClick={handleOpenDatasetReview}
+              disabled={loadingDataset || loraState.isTriggering}
+              size="sm"
+              variant="outline"
+              className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10 h-7 text-xs"
+            >
+              {loadingDataset ? (
+                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+              ) : (
+                <Eye className="mr-1.5 h-3 w-3" />
+              )}
+              Review Dataset
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Dataset review modal */}
+      {showDatasetModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setShowDatasetModal(false)}
+        >
+          <div
+            className="bg-background border border-border rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h2 className="text-base font-semibold">Review dataset — {characterName}</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {datasetImages.length} images passed quality evaluation. Click images to exclude them from training.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowDatasetModal(false)}
+                className="text-muted-foreground"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Image grid */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                {datasetImages.map((img) => {
+                  const isRejected = rejectedIds.has(img.id);
+                  return (
+                    <div
+                      key={img.id}
+                      onClick={() => toggleReject(img.id)}
+                      className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                        isRejected
+                          ? "border-red-500 opacity-50"
+                          : "border-transparent hover:border-green-500/60"
+                      }`}
+                    >
+                      <img
+                        src={img.image_url}
+                        alt={img.category}
+                        className="w-full aspect-square object-cover"
+                      />
+                      {/* Score badge */}
+                      {img.eval_score != null && (
+                        <div className="absolute top-1 left-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                          {img.eval_score.toFixed(1)}
+                        </div>
+                      )}
+                      {/* Category badge */}
+                      <div className="absolute bottom-1 left-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded truncate">
+                        {img.category.replace("-", " ")}
+                      </div>
+                      {/* Rejected overlay */}
+                      {isRejected && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-red-500/20">
+                          <XCircle className="h-8 w-8 text-red-500" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-5 py-4 border-t border-border">
+              <p className="text-xs text-muted-foreground">
+                {rejectedIds.size > 0
+                  ? `${rejectedIds.size} image${rejectedIds.size > 1 ? "s" : ""} excluded · ${datasetImages.length - rejectedIds.size} will be used for training`
+                  : `All ${datasetImages.length} images will be used for training`}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDatasetModal(false)}
+                  className="text-muted-foreground"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleConfirmApprove}
+                  disabled={approvingDataset || datasetImages.length - rejectedIds.size < 14}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {approvingDataset ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Check className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Approve & Start Training
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress details for in-progress states */}
       {isInProgress && (
