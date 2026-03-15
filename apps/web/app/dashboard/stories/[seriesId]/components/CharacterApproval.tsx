@@ -1597,6 +1597,7 @@ export default function CharacterApproval({
                   characterName={ch.characters.name}
                   loraState={state.lora}
                   onTrain={() => handleTrainLora(ch.id)}
+                  onStartPolling={() => startLoraPolling(ch.id)}
                   locked={!fullyApproved}
                 />
               </CardContent>
@@ -1654,6 +1655,7 @@ function LoraTrainingSection({
   characterName,
   loraState,
   onTrain,
+  onStartPolling,
   locked,
 }: {
   storyCharId: string;
@@ -1661,6 +1663,7 @@ function LoraTrainingSection({
   characterName: string;
   loraState: LoraTrainingState;
   onTrain: () => void;
+  onStartPolling: () => void;
   locked: boolean;
 }) {
   const [generatingMore, setGeneratingMore] = useState(false);
@@ -1679,6 +1682,8 @@ function LoraTrainingSection({
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         console.error("Generate more failed:", err.error);
+      } else {
+        onStartPolling();
       }
     } catch {
       // ignore
