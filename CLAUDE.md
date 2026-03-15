@@ -130,8 +130,9 @@ Flux uses 77-token chunking. Front-load the most important information. Cut redu
   (`sdxl-skin-realism.safetensors`, trigger: `Detailed natural skin and blemishes
   without-makeup and acne`, strength: 0.4) — all three for Black/African characters.
   Skin Realism strength capped at 0.4 to prevent age regression artifact.
-- Body generation: RealVisXL + Curvy Body LoRA (`curvy-body-sdxl.safetensors`,
-  strength: 0.90, no trigger word) + Melanin LoRA (for Black/African female characters)
+- Body generation (female): SDXL-only pipeline. RealVisXL + Curvy Body LoRA
+  (`curvy-body-sdxl.safetensors`, strength: 0.90, no trigger word) + Melanin LoRA
+  (for Black/African characters). No Flux conversion, no PuLID — pure SDXL output.
 - SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
 - Trigger words MUST appear at the start of the positive prompt
 

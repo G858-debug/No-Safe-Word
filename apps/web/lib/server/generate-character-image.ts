@@ -1,5 +1,5 @@
 import {
-  buildSdxlPulidPortraitWorkflow,
+  buildSdxlWorkflow,
   buildKontextWorkflow,
   resolvePromptEthnicity,
 } from "@no-safe-word/image-gen";
@@ -309,7 +309,7 @@ async function buildFemalePayload(
   if (stage === 'face') {
     return buildFemaleFacePayload(charData, resolvedEthnicity, seed, customPrompt);
   } else {
-    return buildFemaleBodyPayload(charData, resolvedEthnicity, useMelanin, seed, sluggedName, customPrompt, approvedFaceUrl);
+    return buildFemaleBodyPayload(charData, resolvedEthnicity, useMelanin, seed, sluggedName, customPrompt);
   }
 }
 
@@ -337,9 +337,7 @@ function buildFemaleFacePayload(
  * Female body — SDXL RealVisXL + Curvy Body LoRA for body composition, then
  * Flux + PuLID face injection using the approved face portrait.
  * The two stages run as one ComfyUI workflow (one RunPod job).
- * The SDXL body intermediate is never saved — PuLID output is the final result.
- *
- * Requires approvedFaceUrl — throws if missing (face must be approved first).
+ * Pure SDXL pipeline — no Flux conversion, no PuLID face injection.
  */
 function buildFemaleBodyPayload(
   charData: CharacterData,
@@ -348,9 +346,7 @@ function buildFemaleBodyPayload(
   seed: number,
   sluggedName: string,
   customPrompt?: string,
-  approvedFaceUrl?: string,
 ): RunPodGenerationPayload {
-  // Face URL is optional — body can generate without an approved face portrait
 
   const width = 768;
   const height = 1152;
@@ -385,21 +381,7 @@ function buildFemaleBodyPayload(
 
   const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features`;
 
-  const hairDesc = [charData.hairColor, charData.hairStyle].filter(Boolean).join(' ');
-  const fluxPositivePrompt = [
-    'full body portrait of a woman',
-    hairDesc ? `with ${hairDesc} hair` : null,
-    'curvaceous figure, wearing a fitted outfit, fully clothed, photorealistic',
-  ].filter(Boolean).join(', ');
-
-  // Flux body LoRAs for the PuLID pass — reinforces curvaceous body shape
-  // that text prompting alone cannot consistently produce.
-  const fluxLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
-    { filename: 'hourglassv32_FLUX.safetensors', strengthModel: 0.9, strengthClip: 0.9 },
-    { filename: 'fc-flux-perfect-busts.safetensors', strengthModel: 0.7, strengthClip: 0.7 },
-  ];
-
-  const workflow = buildSdxlPulidPortraitWorkflow({
+  const workflow = buildSdxlWorkflow({
     positivePrompt,
     negativePrompt,
     width,
@@ -408,12 +390,6 @@ function buildFemaleBodyPayload(
     checkpointName: 'realvisxlV50_v50Bakedvae.safetensors',
     loras,
     filenamePrefix: `fullbody_${sluggedName}`,
-    faceRefImageName: 'face_reference.png',
-    pulidWeight: 0.95,
-    pulidDenoise: 0.85,
-    fluxPositivePrompt,
-    sfwMode: true,
-    fluxLoras,
   });
 
   return {
@@ -425,6 +401,5 @@ function buildFemaleBodyPayload(
     width,
     height,
     loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
-    // face_reference.png is fetched and base64-encoded by the route before submitting to RunPod
   };
 }

@@ -1170,3 +1170,4 @@ export function buildSdxlPulidPortraitWorkflow(
 
   return workflow;
 }
+
