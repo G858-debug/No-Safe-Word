@@ -120,12 +120,12 @@ export async function generateDataset(
     failedPrompts.push(...sdxlResult.failures);
     phase2Count = sdxlResult.records.length;
   } else {
-    // Male: keep existing ComfyUI body shot path
-    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via ComfyUI/RunPod...`);
-    const cuResult = await generateComfyUIImages(character, loraId, cuLimited, deps);
-    imageRecords.push(...cuResult.records);
-    failedPrompts.push(...cuResult.failures);
-    phase2Count = cuResult.records.length;
+    // Male: SDXL (no body LoRA) → Flux img2img for consistent body shots
+    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img (male)...`);
+    const sdxlResult = await generateSdxlMaleBodyShots(character, loraId, cuLimited.length, deps);
+    imageRecords.push(...sdxlResult.records);
+    failedPrompts.push(...sdxlResult.failures);
+    phase2Count = sdxlResult.records.length;
   }
 
   console.log(
@@ -173,7 +173,9 @@ export async function generateReplacements(
     try {
       // SDXL→img2img replacements don't use prompt templates — generate a fresh body shot
       if (failed.source === 'sdxl-img2img') {
-        const result = await generateSdxlBodyShots(character, loraId, 1, deps);
+        const result = character.gender === 'female'
+          ? await generateSdxlBodyShots(character, loraId, 1, deps)
+          : await generateSdxlMaleBodyShots(character, loraId, 1, deps);
         replacements.push(...result.records);
         continue;
       }
@@ -377,7 +379,199 @@ async function generateSingleComfyUI(
   return saveDatasetImage(imageBuffer, prompt, loraId, deps);
 }
 
-// ── SDXL + Venus Body LoRA → Flux img2img Pipeline ────────────────
+// ── SDXL → Flux img2img Pipeline (Male — no body LoRA) ────────────
+
+const MALE_POSE_VARIANTS: Record<string, string[]> = {
+  standing_neutral: [
+    'standing tall with arms at sides in a relaxed confident pose',
+    'standing upright with composed posture and natural stance',
+    'standing in a casual relaxed stance with weight on one leg',
+  ],
+  standing_confident: [
+    'standing with arms crossed over chest showing confidence',
+    'standing with hands in pockets in a casual assured pose',
+    'standing with one hand adjusting collar in a relaxed gesture',
+  ],
+  walking: [
+    'caught mid-stride walking forward with confident purpose',
+    'walking with natural easy stride and relaxed shoulders',
+    'stepping forward with deliberate calm energy',
+  ],
+  seated: [
+    'seated on a chair leaning forward with elbows on knees',
+    'sitting back in a chair with one ankle resting on opposite knee',
+    'seated on a stool with relaxed upright posture',
+  ],
+};
+
+const ALL_MALE_POSES = Object.keys(MALE_POSE_VARIANTS);
+
+export async function generateSdxlMaleBodyShots(
+  character: CharacterInput,
+  loraId: string,
+  count: number,
+  deps: DatasetGeneratorDeps,
+): Promise<GenerationBatchResult> {
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+
+  const { skinTone, ethnicity, bodyType } = character.structuredData;
+  const bodyDesc = bodyType || 'athletic';
+  const basePositive =
+    `${ethnicity} man, ${skinTone} skin, ${bodyDesc} build, ` +
+    `wearing a well-fitted henley shirt and dark jeans, fully clothed, ` +
+    `full body, natural pose, masterpiece, best quality, highly detailed, 8k`;
+  const negative =
+    'nude, naked, shirtless, nsfw, underwear, ' +
+    'feminine, woman, female, breasts, deformed, ' +
+    'bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
+
+  const img2imgPrompt =
+    `${ethnicity} man, ${skinTone} skin, ${bodyDesc} build, ` +
+    `wearing fitted casual clothing, fully clothed, ` +
+    `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
+
+  const records: LoraDatasetImageRow[] = [];
+  const failures: DatasetGenerationResult['failedPrompts'] = [];
+
+  for (let i = 0; i < count; i++) {
+    const poseCategory = pick(ALL_MALE_POSES);
+    const pose = pick(MALE_POSE_VARIANTS[poseCategory]);
+    const prompt = `${basePositive}, ${pose}`;
+    const promptId = `sdxl_body_${i}_${Date.now()}`;
+    let succeeded = false;
+
+    for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
+      try {
+        // Step 1: Generate SDXL body shot via Replicate (no body LoRA for males)
+        const replicateRes = await fetch(
+          `https://api.replicate.com/v1/models/${SDXL_BODY_MODEL}/predictions`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Prefer: 'respond-async',
+            },
+            body: JSON.stringify({
+              input: {
+                prompt,
+                negative_prompt: negative,
+                width: 768,
+                height: 1152,
+                num_inference_steps: 30,
+                guidance_scale: 7.5,
+                seed: Math.floor(Math.random() * 2_147_483_647),
+              },
+            }),
+          },
+        );
+
+        if (!replicateRes.ok) {
+          throw new Error(`Replicate SDXL error: ${replicateRes.status}`);
+        }
+
+        const prediction = await replicateRes.json();
+        const predictionId: string = prediction.id;
+
+        // Poll for SDXL completion
+        const sdxlImageUrl = await pollReplicatePrediction(predictionId, token);
+
+        // Step 2: Download SDXL output as base64
+        const sdxlBase64 = await imageUrlToBase64(sdxlImageUrl);
+
+        // Step 3: Convert to photorealistic via Flux Kontext img2img
+        const workflow = buildKontextWorkflow({
+          type: 'img2img',
+          positivePrompt: img2imgPrompt,
+          width: 1024,
+          height: 1024,
+          seed: character.portraitSeed + hashCode(promptId),
+          denoiseStrength: 0.72,
+          filenamePrefix: `dataset_${loraId}`,
+        });
+
+        const { jobId } = await submitRunPodJob(workflow, [
+          { name: 'input.jpg', image: sdxlBase64 },
+        ]);
+
+        const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000);
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+
+        // Step 4: Save the img2img result
+        const category = i % 2 === 0 ? 'full-body' : 'waist-up';
+        const variationType: VariationType = i % 3 === 0 ? 'clothing' : i % 3 === 1 ? 'framing' : 'lighting';
+        const storagePath = `character-loras/datasets/${loraId}/${promptId}.png`;
+
+        const { error: uploadError } = await deps.supabase.storage
+          .from('story-images')
+          .upload(storagePath, imageBuffer, {
+            contentType: 'image/png',
+            upsert: true,
+          });
+
+        if (uploadError) {
+          throw new Error(`Supabase upload failed for ${promptId}: ${uploadError.message}`);
+        }
+
+        const { data: urlData } = deps.supabase.storage
+          .from('story-images')
+          .getPublicUrl(storagePath);
+
+        const { data: record, error: insertError } = await deps.supabase
+          .from('lora_dataset_images')
+          .insert({
+            lora_id: loraId,
+            image_url: urlData.publicUrl,
+            storage_path: storagePath,
+            prompt_template: promptId,
+            variation_type: variationType,
+            source: 'sdxl-img2img',
+            category,
+            eval_status: 'pending',
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          throw new Error(`Failed to create dataset image record: ${insertError.message}`);
+        }
+
+        console.log(`[LoRA Dataset] ✓ ${promptId} (sdxl-img2img-male/${category})`);
+        records.push(record as LoraDatasetImageRow);
+        succeeded = true;
+      } catch (error) {
+        const isTransient = isTransientError(error);
+        if (attempt < MAX_GENERATION_RETRIES && isTransient) {
+          const delay = RETRY_BASE_DELAY * attempt;
+          console.warn(
+            `[LoRA Dataset] SDXL male body ${promptId} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
+          );
+          await sleep(delay);
+        } else {
+          console.error(`[LoRA Dataset] SDXL male body failed ${promptId} after ${attempt} attempt(s): ${error}`);
+        }
+      }
+    }
+
+    if (!succeeded) {
+      failures.push({
+        promptTemplate: promptId,
+        variationType: 'framing',
+        source: 'sdxl-img2img',
+      });
+    }
+
+    // Rate limit delay between requests
+    if (i < count - 1) {
+      await sleep(PIPELINE_CONFIG.nanoBananaDelay);
+    }
+  }
+
+  return { records, failures };
+}
+
+// ── SDXL + Venus Body LoRA → Flux img2img Pipeline (Female) ───────
 
 export async function generateSdxlBodyShots(
   character: CharacterInput,

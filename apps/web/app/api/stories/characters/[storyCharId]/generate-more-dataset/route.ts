@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { generateSdxlBodyShots } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
+import { generateSdxlBodyShots, generateSdxlMaleBodyShots } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
 import { evaluateDataset } from "@no-safe-word/image-gen/server/character-lora/quality-evaluator";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
@@ -100,7 +100,8 @@ export async function POST(
     // Fire-and-forget background job
     (async () => {
       try {
-        const sdxlResult = await generateSdxlBodyShots(characterInput, lora.id, 16, { supabase });
+        const generateFn = characterInput.gender === 'female' ? generateSdxlBodyShots : generateSdxlMaleBodyShots;
+        const sdxlResult = await generateFn(characterInput, lora.id, 16, { supabase });
         console.log(`[Generate More] ${character.name}: ${sdxlResult.records.length} body images generated`);
 
         if (sdxlResult.records.length === 0) {

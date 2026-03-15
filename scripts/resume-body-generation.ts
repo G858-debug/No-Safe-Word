@@ -24,7 +24,7 @@ for (const line of envLines) {
   if (m) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
 }
 
-import { generateSdxlBodyShots } from '../packages/image-gen/src/character-lora/dataset-generator';
+import { generateSdxlBodyShots, generateSdxlMaleBodyShots } from '../packages/image-gen/src/character-lora/dataset-generator';
 import { evaluateDataset } from '../packages/image-gen/src/character-lora/quality-evaluator';
 import type { CharacterInput, CharacterStructured, LoraDatasetImageRow } from '../packages/image-gen/src/character-lora/types';
 
@@ -89,7 +89,6 @@ async function main() {
     if (!character) continue;
 
     const gender = (character.description as any)?.gender || 'unknown';
-    if (gender !== 'female') continue; // Only female characters need SDXL body shots
 
     // Get story character for approved images
     const { data: storyChar } = await (sb as any)
@@ -180,8 +179,9 @@ async function main() {
         .update({ status: 'generating_dataset', error: null })
         .eq('id', lora.id);
 
-      console.log(`\n  Generating body shots...`);
-      const sdxlResult = await generateSdxlBodyShots(characterInput, lora.id, 16, { supabase: sb });
+      console.log(`\n  Generating body shots (${gender})...`);
+      const generateFn = gender === 'female' ? generateSdxlBodyShots : generateSdxlMaleBodyShots;
+      const sdxlResult = await generateFn(characterInput, lora.id, 16, { supabase: sb });
       console.log(`  Generated: ${sdxlResult.records.length} body images, ${sdxlResult.failures.length} failures`);
 
       if (sdxlResult.records.length === 0) {
