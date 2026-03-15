@@ -278,6 +278,65 @@ export function injectDarkSceneVisibility(scenePrompt: string): string {
  * @returns { prompt, needsLlmRewrite } — the assembled prompt and whether
  *          the LLM rewriter should be invoked for further improvement.
  */
+// ── Prompt Reorder ──
+
+// Sentence classification patterns
+const SETTING_PATTERN = /\b(restaurant|workshop|bedroom|café|cafe|kitchen|parking\s*lot|interior|street|bar|club|lounge|office|bathroom|shower|balcony|rooftop|garden|pool|beach|couch|sofa|counter|table|door|wall|window|floor|bed|crate|entrance|Piatto|Hobos|Middelburg|Highveld|township|shebeen|stoep|room|hallway|corridor|stairwell|apartment|flat|house|hotel)\b/i;
+const LIGHTING_PATTERN = /\b(light|glow|amber|candle|lamp|shadow|illuminat|pendant|warm\s+(?:golden|amber|soft)|golden\s+(?:light|glow|hour)|sunset|sunrise|neon|fluorescent|moonlight|streetlight|string\s+lights|fairy\s+lights|firelight|backlit|overhead|single\s+(?:overhead|candle)|dusk|dawn|evening\s+(?:light|glow|atmosphere))\b/i;
+const COMPOSITION_PATTERN = /\b(shot|angle|depth\s+of\s+field|bokeh|framing|close-up|closeup|medium\s+shot|wide\s+shot|tight\s+shot|establishing\s+shot|eye\s+level|low\s+angle|high\s+angle|camera|crop|composition|cinematic|shallow|panoram|two-shot|macro)\b/i;
+
+/**
+ * Reorder scene prompt sentences: setting → lighting → action/character → composition.
+ *
+ * Splits the prompt into sentences, classifies each by content, then reassembles
+ * in the order that Flux's T5 encoder processes most effectively — grounding the
+ * scene in environment first, then layering in action and framing.
+ */
+export function reorderScenePrompt(scenePrompt: string): string {
+  // Split on sentence boundaries (period followed by space/capital or end)
+  const sentences = scenePrompt
+    .split(/(?<=\.)\s+(?=[A-Z])/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  // If only 1-2 sentences, reordering is pointless
+  if (sentences.length <= 2) return scenePrompt;
+
+  const setting: string[] = [];
+  const lighting: string[] = [];
+  const composition: string[] = [];
+  const action: string[] = []; // everything else: pose, expression, clothing, narrative
+
+  for (const sentence of sentences) {
+    // A sentence can match multiple categories; classify by primary signal
+    const hasSetting = SETTING_PATTERN.test(sentence);
+    const hasLighting = LIGHTING_PATTERN.test(sentence);
+    const hasComposition = COMPOSITION_PATTERN.test(sentence);
+
+    // Pure composition (no setting/lighting) → composition bucket
+    if (hasComposition && !hasSetting && !hasLighting) {
+      composition.push(sentence);
+    }
+    // Pure lighting (no setting) → lighting bucket
+    else if (hasLighting && !hasSetting) {
+      lighting.push(sentence);
+    }
+    // Setting (may also contain lighting — keep together) → setting bucket
+    else if (hasSetting) {
+      setting.push(sentence);
+    }
+    // Everything else → action/character bucket
+    else {
+      action.push(sentence);
+    }
+  }
+
+  return [...setting, ...lighting, ...action, ...composition]
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export function buildFluxPrompt(
   identityPrefix: string,
   scenePrompt: string,
@@ -295,13 +354,16 @@ export function buildFluxPrompt(
   // Inject visibility for dark scenes so subjects aren't lost in darkness
   cleanedScene = injectDarkSceneVisibility(cleanedScene);
 
+  // Reorder scene sentences: setting → lighting → action/character → composition
+  cleanedScene = reorderScenePrompt(cleanedScene);
+
   // Check if the cleaned scene still reads like a tag list
   const needsLlmRewrite = hasHeavySdxlFormatting(cleanedScene);
 
   // Extract clothing reinforcement to override reference image's outfit
   const clothingReinforcement = extractClothingReinforcement(cleanedScene);
 
-  // Assemble: identity paragraph + clothing reinforcement + scene content + atmosphere suffix
+  // Assemble: setting/lighting (front of scene) + identity + clothing + action (rest of scene) + composition + atmosphere
   const parts: string[] = [];
   if (identityPrefix.trim()) {
     parts.push(identityPrefix.trim());

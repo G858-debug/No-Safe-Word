@@ -75,30 +75,43 @@ for resume after failure:
 Never use `stability-ai/sdxl` trainer — SDXL LoRAs are architecturally incompatible
 with Flux Kontext and will silently produce wrong results.
 
-### Scene Prompt Format
-Write scene prompts as **natural-language prose** — not comma-separated tags. Flux uses a T5 text encoder that processes sentences, not tag lists.
+### Image Prompt Rules
 
-**Rules:**
+#### Structure (mandatory order)
+Every image prompt must follow this exact structure:
+1. Setting/environment (1 sentence)
+2. Lighting (1 sentence)
+3. Character A — pose + clothing (1-2 sentences)
+4. Character B — pose + clothing (1-2 sentences, dual-character only)
+5. Composition/framing (1 sentence)
+
+#### Length
+Maximum 100 words per prompt. Every sentence must earn its place.
+
+#### Setting first
+Setting and lighting always appear before any character description. Never open a prompt with a character name or physical description.
+
+#### Pose descriptions must be anatomically literal
+Do not use vague action words like "leans forward" or "looks at him". Instead describe exact body position: what the torso is doing, where arms/hands are placed, whether seated/standing/lying, position relative to the other character or environment, and any furniture contact (elbow ON table, back AGAINST wall, sitting ON crate, etc.).
+
+#### Clothing must be explicit and specific
+Name the specific garment. Use "She wears a fitted black mini skirt stopping mid-thigh and a strappy fitted top" not "she wears a top".
+- Add "fully clothed" after clothing description for SFW images with regular clothing (tops, skirts, dresses).
+- Do NOT add "fully clothed" for bedroom or lingerie scenes — the garment description is sufficient.
+- Female characters default to: fitted short mini skirt stopping mid-thigh + strappy/fitted top, unless scene context requires otherwise.
+
+#### Preferred compositions
+Prefer medium shots or 3/4 shots (framed from mid-thigh up) over full-body shots. Full-body shots dilute curvature and read as editorial rather than intimate. Use full-body only for establishing or environmental context shots where no character is the focus.
+
+#### Token efficiency
+Flux uses 77-token chunking. Front-load the most important information. Cut redundant adjectives, repeated anatomical narration, and colour names for elements that don't affect the story read.
+
+#### Flux syntax rules
 - NO emphasis weights — `(tag:1.3)` syntax is ignored by T5. Just describe what you want.
-- NO negative prompts — Flux has no negative conditioning. Omit "avoid X" phrasing.
+- NO negative prompts — Flux has no negative conditioning.
 - NO quality tags — no masterpiece, best quality, 8k, photorealistic, etc.
-- Write flowing descriptive sentences, not comma-separated fragments.
-- Character identity is injected as a prose paragraph by the pipeline — do NOT include physical descriptions.
-
-**Clothing guidance for female characters:** Default to form-fitting, revealing, or glamorous clothing choices (fitted tops, low necklines, mini skirts, heels, bodycon dresses, etc.). The pipeline enhances attractiveness automatically — scene clothing should complement this, not fight it. Only use loose/baggy/modest clothing when it's a deliberate creative choice. Never leave clothing unspecified.
-
-Example (old comma-tag style — DO NOT USE):
-"leaning forward over restaurant table, (sharp seductive half-smile, looking directly at camera:1.3), fitted low-cut top showing tasteful cleavage, gold earrings"
-
-Example (correct Flux prose — USE THIS):
-"She leans forward over the restaurant table with a sharp seductive half-smile, looking directly at the camera. She wears a fitted low-cut top showing tasteful cleavage and gold earrings. A wine glass dangles from her fingers. The scene is lit by warm amber light from a single overhead pendant inside Piatto restaurant on a Friday evening. Medium shot at eye level with a shallow depth of field blurring the other diners."
-
-### The Five Layers (Every Prompt Must Have All Five)
-1. Expression & Gaze — face tells the story; describe gaze direction explicitly in plain text
-2. Narrative Implication — something just happened or is about to, viewer fills the gap
-3. Lighting & Atmosphere — name the specific light source, never "warm lighting"
-4. Composition & Framing — camera angle, shot type, depth of field, strategic cropping
-5. Setting & Cultural Grounding — specific South African environmental details
+- Write natural-language prose, not comma-separated tag lists.
+- Character identity is injected by the pipeline — do NOT include physical descriptions for approved characters.
 
 ### What Makes a Great Sensual Image
 - Tension over exposure — the "moment before" is more powerful than nudity
@@ -141,7 +154,7 @@ The only behavioural difference:
 **Scene Image Generation:**
 - Model: Flux Krea Dev (`flux1KreaDev_fp8E4m3fn.safetensors`) via ComfyUI on RunPod
 - Character consistency: trained character LoRA (from LoRA training pipeline) injected
-  as the FIRST LoRA in the stack at strength 0.85, before style LoRAs
+  as the FIRST LoRA in the stack at strength 0.65, before style LoRAs
 - Style LoRAs — slot priority order:
   - Slot 1: Realism LoRA (always)
   - Slot 2: Detail/Style LoRA (Fashion Editorial SFW / Boudoir NSFW / Add Details)

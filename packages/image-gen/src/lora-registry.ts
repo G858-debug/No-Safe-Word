@@ -347,6 +347,9 @@ export function selectKontextResources(opts: {
       let strength = 0.7 * secondaryReduction;
       if (isFullBody) strength = 0.95 * secondaryReduction;
       if (isCloseUp) strength = 0.4 * secondaryReduction;
+      // Prompt-based full-body boost for single-character scenes only
+      const isPromptFullBody = /\b(full[- ]body|full[- ]length)\b/i.test(prompt);
+      if (isPromptFullBody && !hasDualCharacter) strength = Math.min(strength + 0.15, 1.0);
       loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
       pendingTriggers.push('huge breasts', 'huge hips', 'huge ass', 'narrow waist');
     }

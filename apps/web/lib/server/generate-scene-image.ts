@@ -585,7 +585,7 @@ export async function buildSceneGenerationPayload(
         primaryFaceImageName: 'face_reference.jpg',
         secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.jpg' : undefined,
         weight: 0.85,
-        denoiseStrength: 0.5,
+        denoiseStrength: 0.35,
       }
     : undefined;
 

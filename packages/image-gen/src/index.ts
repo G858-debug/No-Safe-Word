@@ -34,7 +34,7 @@ export { rewritePromptForFlux } from './flux-prompt-rewriter';
 export { runNanoBanana, readReplicateOutput } from './replicate-client';
 
 // Flux-native prompt builder — assembles prose prompts, strips legacy syntax, and enhances sensuality
-export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFemaleEnhancement, injectFluxGazeEmphasis, buildFluxAtmosphereSuffix } from './flux-prompt-builder';
+export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFemaleEnhancement, injectFluxGazeEmphasis, buildFluxAtmosphereSuffix, reorderScenePrompt } from './flux-prompt-builder';
 
 // Character LoRA pipeline — server-only, import directly:
 //   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'
