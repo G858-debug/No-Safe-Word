@@ -604,8 +604,8 @@ export async function buildSceneGenerationPayload(
   // PuLID weight and denoise are reduced for dark scenes to prevent
   // the refinement pass from overriding the scene with a standing portrait.
   const isDarkScene = detectSceneDarkness(imgPrompt.prompt);
-  const pulidWeight = isDarkScene ? 0.55 : 0.75;
-  const pulidDenoise = isDarkScene ? 0.20 : 0.30;
+  const pulidWeight = isDarkScene ? 0.55 : 0.85;
+  const pulidDenoise = isDarkScene ? 0.20 : 0.40;
 
   const pulidConfig = primaryFaceUrl
     ? {
