@@ -87,6 +87,8 @@ interface LoraTrainingState {
   loraId: string | null;
   datasetGenerated: number;
   datasetApproved: number;
+  humanApproved: number;
+  humanRejected: number;
   trainingAttempt: number;
   validationScore: number | null;
   error: string | null;
@@ -263,6 +265,8 @@ export default function CharacterApproval({
           loraId: null,
           datasetGenerated: 0,
           datasetApproved: 0,
+          humanApproved: 0,
+          humanRejected: 0,
           trainingAttempt: 0,
           validationScore: null,
           error: null,
@@ -946,6 +950,8 @@ export default function CharacterApproval({
             loraId: data.loraId,
             datasetGenerated: data.progress?.datasetGenerated || 0,
             datasetApproved: data.progress?.datasetApproved || 0,
+            humanApproved: data.progress?.humanApproved || 0,
+            humanRejected: data.progress?.humanRejected || 0,
             trainingAttempt: data.progress?.trainingAttempt || 0,
             validationScore: data.progress?.validationScore || null,
             error: data.error,
@@ -965,11 +971,10 @@ export default function CharacterApproval({
     [updateLoraState]
   );
 
-  // On mount: check LoRA progress for already-approved characters
-  useEffect(() => {
+  // Fetch LoRA progress for all approved characters
+  const refreshLoraProgress = useCallback(() => {
     for (const ch of characters) {
       if (ch.approved && ch.approved_fullbody) {
-        // Check if there's an existing LoRA training
         fetch(`/api/stories/characters/${ch.id}/lora-progress`)
           .then((r) => r.json())
           .then((data) => {
@@ -979,6 +984,8 @@ export default function CharacterApproval({
                 loraId: data.loraId,
                 datasetGenerated: data.progress?.datasetGenerated || 0,
                 datasetApproved: data.progress?.datasetApproved || 0,
+                humanApproved: data.progress?.humanApproved || 0,
+                humanRejected: data.progress?.humanRejected || 0,
                 trainingAttempt: data.progress?.trainingAttempt || 0,
                 validationScore: data.progress?.validationScore || null,
                 error: data.error,
@@ -994,12 +1001,28 @@ export default function CharacterApproval({
           .catch(() => {/* ignore */});
       }
     }
+  }, [characters, updateLoraState, startLoraPolling]);
+
+  // On mount: check LoRA progress for already-approved characters
+  useEffect(() => {
+    refreshLoraProgress();
 
     return () => {
       Object.values(loraPollingTimers.current).forEach(clearInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-fetch when page becomes visible (e.g. navigating back from dataset approval)
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === "visible") {
+        refreshLoraProgress();
+      }
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, [refreshLoraProgress]);
 
   // ------- Derived state -------
 
@@ -1854,7 +1877,16 @@ function LoraTrainingSection({
         <div className="rounded-md bg-amber-500/5 border border-amber-500/20 p-2.5 space-y-1.5">
           <p className="text-xs text-amber-300">{config.description}</p>
           <p className="text-xs text-muted-foreground">
-            {loraState.datasetApproved} images ready for review (min {20} required)
+            {loraState.humanApproved}/{20} approved · {loraState.datasetApproved} AI-passed · {loraState.datasetGenerated} total
+          </p>
+        </div>
+      )}
+
+      {/* Failed — show dataset counts so user knows where things stand */}
+      {loraState.status === "failed" && loraState.datasetGenerated > 0 && (
+        <div className="rounded-md bg-zinc-500/5 border border-zinc-500/20 p-2.5 space-y-1.5">
+          <p className="text-xs text-muted-foreground">
+            {loraState.humanApproved}/{20} approved · {loraState.datasetApproved} AI-passed · {loraState.datasetGenerated} total
           </p>
         </div>
       )}
