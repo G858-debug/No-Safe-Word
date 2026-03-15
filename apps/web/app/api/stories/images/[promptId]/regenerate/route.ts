@@ -74,6 +74,13 @@ export async function POST(
     const characterDataMap = await fetchCharacterDataMap(characterIds);
 
     // 6. Build full generation payload via shared pipeline
+    const body = await request.json().catch(() => ({}));
+    const pulidOnlyMode = body?.pulidOnlyMode === true;
+
+    if (pulidOnlyMode) {
+      console.log(`[Kontext][${promptId}] PuLID-only test mode — no character LoRAs, realism LoRA only`);
+    }
+
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
     const result = await buildSceneGenerationPayload({
@@ -81,6 +88,7 @@ export async function POST(
       seriesId,
       characterDataMap,
       seed,
+      pulidOnlyMode,
     });
 
     console.log(

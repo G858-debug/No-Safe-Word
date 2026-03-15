@@ -51,6 +51,8 @@ interface GenerateSceneParams {
   seriesId: string;
   characterDataMap: Map<string, CharacterData>;
   seed: number;
+  /** Test mode: skip all LoRAs except realism, rely on PuLID + Redux only */
+  pulidOnlyMode?: boolean;
 }
 
 // ── Helpers ──
@@ -172,40 +174,45 @@ export async function buildSceneGenerationPayload(
 
   // ── Character LoRA preflight check ──
   // Every referenced character must have a deployed LoRA before scene generation.
+  // In pulidOnlyMode, skip entirely — identity comes from PuLID + Redux only.
   const characterLoraDownloads: CharacterLoraDownload[] = [];
 
-  for (const charId of [imgPrompt.character_id, imgPrompt.secondary_character_id]) {
-    if (!charId) continue;
-    const charName = characterDataMap.get(charId)?.name || "Unknown";
+  if (params.pulidOnlyMode) {
+    console.log(`[Kontext][${promptId}] PuLID-only mode: skipping character LoRA preflight`);
+  } else {
+    for (const charId of [imgPrompt.character_id, imgPrompt.secondary_character_id]) {
+      if (!charId) continue;
+      const charName = characterDataMap.get(charId)?.name || "Unknown";
 
-    const { data: loraRow, error: loraError } = await supabase
-      .from("character_loras")
-      .select("filename, storage_url")
-      .eq("character_id", charId)
-      .eq("status", "deployed")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+      const { data: loraRow, error: loraError } = await supabase
+        .from("character_loras")
+        .select("filename, storage_url")
+        .eq("character_id", charId)
+        .eq("status", "deployed")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
 
-    if (loraError || !loraRow) {
-      throw new Error(
-        `Character "${charName}" does not have a trained LoRA yet. ` +
-        `Complete LoRA training in Character Approval before generating story images.`,
-      );
+      if (loraError || !loraRow) {
+        throw new Error(
+          `Character "${charName}" does not have a trained LoRA yet. ` +
+          `Complete LoRA training in Character Approval before generating story images.`,
+        );
+      }
+
+      if (!loraRow.storage_url) {
+        throw new Error(
+          `Character "${charName}" LoRA is deployed but has no storage URL. ` +
+          `Re-deploy the LoRA to fix this.`,
+        );
+      }
+
+      characterLoraDownloads.push({
+        filename: loraRow.filename,
+        url: loraRow.storage_url,
+      });
+      console.log(`[Kontext][${promptId}] Character LoRA found for "${charName}": ${loraRow.filename}`);
     }
-
-    if (!loraRow.storage_url) {
-      throw new Error(
-        `Character "${charName}" LoRA is deployed but has no storage URL. ` +
-        `Re-deploy the LoRA to fix this.`,
-      );
-    }
-
-    characterLoraDownloads.push({
-      filename: loraRow.filename,
-      url: loraRow.storage_url,
-    });
-    console.log(`[Kontext][${promptId}] Character LoRA found for "${charName}": ${loraRow.filename}`);
   }
 
   // ── Reference images ──
@@ -510,34 +517,40 @@ export async function buildSceneGenerationPayload(
   let kontextLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   let kontextTriggerWords: string[] = [];
 
-  // Character identity LoRAs go first in the stack (highest priority)
-  const characterLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = characterLoraDownloads.map((dl) => ({
-    filename: dl.filename,
-    strengthModel: 0.65,
-    strengthClip: 0.65,
-  }));
-
-  if (effectiveKontextType !== "portrait") {
-    const resources = selectKontextResources({
-      gender: primaryGender,
-      secondaryGender,
-      isSfw: sfwMode,
-      imageType: imgPrompt.image_type,
-      prompt: imgPrompt.prompt,
-      hasDualCharacter: hasSecondary,
-      primaryEthnicity: charData?.ethnicity,
-      secondaryEthnicity: secondaryCharData?.ethnicity,
-    });
-    // Character LoRAs first, then style LoRAs
-    kontextLoras = [...characterLoras, ...resources.loras];
-    kontextTriggerWords = resources.triggerWords;
-    console.log(
-      `[Kontext][${promptId}] LoRAs (${primaryGender}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map((l) => `${l.filename}@${l.strengthModel}`).join(", ")}`,
-    );
+  if (params.pulidOnlyMode) {
+    // PuLID-only test mode: realism LoRA only, no character or style LoRAs
+    kontextLoras = [{ filename: 'flux_realism_lora.safetensors', strengthModel: 0.7, strengthClip: 0.7 }];
+    console.log(`[Kontext][${promptId}] PuLID-only mode: realism LoRA only (0.7), all other LoRAs skipped`);
   } else {
-    // Portrait/establishing shots still get character LoRAs (for identity) but no style LoRAs
-    kontextLoras = characterLoras;
-    console.log(`[Kontext][${promptId}] Portrait/establishing shot — character LoRAs only: ${kontextLoras.map((l) => l.filename).join(", ") || "NONE"}`);
+    // Character identity LoRAs go first in the stack (highest priority)
+    const characterLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = characterLoraDownloads.map((dl) => ({
+      filename: dl.filename,
+      strengthModel: 0.65,
+      strengthClip: 0.65,
+    }));
+
+    if (effectiveKontextType !== "portrait") {
+      const resources = selectKontextResources({
+        gender: primaryGender,
+        secondaryGender,
+        isSfw: sfwMode,
+        imageType: imgPrompt.image_type,
+        prompt: imgPrompt.prompt,
+        hasDualCharacter: hasSecondary,
+        primaryEthnicity: charData?.ethnicity,
+        secondaryEthnicity: secondaryCharData?.ethnicity,
+      });
+      // Character LoRAs first, then style LoRAs
+      kontextLoras = [...characterLoras, ...resources.loras];
+      kontextTriggerWords = resources.triggerWords;
+      console.log(
+        `[Kontext][${promptId}] LoRAs (${primaryGender}, sfw=${sfwMode}, dual=${hasSecondary}): ${kontextLoras.map((l) => `${l.filename}@${l.strengthModel}`).join(", ")}`,
+      );
+    } else {
+      // Portrait/establishing shots still get character LoRAs (for identity) but no style LoRAs
+      kontextLoras = characterLoras;
+      console.log(`[Kontext][${promptId}] Portrait/establishing shot — character LoRAs only: ${kontextLoras.map((l) => l.filename).join(", ") || "NONE"}`);
+    }
   }
 
   // Inject trigger words near the relevant character, not at prompt start.
