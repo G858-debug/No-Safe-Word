@@ -1891,8 +1891,8 @@ function LoraTrainingSection({
         </div>
       )}
 
-      {/* Error display */}
-      {loraState.error && (
+      {/* Error display — hide if user has since approved enough images */}
+      {loraState.error && loraState.humanApproved < 20 && (
         <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {loraState.error}
