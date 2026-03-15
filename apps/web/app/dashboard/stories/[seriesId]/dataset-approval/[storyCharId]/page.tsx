@@ -110,12 +110,14 @@ function DatasetImageCard({
   onApprove,
   onReject,
   onZoom,
+  readOnly,
 }: {
   img: DatasetImage;
   focused: boolean;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   onZoom: (url: string) => void;
+  readOnly?: boolean;
 }) {
   const status = approvalStatus(img);
 
@@ -199,28 +201,30 @@ function DatasetImageCard({
       </div>
 
       {/* Approve / Reject buttons */}
-      <div className="mt-auto flex gap-1 p-1.5">
-        <button
-          onClick={() => onApprove(img.id)}
-          className={`flex flex-1 items-center justify-center gap-1 rounded py-1.5 text-xs font-medium transition-colors ${
-            status === "approved"
-              ? "bg-emerald-700 text-emerald-100"
-              : "bg-zinc-800 text-zinc-400 hover:bg-emerald-900/50 hover:text-emerald-300"
-          }`}
-        >
-          <CheckCircle2 className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={() => onReject(img.id)}
-          className={`flex flex-1 items-center justify-center gap-1 rounded py-1.5 text-xs font-medium transition-colors ${
-            status === "rejected"
-              ? "bg-red-800 text-red-200"
-              : "bg-zinc-800 text-zinc-400 hover:bg-red-900/50 hover:text-red-300"
-          }`}
-        >
-          <XCircle className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="mt-auto flex gap-1 p-1.5">
+          <button
+            onClick={() => onApprove(img.id)}
+            className={`flex flex-1 items-center justify-center gap-1 rounded py-1.5 text-xs font-medium transition-colors ${
+              status === "approved"
+                ? "bg-emerald-700 text-emerald-100"
+                : "bg-zinc-800 text-zinc-400 hover:bg-emerald-900/50 hover:text-emerald-300"
+            }`}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => onReject(img.id)}
+            className={`flex flex-1 items-center justify-center gap-1 rounded py-1.5 text-xs font-medium transition-colors ${
+              status === "rejected"
+                ? "bg-red-800 text-red-200"
+                : "bg-zinc-800 text-zinc-400 hover:bg-red-900/50 hover:text-red-300"
+            }`}
+          >
+            <XCircle className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -237,6 +241,7 @@ export default function DatasetApprovalPage() {
   const [images, setImages] = useState<DatasetImage[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loraId, setLoraId] = useState<string | null>(null);
+  const [loraStatus, setLoraStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>("all");
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -254,6 +259,7 @@ export default function DatasetApprovalPage() {
     setImages(data.images ?? []);
     setStats(data.stats ?? null);
     setLoraId(data.loraId ?? null);
+    setLoraStatus(data.loraStatus ?? null);
     setLoading(false);
   }, [storyCharId]);
 
@@ -263,11 +269,13 @@ export default function DatasetApprovalPage() {
 
   // ── Derived ─────────────────────────────────────────────────
 
+  const isApprovalMode = loraStatus === "awaiting_dataset_approval";
+  const readOnly = !isApprovalMode;
   const humanApproved = images.filter((i) => i.human_approved === true).length;
   const humanRejected = images.filter((i) => i.human_approved === false).length;
   const humanPending = images.filter((i) => i.human_approved === null).length;
   const minRequired = stats?.minRequired ?? 20;
-  const canResume = humanApproved >= minRequired;
+  const canResume = isApprovalMode && humanApproved >= minRequired;
 
   // ── Filtered images ─────────────────────────────────────────
 
@@ -438,34 +446,42 @@ export default function DatasetApprovalPage() {
             Back to Characters
           </Link>
           <h1 className="text-2xl font-bold tracking-tight">
-            Review Dataset Images
+            {isApprovalMode ? "Review Dataset Images" : "Dataset Images"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review AI-generated training images before LoRA training begins. Need{" "}
-            {minRequired} approved to proceed.
+            {isApprovalMode
+              ? `Review AI-generated training images before LoRA training begins. Need ${minRequired} approved to proceed.`
+              : `Viewing ${images.length} dataset images generated for this character's LoRA training.`}
           </p>
-        </div>
-        <button
-          onClick={handleResume}
-          disabled={!canResume || resuming}
-          className={`inline-flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors ${
-            canResume && !resuming
-              ? "bg-amber-700 text-amber-100 hover:bg-amber-600"
-              : "pointer-events-none bg-zinc-800 text-zinc-600"
-          }`}
-        >
-          {resuming ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Resuming...
-            </>
-          ) : (
-            <>
-              Resume Training
-              <ArrowRight className="h-4 w-4" />
-            </>
+          {readOnly && loraStatus && (
+            <p className="mt-1 text-xs text-zinc-500">
+              LoRA status: <span className={loraStatus === "failed" ? "text-red-400" : "text-zinc-400"}>{loraStatus}</span>
+            </p>
           )}
-        </button>
+        </div>
+        {isApprovalMode && (
+          <button
+            onClick={handleResume}
+            disabled={!canResume || resuming}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors ${
+              canResume && !resuming
+                ? "bg-amber-700 text-amber-100 hover:bg-amber-600"
+                : "pointer-events-none bg-zinc-800 text-zinc-600"
+            }`}
+          >
+            {resuming ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Resuming...
+              </>
+            ) : (
+              <>
+                Resume Training
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {resumeError && (
@@ -518,13 +534,15 @@ export default function DatasetApprovalPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setApproveAllConfirm(true)}
-            disabled={humanPending === 0}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
-          >
-            Approve All Remaining ({humanPending})
-          </button>
+          {isApprovalMode && (
+            <button
+              onClick={() => setApproveAllConfirm(true)}
+              disabled={humanPending === 0}
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+            >
+              Approve All Remaining ({humanPending})
+            </button>
+          )}
           <button
             onClick={loadImages}
             className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
@@ -535,11 +553,13 @@ export default function DatasetApprovalPage() {
       </div>
 
       {/* Keyboard shortcut hint */}
-      <p className="mb-4 text-[11px] text-zinc-600">
-        Keyboard: <span className="font-mono">→</span> Approve &nbsp;·&nbsp;{" "}
-        <span className="font-mono">←</span> Reject &nbsp;·&nbsp;{" "}
-        <span className="font-mono">↑↓</span> Navigate
-      </p>
+      {isApprovalMode && (
+        <p className="mb-4 text-[11px] text-zinc-600">
+          Keyboard: <span className="font-mono">→</span> Approve &nbsp;·&nbsp;{" "}
+          <span className="font-mono">←</span> Reject &nbsp;·&nbsp;{" "}
+          <span className="font-mono">↑↓</span> Navigate
+        </p>
+      )}
 
       {/* Image grid */}
       {loading ? (
@@ -560,13 +580,14 @@ export default function DatasetApprovalPage() {
               onApprove={handleApprove}
               onReject={handleReject}
               onZoom={setZoomUrl}
+              readOnly={readOnly}
             />
           ))}
         </div>
       )}
 
       {/* Resume footer */}
-      {canResume && (
+      {isApprovalMode && canResume && (
         <div className="mt-8 flex justify-end">
           <button
             onClick={handleResume}

@@ -21,6 +21,7 @@ import {
   Wand2,
   AlertCircle,
   Dna,
+  Eye,
   Pencil,
   Save,
   X,
@@ -1708,6 +1709,16 @@ function LoraTrainingSection({
           >
             <Sparkles className="h-3.5 w-3.5" />
             Review Dataset
+          </a>
+        )}
+
+        {isFailed && loraState.loraId && (
+          <a
+            href={`/dashboard/stories/${seriesId}/dataset-approval/${storyCharId}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-600 bg-transparent px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View Dataset
           </a>
         )}
 
