@@ -6,7 +6,6 @@ export type PipelineStatus =
   | 'pending'
   | 'generating_dataset'
   | 'evaluating'
-  | 'awaiting_dataset_approval'
   | 'captioning'
   | 'training'
   | 'validating'

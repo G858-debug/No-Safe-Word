@@ -110,12 +110,23 @@ export async function generateDataset(
   }));
   const cuLimited = promptLimit ? cuPrompts.slice(0, Math.ceil(promptLimit * 0.4)) : cuPrompts;
 
-  // Body shots via ComfyUI/RunPod for all genders — uses Flux Kontext with portrait reference
-  console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via ComfyUI/RunPod...`);
-  const cuResult = await generateComfyUIImages(character, loraId, cuLimited, deps);
-  imageRecords.push(...cuResult.records);
-  failedPrompts.push(...cuResult.failures);
-  const phase2Count = cuResult.records.length;
+  let phase2Count: number;
+
+  if (character.gender === 'female') {
+    // Female: SDXL + Venus Body LoRA → Flux img2img for curvaceous body shots
+    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img...`);
+    const sdxlResult = await generateSdxlBodyShots(character, loraId, cuLimited.length, deps);
+    imageRecords.push(...sdxlResult.records);
+    failedPrompts.push(...sdxlResult.failures);
+    phase2Count = sdxlResult.records.length;
+  } else {
+    // Male: keep existing ComfyUI body shot path
+    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via ComfyUI/RunPod...`);
+    const cuResult = await generateComfyUIImages(character, loraId, cuLimited, deps);
+    imageRecords.push(...cuResult.records);
+    failedPrompts.push(...cuResult.failures);
+    phase2Count = cuResult.records.length;
+  }
 
   console.log(
     `[LoRA Dataset] Complete: ${imageRecords.length} images ` +
