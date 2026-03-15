@@ -18,6 +18,7 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) {
+    console.error("[GET /api/stories] Supabase error:", error.message, error.code, error.details);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
