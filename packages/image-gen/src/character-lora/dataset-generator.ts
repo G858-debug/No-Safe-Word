@@ -46,14 +46,14 @@ const POSE_VARIANTS: Record<string, string[]> = {
     'both hands on hips, weight shifted to one leg',
   ],
   walking: [
-    'caught mid-stride walking forward with confidence',
-    'walking with a natural fluid hip sway',
-    'stepping forward with purpose and grace',
+    'caught mid-stride walking forward with confidence, full figure in frame',
+    'walking with a natural fluid hip sway, full figure in frame',
+    'stepping forward with purpose and grace, full figure in frame',
   ],
   seated: [
-    'seated gracefully on a chair with legs crossed',
-    'lounging on a couch with one leg stretched out',
-    'sitting cross-legged on the floor in a relaxed pose',
+    'seated gracefully on a chair with legs crossed, face and upper body clearly visible',
+    'lounging on a couch with one leg stretched out, face and upper body clearly visible',
+    'sitting cross-legged on the floor in a relaxed pose, face and upper body clearly visible',
   ],
 };
 
@@ -393,14 +393,14 @@ const MALE_POSE_VARIANTS: Record<string, string[]> = {
     'standing with one hand adjusting collar in a relaxed gesture',
   ],
   walking: [
-    'caught mid-stride walking forward with confident purpose',
-    'walking with natural easy stride and relaxed shoulders',
-    'stepping forward with deliberate calm energy',
+    'caught mid-stride walking forward with confident purpose, full figure in frame',
+    'walking with natural easy stride and relaxed shoulders, full figure in frame',
+    'stepping forward with deliberate calm energy, full figure in frame',
   ],
   seated: [
-    'seated on a chair leaning forward with elbows on knees',
-    'sitting back in a chair with one ankle resting on opposite knee',
-    'seated on a stool with relaxed upright posture',
+    'seated on a chair leaning forward with elbows on knees, face and upper body clearly visible',
+    'sitting back in a chair with one ankle resting on opposite knee, face and upper body clearly visible',
+    'seated on a stool with relaxed upright posture, face and upper body clearly visible',
   ],
 };
 
@@ -417,15 +417,17 @@ export async function generateSdxlMaleBodyShots(
   const basePositive =
     `${ethnicity} man, ${skinTone} skin, ${bodyDesc} build, ` +
     `wearing a well-fitted henley shirt and dark jeans, fully clothed, ` +
-    `full body, natural pose, masterpiece, best quality, highly detailed, 8k`;
+    `face and head fully visible in frame, full body from head to feet, natural pose, masterpiece, best quality, highly detailed, 8k`;
   const negative =
     'nude, naked, shirtless, nsfw, underwear, ' +
     'feminine, woman, female, breasts, deformed, ' +
-    'bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
+    'bad anatomy, extra limbs, (worst quality:2), (low quality:2), ' +
+    'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible';
 
   const img2imgPrompt =
     `${ethnicity} man, ${skinTone} skin, ${bodyDesc} build, ` +
     `wearing fitted casual clothing, fully clothed, ` +
+    `face and head clearly visible, full body, ` +
     `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
 
   const records: LoraDatasetImageRow[] = [];
@@ -574,16 +576,18 @@ export async function generateSdxlBodyShots(
     `${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
     `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
     `wearing a form-fitting bodycon dress that shows her curves clearly, fully clothed, ` +
-    `full body, standing, natural pose, masterpiece, best quality, highly detailed, 8k`;
+    `full body from head to feet, standing, natural pose, masterpiece, best quality, highly detailed, 8k`;
   const negative =
     'nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, underwear, ' +
     'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
     'bad anatomy, extra limbs, (worst quality:2), (low quality:2), ' +
-    'white skin, pale skin, asian features, european features';
+    'white skin, pale skin, asian features, european features, ' +
+    'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible';
 
   const img2imgPrompt =
     `${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
     `and thick thighs, wearing a fitted dress, fully clothed, ` +
+    `face and head clearly visible, full body, ` +
     `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
 
   // Build LoRA stack matching generate-character-image.ts female body pipeline
@@ -715,6 +719,74 @@ export async function generateSdxlBodyShots(
   }
 
   return { records, failures };
+}
+
+// ── Single Image Regeneration ─────────────────────────────────────
+
+/**
+ * Regenerate a single dataset image, routing to the correct pipeline based on source.
+ * Optionally accepts a custom prompt override (for nano-banana and comfyui sources).
+ */
+export async function regenerateSingleImage(
+  character: CharacterInput,
+  loraId: string,
+  original: {
+    source: ImageSource;
+    category: string;
+    variationType: VariationType;
+    promptTemplate: string;
+  },
+  customPrompt: string | undefined,
+  deps: DatasetGeneratorDeps,
+): Promise<LoraDatasetImageRow> {
+  if (original.source === 'sdxl-img2img') {
+    // SDXL body shots use random poses — custom prompt not applicable
+    const generateFn = character.gender === 'female'
+      ? generateSdxlBodyShots
+      : generateSdxlMaleBodyShots;
+    const result = await generateFn(character, loraId, 1, deps);
+    if (result.records.length === 0) {
+      throw new Error('SDXL body shot regeneration produced no images');
+    }
+    return result.records[0];
+  }
+
+  // For nano-banana and comfyui: build a DatasetPrompt, optionally with custom prompt text
+  const allPrompts = [
+    ...getNanoBananaPrompts().map((p) => ({
+      ...p,
+      prompt: adaptPromptForGender(p.prompt, character.gender),
+    })),
+    ...getComfyUIPrompts().map((p) => ({
+      ...p,
+      prompt: adaptPromptForGender(
+        interpolateComfyUIPrompt(p.prompt, character.structuredData),
+        character.gender,
+      ),
+    })),
+  ];
+
+  const templateMatch = allPrompts.find((p) => p.id === original.promptTemplate);
+  const promptId = `${original.promptTemplate}_regen_${Date.now()}`;
+
+  const datasetPrompt: DatasetPrompt = {
+    id: promptId,
+    variationType: original.variationType,
+    source: original.source,
+    category: original.category as DatasetPrompt['category'],
+    prompt: customPrompt || templateMatch?.prompt || customPrompt || '',
+    description: templateMatch?.description || 'Regenerated image',
+  };
+
+  if (!datasetPrompt.prompt) {
+    throw new Error(`No prompt available for template ${original.promptTemplate} and no custom prompt provided`);
+  }
+
+  if (original.source === 'nano-banana') {
+    return generateSingleNanoBanana(character, datasetPrompt, loraId, deps);
+  } else {
+    return generateSingleComfyUI(character, datasetPrompt, loraId, deps);
+  }
 }
 
 // ── Shared Helpers ────────────────────────────────────────────────

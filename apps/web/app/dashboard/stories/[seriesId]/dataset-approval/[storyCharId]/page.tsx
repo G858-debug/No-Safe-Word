@@ -11,6 +11,11 @@ import {
   ZoomIn,
   X,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Save,
+  Check,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────
@@ -33,6 +38,9 @@ interface DatasetImage {
   } | null;
   human_approved: boolean | null;
   caption: string | null;
+  prompt_template: string | null;
+  source: string | null;
+  resolvedPrompt: string | null;
 }
 
 interface Stats {
@@ -66,36 +74,361 @@ function scoreColor(score: number): string {
   return "text-red-400";
 }
 
+function sourceBadgeColor(source: string): string {
+  if (source === "nano-banana") return "bg-blue-900/50 text-blue-300";
+  if (source === "comfyui") return "bg-purple-900/50 text-purple-300";
+  return "bg-amber-900/50 text-amber-300";
+}
+
 // ─────────────────────────────────────────────────────────────────
-// Image modal
+// Image Lightbox
 // ─────────────────────────────────────────────────────────────────
 
-function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
+function ImageLightbox({
+  image,
+  images,
+  currentIndex,
+  storyCharId,
+  onClose,
+  onNavigate,
+  onApprove,
+  onReject,
+  onImageUpdate,
+  onImageRegenerated,
+  readOnly,
+}: {
+  image: DatasetImage;
+  images: DatasetImage[];
+  currentIndex: number;
+  storyCharId: string;
+  onClose: () => void;
+  onNavigate: (index: number) => void;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  onImageUpdate: (id: string, updates: Partial<DatasetImage>) => void;
+  onImageRegenerated: (oldId: string, newImage: DatasetImage) => void;
+  readOnly?: boolean;
+}) {
+  const [editedCaption, setEditedCaption] = useState(image.caption || "");
+  const [editedPrompt, setEditedPrompt] = useState(image.resolvedPrompt || "");
+  const [savingCaption, setSavingCaption] = useState(false);
+  const [captionSaved, setCaptionSaved] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+
+  // Reset local state when image changes (navigation)
+  useEffect(() => {
+    setEditedCaption(image.caption || "");
+    setEditedPrompt(image.resolvedPrompt || "");
+    setCaptionSaved(false);
+    setRegenError(null);
+  }, [image.id, image.caption, image.resolvedPrompt]);
+
+  // Keyboard: Escape to close, arrows to navigate (when not in textarea)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      const target = e.target as HTMLElement;
+      const inTextarea = target.tagName === "TEXTAREA";
+
+      if (e.key === "Escape") {
+        onClose();
+      } else if (!inTextarea && e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (currentIndex > 0) onNavigate(currentIndex - 1);
+      } else if (!inTextarea && e.key === "ArrowRight") {
+        e.preventDefault();
+        if (currentIndex < images.length - 1) onNavigate(currentIndex + 1);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, onNavigate, currentIndex, images.length]);
+
+  const handleSaveCaption = async () => {
+    setSavingCaption(true);
+    setCaptionSaved(false);
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${storyCharId}/dataset-images/${image.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ caption: editedCaption }),
+        }
+      );
+      if (res.ok) {
+        onImageUpdate(image.id, { caption: editedCaption });
+        setCaptionSaved(true);
+        setTimeout(() => setCaptionSaved(false), 2000);
+      }
+    } catch {
+      // ignore
+    }
+    setSavingCaption(false);
+  };
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    setRegenError(null);
+    try {
+      const body: Record<string, string> = {};
+      // Only send custom prompt if it was edited and source supports it
+      if (image.source !== "sdxl-img2img" && editedPrompt && editedPrompt !== image.resolvedPrompt) {
+        body.customPrompt = editedPrompt;
+      }
+
+      const res = await fetch(
+        `/api/stories/characters/${storyCharId}/dataset-images/${image.id}/regenerate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRegenError(data.error || "Regeneration failed");
+        setRegenerating(false);
+        return;
+      }
+
+      const data = await res.json();
+      onImageRegenerated(image.id, data.image);
+    } catch {
+      setRegenError("Network error");
+    }
+    setRegenerating(false);
+  };
+
+  const status = approvalStatus(image);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < images.length - 1;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex bg-black/90 backdrop-blur-sm"
       onClick={onClose}
     >
+      {/* Close button */}
       <button
-        className="absolute right-4 top-4 rounded-full bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700"
+        className="absolute right-4 top-4 z-10 rounded-full bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700"
         onClick={onClose}
       >
         <X className="h-5 w-5" />
       </button>
-      <img
-        src={src}
-        alt="Full size preview"
-        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+
+      {/* Nav counter */}
+      <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-zinc-800/80 px-3 py-1 text-xs text-zinc-400">
+        {currentIndex + 1} / {images.length}
+      </div>
+
+      {/* Left panel: Image + navigation */}
+      <div
+        className="relative flex flex-1 items-center justify-center p-8"
         onClick={(e) => e.stopPropagation()}
-      />
+      >
+        {/* Prev button */}
+        {hasPrev && (
+          <button
+            onClick={() => onNavigate(currentIndex - 1)}
+            className="absolute left-3 rounded-full bg-zinc-800/80 p-2 text-zinc-300 hover:bg-zinc-700"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+        )}
+
+        <img
+          src={image.image_url}
+          alt={`Dataset ${image.category}`}
+          className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
+        />
+
+        {/* Next button */}
+        {hasNext && (
+          <button
+            onClick={() => onNavigate(currentIndex + 1)}
+            className="absolute right-[420px] rounded-full bg-zinc-800/80 p-2 text-zinc-300 hover:bg-zinc-700"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        )}
+      </div>
+
+      {/* Right panel: Details sidebar */}
+      <div
+        className="flex w-[400px] flex-col gap-4 overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Metadata badges */}
+        <div className="flex flex-wrap gap-1.5">
+          {image.source && (
+            <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${sourceBadgeColor(image.source)}`}>
+              {fmtTag(image.source)}
+            </span>
+          )}
+          <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
+            {fmtTag(image.category)}
+          </span>
+          <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">
+            {fmtTag(image.variation_type)}
+          </span>
+          {status !== "pending" && (
+            <span
+              className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                status === "approved" ? "bg-emerald-900/50 text-emerald-300" : "bg-red-900/50 text-red-300"
+              }`}
+            >
+              {status}
+            </span>
+          )}
+        </div>
+
+        {/* Template ID */}
+        {image.prompt_template && (
+          <div>
+            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+              Template ID
+            </label>
+            <code className="block rounded bg-zinc-900 px-2 py-1 text-[11px] text-zinc-500 break-all">
+              {image.prompt_template}
+            </code>
+          </div>
+        )}
+
+        {/* Generation Prompt */}
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+            Generation Prompt
+          </label>
+          {image.source === "sdxl-img2img" && !image.resolvedPrompt ? (
+            <p className="rounded bg-zinc-900 px-2 py-2 text-xs italic text-zinc-600">
+              Dynamically generated with random pose — prompt not stored
+            </p>
+          ) : (
+            <textarea
+              value={editedPrompt}
+              onChange={(e) => setEditedPrompt(e.target.value)}
+              rows={4}
+              className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+              placeholder="No prompt available"
+            />
+          )}
+        </div>
+
+        {/* Caption */}
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+            Training Caption
+          </label>
+          <textarea
+            value={editedCaption}
+            onChange={(e) => setEditedCaption(e.target.value)}
+            rows={3}
+            className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+            placeholder="No caption yet"
+          />
+          <button
+            onClick={handleSaveCaption}
+            disabled={savingCaption || editedCaption === (image.caption || "")}
+            className="mt-1.5 inline-flex items-center gap-1.5 rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-40"
+          >
+            {captionSaved ? (
+              <>
+                <Check className="h-3 w-3 text-emerald-400" />
+                <span className="text-emerald-400">Saved</span>
+              </>
+            ) : savingCaption ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-3 w-3" />
+                Save Caption
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Eval scores */}
+        {image.eval_details && (
+          <div>
+            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+              Eval Scores
+            </label>
+            <div className="flex gap-3 text-xs">
+              <span className={scoreColor(image.eval_details.face_score)}>
+                Face {image.eval_details.face_score}
+              </span>
+              <span className={scoreColor(image.eval_details.body_score)}>
+                Body {image.eval_details.body_score}
+              </span>
+              <span className={scoreColor(image.eval_details.quality_score)}>
+                Quality {image.eval_details.quality_score}
+              </span>
+            </div>
+            {image.eval_details.issues.length > 0 && (
+              <p className="mt-1 text-[10px] leading-snug text-red-400/70">
+                {image.eval_details.issues.join(", ")}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Regenerate */}
+        <div>
+          <button
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-500/30 bg-blue-950/30 px-4 py-2 text-sm font-medium text-blue-300 hover:bg-blue-900/30 disabled:opacity-50"
+          >
+            {regenerating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Regenerating...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Regenerate Image
+              </>
+            )}
+          </button>
+          {regenError && (
+            <p className="mt-1 text-xs text-red-400">{regenError}</p>
+          )}
+        </div>
+
+        {/* Approve / Reject */}
+        {!readOnly && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => onApprove(image.id)}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
+                status === "approved"
+                  ? "bg-emerald-700 text-emerald-100"
+                  : "bg-zinc-800 text-zinc-400 hover:bg-emerald-900/50 hover:text-emerald-300"
+              }`}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Approve
+            </button>
+            <button
+              onClick={() => onReject(image.id)}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
+                status === "rejected"
+                  ? "bg-red-800 text-red-200"
+                  : "bg-zinc-800 text-zinc-400 hover:bg-red-900/50 hover:text-red-300"
+              }`}
+            >
+              <XCircle className="h-4 w-4" />
+              Reject
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -116,7 +449,7 @@ function DatasetImageCard({
   focused: boolean;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
-  onZoom: (url: string) => void;
+  onZoom: (img: DatasetImage) => void;
   readOnly?: boolean;
 }) {
   const status = approvalStatus(img);
@@ -143,10 +476,10 @@ function DatasetImageCard({
         />
         <div
           className="absolute inset-0 cursor-zoom-in"
-          onClick={() => onZoom(img.image_url)}
+          onClick={() => onZoom(img)}
         />
         <button
-          onClick={() => onZoom(img.image_url)}
+          onClick={() => onZoom(img)}
           className="absolute right-1.5 top-1.5 rounded bg-black/60 p-1 text-zinc-300 hover:bg-black/80"
           title="Enlarge"
         >
@@ -245,7 +578,8 @@ export default function DatasetApprovalPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>("all");
   const [focusedIndex, setFocusedIndex] = useState(0);
-  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
+  const [zoomImage, setZoomImage] = useState<DatasetImage | null>(null);
+  const [zoomIndex, setZoomIndex] = useState(0);
   const [approveAllConfirm, setApproveAllConfirm] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
@@ -315,6 +649,44 @@ export default function DatasetApprovalPage() {
     [updateApproval]
   );
 
+  // ── Image update callbacks ────────────────────────────────
+
+  const handleImageUpdate = useCallback((id: string, updates: Partial<DatasetImage>) => {
+    setImages((prev) => prev.map((img) => (img.id === id ? { ...img, ...updates } : img)));
+  }, []);
+
+  const handleImageRegenerated = useCallback((oldId: string, newImage: DatasetImage) => {
+    setImages((prev) => {
+      // Remove the old image (it was marked as 'replaced' server-side) and add the new one
+      const without = prev.filter((img) => img.id !== oldId);
+      return [...without, newImage];
+    });
+    // Update zoom to show the new image
+    setZoomImage(newImage);
+  }, []);
+
+  // ── Zoom handlers ─────────────────────────────────────────
+
+  const handleZoom = useCallback(
+    (img: DatasetImage) => {
+      const idx = filteredImages.findIndex((i) => i.id === img.id);
+      setZoomImage(img);
+      setZoomIndex(idx >= 0 ? idx : 0);
+    },
+    [filteredImages]
+  );
+
+  const handleLightboxNavigate = useCallback(
+    (index: number) => {
+      const img = filteredImages[index];
+      if (img) {
+        setZoomImage(img);
+        setZoomIndex(index);
+      }
+    },
+    [filteredImages]
+  );
+
   // ── Approve all pending ─────────────────────────────────────
 
   const handleApproveAllRemaining = useCallback(async () => {
@@ -360,7 +732,7 @@ export default function DatasetApprovalPage() {
   focusedRef.current = focusedIndex;
 
   useEffect(() => {
-    if (zoomUrl || approveAllConfirm) return;
+    if (zoomImage || approveAllConfirm) return;
 
     const handler = (e: KeyboardEvent) => {
       const visible = filteredImages;
@@ -386,7 +758,7 @@ export default function DatasetApprovalPage() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [filteredImages, zoomUrl, approveAllConfirm, handleApprove, handleReject]);
+  }, [filteredImages, zoomImage, approveAllConfirm, handleApprove, handleReject]);
 
   useEffect(() => {
     setFocusedIndex(0);
@@ -405,8 +777,22 @@ export default function DatasetApprovalPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
-      {/* Modals */}
-      {zoomUrl && <ImageModal src={zoomUrl} onClose={() => setZoomUrl(null)} />}
+      {/* Lightbox */}
+      {zoomImage && (
+        <ImageLightbox
+          image={zoomImage}
+          images={filteredImages}
+          currentIndex={zoomIndex}
+          storyCharId={storyCharId}
+          onClose={() => setZoomImage(null)}
+          onNavigate={handleLightboxNavigate}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onImageUpdate={handleImageUpdate}
+          onImageRegenerated={handleImageRegenerated}
+          readOnly={readOnly}
+        />
+      )}
 
       {approveAllConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -579,7 +965,7 @@ export default function DatasetApprovalPage() {
               focused={idx === focusedIndex}
               onApprove={handleApprove}
               onReject={handleReject}
-              onZoom={setZoomUrl}
+              onZoom={handleZoom}
               readOnly={readOnly}
             />
           ))}

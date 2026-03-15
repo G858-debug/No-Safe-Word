@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
+import {
+  ALL_PROMPTS,
+  interpolateComfyUIPrompt,
+  adaptPromptForGender,
+} from "@no-safe-word/image-gen/server/character-lora/dataset-prompts";
 
 const MIN_PASSED_IMAGES = 20;
 
@@ -13,12 +18,15 @@ export async function GET(
   const { storyCharId } = params;
 
   try {
-    // Get story character → character_id → active LoRA
+    // Get story character → character_id → active LoRA + character description for prompt resolution
     const { data: storyChar, error: scError } = await (supabase as any)
       .from("story_characters")
-      .select("character_id, active_lora_id")
+      .select(`
+        character_id, active_lora_id,
+        characters ( description )
+      `)
       .eq("id", storyCharId)
-      .single();
+      .single() as { data: any; error: any };
 
     if (scError || !storyChar) {
       return NextResponse.json(
@@ -58,7 +66,7 @@ export async function GET(
     const { data: images, error: imgError } = await supabase
       .from("lora_dataset_images")
       .select(
-        "id, image_url, category, variation_type, eval_status, eval_score, eval_details, human_approved, caption"
+        "id, image_url, category, variation_type, eval_status, eval_score, eval_details, human_approved, caption, prompt_template, source"
       )
       .eq("lora_id", lora.id)
       .in("eval_status", ["passed", "failed"])
@@ -71,7 +79,30 @@ export async function GET(
       );
     }
 
-    const allImages = images || [];
+    // Resolve full prompt text from template IDs
+    const desc = (storyChar.characters as any)?.description as Record<string, string> | undefined;
+    const gender = desc?.gender || "female";
+    const promptMap = new Map<string, string>();
+    for (const p of ALL_PROMPTS) {
+      let resolved = p.prompt;
+      if (p.source === "comfyui" && desc) {
+        resolved = interpolateComfyUIPrompt(resolved, {
+          ethnicity: desc.ethnicity || "",
+          bodyType: desc.bodyType || "",
+          skinTone: desc.skinTone || "",
+          hairStyle: desc.hairStyle || "",
+          hairColor: desc.hairColor || "",
+        });
+      }
+      resolved = adaptPromptForGender(resolved, gender);
+      promptMap.set(p.id, resolved);
+    }
+
+    const allImages = (images || []).map((img: any) => ({
+      ...img,
+      resolvedPrompt: img.source === "sdxl-img2img" ? null : (promptMap.get(img.prompt_template) ?? null),
+    }));
+
     const stats = {
       total: allImages.length,
       passed: allImages.filter((i: any) => i.eval_status === "passed").length,

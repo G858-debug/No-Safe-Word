@@ -51,6 +51,7 @@ export interface LoraDatasetImageRow {
   eval_status: EvalStatus;
   eval_score: number | null;
   eval_details: EvalDetails | null;
+  eval_notes: string | null;
   caption: string | null;
   human_approved: boolean | null;
   created_at: string;
@@ -76,6 +77,9 @@ export interface EvalDetails {
   /** True when a body-category image (waist-up, full-body, body-detail) only shows the face/head.
    *  Forces FAIL verdict — the image doesn't match the expected framing. */
   face_only_crop?: boolean;
+  /** True when a body-category image has the head cropped (forehead/chin cut off, head out of frame).
+   *  Forces FAIL verdict — head-cropped body shots teach incorrect head-to-body proportions. */
+  head_cropped?: boolean;
 }
 
 // ── Training Parameters ─────────────────────────────────────────

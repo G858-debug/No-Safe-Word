@@ -49,4 +49,5 @@ export type {
   PipelineType,
   ImageSource,
   ImageCategory,
+  VariationType,
 } from './character-lora/types';

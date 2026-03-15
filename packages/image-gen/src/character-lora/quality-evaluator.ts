@@ -51,12 +51,25 @@ Evaluate the generated image on these criteria:
    (i.e. the body is not visible despite being requested), set face_only_crop to true.
    For face-closeup and head-shoulders categories, always set false.
 
+5. HEAD CROPPING CHECK (for waist-up, full-body, and body-detail categories ONLY):
+   CRITICAL: For body shots, the person's head and face MUST be fully visible in the frame.
+   If the head is cropped (forehead cut off, chin cut off, head partially out of frame,
+   or head missing entirely), this is a hard failure. Set head_cropped to true.
+
+   Check specifically:
+   - Is the full head visible from crown to chin? If not → set head_cropped: true, score face_score 2/10
+   - Is the face identifiable (not obscured, not turned completely away)? If not → set head_cropped: true, score face_score 3/10
+   - For full-body shots: is the figure visible from head to at least mid-thigh? If not → score body_score 4/10
+
+   For face-closeup and head-shoulders categories, always set head_cropped: false.
+
 Respond in JSON format only:
 {
   "face_score": 8,
   "body_score": 9,
   "quality_score": 8,
   "face_only_crop": false,
+  "head_cropped": false,
   "verdict": "PASS",
   "issues": []
 }`;
@@ -278,6 +291,22 @@ async function evaluateSingleImage(
       : 'FAIL';
   }
 
+  // Force FAIL if a body-category image has the head cropped
+  if (evalResult.head_cropped && isBodyCategory) {
+    evalResult.verdict = 'FAIL';
+    evalResult.issues = [
+      ...(evalResult.issues || []),
+      'head_cropped: Head not fully visible in body shot',
+    ];
+  }
+
+  // Build eval_notes for structured failure reasons
+  const evalNotes = evalResult.head_cropped && isBodyCategory
+    ? 'head_cropped: Head not fully visible in body shot'
+    : evalResult.face_only_crop && isBodyCategory
+      ? 'face_only_crop: Body not visible in body-category image'
+      : undefined;
+
   // Update database record
   const evalStatus = evalResult.verdict === 'PASS' ? 'passed' : 'failed';
 
@@ -287,6 +316,7 @@ async function evaluateSingleImage(
       eval_status: evalStatus,
       eval_score: Math.round(weightedScore * 10) / 10,
       eval_details: evalResult,
+      ...(evalNotes ? { eval_notes: evalNotes } : {}),
     })
     .eq('id', image.id);
 
