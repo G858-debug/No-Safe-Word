@@ -386,19 +386,25 @@ export async function buildSceneGenerationPayload(
   let effectiveKontextType = kontextType;
 
   if (kontextType === "dual") {
-    if (kontextImages.length < 2) {
-      const hasPrimary = kontextImages.some((i) => i.name === "primary_ref.jpg");
-      const hasSecondaryRef = kontextImages.some((i) => i.name === "secondary_ref.jpg");
+    const primaryRef = kontextImages.find((i) => i.name === "primary_ref.jpg");
+    const secondaryRef = kontextImages.find((i) => i.name === "secondary_ref.jpg");
+
+    if (!primaryRef || !secondaryRef) {
       throw new Error(
-        `Dual scene requires 2 reference images but only got ${kontextImages.length}. ` +
-        `Primary: ${hasPrimary ? "OK" : "MISSING"}, Secondary: ${hasSecondaryRef ? "OK" : "MISSING"}. ` +
+        `Dual scene requires both primary and secondary reference images. ` +
+        `Primary: ${primaryRef ? "OK" : "MISSING"}, Secondary: ${secondaryRef ? "OK" : "MISSING"}. ` +
         `Ensure both characters have approved face + body portraits.`,
       );
     }
 
-    const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
-    kontextImages = [{ name: "combined_ref.jpg", image: combined }];
-    console.log(`[Kontext][${promptId}] Combined primary + secondary ref images server-side`);
+    const combined = await concatImagesHorizontally(primaryRef.image, secondaryRef.image);
+
+    // Keep PuLID face references (they're separate from the stitched body refs)
+    const faceRefs = kontextImages.filter(
+      (i) => i.name !== "primary_ref.jpg" && i.name !== "secondary_ref.jpg",
+    );
+    kontextImages = [{ name: "combined_ref.jpg", image: combined }, ...faceRefs];
+    console.log(`[Kontext][${promptId}] Combined primary + secondary ref images server-side (preserved ${faceRefs.length} face ref(s) for PuLID)`);
   }
 
   // Use the actual image name — no hardcoding that can mismatch
