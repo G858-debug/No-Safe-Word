@@ -61,6 +61,14 @@ export async function submitRunPodJob(
     },
   };
 
+  // Debug: log the full workflow graph (nodes only, no base64 images)
+  console.log(`[RunPod] WORKFLOW_DEBUG:`, JSON.stringify(payload.input.workflow, null, 2));
+  if (characterLoraDownloads && characterLoraDownloads.length > 0) {
+    console.log(`[RunPod] CHARACTER_LORA_DOWNLOADS:`, JSON.stringify(characterLoraDownloads));
+  } else {
+    console.log(`[RunPod] CHARACTER_LORA_DOWNLOADS: NONE`);
+  }
+
   // Payload size logging and pre-flight check
   const payloadJson = JSON.stringify(payload);
   const payloadSize = Buffer.byteLength(payloadJson);
