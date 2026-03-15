@@ -1,5 +1,5 @@
 // Stage 1: Hybrid Dataset Generation
-// Nano Banana Pro (Replicate) → face close-ups + head-and-shoulders (SFW, best face consistency)
+// Nano Banana 2 (Replicate) → face close-ups + head-and-shoulders (SFW, best face consistency)
 // ComfyUI/RunPod → waist-up, full body, body detail (no content restrictions, body-type fidelity)
 //
 // Images are generated SEQUENTIALLY (not concurrent) to respect API rate limits.
@@ -28,7 +28,7 @@ import {
 } from '../index';
 import { readReplicateOutput } from '../replicate-client';
 
-const NANO_BANANA_MODEL = 'google/nano-banana-pro' as const;
+const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
 const SDXL_BODY_MODEL = 'lucataco/realvisxl-v2-with-lora';
 const VENUS_BODY_LORA_URL = 'https://civitai.com/api/download/models/136081';
 const MAX_GENERATION_RETRIES = 3;
@@ -73,7 +73,7 @@ interface DatasetGeneratorDeps {
 /**
  * Generate a hybrid training dataset for a character LoRA.
  *
- * Phase 1: Nano Banana Pro for face/head shots (uses portrait as reference)
+ * Phase 1: Nano Banana 2 for face/head shots (uses portrait as reference)
  * Phase 2: ComfyUI/RunPod for body shots (uses Kontext ReferenceLatent with portrait + body-type prompts)
  *
  * All images are generated sequentially with delays between requests.
@@ -87,14 +87,14 @@ export async function generateDataset(
   const imageRecords: LoraDatasetImageRow[] = [];
   const failedPrompts: DatasetGenerationResult['failedPrompts'] = [];
 
-  // ── Phase 1: Nano Banana Pro (face/head shots) ──────────────
+  // ── Phase 1: Nano Banana 2 (face/head shots) ───────────────
   const nbPrompts = getNanoBananaPrompts().map((p) => ({
     ...p,
     prompt: adaptPromptForGender(p.prompt, character.gender),
   }));
   const nbLimited = promptLimit ? nbPrompts.slice(0, Math.ceil(promptLimit * 0.6)) : nbPrompts;
 
-  console.log(`[LoRA Dataset] Phase 1: Generating ${nbLimited.length} face/head images via Nano Banana Pro...`);
+  console.log(`[LoRA Dataset] Phase 1: Generating ${nbLimited.length} face/head images via Nano Banana 2...`);
 
   const nbResult = await generateNanoBananaImages(character, loraId, nbLimited, deps);
   imageRecords.push(...nbResult.records);
@@ -205,7 +205,7 @@ export async function generateReplacements(
   return replacements;
 }
 
-// ── Nano Banana Pro Pipeline ──────────────────────────────────────
+// ── Nano Banana 2 Pipeline ───────────────────────────────────────
 
 interface GenerationBatchResult {
   records: LoraDatasetImageRow[];
@@ -379,7 +379,7 @@ async function generateSingleComfyUI(
 
 // ── SDXL + Venus Body LoRA → Flux img2img Pipeline ────────────────
 
-async function generateSdxlBodyShots(
+export async function generateSdxlBodyShots(
   character: CharacterInput,
   loraId: string,
   count: number,
