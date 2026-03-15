@@ -144,6 +144,10 @@ async function testStage2(loraId: string) {
     TEST_CHARACTER.fullBodyImageUrl,
     images,
     { supabase },
+    {
+      bodyType: TEST_CHARACTER.structuredData.bodyType,
+      skinTone: TEST_CHARACTER.structuredData.skinTone,
+    },
   );
 
   console.log('\n--- Stage 2 Results ---');

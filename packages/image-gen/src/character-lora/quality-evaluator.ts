@@ -1,11 +1,16 @@
 // Stage 2: Quality Evaluation using Claude Vision
-// Evaluates each generated dataset image against BOTH reference images
-// (portrait + full-body) with category-weighted scoring.
+// Evaluates each generated dataset image with CATEGORY-SPECIFIC criteria:
 //
-// Face close-ups: face 80%, quality 20%
-// Head-shoulders: face 60%, quality 40%
-// Waist-up / full-body: face 40%, body 40%, quality 20%
-// Body detail: face 30%, body 50%, quality 20%
+// Face shots (face-closeup, head-shoulders):
+//   - Face identity match is PRIMARY criterion
+//   - Both portrait + full-body references sent
+//   - Weights: face-closeup 80/0/20, head-shoulders 60/0/40
+//
+// Body shots (waist-up, full-body, body-detail):
+//   - Face matching is NOT evaluated (face will differ — expected)
+//   - Only full-body reference sent (no portrait — avoids face comparison)
+//   - Scores on: head visibility, body type, skin tone, quality, anatomy
+//   - Weights: waist-up/full-body 0/60/40, body-detail 0/70/30
 
 import Anthropic from '@anthropic-ai/sdk';
 import type {
@@ -18,7 +23,9 @@ import { PIPELINE_CONFIG } from './types';
 
 const EVALUATION_MODEL = 'claude-sonnet-4-6';
 
-const EVALUATION_SYSTEM_PROMPT = `You are evaluating AI-generated images for character consistency in a LoRA training dataset. You will receive:
+// ── Category-specific evaluation prompts ──────────────────────────
+
+const FACE_EVAL_SYSTEM_PROMPT = `You are evaluating AI-generated images for character consistency in a LoRA training dataset. You will receive:
 1. A REFERENCE PORTRAIT (the approved character portrait — face is the ground truth)
 2. A REFERENCE FULL-BODY (the approved full-body image — body type is the ground truth)
 3. A GENERATED IMAGE (a variation for training)
@@ -46,22 +53,9 @@ Evaluate the generated image on these criteria:
    - Single person only — no other people visible
    - Score 7+ = training-quality image
 
-4. FACE-ONLY CROP FLAG (boolean): The image category will be provided (e.g. "full-body", "waist-up").
-   If the category indicates body should be visible but the generated image ONLY shows the head/face
-   (i.e. the body is not visible despite being requested), set face_only_crop to true.
-   For face-closeup and head-shoulders categories, always set false.
+4. FACE-ONLY CROP FLAG (boolean): always set false for face shots.
 
-5. HEAD CROPPING CHECK (for waist-up, full-body, and body-detail categories ONLY):
-   CRITICAL: For body shots, the person's head and face MUST be fully visible in the frame.
-   If the head is cropped (forehead cut off, chin cut off, head partially out of frame,
-   or head missing entirely), this is a hard failure. Set head_cropped to true.
-
-   Check specifically:
-   - Is the full head visible from crown to chin? If not → set head_cropped: true, score face_score 2/10
-   - Is the face identifiable (not obscured, not turned completely away)? If not → set head_cropped: true, score face_score 3/10
-   - For full-body shots: is the figure visible from head to at least mid-thigh? If not → score body_score 4/10
-
-   For face-closeup and head-shoulders categories, always set head_cropped: false.
+5. HEAD CROPPING CHECK: always set head_cropped: false for face shots.
 
 Respond in JSON format only:
 {
@@ -74,6 +68,72 @@ Respond in JSON format only:
   "issues": []
 }`;
 
+function buildBodyEvalPrompt(bodyType: string, skinTone: string): string {
+  return `You are evaluating a BODY SHOT for LoRA training. This image is meant to teach the model about this character's body proportions, clothing style, and poses.
+
+DO NOT evaluate face similarity — the face in body shots is generated differently from the reference portrait and will not match. This is expected and acceptable.
+
+You will receive:
+1. A REFERENCE FULL-BODY (the approved body image — body proportions are the ground truth)
+2. A GENERATED IMAGE (a body shot variation for training)
+
+The character's described body type is: ${bodyType}
+The character's described skin tone is: ${skinTone}
+
+Evaluate the generated image on these criteria:
+
+1. HEAD VISIBILITY (critical):
+   - Is the person's head and face fully visible in frame (crown to chin)?
+   - If the head is cropped, partially out of frame, or missing → set head_cropped: true
+   - Hard fail if head is cropped: set body_score to 2/10
+
+2. BODY TYPE CONSISTENCY (0-10): Does the body match the reference and description?
+   - Body proportions match the described type (${bodyType})
+   - Same general build as the reference full-body image
+   - Score 7+ = body type is consistent
+
+3. SKIN TONE ACCURACY (factor into body_score):
+   - Skin tone should match: ${skinTone}
+   - Deduct 2-3 points if noticeably wrong
+
+4. IMAGE QUALITY (0-10): Is this a high-quality training image?
+   - Sharp and well-rendered (no blurry areas)
+   - No anatomical errors (extra fingers, distorted limbs, extra limbs)
+   - No artifacts or glitches
+   - Good lighting and composition
+   - Single person only — no other people visible
+   - Person is clothed
+   - Score 7+ = training-quality image
+
+5. BODY FRAMING (factor into body_score):
+   - For full-body: figure should be visible from head to at least mid-thigh
+   - For waist-up: figure should be visible from head to at least waist
+   - Deduct points if framing doesn't match the expected category
+
+6. FACE-ONLY CROP FLAG (boolean): If the category indicates body should be visible
+   but the generated image ONLY shows the head/face (body not visible), set face_only_crop to true.
+
+Set face_score to 7 (neutral — face matching is not evaluated for body shots).
+
+Respond in JSON format only:
+{
+  "face_score": 7,
+  "body_score": 8,
+  "quality_score": 8,
+  "face_only_crop": false,
+  "head_cropped": false,
+  "verdict": "PASS",
+  "issues": []
+}`;
+}
+
+// ── Types ─────────────────────────────────────────────────────────
+
+export interface CharacterEvalData {
+  bodyType: string;
+  skinTone: string;
+}
+
 interface QualityEvaluatorDeps {
   supabase: {
     from: (table: string) => any;
@@ -81,8 +141,9 @@ interface QualityEvaluatorDeps {
 }
 
 /**
- * Evaluate all dataset images against both reference images.
- * Uses category-weighted scoring for PASS/FAIL determination.
+ * Evaluate all dataset images with category-specific criteria.
+ * Face shots are scored on face identity match.
+ * Body shots are scored on body type, skin tone, framing, and quality (no face matching).
  *
  * Uses URL-based image sources for the Anthropic API to avoid the 5 MB base64
  * limit — Nano Banana 2 generates 7-9 MB PNGs that exceed the base64 limit.
@@ -93,6 +154,7 @@ export async function evaluateDataset(
   referenceFullBodyUrl: string,
   images: LoraDatasetImageRow[],
   deps: QualityEvaluatorDeps,
+  characterData: CharacterEvalData,
 ): Promise<EvaluationResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -116,7 +178,7 @@ export async function evaluateDataset(
 
     const results = await Promise.allSettled(
       batch.map((image) =>
-        evaluateSingleImage(anthropic, referencePortraitUrl, referenceFullBodyUrl, image, deps)
+        evaluateSingleImage(anthropic, referencePortraitUrl, referenceFullBodyUrl, image, deps, characterData)
       )
     );
 
@@ -179,9 +241,9 @@ function getCategoryWeights(category: ImageCategory): CategoryWeights {
       return { face: 0.6, body: 0.0, quality: 0.4 };
     case 'waist-up':
     case 'full-body':
-      return { face: 0.4, body: 0.4, quality: 0.2 };
+      return { face: 0.0, body: 0.6, quality: 0.4 };
     case 'body-detail':
-      return { face: 0.3, body: 0.5, quality: 0.2 };
+      return { face: 0.0, body: 0.7, quality: 0.3 };
     default:
       return { face: 0.5, body: 0.3, quality: 0.2 };
   }
@@ -198,47 +260,82 @@ function computeWeightedScore(details: EvalDetails, category: ImageCategory): nu
 
 // ── Internal Helpers ──────────────────────────────────────────────
 
+const BODY_CATEGORIES: ImageCategory[] = ['waist-up', 'full-body', 'body-detail'];
+
 async function evaluateSingleImage(
   anthropic: Anthropic,
   portraitUrl: string,
   fullBodyUrl: string,
   image: LoraDatasetImageRow,
   deps: QualityEvaluatorDeps,
+  characterData: CharacterEvalData,
 ): Promise<EvalDetails> {
+  const category = (image.category || 'face-closeup') as ImageCategory;
+  const isBodyShot = BODY_CATEGORIES.includes(category);
+
+  // Build category-specific prompt and message content
+  const systemPrompt = isBodyShot
+    ? buildBodyEvalPrompt(characterData.bodyType, characterData.skinTone)
+    : FACE_EVAL_SYSTEM_PROMPT;
+
+  const messageContent: Anthropic.Messages.ContentBlockParam[] = isBodyShot
+    ? [
+        // Body shots: only send full-body reference (no portrait — avoids face comparison)
+        { type: 'text', text: 'REFERENCE FULL-BODY (approved — body proportions ground truth):' },
+        {
+          type: 'image',
+          source: { type: 'url', url: fullBodyUrl },
+        },
+        {
+          type: 'text',
+          text: `GENERATED IMAGE (${image.prompt_template}, category: ${image.category}, source: ${image.source}):`,
+        },
+        {
+          type: 'image',
+          source: { type: 'url', url: image.image_url },
+        },
+        {
+          type: 'text',
+          text: 'Evaluate the generated body shot against the reference. Respond with JSON only.',
+        },
+      ]
+    : [
+        // Face shots: send both portrait + full-body references
+        { type: 'text', text: 'REFERENCE PORTRAIT (approved — face ground truth):' },
+        {
+          type: 'image',
+          source: { type: 'url', url: portraitUrl },
+        },
+        { type: 'text', text: 'REFERENCE FULL-BODY (approved — body type ground truth):' },
+        {
+          type: 'image',
+          source: { type: 'url', url: fullBodyUrl },
+        },
+        {
+          type: 'text',
+          text: `GENERATED IMAGE (${image.prompt_template}, category: ${image.category}, source: ${image.source}):`,
+        },
+        {
+          type: 'image',
+          source: { type: 'url', url: image.image_url },
+        },
+        {
+          type: 'text',
+          text: 'Evaluate the generated image against both references. Respond with JSON only.',
+        },
+      ];
+
   // Use URL source type to avoid the 5 MB base64 limit.
   // Nano Banana 2 generates 7-9 MB PNGs that exceed the base64 limit but
   // URL sources support up to 20 MB with automatic server-side resizing.
   const response = await anthropic.messages.create({
     model: EVALUATION_MODEL,
     max_tokens: 256,
-    system: EVALUATION_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [
       {
         role: 'user',
-        content: [
-          { type: 'text', text: 'REFERENCE PORTRAIT (approved — face ground truth):' },
-          {
-            type: 'image',
-            source: { type: 'url', url: portraitUrl },
-          },
-          { type: 'text', text: 'REFERENCE FULL-BODY (approved — body type ground truth):' },
-          {
-            type: 'image',
-            source: { type: 'url', url: fullBodyUrl },
-          },
-          {
-            type: 'text',
-            text: `GENERATED IMAGE (${image.prompt_template}, category: ${image.category}, source: ${image.source}):`,
-          },
-          {
-            type: 'image',
-            source: { type: 'url', url: image.image_url },
-          },
-          {
-            type: 'text',
-            text: 'Evaluate the generated image against both references. Respond with JSON only.',
-          },
-        ],
+        content: messageContent,
       },
     ],
   });
@@ -267,19 +364,18 @@ async function evaluateSingleImage(
   }
 
   // Compute weighted score based on image category
-  const category = (image.category || 'face-closeup') as ImageCategory;
   const weightedScore = computeWeightedScore(evalResult, category);
 
   // PASS/FAIL: weighted score >= 7 AND no individual category below 5
+  // For body shots, skip face_score floor (face is set to neutral 7)
   const noCategryBelowFloor =
-    evalResult.face_score >= 5 &&
+    (isBodyShot || evalResult.face_score >= 5) &&
     evalResult.quality_score >= 5 &&
     // Only enforce body score floor for categories that show the body
     (category === 'face-closeup' || category === 'head-shoulders' || evalResult.body_score >= 5);
 
   // Force FAIL if a body-category image is actually a face-only crop
-  const isBodyCategory = category === 'waist-up' || category === 'full-body' || category === 'body-detail';
-  if (evalResult.face_only_crop && isBodyCategory) {
+  if (evalResult.face_only_crop && isBodyShot) {
     evalResult.verdict = 'FAIL';
     evalResult.issues = [
       ...(evalResult.issues || []),
@@ -292,7 +388,7 @@ async function evaluateSingleImage(
   }
 
   // Force FAIL if a body-category image has the head cropped
-  if (evalResult.head_cropped && isBodyCategory) {
+  if (evalResult.head_cropped && isBodyShot) {
     evalResult.verdict = 'FAIL';
     evalResult.issues = [
       ...(evalResult.issues || []),
@@ -301,9 +397,9 @@ async function evaluateSingleImage(
   }
 
   // Build eval_notes for structured failure reasons
-  const evalNotes = evalResult.head_cropped && isBodyCategory
+  const evalNotes = evalResult.head_cropped && isBodyShot
     ? 'head_cropped: Head not fully visible in body shot'
-    : evalResult.face_only_crop && isBodyCategory
+    : evalResult.face_only_crop && isBodyShot
       ? 'face_only_crop: Body not visible in body-category image'
       : undefined;
 
@@ -323,7 +419,7 @@ async function evaluateSingleImage(
   console.log(
     `[LoRA Eval] ${evalResult.verdict} ${image.prompt_template} ` +
     `(face=${evalResult.face_score}, body=${evalResult.body_score}, quality=${evalResult.quality_score}, ` +
-    `weighted=${weightedScore.toFixed(1)}, category=${category})`
+    `weighted=${weightedScore.toFixed(1)}, category=${category}, type=${isBodyShot ? 'body' : 'face'})`
   );
 
   return evalResult;

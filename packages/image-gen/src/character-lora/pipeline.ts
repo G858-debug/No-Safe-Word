@@ -412,11 +412,17 @@ async function runEvaluation(
   await updateStatus(loraId, 'evaluating', deps);
 
   let allImages = [...imageRecords];
+  const characterEvalData = {
+    bodyType: character.structuredData.bodyType,
+    skinTone: character.structuredData.skinTone,
+  };
+
   let evalResult = await evaluateDataset(
     character.approvedImageUrl,
     character.fullBodyImageUrl,
     allImages,
     deps,
+    characterEvalData,
   );
 
   let pendingGenerationFailures = [...failedPrompts];
@@ -473,6 +479,7 @@ async function runEvaluation(
         character.fullBodyImageUrl,
         replacements,
         deps,
+        characterEvalData,
       );
 
       evalResult.passedImages = [...evalResult.passedImages, ...replacementEval.passedImages];

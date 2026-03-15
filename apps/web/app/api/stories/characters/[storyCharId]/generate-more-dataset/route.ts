@@ -118,7 +118,10 @@ export async function POST(
           .update({ status: "evaluating" } as any)
           .eq("id", lora.id);
 
-        const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, sdxlResult.records, { supabase });
+        const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, sdxlResult.records, { supabase }, {
+          bodyType: structuredData.bodyType,
+          skinTone: structuredData.skinTone,
+        });
         console.log(`[Generate More] ${character.name}: ${evalResult.passed} body images passed evaluation`);
 
         // Count total passed (existing + new)

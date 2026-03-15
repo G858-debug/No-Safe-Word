@@ -205,6 +205,10 @@ async function main() {
         fullBodyUrl,
         sdxlResult.records,
         { supabase: sb },
+        {
+          bodyType: structuredData.bodyType,
+          skinTone: structuredData.skinTone,
+        },
       );
 
       console.log(`  Evaluation: ${evalResult.passed} passed, ${evalResult.failed} failed`);
