@@ -747,6 +747,7 @@ export default function DatasetApprovalPage() {
   const aiPassed = images.filter((i) => i.eval_status === "passed").length;
   const minRequired = stats?.minRequired ?? 20;
   const canResume = isApprovalMode && humanApproved >= minRequired;
+  const canRetry = loraStatus === "failed" && humanApproved >= minRequired;
 
   // ── Filtered images ─────────────────────────────────────────
 
@@ -908,6 +909,36 @@ export default function DatasetApprovalPage() {
       }
 
       // Navigate back to the character approval page
+      router.push(`/dashboard/stories/${seriesId}`);
+    } catch {
+      setResumeError("Network error");
+      setResuming(false);
+    }
+  }, [storyCharId, seriesId, router]);
+
+  // ── Retry training (for failed LoRAs) ───────────────────────
+
+  const handleRetryTraining = useCallback(async () => {
+    setResuming(true);
+    setResumeError(null);
+
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${storyCharId}/train-lora`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      );
+      const data = await res.json();
+
+      if (!res.ok) {
+        setResumeError(data.error || "Failed to start training");
+        setResuming(false);
+        return;
+      }
+
       router.push(`/dashboard/stories/${seriesId}`);
     } catch {
       setResumeError("Network error");
@@ -1082,6 +1113,25 @@ export default function DatasetApprovalPage() {
             ) : (
               <>
                 Resume Training
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
+        )}
+        {canRetry && (
+          <button
+            onClick={handleRetryTraining}
+            disabled={resuming}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-700 px-5 py-2.5 text-sm font-medium text-amber-100 transition-colors hover:bg-amber-600 disabled:opacity-50"
+          >
+            {resuming ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Starting...
+              </>
+            ) : (
+              <>
+                Retry Training ({humanApproved} images)
                 <ArrowRight className="h-4 w-4" />
               </>
             )}
