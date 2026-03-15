@@ -51,13 +51,20 @@ interface GenerateSceneParams {
   seriesId: string;
   characterDataMap: Map<string, CharacterData>;
   seed: number;
-  /** Test mode: skip all LoRAs except realism, rely on PuLID + Redux only */
+  /** Test mode: skip all LoRAs except realism, rely on PuLID only */
   pulidOnlyMode?: boolean;
-  /** Test mode: skip Redux conditioning (nodes 5-8, 15). PuLID and LoRAs still run. */
-  reduxDisabled?: boolean;
 }
 
 // ── Helpers ──
+
+const DARK_SCENE_KEYWORDS = /\b(dark|night(?:time)?|dim|shadow|candle|moonlight|bedroom|phone[- ]?light|blue[- ]?glow|low[- ]?light|dusk|semi-dark|unlit)\b/i;
+
+/** Detect whether a scene prompt describes a dark/low-light environment.
+ *  Used to reduce PuLID weight and denoise in dark scenes where the
+ *  refinement pass would otherwise override the scene with a bright portrait. */
+function detectSceneDarkness(prompt: string): boolean {
+  return DARK_SCENE_KEYWORDS.test(prompt);
+}
 
 /** Try stored_url first; if it fails (e.g. 400/404), fall back to sfw_url */
 async function fetchRefImageBase64(
@@ -594,24 +601,26 @@ export async function buildSceneGenerationPayload(
 
   // ── Workflow ──
   // Build PuLID config when face references are available.
-  // Falls back to Redux-only (no PuLID) if face_url is missing for a character.
+  // PuLID weight and denoise are reduced for dark scenes to prevent
+  // the refinement pass from overriding the scene with a standing portrait.
+  const isDarkScene = detectSceneDarkness(imgPrompt.prompt);
+  const pulidWeight = isDarkScene ? 0.55 : 0.75;
+  const pulidDenoise = isDarkScene ? 0.20 : 0.30;
+
   const pulidConfig = primaryFaceUrl
     ? {
         primaryFaceImageName: 'face_reference.jpg',
         secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.jpg' : undefined,
-        weight: 0.85,
-        denoiseStrength: 0.35,
+        weight: pulidWeight,
+        denoiseStrength: pulidDenoise,
       }
     : undefined;
 
   if (effectiveKontextType !== 'portrait') {
-    if (params.reduxDisabled) {
-      console.log(`[Kontext][${promptId}] Redux DISABLED — skipping Redux conditioning nodes`);
-    }
     if (primaryFaceUrl) {
-      console.log(`[Kontext][${promptId}] PuLID enabled: primary face ref present${secondaryFaceUrl ? ', secondary face ref present' : ', secondary face ref absent (single PuLID pass)'}`);
+      console.log(`[Kontext][${promptId}] PuLID enabled: weight=${pulidWeight}, denoise=${pulidDenoise}, dark=${isDarkScene}${secondaryFaceUrl ? ', secondary face ref present' : ''}`);
     } else {
-      console.log(`[Kontext][${promptId}] PuLID disabled: no face_url for primary character — Redux-only identity`);
+      console.log(`[Kontext][${promptId}] PuLID disabled: no face_url for primary character`);
     }
   }
 
@@ -627,7 +636,6 @@ export async function buildSceneGenerationPayload(
     guidance: 3.5,
     sfwMode,
     pulid: pulidConfig,
-    reduxDisabled: params.reduxDisabled,
   });
 
   // ── Structured generation summary ──
