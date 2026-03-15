@@ -68,7 +68,31 @@ Respond in JSON format only:
   "issues": []
 }`;
 
-function buildBodyEvalPrompt(bodyType: string, skinTone: string): string {
+function getFramingRules(category: string): string {
+  switch (category) {
+    case 'full-body':
+      return `This is a FULL-BODY shot. Framing requirements:
+   - The full figure from head to feet MUST be visible
+   - If legs or feet are not visible, this is a framing failure: set body_score to 2/10
+   - Standing or walking pose expected unless prompt specified otherwise`;
+    case 'waist-up':
+      return `This is a WAIST-UP shot. Framing requirements:
+   - Head to waist/hip area must be visible — that is sufficient
+   - Mid-thigh cropping is PERFECTLY ACCEPTABLE — do NOT penalize
+   - Legs and feet are NOT expected to be visible — do NOT deduct points for missing legs
+   - Seated poses are acceptable
+   - DO NOT apply full-body framing criteria to this image`;
+    case 'body-detail':
+      return `This is a BODY-DETAIL shot. Framing requirements:
+   - Partial body framing is intentional for this category
+   - Focus evaluation on image quality, skin texture, and clothing detail
+   - No specific framing requirements beyond the head being visible`;
+    default:
+      return `Evaluate framing based on whether the body is reasonably visible.`;
+  }
+}
+
+function buildBodyEvalPrompt(bodyType: string, skinTone: string, category: string): string {
   return `You are evaluating a BODY SHOT for LoRA training. This image is meant to teach the model about this character's body proportions, clothing style, and poses.
 
 DO NOT evaluate face similarity — the face in body shots is generated differently from the reference portrait and will not match. This is expected and acceptable.
@@ -79,6 +103,7 @@ You will receive:
 
 The character's described body type is: ${bodyType}
 The character's described skin tone is: ${skinTone}
+The image category is: ${category}
 
 Evaluate the generated image on these criteria:
 
@@ -88,13 +113,18 @@ Evaluate the generated image on these criteria:
    - Hard fail if head is cropped: set body_score to 2/10
 
 2. BODY TYPE CONSISTENCY (0-10): Does the body match the reference and description?
-   - Body proportions match the described type (${bodyType})
+   - Body proportions should generally match the described type (${bodyType})
    - Same general build as the reference full-body image
-   - Score 7+ = body type is consistent
+   - Some variation in build is acceptable and even beneficial for LoRA training generalization
+   - Only reject if the body type is fundamentally different (e.g. described as curvaceous but image shows very thin)
+   - Do not reject for being slightly more or less muscular/curvy than described
+   - Score 7+ = body type is reasonably consistent
 
 3. SKIN TONE ACCURACY (factor into body_score):
-   - Skin tone should match: ${skinTone}
-   - Deduct 2-3 points if noticeably wrong
+   - Skin tone should generally match: ${skinTone}
+   - Minor shade variations (slightly darker or lighter) are acceptable — do NOT deduct points
+   - Only deduct points if skin tone is fundamentally wrong (e.g. described as dark brown but image shows pale/white skin)
+   - Deduct 2-3 points only for fundamental mismatches
 
 4. IMAGE QUALITY (0-10): Is this a high-quality training image?
    - Sharp and well-rendered (no blurry areas)
@@ -106,9 +136,7 @@ Evaluate the generated image on these criteria:
    - Score 7+ = training-quality image
 
 5. BODY FRAMING (factor into body_score):
-   - For full-body: figure should be visible from head to at least mid-thigh
-   - For waist-up: figure should be visible from head to at least waist
-   - Deduct points if framing doesn't match the expected category
+   ${getFramingRules(category)}
 
 6. FACE-ONLY CROP FLAG (boolean): If the category indicates body should be visible
    but the generated image ONLY shows the head/face (body not visible), set face_only_crop to true.
@@ -275,7 +303,7 @@ async function evaluateSingleImage(
 
   // Build category-specific prompt and message content
   const systemPrompt = isBodyShot
-    ? buildBodyEvalPrompt(characterData.bodyType, characterData.skinTone)
+    ? buildBodyEvalPrompt(characterData.bodyType, characterData.skinTone, category)
     : FACE_EVAL_SYSTEM_PROMPT;
 
   const messageContent: Anthropic.Messages.ContentBlockParam[] = isBodyShot
