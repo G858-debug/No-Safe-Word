@@ -3,7 +3,7 @@
 // Designed to run as a background job (fire-and-forget from API route).
 //
 // HYBRID APPROACH:
-//   Stage 1: Dataset generation (Nano Banana Pro for face/head + ComfyUI for body)
+//   Stage 1: Dataset generation (Nano Banana 2 for face/head + ComfyUI for body)
 //   Stage 2: Claude Vision quality evaluation against BOTH reference images
 //   Stage 3: Auto-captioning from prompt templates
 //   Stage 4: Replicate SDXL LoRA training

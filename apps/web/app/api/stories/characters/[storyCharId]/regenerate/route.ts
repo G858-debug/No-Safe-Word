@@ -67,7 +67,7 @@ export async function POST(
         for (const img of oldImages) {
           if (img.stored_url) {
             // When regenerating body, preserve the approved face image so it can
-            // be used as the reference for Nano Banana Pro / PuLID.
+            // be used as the reference for Nano Banana 2 / PuLID.
             if (stage === 'body' && storyChar.face_url && img.stored_url === storyChar.face_url) {
               continue;
             }
@@ -118,7 +118,7 @@ export async function POST(
 
     // 5. Branch by engine
     if (payload.engine === 'replicate') {
-      // ---- Replicate path (Nano Banana Pro — synchronous) ----
+      // ---- Replicate path (Nano Banana 2 — synchronous) ----
       const imageBuffer = await runNanoBanana(
         payload.positivePrompt,
         payload.referenceImageUrl,
@@ -172,7 +172,7 @@ export async function POST(
         cost: 0,
       });
 
-      console.log(`[StoryPublisher] Nano Banana Pro regeneration complete: ${imageRow.id}`);
+      console.log(`[StoryPublisher] Nano Banana 2 regeneration complete: ${imageRow.id}`);
 
       return NextResponse.json({
         jobId: `replicate-instant-${imageRow.id}`,

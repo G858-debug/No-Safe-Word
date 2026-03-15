@@ -1,6 +1,6 @@
 import Replicate from 'replicate';
 
-const NANO_BANANA_MODEL = 'google/nano-banana-pro' as const;
+const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
 
 /**
  * Read a Replicate FileOutput (ReadableStream) or legacy URL string into a Buffer.
@@ -38,7 +38,7 @@ export async function readReplicateOutput(output: unknown): Promise<Buffer> {
 }
 
 /**
- * Run Nano Banana Pro on Replicate for character portrait generation.
+ * Run Nano Banana 2 on Replicate for character portrait generation.
  * Returns the generated image as a Buffer.
  *
  * @param prompt - Text prompt describing the portrait

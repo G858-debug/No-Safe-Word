@@ -1,7 +1,7 @@
 // Dataset Prompt Templates for Hybrid LoRA Training Pipeline
 //
 // SPLIT:
-//   Nano Banana Pro (14-18 images) — face close-ups + head-and-shoulders (SFW only)
+//   Nano Banana 2 (14-18 images) — face close-ups + head-and-shoulders (SFW only)
 //   ComfyUI/RunPod (10-14 images) — waist-up, full body, body detail (no restrictions)
 //
 // Nano Banana prompts are simple and SFW — no body-specific terms.
@@ -22,7 +22,7 @@ export interface DatasetPrompt {
 
 // ── NANO BANANA PRO PROMPTS (SFW face/head shots) ───────────────
 // These are sent with the approved portrait as a reference image.
-// Nano Banana Pro excels at face consistency but content-restricts body terms.
+// Nano Banana 2 excels at face consistency but content-restricts body terms.
 
 const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
   // Face close-ups (8-10)

@@ -93,7 +93,7 @@ function buildSdxlFacePrompt(
 }
 
 /**
- * Build Nano Banana Pro face prompt for MALE characters.
+ * Build Nano Banana 2 face prompt for MALE characters.
  */
 function buildMaleNanoBananaFacePrompt(
   charData: CharacterData,
@@ -125,7 +125,7 @@ function buildMaleNanoBananaFacePrompt(
 }
 
 /**
- * Build Nano Banana Pro body prompt for MALE characters.
+ * Build Nano Banana 2 body prompt for MALE characters.
  */
 function buildMaleNanoBananaBodyPrompt(
   charData: CharacterData,
@@ -185,13 +185,13 @@ export interface RunPodGenerationPayload {
   images?: Array<{ name: string; image: string }>;
 }
 
-/** Replicate-based generation (Nano Banana Pro) */
+/** Replicate-based generation (Nano Banana 2) */
 export interface ReplicateGenerationPayload {
   engine: 'replicate';
   model: string;
   positivePrompt: string;
   seed: number;
-  /** Reference image URL for Nano Banana Pro (approved face for body gen) */
+  /** Reference image URL for Nano Banana 2 (approved face for body gen) */
   referenceImageUrl?: string;
 }
 
@@ -207,10 +207,10 @@ export type CharacterGenerationPayload = RunPodGenerationPayload | ReplicateGene
  * Dispatches by gender + stage:
  * | Gender | Stage | Engine    | Model                                      |
  * |--------|-------|-----------|--------------------------------------------|
- * | Female | face  | Replicate | Nano Banana Pro                            |
+ * | Female | face  | Replicate | Nano Banana 2                            |
  * | Female | body  | RunPod    | SDXL RealVisXL + Curvy Body LoRA + ReActor |
- * | Male   | face  | Replicate | Nano Banana Pro                            |
- * | Male   | body  | Replicate | Nano Banana Pro (with face reference)      |
+ * | Male   | face  | Replicate | Nano Banana 2                            |
+ * | Male   | body  | Replicate | Nano Banana 2 (with face reference)      |
  */
 export async function buildCharacterGenerationPayload(
   params: CharacterGenerationInput,
@@ -264,7 +264,7 @@ export async function buildCharacterGenerationPayload(
 }
 
 // ---------------------------------------------------------------------------
-// Male Pipeline — Nano Banana Pro (Replicate)
+// Male Pipeline — Nano Banana 2 (Replicate)
 // ---------------------------------------------------------------------------
 
 function buildMalePayload(
@@ -285,7 +285,7 @@ function buildMalePayload(
 
   return {
     engine: 'replicate',
-    model: 'google/nano-banana-pro',
+    model: 'google/nano-banana-2',
     positivePrompt: prompt,
     seed,
     referenceImageUrl: stage === 'body' ? approvedFaceUrl : undefined,
@@ -293,7 +293,7 @@ function buildMalePayload(
 }
 
 // ---------------------------------------------------------------------------
-// Female Pipeline — Nano Banana Pro (face) + SDXL+ReActor (body)
+// Female Pipeline — Nano Banana 2 (face) + SDXL+ReActor (body)
 // ---------------------------------------------------------------------------
 
 async function buildFemalePayload(
@@ -314,7 +314,7 @@ async function buildFemalePayload(
 }
 
 /**
- * Female face — Nano Banana Pro (Replicate), same engine as male face.
+ * Female face — Nano Banana 2 (Replicate), same engine as male face.
  * Uses the existing prose face prompt.
  */
 function buildFemaleFacePayload(
@@ -327,7 +327,7 @@ function buildFemaleFacePayload(
 
   return {
     engine: 'replicate',
-    model: 'google/nano-banana-pro',
+    model: 'google/nano-banana-2',
     positivePrompt: prompt,
     seed,
   };

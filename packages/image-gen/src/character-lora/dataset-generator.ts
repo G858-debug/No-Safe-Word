@@ -22,6 +22,7 @@ import {
 import type { DatasetPrompt } from './dataset-prompts';
 import {
   buildKontextWorkflow,
+  buildSdxlWorkflow,
   submitRunPodJob,
   waitForRunPodResult,
   imageUrlToBase64,
@@ -29,8 +30,7 @@ import {
 import { readReplicateOutput } from '../replicate-client';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
-const SDXL_BODY_MODEL = 'lucataco/realvisxl-v2-with-lora';
-const VENUS_BODY_LORA_URL = 'https://civitai.com/api/download/models/136081';
+const SDXL_CHECKPOINT = 'realvisxlV50_v50Bakedvae.safetensors';
 const MAX_GENERATION_RETRIES = 3;
 const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 

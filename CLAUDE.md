@@ -51,7 +51,7 @@ The pipeline runs 6 stages, tracked in the `character_loras` table with checkpoi
 for resume after failure:
 
 1. **Dataset generation** — Hybrid approach:
-   - Face/head shots: Nano Banana Pro (Replicate `google/nano-banana-pro`)
+   - Face/head shots: Nano Banana 2 (Replicate `google/nano-banana-2`)
      using approved portrait as reference
    - Body shots (female): SDXL + Venus Body LoRA on Replicate → Flux Kontext img2img
      conversion (denoise: 0.72) for photorealistic curvaceous output

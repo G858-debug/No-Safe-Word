@@ -72,7 +72,7 @@ interface QualityEvaluatorDeps {
  * Uses category-weighted scoring for PASS/FAIL determination.
  *
  * Uses URL-based image sources for the Anthropic API to avoid the 5 MB base64
- * limit — Nano Banana Pro generates 7-9 MB PNGs that exceed the base64 limit.
+ * limit — Nano Banana 2 generates 7-9 MB PNGs that exceed the base64 limit.
  * URL source supports up to 20 MB with automatic server-side resizing.
  */
 export async function evaluateDataset(
@@ -193,7 +193,7 @@ async function evaluateSingleImage(
   deps: QualityEvaluatorDeps,
 ): Promise<EvalDetails> {
   // Use URL source type to avoid the 5 MB base64 limit.
-  // Nano Banana Pro generates 7-9 MB PNGs that exceed the base64 limit but
+  // Nano Banana 2 generates 7-9 MB PNGs that exceed the base64 limit but
   // URL sources support up to 20 MB with automatic server-side resizing.
   const response = await anthropic.messages.create({
     model: EVALUATION_MODEL,

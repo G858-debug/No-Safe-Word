@@ -103,8 +103,8 @@ export async function POST(
 
     // 4. Branch by engine
     if (payload.engine === 'replicate') {
-      // ---- Replicate path (Nano Banana Pro — synchronous) ----
-      console.log(`[StoryPublisher] Calling Nano Banana Pro via Replicate...`);
+      // ---- Replicate path (Nano Banana 2 — synchronous) ----
+      console.log(`[StoryPublisher] Calling Nano Banana 2 via Replicate...`);
 
       const imageBuffer = await runNanoBanana(
         payload.positivePrompt,
@@ -163,7 +163,7 @@ export async function POST(
         cost: 0,
       });
 
-      console.log(`[StoryPublisher] Nano Banana Pro complete: ${imageRow.id}, stored at: ${publicUrl}`);
+      console.log(`[StoryPublisher] Nano Banana 2 complete: ${imageRow.id}, stored at: ${publicUrl}`);
 
       return NextResponse.json({
         jobId: `replicate-instant-${imageRow.id}`,

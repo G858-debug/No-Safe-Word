@@ -5,7 +5,7 @@
  *   npx tsx packages/image-gen/src/character-lora/test-pipeline.ts --stage 1
  *
  * Stages:
- *   1 = Dataset generation (Replicate / Nano Banana Pro)
+ *   1 = Dataset generation (Replicate / Nano Banana 2)
  *   2 = Quality evaluation (Claude Vision)
  *   3 = Caption generation (local, no API calls)
  *   all = Run stages 1-3 end-to-end
