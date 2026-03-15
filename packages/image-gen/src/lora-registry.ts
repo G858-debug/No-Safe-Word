@@ -289,7 +289,8 @@ export function selectKontextResources(opts: {
   // Placed before realism LoRA so it chains first after character identity LoRAs.
   const ethnicityLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   const isAfricanEthnicity = (eth?: string) => eth && /\b(black|african)\b/i.test(eth);
-  if (isAfricanEthnicity(opts.primaryEthnicity) || isAfricanEthnicity(opts.secondaryEthnicity)) {
+  const africanLora = KONTEXT_LORA_REGISTRY.find(l => l.filename === 'african-woman-flux.safetensors');
+  if (africanLora?.installed && (isAfricanEthnicity(opts.primaryEthnicity) || isAfricanEthnicity(opts.secondaryEthnicity))) {
     const strength = hasDualCharacter ? 0.5 : 0.6;
     ethnicityLoras.push({ filename: 'african-woman-flux.safetensors', strengthModel: strength, strengthClip: strength });
   }
