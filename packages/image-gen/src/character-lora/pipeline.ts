@@ -205,7 +205,7 @@ export async function resumePipeline(
       .eq('id', loraId)
       .single();
 
-    const resumableStatuses = ['awaiting_dataset_approval', 'failed'];
+    const resumableStatuses = ['awaiting_dataset_approval', 'failed', 'training', 'validating', 'captioning'];
     if (!loraRow || !resumableStatuses.includes(loraRow.status)) {
       throw new Error(
         `Cannot resume: LoRA ${loraId} is in status "${loraRow?.status}", expected one of: ${resumableStatuses.join(', ')}`
