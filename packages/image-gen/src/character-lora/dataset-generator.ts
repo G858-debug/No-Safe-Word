@@ -412,9 +412,6 @@ export async function generateSdxlMaleBodyShots(
   count: number,
   deps: DatasetGeneratorDeps,
 ): Promise<GenerationBatchResult> {
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) throw new Error('Missing REPLICATE_API_TOKEN environment variable');
-
   const { skinTone, ethnicity, bodyType } = character.structuredData;
   const bodyDesc = bodyType || 'athletic';
   const basePositive =
@@ -443,45 +440,25 @@ export async function generateSdxlMaleBodyShots(
 
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
       try {
-        // Step 1: Generate SDXL body shot via Replicate (no body LoRA for males)
-        const replicateRes = await fetch(
-          `https://api.replicate.com/v1/models/${SDXL_BODY_MODEL}/predictions`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-              Prefer: 'respond-async',
-            },
-            body: JSON.stringify({
-              input: {
-                prompt,
-                negative_prompt: negative,
-                width: 768,
-                height: 1152,
-                num_inference_steps: 30,
-                guidance_scale: 7.5,
-                seed: Math.floor(Math.random() * 2_147_483_647),
-              },
-            }),
-          },
-        );
+        // Step 1: Generate SDXL body shot via ComfyUI on RunPod (no body LoRA for males)
+        const sdxlSeed = Math.floor(Math.random() * 2_147_483_647);
+        const sdxlWorkflow = buildSdxlWorkflow({
+          positivePrompt: prompt,
+          negativePrompt: negative,
+          width: 768,
+          height: 1152,
+          seed: sdxlSeed,
+          steps: 30,
+          cfg: 7.5,
+          checkpointName: SDXL_CHECKPOINT,
+          filenamePrefix: `sdxl_body_${loraId}`,
+        });
 
-        if (!replicateRes.ok) {
-          throw new Error(`Replicate SDXL error: ${replicateRes.status}`);
-        }
+        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow);
+        const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
 
-        const prediction = await replicateRes.json();
-        const predictionId: string = prediction.id;
-
-        // Poll for SDXL completion
-        const sdxlImageUrl = await pollReplicatePrediction(predictionId, token);
-
-        // Step 2: Download SDXL output as base64
-        const sdxlBase64 = await imageUrlToBase64(sdxlImageUrl);
-
-        // Step 3: Convert to photorealistic via Flux Kontext img2img
-        const workflow = buildKontextWorkflow({
+        // Step 2: Convert to photorealistic via Flux Kontext img2img
+        const fluxWorkflow = buildKontextWorkflow({
           type: 'img2img',
           positivePrompt: img2imgPrompt,
           width: 1024,
@@ -491,14 +468,14 @@ export async function generateSdxlMaleBodyShots(
           filenamePrefix: `dataset_${loraId}`,
         });
 
-        const { jobId } = await submitRunPodJob(workflow, [
+        const { jobId } = await submitRunPodJob(fluxWorkflow, [
           { name: 'input.jpg', image: sdxlBase64 },
         ]);
 
         const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000);
         const imageBuffer = Buffer.from(imageBase64, 'base64');
 
-        // Step 4: Save the img2img result
+        // Step 3: Save the img2img result
         const category = i % 2 === 0 ? 'full-body' : 'waist-up';
         const variationType: VariationType = i % 3 === 0 ? 'clothing' : i % 3 === 1 ? 'framing' : 'lighting';
         const storagePath = `character-loras/datasets/${loraId}/${promptId}.png`;
@@ -571,7 +548,13 @@ export async function generateSdxlMaleBodyShots(
   return { records, failures };
 }
 
-// ── SDXL + Venus Body LoRA → Flux img2img Pipeline (Female) ───────
+// ── SDXL + Curvy Body LoRA → Flux img2img Pipeline (Female) ───────
+
+/** Case-insensitive check for Black/African ethnicity */
+function isBlackAfrican(ethnicity: string): boolean {
+  const lower = ethnicity.toLowerCase();
+  return lower.includes('black') || lower.includes('african') || lower.includes('dark');
+}
 
 export async function generateSdxlBodyShots(
   character: CharacterInput,
@@ -579,24 +562,39 @@ export async function generateSdxlBodyShots(
   count: number,
   deps: DatasetGeneratorDeps,
 ): Promise<GenerationBatchResult> {
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token) throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+  const { skinTone, ethnicity } = character.structuredData;
+  const useMelanin = isBlackAfrican(ethnicity);
 
-  const { skinTone, ethnicity, bodyType } = character.structuredData;
+  const melaninPrefix = useMelanin ? 'melanin, ' : '';
+  const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
+  const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
+
   const basePositive =
-    `venusbody, ${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
+    `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}` +
+    `${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
     `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
     `wearing a form-fitting bodycon dress that shows her curves clearly, fully clothed, ` +
     `full body, standing, natural pose, masterpiece, best quality, highly detailed, 8k`;
   const negative =
     'nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, underwear, ' +
     'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
-    'bad anatomy, extra limbs, (worst quality:2), (low quality:2)';
+    'bad anatomy, extra limbs, (worst quality:2), (low quality:2), ' +
+    'white skin, pale skin, asian features, european features';
 
   const img2imgPrompt =
     `${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
     `and thick thighs, wearing a fitted dress, fully clothed, ` +
     `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
+
+  // Build LoRA stack matching generate-character-image.ts female body pipeline
+  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
+    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.75, strengthClip: 0.75 },
+  ];
+  if (useMelanin) {
+    loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+    loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
+  }
 
   const records: LoraDatasetImageRow[] = [];
   const failures: DatasetGenerationResult['failedPrompts'] = [];
@@ -610,47 +608,26 @@ export async function generateSdxlBodyShots(
 
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
       try {
-        // Step 1: Generate SDXL body shot via Replicate
-        const replicateRes = await fetch(
-          `https://api.replicate.com/v1/models/${SDXL_BODY_MODEL}/predictions`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-              Prefer: 'respond-async',
-            },
-            body: JSON.stringify({
-              input: {
-                prompt,
-                negative_prompt: negative,
-                lora_weights: VENUS_BODY_LORA_URL,
-                lora_scale: 0.75,
-                width: 768,
-                height: 1152,
-                num_inference_steps: 30,
-                guidance_scale: 7.5,
-                seed: Math.floor(Math.random() * 2_147_483_647),
-              },
-            }),
-          },
-        );
+        // Step 1: Generate SDXL body shot via ComfyUI on RunPod
+        const sdxlSeed = Math.floor(Math.random() * 2_147_483_647);
+        const sdxlWorkflow = buildSdxlWorkflow({
+          positivePrompt: prompt,
+          negativePrompt: negative,
+          width: 768,
+          height: 1152,
+          seed: sdxlSeed,
+          steps: 30,
+          cfg: 7.5,
+          checkpointName: SDXL_CHECKPOINT,
+          loras,
+          filenamePrefix: `sdxl_body_${loraId}`,
+        });
 
-        if (!replicateRes.ok) {
-          throw new Error(`Replicate SDXL error: ${replicateRes.status}`);
-        }
+        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow);
+        const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
 
-        const prediction = await replicateRes.json();
-        const predictionId: string = prediction.id;
-
-        // Poll for SDXL completion
-        const sdxlImageUrl = await pollReplicatePrediction(predictionId, token);
-
-        // Step 2: Download SDXL output as base64
-        const sdxlBase64 = await imageUrlToBase64(sdxlImageUrl);
-
-        // Step 3: Convert to photorealistic via Flux Kontext img2img
-        const workflow = buildKontextWorkflow({
+        // Step 2: Convert to photorealistic via Flux Kontext img2img
+        const fluxWorkflow = buildKontextWorkflow({
           type: 'img2img',
           positivePrompt: img2imgPrompt,
           width: 1024,
@@ -660,14 +637,14 @@ export async function generateSdxlBodyShots(
           filenamePrefix: `dataset_${loraId}`,
         });
 
-        const { jobId } = await submitRunPodJob(workflow, [
+        const { jobId } = await submitRunPodJob(fluxWorkflow, [
           { name: 'input.jpg', image: sdxlBase64 },
         ]);
 
         const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000);
         const imageBuffer = Buffer.from(imageBase64, 'base64');
 
-        // Step 4: Save the img2img result
+        // Step 3: Save the img2img result
         const category = i % 2 === 0 ? 'full-body' : 'waist-up';
         const variationType: VariationType = i % 3 === 0 ? 'clothing' : i % 3 === 1 ? 'framing' : 'lighting';
         const storagePath = `character-loras/datasets/${loraId}/${promptId}.png`;
@@ -740,31 +717,6 @@ export async function generateSdxlBodyShots(
   return { records, failures };
 }
 
-/**
- * Poll a Replicate prediction until it completes and return the output image URL.
- */
-async function pollReplicatePrediction(predictionId: string, token: string): Promise<string> {
-  const maxPolls = 60; // ~5 minutes at 5s intervals
-  for (let i = 0; i < maxPolls; i++) {
-    await sleep(5000);
-    const res = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(`Replicate poll error: ${res.status}`);
-    const data = await res.json();
-
-    if (data.status === 'succeeded') {
-      const output = Array.isArray(data.output) ? data.output[0] : data.output;
-      if (!output) throw new Error('Replicate prediction succeeded but no output URL');
-      return output;
-    }
-    if (data.status === 'failed' || data.status === 'canceled') {
-      throw new Error(`Replicate prediction ${data.status}: ${data.error || 'unknown error'}`);
-    }
-  }
-  throw new Error(`Replicate prediction ${predictionId} timed out after ${maxPolls * 5}s`);
-}
-
 // ── Shared Helpers ────────────────────────────────────────────────
 
 async function saveDatasetImage(
@@ -815,8 +767,6 @@ async function saveDatasetImage(
 
   return record as LoraDatasetImageRow;
 }
-
-// readReplicateOutput is imported from ../replicate-client
 
 function hashCode(str: string): number {
   let hash = 0;
