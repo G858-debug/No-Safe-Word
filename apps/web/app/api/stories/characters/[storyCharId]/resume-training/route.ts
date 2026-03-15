@@ -35,19 +35,19 @@ export async function POST(
       );
     }
 
-    // 2. Find the LoRA in awaiting_dataset_approval state
+    // 2. Find the LoRA — accept awaiting_dataset_approval or failed (retry with existing dataset)
     const { data: lora, error: loraError } = await supabase
       .from("character_loras")
       .select("id, status")
       .eq("character_id", storyChar.character_id)
-      .eq("status", "awaiting_dataset_approval")
+      .in("status", ["awaiting_dataset_approval", "failed"])
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
 
     if (loraError || !lora) {
       return NextResponse.json(
-        { error: "No LoRA awaiting dataset approval for this character" },
+        { error: "No LoRA ready to resume for this character" },
         { status: 400 }
       );
     }

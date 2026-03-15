@@ -924,17 +924,13 @@ export default function DatasetApprovalPage() {
 
     try {
       const res = await fetch(
-        `/api/stories/characters/${storyCharId}/train-lora`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        }
+        `/api/stories/characters/${storyCharId}/resume-training`,
+        { method: "POST" }
       );
       const data = await res.json();
 
       if (!res.ok) {
-        setResumeError(data.error || "Failed to start training");
+        setResumeError(data.error || "Failed to resume training");
         setResuming(false);
         return;
       }
