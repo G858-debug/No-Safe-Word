@@ -740,10 +740,11 @@ export default function DatasetApprovalPage() {
   // ── Derived ─────────────────────────────────────────────────
 
   const isApprovalMode = loraStatus === "awaiting_dataset_approval";
-  const readOnly = !isApprovalMode;
+  const readOnly = loraStatus === "deployed" || loraStatus === "archived";
   const humanApproved = images.filter((i) => i.human_approved === true).length;
   const humanRejected = images.filter((i) => i.human_approved === false).length;
   const humanPending = images.filter((i) => i.human_approved === null).length;
+  const aiPassed = images.filter((i) => i.eval_status === "passed").length;
   const minRequired = stats?.minRequired ?? 20;
   const canResume = isApprovalMode && humanApproved >= minRequired;
 
@@ -1057,9 +1058,9 @@ export default function DatasetApprovalPage() {
               ? `Review AI-generated training images before LoRA training begins. Need ${minRequired} approved to proceed.`
               : `Viewing ${images.length} dataset images generated for this character's LoRA training.`}
           </p>
-          {readOnly && loraStatus && (
+          {!isApprovalMode && loraStatus && (
             <p className="mt-1 text-xs text-zinc-500">
-              LoRA status: <span className={loraStatus === "failed" ? "text-red-400" : "text-zinc-400"}>{loraStatus}</span>
+              LoRA status: <span className={String(loraStatus) === "failed" ? "text-red-400" : "text-zinc-400"}>{loraStatus}</span>
             </p>
           )}
         </div>
@@ -1098,7 +1099,7 @@ export default function DatasetApprovalPage() {
       <div className="mb-6 grid grid-cols-3 gap-2 sm:grid-cols-6">
         {[
           { label: "Total", value: images.length, color: "text-zinc-100" },
-          { label: "AI Passed", value: stats?.passed ?? 0, color: "text-blue-400" },
+          { label: "AI Passed", value: aiPassed, color: "text-blue-400" },
           { label: "Approved", value: humanApproved, color: "text-emerald-400" },
           { label: "Rejected", value: rejected.length, color: "text-red-400" },
           { label: "Needs Review", value: needsReview.length, color: "text-orange-400" },
@@ -1138,7 +1139,7 @@ export default function DatasetApprovalPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isApprovalMode && (
+          {!readOnly && (
             <>
               <button
                 onClick={() => setApproveAllConfirm(true)}
@@ -1166,7 +1167,7 @@ export default function DatasetApprovalPage() {
       </div>
 
       {/* Keyboard shortcut hint */}
-      {isApprovalMode && (
+      {!readOnly && (
         <p className="mb-4 text-[11px] text-zinc-600">
           Keyboard: <span className="font-mono">→</span> Approve &nbsp;·&nbsp;{" "}
           <span className="font-mono">←</span> Reject &nbsp;·&nbsp;{" "}

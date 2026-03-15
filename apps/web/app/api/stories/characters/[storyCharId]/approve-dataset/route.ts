@@ -43,20 +43,29 @@ export async function POST(
       );
     }
 
-    // Find the LoRA — must be in awaiting_dataset_approval status
-    const { data: lora, error: loraError } = await supabase
+    // Find the most recent LoRA for this character
+    let loraQuery = supabase
       .from("character_loras")
       .select("id, status")
       .eq("character_id", storyChar.character_id)
-      .eq("status", "awaiting_dataset_approval")
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
 
+    if (storyChar.active_lora_id) {
+      loraQuery = supabase
+        .from("character_loras")
+        .select("id, status")
+        .eq("id", storyChar.active_lora_id)
+        .single();
+    }
+
+    const { data: lora, error: loraError } = await loraQuery;
+
     if (loraError || !lora) {
       return NextResponse.json(
-        { error: "No LoRA in awaiting_dataset_approval state for this character" },
-        { status: 400 }
+        { error: "No LoRA found for this character" },
+        { status: 404 }
       );
     }
 
