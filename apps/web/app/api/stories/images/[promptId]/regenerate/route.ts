@@ -76,9 +76,13 @@ export async function POST(
     // 6. Build full generation payload via shared pipeline
     const body = await request.json().catch(() => ({}));
     const pulidOnlyMode = body?.pulidOnlyMode === true;
+    const reduxDisabled = body?.reduxDisabled === true;
 
     if (pulidOnlyMode) {
       console.log(`[Kontext][${promptId}] PuLID-only test mode — no character LoRAs, realism LoRA only`);
+    }
+    if (reduxDisabled) {
+      console.log(`[Kontext][${promptId}] Redux disabled test mode — no Redux conditioning`);
     }
 
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
@@ -89,6 +93,7 @@ export async function POST(
       characterDataMap,
       seed,
       pulidOnlyMode,
+      reduxDisabled,
     });
 
     console.log(

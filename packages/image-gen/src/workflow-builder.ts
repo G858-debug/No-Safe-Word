@@ -36,6 +36,9 @@ export interface KontextWorkflowConfig {
    *  Higher = stronger identity preservation, lower = more creative freedom.
    *  Range 0.0–1.0. Default: 0.65 */
   reduxStrength?: number;
+  /** When true, skip Redux conditioning entirely (nodes 5-8, 15).
+   *  PuLID and LoRAs still run. For A/B testing identity methods. */
+  reduxDisabled?: boolean;
   /**
    * Optional PuLID face identity refinement pass.
    * When set, a second KSampler pass is appended after the main generation.
@@ -261,63 +264,66 @@ function buildKontextSingleWorkflow(
   config: KontextWorkflowConfig,
   modelRef: [string, number],
 ): Record<string, any> {
-  if (!config.primaryRefImageName) {
-    throw new Error('Kontext single workflow requires primaryRefImageName');
+  if (!config.primaryRefImageName && !config.reduxDisabled) {
+    throw new Error('Kontext single workflow requires primaryRefImageName (or reduxDisabled: true)');
   }
 
-  const reduxStrength = config.reduxStrength ?? 0.65;
+  if (!config.reduxDisabled) {
+    const reduxStrength = config.reduxStrength ?? 0.65;
 
-  // Node 5: LoadImage — primary character reference
-  workflow['5'] = {
-    class_type: 'LoadImage',
-    inputs: {
-      image: config.primaryRefImageName,
-    },
-  };
+    // Node 5: LoadImage — primary character reference
+    workflow['5'] = {
+      class_type: 'LoadImage',
+      inputs: {
+        image: config.primaryRefImageName,
+      },
+    };
 
-  // Node 6: CLIPVisionEncode — encode reference image semantically (identity, not composition)
-  workflow['6'] = {
-    class_type: 'CLIPVisionEncode',
-    inputs: {
-      clip_vision: ['7', 0],   // CLIPVisionLoader output
-      image: ['5', 0],         // Reference image
-      crop: 'center',          // Center-crop to CLIP Vision input size
-    },
-  };
+    // Node 6: CLIPVisionEncode — encode reference image semantically (identity, not composition)
+    workflow['6'] = {
+      class_type: 'CLIPVisionEncode',
+      inputs: {
+        clip_vision: ['7', 0],   // CLIPVisionLoader output
+        image: ['5', 0],         // Reference image
+        crop: 'center',          // Center-crop to CLIP Vision input size
+      },
+    };
 
-  // Node 7: CLIPVisionLoader — load SigCLIP Vision encoder for Redux
-  workflow['7'] = {
-    class_type: 'CLIPVisionLoader',
-    inputs: {
-      clip_name: 'sigclip_vision_patch14_384.safetensors',
-    },
-  };
+    // Node 7: CLIPVisionLoader — load SigCLIP Vision encoder for Redux
+    workflow['7'] = {
+      class_type: 'CLIPVisionLoader',
+      inputs: {
+        clip_name: 'sigclip_vision_patch14_384.safetensors',
+      },
+    };
 
-  // Node 15: StyleModelLoader — load the Flux Redux style model
-  workflow['15'] = {
-    class_type: 'StyleModelLoader',
-    inputs: {
-      style_model_name: 'flux1-redux-dev.safetensors',
-    },
-  };
+    // Node 15: StyleModelLoader — load the Flux Redux style model
+    workflow['15'] = {
+      class_type: 'StyleModelLoader',
+      inputs: {
+        style_model_name: 'flux1-redux-dev.safetensors',
+      },
+    };
 
-  // Node 8: StyleModelApply — merge reference identity into text conditioning
-  workflow['8'] = {
-    class_type: 'StyleModelApply',
-    inputs: {
-      conditioning: ['4', 0],        // Text conditioning from CLIPTextEncode
-      style_model: ['15', 0],        // Redux style model
-      clip_vision_output: ['6', 0],  // CLIPVision encoding of reference
-      strength: reduxStrength,
-      strength_type: 'multiply',     // Multiply strength scaling
-    },
-  };
+    // Node 8: StyleModelApply — merge reference identity into text conditioning
+    workflow['8'] = {
+      class_type: 'StyleModelApply',
+      inputs: {
+        conditioning: ['4', 0],        // Text conditioning from CLIPTextEncode
+        style_model: ['15', 0],        // Redux style model
+        clip_vision_output: ['6', 0],  // CLIPVision encoding of reference
+        strength: reduxStrength,
+        strength_type: 'multiply',     // Multiply strength scaling
+      },
+    };
+  }
 
   // Node 9: FluxGuidance — applies Flux-native guidance
+  // When Redux is disabled, conditioning comes directly from CLIPTextEncode (node 4)
   workflow['9'] = {
     class_type: 'FluxGuidance',
     inputs: {
-      conditioning: ['8', 0],  // Redux-conditioned output
+      conditioning: config.reduxDisabled ? ['4', 0] : ['8', 0],
       guidance: config.guidance ?? 2.5,
     },
   };
@@ -746,59 +752,62 @@ function buildKontextDualWorkflow(
     throw new Error('Kontext dual workflow requires primaryRefImageName (pre-combined reference image)');
   }
 
-  const reduxStrength = config.reduxStrength ?? 0.65;
+  if (!config.reduxDisabled) {
+    const reduxStrength = config.reduxStrength ?? 0.65;
 
-  // Node 5: LoadImage — combined reference (both characters side by side)
-  workflow['5'] = {
-    class_type: 'LoadImage',
-    inputs: {
-      image: config.primaryRefImageName,
-    },
-  };
+    // Node 5: LoadImage — combined reference (both characters side by side)
+    workflow['5'] = {
+      class_type: 'LoadImage',
+      inputs: {
+        image: config.primaryRefImageName,
+      },
+    };
 
-  // Node 6: CLIPVisionEncode — encode combined reference semantically
-  workflow['6'] = {
-    class_type: 'CLIPVisionEncode',
-    inputs: {
-      clip_vision: ['7', 0],
-      image: ['5', 0],
-      crop: 'center',
-    },
-  };
+    // Node 6: CLIPVisionEncode — encode combined reference semantically
+    workflow['6'] = {
+      class_type: 'CLIPVisionEncode',
+      inputs: {
+        clip_vision: ['7', 0],
+        image: ['5', 0],
+        crop: 'center',
+      },
+    };
 
-  // Node 7: CLIPVisionLoader — SigCLIP Vision encoder
-  workflow['7'] = {
-    class_type: 'CLIPVisionLoader',
-    inputs: {
-      clip_name: 'sigclip_vision_patch14_384.safetensors',
-    },
-  };
+    // Node 7: CLIPVisionLoader — SigCLIP Vision encoder
+    workflow['7'] = {
+      class_type: 'CLIPVisionLoader',
+      inputs: {
+        clip_name: 'sigclip_vision_patch14_384.safetensors',
+      },
+    };
 
-  // Node 15: StyleModelLoader — Flux Redux style model
-  workflow['15'] = {
-    class_type: 'StyleModelLoader',
-    inputs: {
-      style_model_name: 'flux1-redux-dev.safetensors',
-    },
-  };
+    // Node 15: StyleModelLoader — Flux Redux style model
+    workflow['15'] = {
+      class_type: 'StyleModelLoader',
+      inputs: {
+        style_model_name: 'flux1-redux-dev.safetensors',
+      },
+    };
 
-  // Node 8: StyleModelApply — merge reference identity into text conditioning
-  workflow['8'] = {
-    class_type: 'StyleModelApply',
-    inputs: {
-      conditioning: ['4', 0],
-      style_model: ['15', 0],
-      clip_vision_output: ['6', 0],
-      strength: reduxStrength,
-      strength_type: 'multiply',
-    },
-  };
+    // Node 8: StyleModelApply — merge reference identity into text conditioning
+    workflow['8'] = {
+      class_type: 'StyleModelApply',
+      inputs: {
+        conditioning: ['4', 0],
+        style_model: ['15', 0],
+        clip_vision_output: ['6', 0],
+        strength: reduxStrength,
+        strength_type: 'multiply',
+      },
+    };
+  }
 
   // Node 9: FluxGuidance — Flux-native guidance
+  // When Redux is disabled, conditioning comes directly from CLIPTextEncode (node 4)
   workflow['9'] = {
     class_type: 'FluxGuidance',
     inputs: {
-      conditioning: ['8', 0],
+      conditioning: config.reduxDisabled ? ['4', 0] : ['8', 0],
       guidance: config.guidance ?? 2.5,
     },
   };

@@ -53,6 +53,8 @@ interface GenerateSceneParams {
   seed: number;
   /** Test mode: skip all LoRAs except realism, rely on PuLID + Redux only */
   pulidOnlyMode?: boolean;
+  /** Test mode: skip Redux conditioning (nodes 5-8, 15). PuLID and LoRAs still run. */
+  reduxDisabled?: boolean;
 }
 
 // ── Helpers ──
@@ -603,6 +605,9 @@ export async function buildSceneGenerationPayload(
     : undefined;
 
   if (effectiveKontextType !== 'portrait') {
+    if (params.reduxDisabled) {
+      console.log(`[Kontext][${promptId}] Redux DISABLED — skipping Redux conditioning nodes`);
+    }
     if (primaryFaceUrl) {
       console.log(`[Kontext][${promptId}] PuLID enabled: primary face ref present${secondaryFaceUrl ? ', secondary face ref present' : ', secondary face ref absent (single PuLID pass)'}`);
     } else {
@@ -622,6 +627,7 @@ export async function buildSceneGenerationPayload(
     guidance: 3.5,
     sfwMode,
     pulid: pulidConfig,
+    reduxDisabled: params.reduxDisabled,
   });
 
   // ── Structured generation summary ──
