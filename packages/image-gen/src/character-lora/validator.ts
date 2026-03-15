@@ -108,11 +108,12 @@ export async function validateLora(
       });
 
       // Submit to RunPod with character_lora_downloads for on-the-fly download
-      const { jobId } = await submitRunPodJob(workflow, undefined);
-
-      // Note: The RunPod worker will need to download the LoRA file.
-      // For now, we pass the download URL in the workflow metadata.
-      // The worker handler intercepts this before running the workflow.
+      const { jobId } = await submitRunPodJob(workflow, undefined, [
+        {
+          filename: `characters/${loraFilename}`,
+          url: loraStorageUrl,
+        },
+      ]);
 
       const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000);
 
