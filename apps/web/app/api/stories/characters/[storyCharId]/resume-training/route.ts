@@ -1,0 +1,138 @@
+import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@no-safe-word/story-engine";
+import { resumePipeline } from "@no-safe-word/image-gen/server/character-lora";
+import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
+
+const MIN_PASSED_IMAGES = 20;
+
+// POST /api/stories/characters/[storyCharId]/resume-training
+// Resume the LoRA pipeline after human dataset approval.
+// Validates >= minPassedImages human-approved images exist before proceeding.
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ storyCharId: string }> }
+) {
+  const params = await props.params;
+  const { storyCharId } = params;
+
+  try {
+    // 1. Fetch story character with character data
+    const { data: storyChar, error: scError } = await (supabase as any)
+      .from("story_characters")
+      .select(`
+        id, character_id, approved, approved_image_id, approved_seed, approved_prompt,
+        approved_fullbody, approved_fullbody_image_id, approved_fullbody_seed,
+        active_lora_id,
+        characters ( id, name, description )
+      `)
+      .eq("id", storyCharId)
+      .single() as { data: any; error: any };
+
+    if (scError || !storyChar) {
+      return NextResponse.json(
+        { error: "Story character not found" },
+        { status: 404 }
+      );
+    }
+
+    // 2. Find the LoRA in awaiting_dataset_approval state
+    const { data: lora, error: loraError } = await supabase
+      .from("character_loras")
+      .select("id, status")
+      .eq("character_id", storyChar.character_id)
+      .eq("status", "awaiting_dataset_approval")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (loraError || !lora) {
+      return NextResponse.json(
+        { error: "No LoRA awaiting dataset approval for this character" },
+        { status: 400 }
+      );
+    }
+
+    // 3. Count human-approved images
+    const { count: approvedCount } = await supabase
+      .from("lora_dataset_images")
+      .select("*", { count: "exact", head: true })
+      .eq("lora_id", lora.id)
+      .eq("human_approved", true);
+
+    if ((approvedCount || 0) < MIN_PASSED_IMAGES) {
+      return NextResponse.json(
+        {
+          error: `Only ${approvedCount || 0} images approved (minimum ${MIN_PASSED_IMAGES} required)`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // 4. Build CharacterInput (same logic as train-lora route)
+    const character = storyChar.characters as { id: string; name: string; description: Record<string, unknown> };
+    const desc = character.description as Record<string, string>;
+
+    const [portraitImage, fullBodyImage] = await Promise.all([
+      supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_image_id!).single(),
+      supabase.from("images").select("stored_url, sfw_url").eq("id", storyChar.approved_fullbody_image_id!).single(),
+    ]);
+
+    const portraitUrl = portraitImage.data?.sfw_url || portraitImage.data?.stored_url;
+    const fullBodyUrl = fullBodyImage.data?.sfw_url || fullBodyImage.data?.stored_url;
+
+    if (!portraitUrl || !fullBodyUrl) {
+      return NextResponse.json(
+        { error: "Could not find stored URLs for approved images" },
+        { status: 500 }
+      );
+    }
+
+    const structuredData: CharacterStructured = {
+      gender: desc.gender || "female",
+      ethnicity: desc.ethnicity || "",
+      bodyType: desc.bodyType || "",
+      skinTone: desc.skinTone || "",
+      hairColor: desc.hairColor || "",
+      hairStyle: desc.hairStyle || "",
+      eyeColor: desc.eyeColor || "",
+      age: desc.age || "",
+      distinguishingFeatures: desc.distinguishingFeatures,
+    };
+
+    const characterInput: CharacterInput = {
+      characterId: character.id,
+      characterName: character.name,
+      gender: desc.gender || "female",
+      approvedImageUrl: portraitUrl,
+      approvedPrompt: storyChar.approved_prompt || "",
+      fullBodyImageUrl: fullBodyUrl,
+      fullBodySeed: storyChar.approved_fullbody_seed || 42,
+      portraitSeed: storyChar.approved_seed || 42,
+      structuredData,
+      pipelineType: "story_character",
+    };
+
+    // 5. Fire-and-forget — resume the pipeline in the background
+    console.log(`[LoRA API] Resuming pipeline for ${character.name} (loraId: ${lora.id}, ${approvedCount} approved images)`);
+
+    resumePipeline(characterInput, lora.id, { supabase }).catch((err) => {
+      console.error(`[LoRA API] Resume pipeline background error:`, err);
+    });
+
+    return NextResponse.json({
+      success: true,
+      loraId: lora.id,
+      approvedImages: approvedCount,
+      message: `Training resumed for ${character.name} with ${approvedCount} approved images.`,
+    });
+  } catch (err) {
+    console.error("[Resume Training API] Failed:", err);
+    return NextResponse.json(
+      {
+        error: "Failed to resume training",
+        details: err instanceof Error ? err.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
+}

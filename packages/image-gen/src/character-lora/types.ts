@@ -6,6 +6,7 @@ export type PipelineStatus =
   | 'pending'
   | 'generating_dataset'
   | 'evaluating'
+  | 'awaiting_dataset_approval'
   | 'captioning'
   | 'training'
   | 'validating'
@@ -51,6 +52,7 @@ export interface LoraDatasetImageRow {
   eval_score: number | null;
   eval_details: EvalDetails | null;
   caption: string | null;
+  human_approved: boolean | null;
   created_at: string;
 }
 
@@ -215,6 +217,8 @@ export interface PipelineProgress {
   progress: {
     datasetGenerated: number;
     datasetApproved: number;
+    humanApproved: number;
+    humanRejected: number;
     trainingAttempt: number;
     validationScore: number | null;
   };

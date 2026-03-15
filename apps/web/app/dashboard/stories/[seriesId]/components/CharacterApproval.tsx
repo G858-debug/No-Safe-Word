@@ -82,7 +82,7 @@ interface ImageSlotState {
 }
 
 interface LoraTrainingState {
-  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "captioning" | "training" | "validating" | "deployed" | "failed" | "archived";
+  status: "no_lora" | "pending" | "generating_dataset" | "evaluating" | "awaiting_dataset_approval" | "captioning" | "training" | "validating" | "deployed" | "failed" | "archived";
   loraId: string | null;
   datasetGenerated: number;
   datasetApproved: number;
@@ -952,7 +952,7 @@ export default function CharacterApproval({
           });
 
           // Stop polling when terminal state reached
-          if (["deployed", "failed", "archived"].includes(data.status)) {
+          if (["deployed", "failed", "archived", "awaiting_dataset_approval"].includes(data.status)) {
             clearInterval(loraPollingTimers.current[storyCharId]);
             delete loraPollingTimers.current[storyCharId];
           }
@@ -985,7 +985,7 @@ export default function CharacterApproval({
               });
 
               // If still in progress, start polling
-              if (!["deployed", "failed", "archived", "no_lora"].includes(data.status)) {
+              if (!["deployed", "failed", "archived", "awaiting_dataset_approval", "no_lora"].includes(data.status)) {
                 startLoraPolling(ch.id);
               }
             }
@@ -1119,7 +1119,8 @@ export default function CharacterApproval({
           else if (!s.fullBody.approved) reasons.push("body not approved");
           if (s.portrait.approved && s.fullBody.approved && s.lora.status !== "deployed") {
             const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(s.lora.status);
-            reasons.push(loraInProgress ? "LoRA training in progress" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
+            const needsReview = s.lora.status === "awaiting_dataset_approval";
+            reasons.push(loraInProgress ? "LoRA training in progress" : needsReview ? "dataset needs review" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
           }
           if (reasons.length > 0) blockers.push(`${ch.characters.name} (${reasons.join(", ")})`);
         }
@@ -1184,8 +1185,9 @@ export default function CharacterApproval({
                     const bodyColor = state.fullBody.approved ? "text-green-400" : state.fullBody.isGenerating ? "text-amber-400" : "text-muted-foreground/40";
                     const bodyDot = state.fullBody.approved ? "bg-green-400" : state.fullBody.isGenerating ? "bg-amber-400" : "bg-muted-foreground/30";
                     const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(state.lora.status);
-                    const loraColor = state.lora.status === "deployed" ? "text-green-400" : state.lora.status === "failed" ? "text-red-400" : loraInProgress ? "text-amber-400" : "text-muted-foreground/40";
-                    const loraDot = state.lora.status === "deployed" ? "bg-green-400" : state.lora.status === "failed" ? "bg-red-400" : loraInProgress ? "bg-amber-400" : "bg-muted-foreground/30";
+                    const loraNeedsReview = state.lora.status === "awaiting_dataset_approval";
+                    const loraColor = state.lora.status === "deployed" ? "text-green-400" : state.lora.status === "failed" ? "text-red-400" : loraInProgress ? "text-amber-400" : loraNeedsReview ? "text-amber-400" : "text-muted-foreground/40";
+                    const loraDot = state.lora.status === "deployed" ? "bg-green-400" : state.lora.status === "failed" ? "bg-red-400" : loraInProgress ? "bg-amber-400" : loraNeedsReview ? "bg-amber-400" : "bg-muted-foreground/30";
                     return (
                       <>
                         <span className={`inline-flex items-center gap-1 ${faceColor}`}>
@@ -1590,6 +1592,7 @@ export default function CharacterApproval({
                 {/* LoRA Training Section */}
                 <LoraTrainingSection
                   storyCharId={ch.id}
+                  seriesId={seriesId}
                   characterName={ch.characters.name}
                   loraState={state.lora}
                   onTrain={() => handleTrainLora(ch.id)}
@@ -1635,6 +1638,7 @@ const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; descrip
   pending: { label: "Starting...", color: "text-blue-400", description: "Initializing pipeline" },
   generating_dataset: { label: "Generating Dataset", color: "text-blue-400", description: "Creating training images (Nano Banana Pro + ComfyUI)" },
   evaluating: { label: "Evaluating Quality", color: "text-blue-400", description: "Claude Vision is checking face & body consistency" },
+  awaiting_dataset_approval: { label: "Review Dataset", color: "text-amber-400", description: "Dataset generated — review and approve images before training" },
   captioning: { label: "Captioning", color: "text-blue-400", description: "Generating training captions" },
   training: { label: "Training LoRA", color: "text-purple-400", description: "Character LoRA training in progress" },
   validating: { label: "Validating", color: "text-purple-400", description: "Testing LoRA with sample generations" },
@@ -1645,19 +1649,21 @@ const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; descrip
 
 function LoraTrainingSection({
   storyCharId,
+  seriesId,
   characterName,
   loraState,
   onTrain,
   locked,
 }: {
   storyCharId: string;
+  seriesId: string;
   characterName: string;
   loraState: LoraTrainingState;
   onTrain: () => void;
   locked: boolean;
 }) {
   const config = LORA_STATUS_CONFIG[loraState.status] || LORA_STATUS_CONFIG.no_lora;
-  const isInProgress = !["no_lora", "deployed", "failed", "archived"].includes(loraState.status);
+  const isInProgress = !["no_lora", "deployed", "failed", "archived", "awaiting_dataset_approval"].includes(loraState.status);
   const isDeployed = loraState.status === "deployed";
   const isFailed = loraState.status === "failed";
 
@@ -1693,6 +1699,16 @@ function LoraTrainingSection({
             )}
             {locked ? "Approve body first" : "Train Character LoRA"}
           </Button>
+        )}
+
+        {loraState.status === "awaiting_dataset_approval" && (
+          <a
+            href={`/dashboard/stories/${seriesId}/dataset-approval/${storyCharId}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-transparent px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-amber-500/10"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Review Dataset
+          </a>
         )}
 
         {isFailed && (
@@ -1778,6 +1794,16 @@ function LoraTrainingSection({
             <Loader2 className="h-3 w-3 animate-spin text-purple-400" />
             <span className="text-xs text-purple-400">Running in background...</span>
           </div>
+        </div>
+      )}
+
+      {/* Awaiting dataset approval */}
+      {loraState.status === "awaiting_dataset_approval" && (
+        <div className="rounded-md bg-amber-500/5 border border-amber-500/20 p-2.5 space-y-1.5">
+          <p className="text-xs text-amber-300">{config.description}</p>
+          <p className="text-xs text-muted-foreground">
+            {loraState.datasetApproved} images ready for review (min {20} required)
+          </p>
         </div>
       )}
 

@@ -150,6 +150,94 @@ export async function runPipeline(
 
     console.log(`[LoRA Pipeline] ${passedCount} images approved for training`);
 
+    // ── PAUSE: Wait for human dataset approval ────────────────
+    // Pre-seed human_approved from eval results so reviewer starts with AI recommendations
+    await deps.supabase
+      .from('lora_dataset_images')
+      .update({ human_approved: true })
+      .eq('lora_id', loraId)
+      .eq('eval_status', 'passed');
+
+    await deps.supabase
+      .from('lora_dataset_images')
+      .update({ human_approved: false })
+      .eq('lora_id', loraId)
+      .in('eval_status', ['failed', 'replaced']);
+
+    await updateStatus(loraId, 'awaiting_dataset_approval', deps);
+    console.log(`[LoRA Pipeline] Paused for human dataset approval. ${passedCount} images pre-approved.`);
+    return; // EXIT — pipeline stops here, user must review and call resumePipeline
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+
+    console.error(`[LoRA Pipeline] FAILED: ${errorMessage}`);
+
+    await deps.supabase
+      .from('character_loras')
+      .update({
+        status: 'failed',
+        error: errorMessage,
+      })
+      .eq('id', loraId);
+  }
+}
+
+/**
+ * Resume the LoRA pipeline after human dataset approval.
+ *
+ * Called from the resume-training API route after the user reviews
+ * the dataset images. Picks up from stage 3 (captioning) using only
+ * images where human_approved = true.
+ */
+export async function resumePipeline(
+  character: CharacterInput,
+  loraId: string,
+  deps: PipelineDeps,
+): Promise<void> {
+  const startTime = Date.now();
+
+  try {
+    // Validate the LoRA is in the correct state
+    const { data: loraRow } = await deps.supabase
+      .from('character_loras')
+      .select('status, completed_stage, training_id, training_attempts')
+      .eq('id', loraId)
+      .single();
+
+    if (!loraRow || loraRow.status !== 'awaiting_dataset_approval') {
+      throw new Error(
+        `Cannot resume: LoRA ${loraId} is in status "${loraRow?.status}", expected "awaiting_dataset_approval"`
+      );
+    }
+
+    const completedStage = loraRow.completed_stage as CompletedStage | null;
+    const shouldSkip = (stage: CompletedStage) =>
+      completedStage !== null &&
+      STAGE_ORDER.indexOf(stage) <= STAGE_ORDER.indexOf(completedStage);
+
+    // Load human-approved images
+    const { data: approvedImages } = await deps.supabase
+      .from('lora_dataset_images')
+      .select('*')
+      .eq('lora_id', loraId)
+      .eq('human_approved', true);
+
+    const passedImages = (approvedImages || []) as LoraDatasetImageRow[];
+    const passedCount = passedImages.length;
+
+    if (passedCount < PIPELINE_CONFIG.minPassedImages) {
+      throw new Error(
+        `Only ${passedCount} images approved (minimum ${PIPELINE_CONFIG.minPassedImages} required). ` +
+          `Please approve more images before resuming.`
+      );
+    }
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`[LoRA Pipeline] RESUMING after dataset approval for ${character.characterName}`);
+    console.log(`[LoRA Pipeline] ${passedCount} human-approved images`);
+    console.log(`${'='.repeat(60)}\n`);
+
     // ── STAGE 3: Captioning ──────────────────────────────────
     let captionedImages: CaptionResult['captionedImages'];
 
@@ -159,7 +247,7 @@ export async function runPipeline(
         .from('lora_dataset_images')
         .select('*')
         .eq('lora_id', loraId)
-        .eq('eval_status', 'passed')
+        .eq('human_approved', true)
         .not('caption', 'is', null);
 
       captionedImages = (captioned || []).map((img: LoraDatasetImageRow) => ({
@@ -182,8 +270,7 @@ export async function runPipeline(
     let loraFilename: string | null = null;
     let trainingSuccess = false;
 
-    // If training was already checkpointed, check if the Replicate training succeeded
-    if (shouldSkip('training') && loraRow?.training_id) {
+    if (shouldSkip('training') && loraRow.training_id) {
       console.log(`[LoRA Pipeline] Checking existing training ${loraRow.training_id}...`);
       const resp = await fetch(`https://api.replicate.com/v1/trainings/${loraRow.training_id}`, {
         headers: { Authorization: `Bearer ${process.env.REPLICATE_API_TOKEN}` },
@@ -202,7 +289,7 @@ export async function runPipeline(
     }
 
     if (!trainingSuccess) {
-      const startAttempt = (loraRow?.training_attempts || 0) + 1;
+      const startAttempt = (loraRow.training_attempts || 0) + 1;
 
       for (
         let attempt = startAttempt;
@@ -232,7 +319,6 @@ export async function runPipeline(
 
           await checkpoint(loraId, 'training', deps);
 
-          // Use the Replicate weights URL directly for validation
           await updateStatus(loraId, 'validating', deps);
 
           const validationResult = await validateLora(
@@ -300,7 +386,7 @@ export async function runPipeline(
     const errorMessage =
       error instanceof Error ? error.message : String(error);
 
-    console.error(`[LoRA Pipeline] FAILED: ${errorMessage}`);
+    console.error(`[LoRA Pipeline] RESUME FAILED: ${errorMessage}`);
 
     await deps.supabase
       .from('character_loras')
@@ -429,10 +515,23 @@ export async function getPipelineProgress(
     .eq('lora_id', loraRecord.id)
     .eq('eval_status', 'passed');
 
+  const { count: humanApproved } = await deps.supabase
+    .from('lora_dataset_images')
+    .select('*', { count: 'exact', head: true })
+    .eq('lora_id', loraRecord.id)
+    .eq('human_approved', true);
+
+  const { count: humanRejected } = await deps.supabase
+    .from('lora_dataset_images')
+    .select('*', { count: 'exact', head: true })
+    .eq('lora_id', loraRecord.id)
+    .eq('human_approved', false);
+
   const timeEstimates: Record<string, string> = {
     pending: '~25 minutes',
     generating_dataset: '~20 minutes',
     evaluating: '~15 minutes',
+    awaiting_dataset_approval: 'Waiting for review',
     captioning: '~12 minutes',
     training: '~10 minutes',
     validating: '~5 minutes',
@@ -447,6 +546,8 @@ export async function getPipelineProgress(
     progress: {
       datasetGenerated: generated || 0,
       datasetApproved: approved || 0,
+      humanApproved: humanApproved || 0,
+      humanRejected: humanRejected || 0,
       trainingAttempt: loraRecord.training_attempts,
       validationScore: loraRecord.validation_score,
     },
