@@ -559,7 +559,7 @@ export default function CharacterApproval({
         const data = await res.json();
         console.log(`[StoryPublisher] Generation started - jobId: ${data.jobId}, imageId: ${data.imageId}, type: ${type}, instant: ${!!data.instant}`);
 
-        // Nano Banana Pro returns instantly — no polling needed
+        // Nano Banana 2 returns instantly — no polling needed
         if (data.instant && data.storedUrl) {
           updateSlot(storyCharId, type, {
             isGenerating: false,
@@ -638,7 +638,7 @@ export default function CharacterApproval({
         }
         const data = await res.json();
 
-        // Nano Banana Pro returns instantly
+        // Nano Banana 2 returns instantly
         if (data.instant && data.storedUrl) {
           updateSlot(storyCharId, type, {
             isGenerating: false,
@@ -781,7 +781,7 @@ export default function CharacterApproval({
 
         const data = await res.json();
 
-        // Nano Banana Pro returns instantly — no polling needed
+        // Nano Banana 2 returns instantly — no polling needed
         if (data.instant && data.storedUrl) {
           updateSlot(ch.id, type, {
             isGenerating: false,
@@ -1637,7 +1637,7 @@ export default function CharacterApproval({
 const LORA_STATUS_CONFIG: Record<string, { label: string; color: string; description: string }> = {
   no_lora: { label: "Not Started", color: "text-muted-foreground/50", description: "Train a character LoRA for consistent identity across all scenes" },
   pending: { label: "Starting...", color: "text-blue-400", description: "Initializing pipeline" },
-  generating_dataset: { label: "Generating Dataset", color: "text-blue-400", description: "Creating training images (Nano Banana Pro + ComfyUI)" },
+  generating_dataset: { label: "Generating Dataset", color: "text-blue-400", description: "Creating training images (Nano Banana 2 + ComfyUI)" },
   evaluating: { label: "Evaluating Quality", color: "text-blue-400", description: "Claude Vision is checking face & body consistency" },
   awaiting_dataset_approval: { label: "Review Dataset", color: "text-amber-400", description: "Dataset generated — review and approve images before training" },
   captioning: { label: "Captioning", color: "text-blue-400", description: "Generating training captions" },
@@ -1663,10 +1663,28 @@ function LoraTrainingSection({
   onTrain: () => void;
   locked: boolean;
 }) {
+  const [generatingMore, setGeneratingMore] = useState(false);
+
   const config = LORA_STATUS_CONFIG[loraState.status] || LORA_STATUS_CONFIG.no_lora;
   const isInProgress = !["no_lora", "deployed", "failed", "archived", "awaiting_dataset_approval"].includes(loraState.status);
   const isDeployed = loraState.status === "deployed";
   const isFailed = loraState.status === "failed";
+
+  const handleGenerateMore = async () => {
+    setGeneratingMore(true);
+    try {
+      const res = await fetch(`/api/stories/characters/${storyCharId}/generate-more-dataset`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("Generate more failed:", err.error);
+      }
+    } catch {
+      // ignore
+    }
+    setGeneratingMore(false);
+  };
 
   return (
     <div className="border-t border-muted/50 pt-3 mt-1 space-y-2">
@@ -1723,21 +1741,39 @@ function LoraTrainingSection({
         )}
 
         {isFailed && (
-          <Button
-            onClick={onTrain}
-            disabled={loraState.isTriggering || locked}
-            size="sm"
-            variant="outline"
-            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-            title={locked ? "Approve body first" : undefined}
-          >
-            {loraState.isTriggering ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={onTrain}
+              disabled={loraState.isTriggering || locked}
+              size="sm"
+              variant="outline"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+              title={locked ? "Approve body first" : undefined}
+            >
+              {loraState.isTriggering ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Retry
+            </Button>
+            {loraState.loraId && (
+              <Button
+                onClick={handleGenerateMore}
+                disabled={generatingMore}
+                size="sm"
+                variant="outline"
+                className="border-blue-500/30 text-blue-400 hover:bg-blue-500/10"
+              >
+                {generatingMore ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Generate more images
+              </Button>
             )}
-            Retry
-          </Button>
+          </div>
         )}
 
         {isDeployed && (

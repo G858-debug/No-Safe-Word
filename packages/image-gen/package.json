@@ -7,6 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./server/character-lora": "./src/character-lora/pipeline.ts",
+    "./server/character-lora/dataset-generator": "./src/character-lora/dataset-generator.ts",
+    "./server/character-lora/quality-evaluator": "./src/character-lora/quality-evaluator.ts",
     "./runpod": "./src/runpod.ts"
   },
   "scripts": {
