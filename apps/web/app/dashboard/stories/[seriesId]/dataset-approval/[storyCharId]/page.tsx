@@ -673,7 +673,7 @@ function DatasetImageCard({
           <button
             onClick={() => onApprove(img.id)}
             className={`flex flex-1 items-center justify-center gap-1 rounded py-1.5 text-xs font-medium transition-colors ${
-              status === "approved"
+              isHumanApproved
                 ? "bg-emerald-700 text-emerald-100"
                 : "bg-zinc-800 text-zinc-400 hover:bg-emerald-900/50 hover:text-emerald-300"
             }`}
@@ -683,7 +683,7 @@ function DatasetImageCard({
           <button
             onClick={() => onReject(img.id)}
             className={`flex flex-1 items-center justify-center gap-1 rounded py-1.5 text-xs font-medium transition-colors ${
-              status === "rejected"
+              isHumanRejected
                 ? "bg-red-800 text-red-200"
                 : "bg-zinc-800 text-zinc-400 hover:bg-red-900/50 hover:text-red-300"
             }`}
