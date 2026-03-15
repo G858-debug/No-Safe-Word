@@ -17,7 +17,7 @@ import {
   buildFluxPrompt,
   injectFluxFemaleEnhancement,
 } from "@no-safe-word/image-gen";
-import { concatImagesHorizontally, concatImagesVertically } from "./image-concat";
+import { concatImagesHorizontally, concatImagesVertically, compressImageForPayload } from "./image-concat";
 import type { KontextWorkflowType, CharacterLoraDownload } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
@@ -253,15 +253,16 @@ export async function buildSceneGenerationPayload(
       }
 
       const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
-      kontextImages.push({ name: "primary_ref.png", image: combinedBase64 });
+      kontextImages.push({ name: "primary_ref.jpg", image: combinedBase64 });
       console.log(`[Kontext][${promptId}] Combined face + body ref images vertically for "${charName}"`);
 
       // Capture face_url for PuLID face reference
       if (sc.face_url) {
         primaryFaceUrl = sc.face_url;
-        const primaryFaceRefBase64 = await imageUrlToBase64(sc.face_url);
-        kontextImages.push({ name: "face_reference.png", image: primaryFaceRefBase64 });
-        console.log(`[Kontext][${promptId}] PuLID face reference added for "${charName}"`);
+        const rawFaceBase64 = await imageUrlToBase64(sc.face_url);
+        const primaryFaceRefBase64 = await compressImageForPayload(rawFaceBase64, 1024, 85);
+        kontextImages.push({ name: "face_reference.jpg", image: primaryFaceRefBase64 });
+        console.log(`[Kontext][${promptId}] PuLID face reference added for "${charName}" (${Math.round(primaryFaceRefBase64.length / 1024)}KB)`);
       }
     } else {
       // Dual-character: face + body for primary
@@ -280,20 +281,21 @@ export async function buildSceneGenerationPayload(
           ]);
           if (faceBase64 && bodyBase64) {
             const stitchedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 512);
-            kontextImages.push({ name: "primary_ref.png", image: stitchedBase64 });
+            kontextImages.push({ name: "primary_ref.jpg", image: stitchedBase64 });
             console.log(
               `[Kontext][${promptId}] Primary ref: face+body vertically stitched (${Math.round(stitchedBase64.length / 1024)}KB base64)`,
             );
           } else if (faceBase64) {
-            kontextImages.push({ name: "primary_ref.png", image: faceBase64 });
+            kontextImages.push({ name: "primary_ref.jpg", image: faceBase64 });
             console.warn(`[Kontext][${promptId}] Primary ref: face only (body fetch failed)`);
           }
           // Capture face_url for PuLID face reference (dual primary)
           if (sc.face_url) {
             primaryFaceUrl = sc.face_url;
-            const primaryFaceRefBase64 = await imageUrlToBase64(sc.face_url);
-            kontextImages.push({ name: "face_reference.png", image: primaryFaceRefBase64 });
-            console.log(`[Kontext][${promptId}] PuLID face reference added for primary "${charName}"`);
+            const rawFaceBase64 = await imageUrlToBase64(sc.face_url);
+            const primaryFaceRefBase64 = await compressImageForPayload(rawFaceBase64, 1024, 85);
+            kontextImages.push({ name: "face_reference.jpg", image: primaryFaceRefBase64 });
+            console.log(`[Kontext][${promptId}] PuLID face reference added for primary "${charName}" (${Math.round(primaryFaceRefBase64.length / 1024)}KB)`);
           }
         } else {
           const { data: img } = await supabase
@@ -303,7 +305,7 @@ export async function buildSceneGenerationPayload(
             .single();
           const primaryRefBase64 = await fetchRefImageBase64(img, `${charName} primary`);
           if (primaryRefBase64) {
-            kontextImages.push({ name: "primary_ref.png", image: primaryRefBase64 });
+            kontextImages.push({ name: "primary_ref.jpg", image: primaryRefBase64 });
             console.warn(
               `[Kontext][${promptId}] Primary ref: face only — no approved_fullbody_image_id for "${charName}"`,
             );
@@ -365,7 +367,7 @@ export async function buildSceneGenerationPayload(
     }
 
     const stitchedSecondary = await concatImagesVertically(faceBase64, bodyBase64, 512);
-    kontextImages.push({ name: "secondary_ref.png", image: stitchedSecondary });
+    kontextImages.push({ name: "secondary_ref.jpg", image: stitchedSecondary });
     console.log(
       `[Kontext][${promptId}] Secondary ref: face+body vertically stitched for "${secondaryName}" (${Math.round(stitchedSecondary.length / 1024)}KB base64)`,
     );
@@ -373,9 +375,10 @@ export async function buildSceneGenerationPayload(
     // Capture face_url for PuLID secondary face reference
     if (sc2.face_url) {
       secondaryFaceUrl = sc2.face_url;
-      const secondaryFaceRefBase64 = await imageUrlToBase64(sc2.face_url);
-      kontextImages.push({ name: "secondary_face_reference.png", image: secondaryFaceRefBase64 });
-      console.log(`[Kontext][${promptId}] PuLID secondary face reference added for "${secondaryName}"`);
+      const rawSecondaryFace = await imageUrlToBase64(sc2.face_url);
+      const secondaryFaceRefBase64 = await compressImageForPayload(rawSecondaryFace, 1024, 85);
+      kontextImages.push({ name: "secondary_face_reference.jpg", image: secondaryFaceRefBase64 });
+      console.log(`[Kontext][${promptId}] PuLID secondary face reference added for "${secondaryName}" (${Math.round(secondaryFaceRefBase64.length / 1024)}KB)`);
     }
   }
 
@@ -384,8 +387,8 @@ export async function buildSceneGenerationPayload(
 
   if (kontextType === "dual") {
     if (kontextImages.length < 2) {
-      const hasPrimary = kontextImages.some((i) => i.name === "primary_ref.png");
-      const hasSecondaryRef = kontextImages.some((i) => i.name === "secondary_ref.png");
+      const hasPrimary = kontextImages.some((i) => i.name === "primary_ref.jpg");
+      const hasSecondaryRef = kontextImages.some((i) => i.name === "secondary_ref.jpg");
       throw new Error(
         `Dual scene requires 2 reference images but only got ${kontextImages.length}. ` +
         `Primary: ${hasPrimary ? "OK" : "MISSING"}, Secondary: ${hasSecondaryRef ? "OK" : "MISSING"}. ` +
@@ -394,7 +397,7 @@ export async function buildSceneGenerationPayload(
     }
 
     const combined = await concatImagesHorizontally(kontextImages[0].image, kontextImages[1].image);
-    kontextImages = [{ name: "combined_ref.png", image: combined }];
+    kontextImages = [{ name: "combined_ref.jpg", image: combined }];
     console.log(`[Kontext][${promptId}] Combined primary + secondary ref images server-side`);
   }
 
@@ -402,7 +405,7 @@ export async function buildSceneGenerationPayload(
   const refImageName =
     effectiveKontextType === "portrait"
       ? undefined
-      : kontextImages[0]?.name || "primary_ref.png";
+      : kontextImages[0]?.name || "primary_ref.jpg";
 
   // ── Dimensions ──
   const isLandscape = /\b(wide|establishing|panoram)/i.test(imgPrompt.prompt);
@@ -571,8 +574,8 @@ export async function buildSceneGenerationPayload(
   // Falls back to Redux-only (no PuLID) if face_url is missing for a character.
   const pulidConfig = primaryFaceUrl
     ? {
-        primaryFaceImageName: 'face_reference.png',
-        secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.png' : undefined,
+        primaryFaceImageName: 'face_reference.jpg',
+        secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.jpg' : undefined,
         weight: 0.85,
         denoiseStrength: 0.5,
       }

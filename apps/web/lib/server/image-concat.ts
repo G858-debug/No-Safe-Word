@@ -21,8 +21,8 @@ export async function concatImagesHorizontally(base64A: string, base64B: string)
 
   // Resize both to the same height, preserving aspect ratio
   const [resizedA, resizedB] = await Promise.all([
-    sharp(bufA).resize({ height, fit: 'inside' }).png().toBuffer(),
-    sharp(bufB).resize({ height, fit: 'inside' }).png().toBuffer(),
+    sharp(bufA).resize({ height, fit: 'inside' }).jpeg({ quality: 90 }).toBuffer(),
+    sharp(bufB).resize({ height, fit: 'inside' }).jpeg({ quality: 90 }).toBuffer(),
   ]);
 
   const metaRA = await sharp(resizedA).metadata();
@@ -42,7 +42,7 @@ export async function concatImagesHorizontally(base64A: string, base64B: string)
       { input: resizedA, left: 0, top: 0 },
       { input: resizedB, left: widthA, top: 0 },
     ])
-    .png()
+    .jpeg({ quality: 85 })
     .toBuffer();
 
   return combined.toString('base64');
@@ -65,8 +65,8 @@ export async function concatImagesVertically(
 
   // Resize both to the same width, preserving aspect ratio
   const [resizedTop, resizedBottom] = await Promise.all([
-    sharp(bufTop).resize({ width: targetWidth, fit: 'inside' }).png().toBuffer(),
-    sharp(bufBottom).resize({ width: targetWidth, fit: 'inside' }).png().toBuffer(),
+    sharp(bufTop).resize({ width: targetWidth, fit: 'inside' }).jpeg({ quality: 90 }).toBuffer(),
+    sharp(bufBottom).resize({ width: targetWidth, fit: 'inside' }).jpeg({ quality: 90 }).toBuffer(),
   ]);
 
   const metaTop = await sharp(resizedTop).metadata();
@@ -86,8 +86,26 @@ export async function concatImagesVertically(
       { input: resizedTop, left: 0, top: 0 },
       { input: resizedBottom, left: 0, top: heightTop },
     ])
-    .png()
+    .jpeg({ quality: 85 })
     .toBuffer();
 
   return combined.toString('base64');
+}
+
+/**
+ * Compress and resize a base64 image for RunPod payload embedding.
+ * Resizes to max dimension on longest side and converts to JPEG.
+ * Used for PuLID face references and any other images embedded in the payload.
+ */
+export async function compressImageForPayload(
+  base64: string,
+  maxDimension = 1024,
+  quality = 85,
+): Promise<string> {
+  const buf = Buffer.from(base64, 'base64');
+  const compressed = await sharp(buf)
+    .resize({ width: maxDimension, height: maxDimension, fit: 'inside' })
+    .jpeg({ quality })
+    .toBuffer();
+  return compressed.toString('base64');
 }

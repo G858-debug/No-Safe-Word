@@ -61,13 +61,38 @@ export async function submitRunPodJob(
     },
   };
 
+  // Payload size logging and pre-flight check
+  const payloadJson = JSON.stringify(payload);
+  const payloadSize = Buffer.byteLength(payloadJson);
+  const payloadMB = payloadSize / (1024 * 1024);
+  console.log(`[RunPod] Payload size: ${payloadMB.toFixed(2)} MB`);
+  console.log(`[RunPod] Workflow JSON: ${JSON.stringify(payload.input.workflow).length} bytes`);
+  if (images) {
+    for (const img of images) {
+      console.log(`[RunPod] Image "${img.name}": ${(img.image.length / 1024).toFixed(0)} KB (base64)`);
+    }
+  }
+  if (characterLoraDownloads) {
+    console.log(`[RunPod] Character LoRA downloads: ${characterLoraDownloads.map((d) => d.filename).join(', ')} (delivered via URL)`);
+  }
+
+  if (payloadSize > 9 * 1024 * 1024) {
+    const imageBreakdown = images
+      ? images.map((img) => `"${img.name}": ${(img.image.length / 1024).toFixed(0)}KB`).join(', ')
+      : 'none';
+    throw new Error(
+      `RunPod payload exceeds 10MB limit (${payloadMB.toFixed(2)} MB). ` +
+      `Workflow: ${JSON.stringify(payload.input.workflow).length} bytes. Images: ${imageBreakdown}`
+    );
+  }
+
   const response = await fetch(`${RUNPOD_API_BASE}/${endpointId}/run`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(payload),
+    body: payloadJson,
   });
 
   if (!response.ok) {
@@ -130,13 +155,34 @@ export async function submitRunPodSync(
     },
   };
 
+  // Payload size logging and pre-flight check
+  const payloadJson = JSON.stringify(payload);
+  const payloadSize = Buffer.byteLength(payloadJson);
+  const payloadMB = payloadSize / (1024 * 1024);
+  console.log(`[RunPod Sync] Payload size: ${payloadMB.toFixed(2)} MB`);
+  if (images) {
+    for (const img of images) {
+      console.log(`[RunPod Sync] Image "${img.name}": ${(img.image.length / 1024).toFixed(0)} KB (base64)`);
+    }
+  }
+
+  if (payloadSize > 9 * 1024 * 1024) {
+    const imageBreakdown = images
+      ? images.map((img) => `"${img.name}": ${(img.image.length / 1024).toFixed(0)}KB`).join(', ')
+      : 'none';
+    throw new Error(
+      `RunPod payload exceeds 10MB limit (${payloadMB.toFixed(2)} MB). ` +
+      `Images: ${imageBreakdown}`
+    );
+  }
+
   const response = await fetch(`${RUNPOD_API_BASE}/${endpointId}/runsync`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(payload),
+    body: payloadJson,
   });
 
   if (!response.ok) {
