@@ -567,10 +567,11 @@ function DatasetImageCard({
   const isFailed = img.eval_status === "failed";
   const isPassed = img.eval_status === "passed";
   const isHumanApproved = img.human_approved === true;
+  const isHumanRejected = img.human_approved === false;
 
   const borderClass = isHumanApproved
     ? "border-emerald-600"
-    : isFailed
+    : isHumanRejected || isFailed
     ? "border-red-700"
     : focused
     ? "border-blue-500"
@@ -585,7 +586,7 @@ function DatasetImageCard({
         <img
           src={img.image_url}
           alt={`Dataset ${img.category}`}
-          className={`h-full w-full object-cover${isFailed && !isHumanApproved ? " opacity-60" : ""}`}
+          className={`h-full w-full object-cover${(isFailed || isHumanRejected) && !isHumanApproved ? " opacity-60" : ""}`}
         />
         <div
           className="absolute inset-0 cursor-zoom-in"
@@ -599,12 +600,16 @@ function DatasetImageCard({
           <ZoomIn className="h-3.5 w-3.5" />
         </button>
 
-        {/* Eval status badge */}
-        {isPassed && isHumanApproved ? (
+        {/* Eval status badge — human approval takes priority */}
+        {isHumanApproved ? (
           <span className="absolute left-1.5 top-1.5 flex items-center gap-0.5 rounded bg-emerald-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-100">
             <CheckCircle2 className="h-3 w-3" />
           </span>
-        ) : isPassed && !isHumanApproved ? (
+        ) : isHumanRejected ? (
+          <span className="absolute left-1.5 top-1.5 flex items-center rounded bg-red-800/80 px-1.5 py-0.5 text-[9px] font-semibold text-red-200">
+            <XCircle className="h-3 w-3" />
+          </span>
+        ) : isPassed ? (
           <span className="absolute left-1.5 top-1.5 rounded bg-orange-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-orange-100">
             AI ✓
           </span>
