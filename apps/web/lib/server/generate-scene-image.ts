@@ -513,8 +513,8 @@ export async function buildSceneGenerationPayload(
   // Character identity LoRAs go first in the stack (highest priority)
   const characterLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = characterLoraDownloads.map((dl) => ({
     filename: dl.filename,
-    strengthModel: 0.85,
-    strengthClip: 0.85,
+    strengthModel: 0.65,
+    strengthClip: 0.65,
   }));
 
   if (effectiveKontextType !== "portrait") {
@@ -525,6 +525,8 @@ export async function buildSceneGenerationPayload(
       imageType: imgPrompt.image_type,
       prompt: imgPrompt.prompt,
       hasDualCharacter: hasSecondary,
+      primaryEthnicity: charData?.ethnicity,
+      secondaryEthnicity: secondaryCharData?.ethnicity,
     });
     // Character LoRAs first, then style LoRAs
     kontextLoras = [...characterLoras, ...resources.loras];

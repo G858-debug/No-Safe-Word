@@ -202,6 +202,17 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     genderCategory: 'neutral',
   },
   {
+    name: 'African Woman Flux',
+    filename: 'african-woman-flux.safetensors',
+    category: 'melanin',
+    defaultStrength: 0.6,
+    clipStrength: 0.6,
+    description: 'African ethnicity enhancement for Flux — skin tone accuracy and feature consistency for Black/African characters',
+    compatibleWith: ['sfw', 'nsfw'],
+    installed: false,
+    genderCategory: 'female',
+  },
+  {
     name: 'RefControl Kontext Pose',
     filename: 'refcontrol_pose.safetensors',
     category: 'style',
@@ -249,6 +260,10 @@ export function selectKontextResources(opts: {
   imageType: string;
   prompt: string;
   hasDualCharacter: boolean;
+  /** Primary character ethnicity — used to load ethnicity-specific LoRAs */
+  primaryEthnicity?: string;
+  /** Secondary character ethnicity */
+  secondaryEthnicity?: string;
   /** Which body shape LoRA to use: 'hourglass', 'bodylicious', or 'auto' (default: bodylicious) */
   bodyShapeLoRA?: 'hourglass' | 'bodylicious' | 'auto';
   /** Include RefControl Kontext pose LoRA for identity+pose transfer */
@@ -269,6 +284,15 @@ export function selectKontextResources(opts: {
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   const pendingTriggers: string[] = [];
+
+  // Ethnicity LoRA — loaded for Black/African characters, outside the style budget cap.
+  // Placed before realism LoRA so it chains first after character identity LoRAs.
+  const ethnicityLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  const isAfricanEthnicity = (eth?: string) => eth && /\b(black|african)\b/i.test(eth);
+  if (isAfricanEthnicity(opts.primaryEthnicity) || isAfricanEthnicity(opts.secondaryEthnicity)) {
+    const strength = hasDualCharacter ? 0.5 : 0.6;
+    ethnicityLoras.push({ filename: 'african-woman-flux.safetensors', strengthModel: strength, strengthClip: strength });
+  }
 
   // Slot 1: Realism LoRA — always included. Krea Dev still needs this for
   // photorealistic quality. Without it, output is blurry and degraded.
@@ -373,6 +397,6 @@ export function selectKontextResources(opts: {
     (t) => !new RegExp(`\\b${t}\\b`, 'i').test(prompt)
   );
 
-  return { loras, triggerWords };
+  return { loras: [...ethnicityLoras, ...loras], triggerWords };
 }
 

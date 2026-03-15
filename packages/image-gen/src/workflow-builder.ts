@@ -108,7 +108,7 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
 
   // ---- Optional LoRA chain (nodes 50+) ----
   //
-  // LoRA Slot Priority Order (max 6 slots, nodes 50–55):
+  // LoRA Slot Priority Order (max 8 slots, nodes 50–57):
   //
   //   Slot 1: Realism LoRA (always loaded — quality backbone)
   //   Slot 2: Detail/Style LoRA (Detail, Fashion Editorial SFW, Boudoir NSFW)
@@ -129,7 +129,7 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
   let clipRef: [string, number] = ['2', 0];
 
   if (config.loras && config.loras.length > 0) {
-    const capped = config.loras.slice(0, 6);
+    const capped = config.loras.slice(0, 8);
     for (let i = 0; i < capped.length; i++) {
       const nodeId = String(50 + i);
       const lora = capped[i];
@@ -608,7 +608,7 @@ export function buildSdxlWorkflow(config: SdxlWorkflowConfig): Record<string, an
   let clipRef: [string, number] = ['100', 1];
 
   if (config.loras && config.loras.length > 0) {
-    const capped = config.loras.slice(0, 6);
+    const capped = config.loras.slice(0, 8);
     for (let i = 0; i < capped.length; i++) {
       const nodeId = String(110 + i);
       const lora = capped[i];
@@ -1052,7 +1052,7 @@ export function buildSdxlPulidPortraitWorkflow(
   let sdxlClipRef: [string, number] = ['100', 1];
 
   if (config.loras && config.loras.length > 0) {
-    const capped = config.loras.slice(0, 6);
+    const capped = config.loras.slice(0, 8);
     for (let i = 0; i < capped.length; i++) {
       const nodeId = String(110 + i);
       const lora = capped[i];
