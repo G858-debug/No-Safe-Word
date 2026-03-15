@@ -50,17 +50,7 @@ export async function POST(
       );
     }
 
-    const unapproved = storyChars.filter((sc) => !sc.approved);
-    if (unapproved.length > 0) {
-      return NextResponse.json(
-        {
-          error:
-            "All characters must be approved before generating story images",
-          unapproved_count: unapproved.length,
-        },
-        { status: 400 }
-      );
-    }
+    // Approval is editorial only — no longer gates scene generation
 
     // Build character_id → approved_seed map
     const seedMap = new Map<string, number | null>();

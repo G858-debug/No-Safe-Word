@@ -16,8 +16,8 @@ function buildWorkflow(prompt: string, negativePrompt: string, seed: number) {
       class_type: 'LoraLoader',
       inputs: {
         lora_name: 'curvy-body-sdxl.safetensors',
-        strength_model: 0.85,
-        strength_clip: 0.85,
+        strength_model: 0.90,
+        strength_clip: 0.90,
         model: ['1', 0],
         clip: ['1', 1],
       },

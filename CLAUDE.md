@@ -3,21 +3,20 @@
 ## Image Generation Best Practices
 
 ### Character Consistency Rules
-1. **Approved characters** have three approval stages that must be completed in order:
-   a. **Face** — generated via RealVisXL + Melanin LoRA. Must be approved before body.
+1. **Approved characters** have three generation stages (face, body, and LoRA can run in parallel — no sequential gate):
+   a. **Face** — generated via RealVisXL + Melanin LoRA.
       Face portrait prompts (PATH A): contain ONLY face-relevant fields — age, ethnicity,
       skin tone, hair, eyes, distinguishing features. Body type and beauty descriptors are
       explicitly excluded to prevent exposed chest rendering. Negative prompt always blocks
       nudity (nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage).
-   b. **Body** — generated via RealVisXL + Venus Body LoRA. Must be approved before LoRA training.
+   b. **Body** — generated via RealVisXL + Venus Body LoRA.
       Body shot prompts (PATH B): include body type descriptors but always include explicit
       clothing language ("form-fitting bodycon dress" or "fitted top and jeans, fully clothed")
       and a nudity-blocking negative prompt. The goal is visible body proportions through
       clothing, not nudity — LoRA training benefits more from clothed full-body shots with
       a clear silhouette.
    c. **Character LoRA** — trained on Replicate using `ostris/flux-dev-lora-trainer`
-      with the approved face + body images as the dataset seed. Must be deployed before
-      any scene images can be generated for the series.
+      with the face + body images as the dataset seed.
 2. **Non-character people** (background figures, unnamed extras, one-off mentions like "a waiter", "his mother", "the woman at the next table"): MUST be described inline in the scene prompt with physical details, since the pipeline has no data for them. Keep these descriptions brief — just enough for the model to render them correctly (e.g., "older woman in floral dress and doek in background" rather than full Five Layers treatment).
 3. Scene prompts describe ONLY: action, pose, clothing for this scene, setting, lighting, camera angle, composition, gaze/expression — plus any non-character people as described above.
 4. Never include physical descriptions (skin tone, hair, build, face shape) for approved characters in scene prompts — the pipeline injects these from character data.
@@ -132,7 +131,7 @@ Flux uses 77-token chunking. Front-load the most important information. Cut redu
   without-makeup and acne`, strength: 0.4) — all three for Black/African characters.
   Skin Realism strength capped at 0.4 to prevent age regression artifact.
 - Body generation: RealVisXL + Curvy Body LoRA (`curvy-body-sdxl.safetensors`,
-  strength: 0.75, no trigger word) + Melanin LoRA (for Black/African female characters)
+  strength: 0.90, no trigger word) + Melanin LoRA (for Black/African female characters)
 - SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
 - Trigger words MUST appear at the start of the positive prompt
 
@@ -197,6 +196,63 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
    These are SCENE IMAGE LoRAs for Flux — not used during character approval (which uses
    RealVisXL + `venus-body-xl.safetensors` instead).
 3. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and the pipeline adjusts enhancement accordingly.
+
+## Character LoRA Training Standards
+
+### Body Shape Requirements (Female Characters)
+All female character training datasets must produce characters with:
+- Very large natural breasts (not augmented-looking)
+- Very wide hips
+- Very large round ass
+- Narrow defined waist
+- Soft stomach (not athletic/flat)
+- Full thighs
+
+These must be visible and consistent across ALL training images.
+When generating training images via /admin/lora-studio, use these
+body descriptors explicitly in every SDXL generation prompt.
+Venus Body LoRA must be active at strength 0.90 during dataset
+generation. Venus Body LoRA at strength 0.90.
+
+### Background Diversity Requirements
+Training datasets must include varied backgrounds across these categories:
+- Indoor day (restaurant, café, office, home interior)
+- Indoor night (bedroom, lounge, dark room with artificial light)
+- Outdoor day (street, township, workshop exterior, park)
+- Outdoor golden hour (sunset, warm light)
+- Close-up/detail shots (face only, waist up, hands)
+
+Minimum 20% of training images must show the character in each
+category. Plain/neutral backgrounds must not exceed 20% of the dataset.
+
+### Caption Requirements
+Every training image must have a detailed caption (.txt file) that includes:
+1. Trigger word first (e.g. "lndw_character")
+2. Setting/environment description
+3. Lighting description
+4. Body position/pose
+5. Clothing description
+6. Expression
+
+Example:
+"lndw_character, Piatto restaurant interior, warm amber pendant light,
+seated at table leaning forward, wearing fitted low-cut top and mini skirt,
+conspiratorial half-smile looking sideways"
+
+### Inference Settings (from training)
+- Train on: Flux 1 Dev
+- Infer on: Flux 1 Krea Dev Uncensored
+- Training steps: 1500-2500, save checkpoint every 500 steps
+- Test each checkpoint against scene prompts before selecting final
+- Character LoRA inference strength: 0.65 (scene images), 0.80 (portraits)
+- PuLID weight: 0.75 bright scenes, 0.55 dark/interior scenes
+- PuLID denoise: 0.30 bright scenes, 0.20 dark/interior scenes
+- Redux: DISABLED for scene images permanently
+
+### Approval Flow
+- Face portrait and body portrait generate simultaneously (no gate)
+- Approval is editorial review only, not a pipeline blocker
+- Scene images can generate using any existing reference image
 
 ## Error Handling
 - Do NOT add silent fallbacks or default values that mask errors

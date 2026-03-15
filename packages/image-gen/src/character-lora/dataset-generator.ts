@@ -573,6 +573,7 @@ export async function generateSdxlBodyShots(
 
   const basePositive =
     `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}` +
+    `extremely voluptuous figure, very large natural breasts, very wide hips, very large round ass, narrow defined waist, full thighs, ` +
     `${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
     `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
     `wearing a form-fitting bodycon dress that shows her curves clearly, fully clothed, ` +
@@ -592,7 +593,7 @@ export async function generateSdxlBodyShots(
 
   // Build LoRA stack matching generate-character-image.ts female body pipeline
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
-    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.75, strengthClip: 0.75 },
+    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.90, strengthClip: 0.90 },
   ];
   if (useMelanin) {
     loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });

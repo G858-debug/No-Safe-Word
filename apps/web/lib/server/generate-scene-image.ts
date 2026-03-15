@@ -245,32 +245,36 @@ export async function buildSceneGenerationPayload(
       "Unknown";
 
     if (kontextType === "single") {
-      // Single-character: require BOTH face + body
-      if (!sc?.approved_image_id || !sc?.approved_fullbody_image_id) {
+      // Single-character: require at least one reference image
+      if (!sc?.approved_image_id && !sc?.approved_fullbody_image_id) {
         throw new Error(
-          `Character "${charName}" requires both a face portrait and body shot to be approved before generating scene images.`,
+          `Character "${charName}" has no reference images — generate at least one portrait before creating scene images.`,
         );
       }
 
-      const [{ data: faceImg }, { data: bodyImg }] = await Promise.all([
-        supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
-        supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
-      ]);
-
-      const [faceBase64, bodyBase64] = await Promise.all([
-        fetchRefImageBase64(faceImg, `${charName} face`),
-        fetchRefImageBase64(bodyImg, `${charName} body`),
-      ]);
-
-      if (!faceBase64 || !bodyBase64) {
-        throw new Error(
-          `Character "${charName}" has approved image IDs but the images could not be fetched. Face: ${faceBase64 ? "OK" : "failed"}, Body: ${bodyBase64 ? "OK" : "failed"}.`,
-        );
+      // Fetch whichever reference images exist
+      let faceBase64: string | null = null;
+      let bodyBase64: string | null = null;
+      if (sc.approved_image_id) {
+        const { data: faceImg } = await supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single();
+        faceBase64 = await fetchRefImageBase64(faceImg, `${charName} face`);
+      }
+      if (sc.approved_fullbody_image_id) {
+        const { data: bodyImg } = await supabase.from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single();
+        bodyBase64 = await fetchRefImageBase64(bodyImg, `${charName} body`);
       }
 
-      const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
-      kontextImages.push({ name: "primary_ref.jpg", image: combinedBase64 });
-      console.log(`[Kontext][${promptId}] Combined face + body ref images vertically for "${charName}"`);
+      if (faceBase64 && bodyBase64) {
+        const combinedBase64 = await concatImagesVertically(faceBase64, bodyBase64, 768);
+        kontextImages.push({ name: "primary_ref.jpg", image: combinedBase64 });
+        console.log(`[Kontext][${promptId}] Combined face + body ref images vertically for "${charName}"`);
+      } else if (faceBase64) {
+        kontextImages.push({ name: "primary_ref.jpg", image: faceBase64 });
+        console.warn(`[Kontext][${promptId}] Single-char ref: face only for "${charName}" (no body approved yet)`);
+      } else if (bodyBase64) {
+        kontextImages.push({ name: "primary_ref.jpg", image: bodyBase64 });
+        console.warn(`[Kontext][${promptId}] Single-char ref: body only for "${charName}" (no face approved yet)`);
+      }
 
       // Capture face_url for PuLID face reference
       if (sc.face_url) {
@@ -356,37 +360,37 @@ export async function buildSceneGenerationPayload(
       `[Kontext][${promptId}] Secondary "${secondaryName}" approved_image_id: ${sc2?.approved_image_id || "NONE"}, approved_fullbody_image_id: ${sc2?.approved_fullbody_image_id || "NONE"}`,
     );
 
-    if (!sc2?.approved_image_id) {
+    if (!sc2?.approved_image_id && !sc2?.approved_fullbody_image_id) {
       throw new Error(
-        `Secondary character "${secondaryName}" has no approved_image_id — cannot build dual scene reference`,
-      );
-    }
-    if (!sc2.approved_fullbody_image_id) {
-      throw new Error(
-        `Secondary character "${secondaryName}" has no approved_fullbody_image_id — cannot build dual scene reference. Approve a full-body portrait first.`,
+        `Secondary character "${secondaryName}" has no reference images — generate at least one portrait first.`,
       );
     }
 
-    const [{ data: faceImg2 }, { data: bodyImg2 }] = await Promise.all([
-      supabase.from("images").select("stored_url, sfw_url").eq("id", sc2.approved_image_id).single(),
-      supabase.from("images").select("stored_url, sfw_url").eq("id", sc2.approved_fullbody_image_id).single(),
-    ]);
-    const [faceBase64, bodyBase64] = await Promise.all([
-      fetchRefImageBase64(faceImg2, `${secondaryName} face`),
-      fetchRefImageBase64(bodyImg2, `${secondaryName} body`),
-    ]);
-
-    if (!faceBase64 || !bodyBase64) {
-      throw new Error(
-        `Secondary character "${secondaryName}" has approved image IDs but the images could not be fetched. Face: ${faceBase64 ? "OK" : "failed"}, Body: ${bodyBase64 ? "OK" : "failed"}.`,
-      );
+    // Fetch whichever reference images exist for secondary character
+    let faceBase64: string | null = null;
+    let bodyBase64: string | null = null;
+    if (sc2.approved_image_id) {
+      const { data: faceImg2 } = await supabase.from("images").select("stored_url, sfw_url").eq("id", sc2.approved_image_id).single();
+      faceBase64 = await fetchRefImageBase64(faceImg2, `${secondaryName} face`);
+    }
+    if (sc2.approved_fullbody_image_id) {
+      const { data: bodyImg2 } = await supabase.from("images").select("stored_url, sfw_url").eq("id", sc2.approved_fullbody_image_id).single();
+      bodyBase64 = await fetchRefImageBase64(bodyImg2, `${secondaryName} body`);
     }
 
-    const stitchedSecondary = await concatImagesVertically(faceBase64, bodyBase64, 512);
-    kontextImages.push({ name: "secondary_ref.jpg", image: stitchedSecondary });
-    console.log(
-      `[Kontext][${promptId}] Secondary ref: face+body vertically stitched for "${secondaryName}" (${Math.round(stitchedSecondary.length / 1024)}KB base64)`,
-    );
+    if (faceBase64 && bodyBase64) {
+      const stitchedSecondary = await concatImagesVertically(faceBase64, bodyBase64, 512);
+      kontextImages.push({ name: "secondary_ref.jpg", image: stitchedSecondary });
+      console.log(
+        `[Kontext][${promptId}] Secondary ref: face+body vertically stitched for "${secondaryName}" (${Math.round(stitchedSecondary.length / 1024)}KB base64)`,
+      );
+    } else if (faceBase64) {
+      kontextImages.push({ name: "secondary_ref.jpg", image: faceBase64 });
+      console.warn(`[Kontext][${promptId}] Secondary ref: face only for "${secondaryName}" (no body approved yet)`);
+    } else if (bodyBase64) {
+      kontextImages.push({ name: "secondary_ref.jpg", image: bodyBase64 });
+      console.warn(`[Kontext][${promptId}] Secondary ref: body only for "${secondaryName}" (no face approved yet)`);
+    }
 
     // Capture face_url for PuLID secondary face reference
     if (sc2.face_url) {

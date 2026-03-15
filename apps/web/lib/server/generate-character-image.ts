@@ -350,17 +350,13 @@ function buildFemaleBodyPayload(
   customPrompt?: string,
   approvedFaceUrl?: string,
 ): RunPodGenerationPayload {
-  if (!approvedFaceUrl) {
-    throw new Error(
-      'Female body stage requires an approved face portrait. Approve the face portrait first, then generate the body.',
-    );
-  }
+  // Face URL is optional — body can generate without an approved face portrait
 
   const width = 768;
   const height = 1152;
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-  loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.75, strengthClip: 0.75 });
+  loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.90, strengthClip: 0.90 });
   if (useMelanin) {
     loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
     loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });

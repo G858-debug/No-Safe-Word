@@ -202,7 +202,7 @@ export async function POST(
               prompt,
               negative_prompt: negativePrompt,
               lora_weights: VENUS_BODY_LORA_URL,
-              lora_scale: 0.75,
+              lora_scale: 0.90,
               width: 768,
               height: 1152,
               num_inference_steps: 30,
