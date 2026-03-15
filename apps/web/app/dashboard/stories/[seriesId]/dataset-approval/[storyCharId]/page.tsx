@@ -775,6 +775,11 @@ export default function DatasetApprovalPage() {
           imageIds.includes(img.id) ? { ...img, human_approved: approved } : img
         )
       );
+      setZoomImage((prev) =>
+        prev && imageIds.includes(prev.id)
+          ? { ...prev, human_approved: approved }
+          : prev
+      );
 
       await fetch(`/api/stories/characters/${storyCharId}/approve-dataset`, {
         method: "POST",
@@ -798,6 +803,7 @@ export default function DatasetApprovalPage() {
 
   const handleImageUpdate = useCallback((id: string, updates: Partial<DatasetImage>) => {
     setImages((prev) => prev.map((img) => (img.id === id ? { ...img, ...updates } : img)));
+    setZoomImage((prev) => (prev && prev.id === id ? { ...prev, ...updates } : prev));
   }, []);
 
   const handleImageRegenerated = useCallback((oldId: string, newImage: DatasetImage) => {
