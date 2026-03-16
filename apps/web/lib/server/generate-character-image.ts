@@ -377,10 +377,10 @@ function buildFemaleBodyPayload(
     const melaninPrefix = useMelanin ? 'melanin, ' : '';
     const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
     const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-    positivePrompt = `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${charData.age}-year-old ${resolvedEthnicity} woman, ${charData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${charData.hairStyle} ${charData.hairColor} hair. She is wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top with thin spaghetti straps, deep neckline showing generous cleavage, midriff partially exposed. High heels. Outfit is tight and body-hugging, emphasising every curve. Full body shot from head to toe. Standing pose, confident stance. Softly blurred warm neutral background, slight bokeh, photography studio with warm ambient light. Soft natural window light from camera left, warm fill light from the right, subtle directional shadows creating depth on skin, rich warm skin tones with natural variation, photorealistic skin texture with visible pore detail, subsurface scattering on skin. Natural melanin-rich skin, deep warm undertones, skin has natural sheen not plastic shine, soft catchlights in eyes, DSLR photography, 85mm portrait lens, f/2.8 aperture`;
+    positivePrompt = `score_7_up, score_6_up, ${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${charData.age}-year-old ${resolvedEthnicity} woman, ${charData.skinTone} skin, curvaceous figure with large breasts wide hips and thick thighs small waist, ${charData.hairStyle} ${charData.hairColor} hair. She is wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top with thin spaghetti straps, deep neckline showing generous cleavage, midriff partially exposed. High heels. Outfit is tight and body-hugging, emphasising every curve. Full body shot from head to toe. Standing pose, confident stance. Softly blurred warm neutral background, slight bokeh, photography studio with warm ambient light. Soft natural window light from camera left, warm fill light from the right, subtle directional shadows creating depth on skin, rich warm skin tones with natural variation, photorealistic skin texture with visible pore detail, subsurface scattering on skin. Natural melanin-rich skin, deep warm undertones, skin has natural sheen not plastic shine, soft catchlights in eyes, DSLR photography, 85mm portrait lens, f/2.8 aperture`;
   }
 
-  const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, bikini, underwear only, skinny, thin, flat chest, small breasts, narrow hips, deformed, bad anatomy, extra limbs, (worst quality:2), (low quality:2), white skin, pale skin, asian features, european features, overexposed, flat lighting, harsh shadows, plastic skin, oversaturated, muddy skin tone, grey skin, ashy skin, watermark, text, logo, signature`;
+  const negativePrompt = `score_1, score_2, score_3, multiple views, bad anatomy, watermark, text, logo, signature, overexposed, flat lighting, plastic skin, oversaturated, muddy skin tone, grey skin, ashy skin`;
 
   const workflow = buildSdxlWorkflow({
     positivePrompt,
@@ -388,6 +388,9 @@ function buildFemaleBodyPayload(
     width,
     height,
     seed,
+    cfg: 2.0,
+    steps: 40,
+    samplerName: 'dpmpp_2m_sde',
     checkpointName: process.env.SDXL_BODY_CHECKPOINT || 'realvisxlV50_v50Bakedvae.safetensors',
     loras,
     filenamePrefix: `fullbody_${sluggedName}`,

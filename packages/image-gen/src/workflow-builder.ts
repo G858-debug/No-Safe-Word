@@ -515,6 +515,7 @@ export interface SdxlWorkflowConfig {
   seed: number;
   steps?: number;          // default 30
   cfg?: number;            // default 7.0
+  samplerName?: string;    // default 'dpmpp_2m'
   filenamePrefix: string;
   checkpointName: string;  // e.g. 'realvisxlV50_v50Bakedvae.safetensors'
   loras?: Array<{
@@ -613,7 +614,7 @@ export function buildSdxlWorkflow(config: SdxlWorkflowConfig): Record<string, an
       seed: config.seed,
       steps: config.steps ?? 30,
       cfg: config.cfg ?? 7.0,
-      sampler_name: 'dpmpp_2m',
+      sampler_name: config.samplerName ?? 'dpmpp_2m',
       scheduler: 'karras',
       denoise: 1.0,
     },
