@@ -131,17 +131,21 @@ VOLUME_MODELS="${VOLUME_LORAS_DIR%/loras}"  # /runpod-volume/models
 
 echo "[NSW] Cleaning up SDXL model files..."
 
-# Checkpoints dir: remove old SDXL checkpoints but keep RealVisXL V5.0 (used by LoRA Studio)
+# Checkpoints dir: remove old SDXL checkpoints but keep active ones
 if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
   for ckpt_file in "${VOLUME_MODELS}/checkpoints/"*.safetensors "${VOLUME_MODELS}/checkpoints/"*.ckpt; do
     [ -f "$ckpt_file" ] || continue
     ckpt_name=$(basename "$ckpt_file")
-    if [ "$ckpt_name" != "realvisxlV50_v50Bakedvae.safetensors" ]; then
-      echo "[NSW] Removing old checkpoint: $ckpt_name"
-      rm -f "$ckpt_file"
-    fi
+    case "$ckpt_name" in
+      realvisxlV50_v50Bakedvae.safetensors|bigasp_v20.safetensors)
+        ;; # keep
+      *)
+        echo "[NSW] Removing old checkpoint: $ckpt_name"
+        rm -f "$ckpt_file"
+        ;;
+    esac
   done
-  echo "[NSW] ✓ Old SDXL checkpoints removed (kept realvisxlV50_v50Bakedvae)"
+  echo "[NSW] ✓ Old SDXL checkpoints removed (kept realvisxlV50_v50Bakedvae, bigasp_v20)"
 fi
 
 # FaceDetailer YOLO models no longer cleaned up — ultralytics/ may be needed by ReActor
@@ -285,12 +289,45 @@ else
     echo "[NSW] Volume not mounted — skipping ${CKPT_FILE}"
 fi
 
+# bigASP v2.0 — alternative SDXL checkpoint for body portrait generation (~6.4GB)
+# CivitAI model 502468, version 991916. Set SDXL_BODY_CHECKPOINT=bigasp_v20.safetensors to use.
+BIGASP_FILE="bigasp_v20.safetensors"
+if [ -f "${CKPT_DIR}/${BIGASP_FILE}" ]; then
+    echo "[NSW] ✓ ${BIGASP_FILE} (volume checkpoint, exists)"
+elif [ -d "/runpod-volume/models" ]; then
+    mkdir -p "${CKPT_DIR}"
+    BIGASP_URL="https://civitai.com/api/download/models/991916"
+    [ -n "${CIVITAI_API_KEY:-}" ] && BIGASP_URL="${BIGASP_URL}?token=${CIVITAI_API_KEY}"
+    echo "[NSW] Downloading ${BIGASP_FILE} to volume checkpoints..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${BIGASP_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=900)
+    with open('${CKPT_DIR}/${BIGASP_FILE}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${CKPT_DIR}/${BIGASP_FILE}.tmp" "${CKPT_DIR}/${BIGASP_FILE}" && \
+    echo "[NSW] ✓ ${BIGASP_FILE} (volume checkpoint, downloaded)" || \
+    { rm -f "${CKPT_DIR}/${BIGASP_FILE}.tmp"; echo "[NSW] ✗✗ ${BIGASP_FILE} FAILED"; FAILED=$((FAILED + 1)); }
+else
+    echo "[NSW] Volume not mounted — skipping ${BIGASP_FILE}"
+fi
+
 # BodyLicious FLUX — exaggerated feminine curves (CivitAI model 238105, version 979680)
 download_to_volume "979680" "bodylicious-flux.safetensors"
 
 # Melanin Girlfriend mix — SDXL dark skin enhancement for character face generation
 # CivitAI model 390634, version 435833. Trigger word: melanin
 download_to_volume "435833" "melanin-XL.safetensors"
+
+# Perfect Breasts v2 — SDXL LoRA for breast shape/fullness in body portraits
+# CivitAI model 1621732, version 1987668. Strength: 0.70 | No trigger word.
+download_to_volume "1987668" "perfect-breasts-v2.safetensors"
 
 # Curvy Body SDXL — curvaceous body shape for character body generation
 # Already present on volume as curvy-body-sdxl.safetensors (pre-installed).

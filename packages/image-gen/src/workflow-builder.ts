@@ -894,6 +894,9 @@ export interface SdxlPulidPortraitConfig {
   height: number;
   seed: number;
   checkpointName: string;
+  /** Override SDXL checkpoint for body portraits (e.g. 'bigASP_v2.safetensors').
+   *  Falls back to SDXL_BODY_CHECKPOINT env var, then checkpointName. */
+  bodyPortraitCheckpoint?: string;
   loras?: Array<{ filename: string; strengthModel: number; strengthClip: number }>;
   filenamePrefix: string;
   // Flux + PuLID face injection section
@@ -943,18 +946,29 @@ export function buildSdxlPulidPortraitWorkflow(
 
   // ── SDXL section ──────────────────────────────────────────────────────
 
-  // Node 100: CheckpointLoaderSimple — RealVisXL V5.0
+  const sdxlCheckpoint = config.bodyPortraitCheckpoint
+    || process.env.SDXL_BODY_CHECKPOINT
+    || config.checkpointName;
+
+  // Node 100: CheckpointLoaderSimple — RealVisXL V5.0 or override checkpoint
   workflow['100'] = {
     class_type: 'CheckpointLoaderSimple',
-    inputs: { ckpt_name: config.checkpointName },
+    inputs: { ckpt_name: sdxlCheckpoint },
   };
 
-  // LoRA chain (nodes 110+) — curvy-body, melanin, skin LoRAs etc.
+  // LoRA chain (nodes 110+) — caller LoRAs + hardcoded body LoRAs
+  // Append Curvy Body SDXL and Perfect Breasts v2 after any caller-supplied LoRAs
+  const sdxlLoras = [
+    ...(config.loras || []),
+    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.90, strengthClip: 0.90 },
+    { filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
+  ];
+
   let sdxlModelRef: [string, number] = ['100', 0];
   let sdxlClipRef: [string, number] = ['100', 1];
 
-  if (config.loras && config.loras.length > 0) {
-    const capped = config.loras.slice(0, 8);
+  if (sdxlLoras.length > 0) {
+    const capped = sdxlLoras.slice(0, 8);
     for (let i = 0; i < capped.length; i++) {
       const nodeId = String(110 + i);
       const lora = capped[i];
