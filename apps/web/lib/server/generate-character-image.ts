@@ -388,7 +388,7 @@ function buildFemaleBodyPayload(
     width,
     height,
     seed,
-    cfg: 2.0,
+    cfg: 3.0,
     steps: 40,
     samplerName: 'dpmpp_2m_sde',
     checkpointName: process.env.SDXL_BODY_CHECKPOINT || 'realvisxlV50_v50Bakedvae.safetensors',
