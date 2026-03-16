@@ -353,7 +353,8 @@ function buildFemaleBodyPayload(
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.90, strengthClip: 0.90 });
-  loras.push({ filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.45, strengthClip: 0.45 });
+  // perfect-breasts-v2.safetensors — re-enable once downloaded to network volume
+  // loras.push({ filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.45, strengthClip: 0.45 });
   if (useMelanin) {
     loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
     loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
