@@ -962,7 +962,7 @@ export function buildSdxlPulidPortraitWorkflow(
   const sdxlLoras = [
     ...(config.loras || []),
     { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.90, strengthClip: 0.90 },
-    { filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
+    { filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.45, strengthClip: 0.45 },
   ];
 
   let sdxlModelRef: [string, number] = ['100', 0];
