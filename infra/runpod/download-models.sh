@@ -329,6 +329,10 @@ download_to_volume "435833" "melanin-XL.safetensors"
 # CivitAI model 1621732, version 1987668. Strength: 0.70 | No trigger word.
 download_to_volume "1987668" "perfect-breasts-v2.safetensors"
 
+# Feminine Body Proportions — Pony v1.1 (SDXL-compatible) wider hips, narrow shoulders, hourglass shape
+# CivitAI model 494824, version 659091. Strength: 0.80 | No trigger word.
+download_to_volume "659091" "feminine-body-proportions-sdxl.safetensors"
+
 # Curvy Body SDXL — curvaceous body shape for character body generation
 # Already present on volume as curvy-body-sdxl.safetensors (pre-installed).
 # Replaces venus-body-xl which was removed from CivitAI.
