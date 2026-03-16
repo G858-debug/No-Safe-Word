@@ -30,38 +30,36 @@ import {
 import { readReplicateOutput } from '../replicate-client';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
-const SDXL_CHECKPOINT = 'realvisxlV50_v50Bakedvae.safetensors';
+const SDXL_CHECKPOINT = 'bigasp_v20.safetensors';
 const MAX_GENERATION_RETRIES = 3;
 const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
-const POSE_VARIANTS: Record<string, string[]> = {
-  standing_neutral: [
-    'standing tall in a composed, elegant pose',
-    'standing upright with serene confident posture',
-    'standing in a relaxed neutral stance',
-  ],
-  standing_attitude: [
-    'standing with one hand planted firmly on hip',
-    'hip cocked to the side, hand on waist',
-    'both hands on hips, weight shifted to one leg',
-  ],
-  walking: [
-    'caught mid-stride walking forward with confidence, full figure in frame',
-    'walking with a natural fluid hip sway, full figure in frame',
-    'stepping forward with purpose and grace, full figure in frame',
-  ],
-  seated: [
-    'seated gracefully on a chair with legs crossed, face and upper body clearly visible',
-    'lounging on a couch with one leg stretched out, face and upper body clearly visible',
-    'sitting cross-legged on the floor in a relaxed pose, face and upper body clearly visible',
-  ],
-};
-
-const ALL_POSES = Object.keys(POSE_VARIANTS);
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+const BODY_PROMPT_VARIANTS = [
+  {
+    pose: 'standing facing camera, hands on hips, confident pose, softly blurred warm studio background',
+    clothing: 'wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top, high heels, fully clothed',
+  },
+  {
+    pose: 'body turned three-quarter angle showing hip curve, weight shifted onto one leg, warm indoor background with soft window light',
+    clothing: 'wearing a form-fitting bodycon dress that shows her curves clearly, high heels, fully clothed',
+  },
+  {
+    pose: 'turned showing profile and rear, looking over shoulder, outdoor South African street background, golden hour light',
+    clothing: 'wearing high-waisted skinny jeans and a cropped fitted tank top, sneakers, fully clothed',
+  },
+  {
+    pose: 'seated on chair or couch, legs crossed, torso upright, warm living room interior background',
+    clothing: 'wearing a short wrap dress with plunging neckline, heeled sandals, fully clothed',
+  },
+  {
+    pose: 'mid-stride walking pose, slight body twist, urban Johannesburg street background, natural daylight',
+    clothing: 'wearing fitted leggings and a tight long-sleeve crop top, running shoes, fully clothed',
+  },
+  {
+    pose: 'standing relaxed, arms at sides, near a window with natural soft light, home interior background',
+    clothing: 'wearing a fitted camisole and short shorts, barefoot, fully clothed',
+  },
+];
 
 interface DatasetGeneratorDeps {
   supabase: {
@@ -113,19 +111,19 @@ export async function generateDataset(
   let phase2Count: number;
 
   if (character.gender === 'female') {
-    // Female: SDXL + Venus Body LoRA → Flux img2img for curvaceous body shots
+    // Female: BigASP + Feminine Body Proportions + Curvy Body → Flux img2img for curvaceous body shots
     console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img...`);
     const sdxlResult = await generateSdxlBodyShots(character, loraId, cuLimited.length, deps);
     imageRecords.push(...sdxlResult.records);
     failedPrompts.push(...sdxlResult.failures);
     phase2Count = sdxlResult.records.length;
   } else {
-    // Male: SDXL (no body LoRA) → Flux img2img for consistent body shots
-    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img (male)...`);
-    const sdxlResult = await generateSdxlMaleBodyShots(character, loraId, cuLimited.length, deps);
-    imageRecords.push(...sdxlResult.records);
-    failedPrompts.push(...sdxlResult.failures);
-    phase2Count = sdxlResult.records.length;
+    // Male: Nano Banana 2 with 3:4 portrait aspect for body shots
+    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via Nano Banana 2 (male)...`);
+    const nbBodyResult = await generateNanoBananaMaleBodyShots(character, loraId, cuLimited.length, deps);
+    imageRecords.push(...nbBodyResult.records);
+    failedPrompts.push(...nbBodyResult.failures);
+    phase2Count = nbBodyResult.records.length;
   }
 
   console.log(
@@ -173,9 +171,7 @@ export async function generateReplacements(
     try {
       // SDXL→img2img replacements don't use prompt templates — generate a fresh body shot
       if (failed.source === 'sdxl-img2img') {
-        const result = character.gender === 'female'
-          ? await generateSdxlBodyShots(character, loraId, 1, deps)
-          : await generateSdxlMaleBodyShots(character, loraId, 1, deps);
+        const result = await generateSdxlBodyShots(character, loraId, 1, deps);
         replacements.push(...result.records);
         continue;
       }
@@ -267,6 +263,7 @@ async function generateSingleNanoBanana(
   prompt: DatasetPrompt,
   loraId: string,
   deps: DatasetGeneratorDeps,
+  aspectRatio: string = '1:1',
 ): Promise<LoraDatasetImageRow> {
   const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
@@ -278,7 +275,7 @@ async function generateSingleNanoBanana(
     input: {
       prompt: prompt.prompt,
       image_input: [character.approvedImageUrl],
-      aspect_ratio: '1:1',
+      aspect_ratio: aspectRatio,
       output_format: 'png',
       safety_tolerance: 6,
     },
@@ -379,165 +376,100 @@ async function generateSingleComfyUI(
   return saveDatasetImage(imageBuffer, prompt, loraId, deps);
 }
 
-// ── SDXL → Flux img2img Pipeline (Male — no body LoRA) ────────────
+// ── Nano Banana 2 Body Pipeline (Male — 3:4 portrait) ─────────────
 
-const MALE_POSE_VARIANTS: Record<string, string[]> = {
-  standing_neutral: [
-    'standing tall with arms at sides in a relaxed confident pose',
-    'standing upright with composed posture and natural stance',
-    'standing in a casual relaxed stance with weight on one leg',
-  ],
-  standing_confident: [
-    'standing with arms crossed over chest showing confidence',
-    'standing with hands in pockets in a casual assured pose',
-    'standing with one hand adjusting collar in a relaxed gesture',
-  ],
-  walking: [
-    'caught mid-stride walking forward with confident purpose, full figure in frame',
-    'walking with natural easy stride and relaxed shoulders, full figure in frame',
-    'stepping forward with deliberate calm energy, full figure in frame',
-  ],
-  seated: [
-    'seated on a chair leaning forward with elbows on knees, face and upper body clearly visible',
-    'sitting back in a chair with one ankle resting on opposite knee, face and upper body clearly visible',
-    'seated on a stool with relaxed upright posture, face and upper body clearly visible',
-  ],
-};
+const MALE_BODY_PROMPTS: DatasetPrompt[] = [
+  {
+    id: 'nb_male_body_front_studio',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: 'Full body photo, standing facing camera with arms at sides, wearing fitted henley shirt and dark jeans, warm studio background with soft lighting',
+    description: 'Front standing, henley + jeans, studio',
+  },
+  {
+    id: 'nb_male_body_34_indoor',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: 'Full body photo, body turned three-quarter angle, hands in pockets, wearing tailored chinos and fitted polo shirt, warm indoor background with soft window light',
+    description: '3/4 angle, chinos + polo, indoor',
+  },
+  {
+    id: 'nb_male_body_walking_outdoor',
+    variationType: 'framing',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: 'Full body photo, mid-stride walking with confident posture, wearing bomber jacket over t-shirt and slim jeans, outdoor South African street background, golden hour light',
+    description: 'Walking, bomber jacket, outdoor SA',
+  },
+  {
+    id: 'nb_male_body_seated_interior',
+    variationType: 'lighting',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: 'Full body photo, seated on chair leaning forward with elbows on knees, wearing button-up shirt with rolled sleeves and chinos, warm living room interior background',
+    description: 'Seated, button-up, interior',
+  },
+  {
+    id: 'nb_male_body_urban_casual',
+    variationType: 'clothing',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: 'Full body photo, standing with arms crossed, wearing fitted crew neck sweater and dark trousers, urban Johannesburg street background, natural daylight',
+    description: 'Arms crossed, sweater, urban JHB',
+  },
+  {
+    id: 'nb_male_body_window_relaxed',
+    variationType: 'lighting',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: 'Full body photo, standing relaxed leaning against wall, wearing v-neck t-shirt and joggers, near a window with natural soft light, home interior background',
+    description: 'Leaning, v-neck + joggers, window light',
+  },
+];
 
-const ALL_MALE_POSES = Object.keys(MALE_POSE_VARIANTS);
-
-export async function generateSdxlMaleBodyShots(
+export async function generateNanoBananaMaleBodyShots(
   character: CharacterInput,
   loraId: string,
   count: number,
   deps: DatasetGeneratorDeps,
 ): Promise<GenerationBatchResult> {
-  const { skinTone, ethnicity, bodyType } = character.structuredData;
-  const bodyDesc = bodyType || 'athletic';
-  const basePositive =
-    `${ethnicity} man, ${skinTone} skin, ${bodyDesc} build, ` +
-    `wearing a well-fitted henley shirt and dark jeans, fully clothed, ` +
-    `face and head fully visible in frame, full body from head to feet, natural pose, masterpiece, best quality, highly detailed, 8k`;
-  const negative =
-    'nude, naked, shirtless, nsfw, underwear, ' +
-    'feminine, woman, female, breasts, deformed, ' +
-    'bad anatomy, extra limbs, (worst quality:2), (low quality:2), ' +
-    'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible';
-
-  const img2imgPrompt =
-    `${ethnicity} man, ${skinTone} skin, ${bodyDesc} build, ` +
-    `wearing fitted casual clothing, fully clothed, ` +
-    `face and head clearly visible, full body, ` +
-    `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
-
   const records: LoraDatasetImageRow[] = [];
   const failures: DatasetGenerationResult['failedPrompts'] = [];
 
   for (let i = 0; i < count; i++) {
-    const poseCategory = pick(ALL_MALE_POSES);
-    const pose = pick(MALE_POSE_VARIANTS[poseCategory]);
-    const prompt = `${basePositive}, ${pose}`;
-    const promptId = `sdxl_body_${i}_${Date.now()}`;
-    let succeeded = false;
+    const promptTemplate = MALE_BODY_PROMPTS[i % MALE_BODY_PROMPTS.length];
+    const prompt: DatasetPrompt = {
+      ...promptTemplate,
+      id: `${promptTemplate.id}_${i}_${Date.now()}`,
+    };
 
+    let succeeded = false;
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
       try {
-        // Step 1: Generate SDXL body shot via ComfyUI on RunPod (no body LoRA for males)
-        const sdxlSeed = Math.floor(Math.random() * 2_147_483_647);
-        const sdxlWorkflow = buildSdxlWorkflow({
-          positivePrompt: prompt,
-          negativePrompt: negative,
-          width: 768,
-          height: 1152,
-          seed: sdxlSeed,
-          steps: 30,
-          cfg: 7.5,
-          checkpointName: SDXL_CHECKPOINT,
-          filenamePrefix: `sdxl_body_${loraId}`,
-        });
-
-        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow);
-        const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
-
-        // Step 2: Convert to photorealistic via Flux Kontext img2img
-        const fluxWorkflow = buildKontextWorkflow({
-          type: 'img2img',
-          positivePrompt: img2imgPrompt,
-          width: 1024,
-          height: 1024,
-          seed: character.portraitSeed + hashCode(promptId),
-          denoiseStrength: 0.72,
-          filenamePrefix: `dataset_${loraId}`,
-        });
-
-        const { jobId } = await submitRunPodJob(fluxWorkflow, [
-          { name: 'input.jpg', image: sdxlBase64 },
-        ]);
-
-        const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000);
-        const imageBuffer = Buffer.from(imageBase64, 'base64');
-
-        // Step 3: Save the img2img result
-        const category = i % 2 === 0 ? 'full-body' : 'waist-up';
-        const variationType: VariationType = i % 3 === 0 ? 'clothing' : i % 3 === 1 ? 'framing' : 'lighting';
-        const storagePath = `character-loras/datasets/${loraId}/${promptId}.png`;
-
-        const { error: uploadError } = await deps.supabase.storage
-          .from('story-images')
-          .upload(storagePath, imageBuffer, {
-            contentType: 'image/png',
-            upsert: true,
-          });
-
-        if (uploadError) {
-          throw new Error(`Supabase upload failed for ${promptId}: ${uploadError.message}`);
-        }
-
-        const { data: urlData } = deps.supabase.storage
-          .from('story-images')
-          .getPublicUrl(storagePath);
-
-        const { data: record, error: insertError } = await deps.supabase
-          .from('lora_dataset_images')
-          .insert({
-            lora_id: loraId,
-            image_url: urlData.publicUrl,
-            storage_path: storagePath,
-            prompt_template: promptId,
-            variation_type: variationType,
-            source: 'sdxl-img2img',
-            category,
-            eval_status: 'pending',
-          })
-          .select()
-          .single();
-
-        if (insertError) {
-          throw new Error(`Failed to create dataset image record: ${insertError.message}`);
-        }
-
-        console.log(`[LoRA Dataset] ✓ ${promptId} (sdxl-img2img-male/${category})`);
-        records.push(record as LoraDatasetImageRow);
+        const record = await generateSingleNanoBanana(character, prompt, loraId, deps, '3:4');
+        records.push(record);
         succeeded = true;
       } catch (error) {
         const isTransient = isTransientError(error);
         if (attempt < MAX_GENERATION_RETRIES && isTransient) {
           const delay = RETRY_BASE_DELAY * attempt;
           console.warn(
-            `[LoRA Dataset] SDXL male body ${promptId} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
+            `[LoRA Dataset] NB male body ${prompt.id} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
           );
           await sleep(delay);
         } else {
-          console.error(`[LoRA Dataset] SDXL male body failed ${promptId} after ${attempt} attempt(s): ${error}`);
+          console.error(`[LoRA Dataset] NB male body failed ${prompt.id} after ${attempt} attempt(s): ${error}`);
         }
       }
     }
 
     if (!succeeded) {
       failures.push({
-        promptTemplate: promptId,
-        variationType: 'framing',
-        source: 'sdxl-img2img',
+        promptTemplate: prompt.id,
+        variationType: prompt.variationType,
+        source: 'nano-banana',
       });
     }
 
@@ -564,20 +496,20 @@ export async function generateSdxlBodyShots(
   count: number,
   deps: DatasetGeneratorDeps,
 ): Promise<GenerationBatchResult> {
-  const { skinTone, ethnicity } = character.structuredData;
+  const { skinTone, ethnicity, hairStyle, hairColor } = character.structuredData;
   const useMelanin = isBlackAfrican(ethnicity);
+  const hairDesc = hairStyle && hairColor ? `${hairStyle} ${hairColor} hair, ` : '';
 
   const melaninPrefix = useMelanin ? 'melanin, ' : '';
   const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
   const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
 
   const basePositive =
-    `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}` +
+    `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}${hairDesc}` +
     `extremely voluptuous figure, very large natural breasts, very wide hips, very large round ass, narrow defined waist, full thighs, ` +
     `${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
     `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
-    `wearing a form-fitting bodycon dress that shows her curves clearly, fully clothed, ` +
-    `full body from head to feet, standing, natural pose, masterpiece, best quality, highly detailed, 8k`;
+    `full body from head to feet`;
   const negative =
     'nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, underwear, ' +
     'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
@@ -586,14 +518,16 @@ export async function generateSdxlBodyShots(
     'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible';
 
   const img2imgPrompt =
-    `${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
-    `and thick thighs, wearing a fitted dress, fully clothed, ` +
+    `Photorealistic photograph, extremely wide hips, very large round bubble butt, thick heavy thighs, narrow waist, pear-shaped bottom-heavy figure, ` +
+    `${hairDesc}${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
+    `and thick thighs, wearing a fitted outfit, fully clothed, ` +
     `face and head clearly visible, full body, ` +
-    `photorealistic, natural skin texture, soft studio lighting, high detail, 8k`;
+    `natural skin texture, soft lighting, high detail`;
 
   // Build LoRA stack matching generate-character-image.ts female body pipeline
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
-    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.90, strengthClip: 0.90 },
+    { filename: 'feminine-body-proportions-sdxl.safetensors', strengthModel: 0.80, strengthClip: 0.80 },
+    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
   ];
   if (useMelanin) {
     loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
@@ -605,9 +539,8 @@ export async function generateSdxlBodyShots(
   const failures: DatasetGenerationResult['failedPrompts'] = [];
 
   for (let i = 0; i < count; i++) {
-    const poseCategory = pick(ALL_POSES);
-    const pose = pick(POSE_VARIANTS[poseCategory]);
-    const prompt = `${basePositive}, ${pose}`;
+    const variant = BODY_PROMPT_VARIANTS[i % BODY_PROMPT_VARIANTS.length];
+    const prompt = `${basePositive}, ${variant.clothing}, ${variant.pose}`;
     const promptId = `sdxl_body_${i}_${Date.now()}`;
     let succeeded = false;
 
@@ -621,8 +554,9 @@ export async function generateSdxlBodyShots(
           width: 768,
           height: 1152,
           seed: sdxlSeed,
-          steps: 30,
-          cfg: 7.5,
+          steps: 40,
+          cfg: 4.0,
+          samplerName: 'dpmpp_2m_sde',
           checkpointName: SDXL_CHECKPOINT,
           loras,
           filenamePrefix: `sdxl_body_${loraId}`,
@@ -638,7 +572,7 @@ export async function generateSdxlBodyShots(
           width: 1024,
           height: 1024,
           seed: character.portraitSeed + hashCode(promptId),
-          denoiseStrength: 0.72,
+          denoiseStrength: 0.55,
           filenamePrefix: `dataset_${loraId}`,
         });
 
@@ -741,11 +675,8 @@ export async function regenerateSingleImage(
   deps: DatasetGeneratorDeps,
 ): Promise<LoraDatasetImageRow> {
   if (original.source === 'sdxl-img2img') {
-    // SDXL body shots use random poses — custom prompt not applicable
-    const generateFn = character.gender === 'female'
-      ? generateSdxlBodyShots
-      : generateSdxlMaleBodyShots;
-    const result = await generateFn(character, loraId, 1, deps);
+    // SDXL body shots use variant cycling — custom prompt not applicable
+    const result = await generateSdxlBodyShots(character, loraId, 1, deps);
     if (result.records.length === 0) {
       throw new Error('SDXL body shot regeneration produced no images');
     }

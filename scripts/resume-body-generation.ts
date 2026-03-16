@@ -24,7 +24,7 @@ for (const line of envLines) {
   if (m) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
 }
 
-import { generateSdxlBodyShots, generateSdxlMaleBodyShots } from '../packages/image-gen/src/character-lora/dataset-generator';
+import { generateSdxlBodyShots, generateNanoBananaMaleBodyShots } from '../packages/image-gen/src/character-lora/dataset-generator';
 import { evaluateDataset } from '../packages/image-gen/src/character-lora/quality-evaluator';
 import type { CharacterInput, CharacterStructured, LoraDatasetImageRow } from '../packages/image-gen/src/character-lora/types';
 
@@ -179,8 +179,9 @@ async function main() {
         .update({ status: 'generating_dataset', error: null })
         .eq('id', lora.id);
 
+      const gender = desc.gender || 'female';
       console.log(`\n  Generating body shots (${gender})...`);
-      const generateFn = gender === 'female' ? generateSdxlBodyShots : generateSdxlMaleBodyShots;
+      const generateFn = gender === 'female' ? generateSdxlBodyShots : generateNanoBananaMaleBodyShots;
       const sdxlResult = await generateFn(characterInput, lora.id, 16, { supabase: sb });
       console.log(`  Generated: ${sdxlResult.records.length} body images, ${sdxlResult.failures.length} failures`);
 

@@ -9,10 +9,11 @@
       skin tone, hair, eyes, distinguishing features. Body type and beauty descriptors are
       explicitly excluded to prevent exposed chest rendering. Negative prompt always blocks
       nudity (nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage).
-   b. **Body** — generated via RealVisXL + Venus Body LoRA.
+   b. **Body** — generated via RealVisXL + Curvy Body LoRA + Feminine Body Proportions LoRA.
       Body shot prompts (PATH B): include body type descriptors but always include explicit
-      clothing language ("form-fitting bodycon dress" or "fitted top and jeans, fully clothed")
-      and a nudity-blocking negative prompt. The goal is visible body proportions through
+      clothing language (varied per prompt variant — mini skirt + crop top, bodycon dress,
+      jeans + tank top, wrap dress, leggings + crop top, camisole + shorts) and a
+      nudity-blocking negative prompt. The goal is visible body proportions through
       clothing, not nudity — LoRA training benefits more from clothed full-body shots with
       a clear silhouette.
    c. **Character LoRA** — trained on Replicate using `ostris/flux-dev-lora-trainer`
@@ -51,10 +52,14 @@ for resume after failure:
 
 1. **Dataset generation** — Hybrid approach:
    - Face/head shots: Nano Banana 2 (Replicate `google/nano-banana-2`)
-     using approved portrait as reference
-   - Body shots (female): SDXL + Venus Body LoRA on Replicate → Flux Kontext img2img
-     conversion (denoise: 0.72) for photorealistic curvaceous output
-   - Body shots (male): ComfyUI/RunPod Kontext workflow directly
+     using approved portrait as reference (1:1 aspect ratio)
+   - Body shots (female): BigASP (`bigasp_v20.safetensors`) + Feminine Body
+     Proportions LoRA (0.80) + Curvy Body LoRA (0.70) via ComfyUI on RunPod
+     → Flux Kontext img2img conversion (denoise: 0.55) for photorealistic output.
+     6 prompt variants cycle pose, clothing, and background evenly. hairStyle
+     and hairColor from character data are injected into every prompt.
+   - Body shots (male): Nano Banana 2 (Replicate) with 3:4 portrait aspect
+     ratio. 6 prompt variants cycle pose, clothing, and background evenly.
 
 2. **Quality evaluation** — Claude Vision scores each image; minimum score 7/10 to pass
 
@@ -130,8 +135,9 @@ Flux uses 77-token chunking. Front-load the most important information. Cut redu
   (`sdxl-skin-realism.safetensors`, trigger: `Detailed natural skin and blemishes
   without-makeup and acne`, strength: 0.4) — all three for Black/African characters.
   Skin Realism strength capped at 0.4 to prevent age regression artifact.
-- Body generation (female): SDXL-only pipeline. RealVisXL + Curvy Body LoRA
-  (`curvy-body-sdxl.safetensors`, strength: 0.90, no trigger word) + Melanin LoRA
+- Body generation (female): SDXL-only pipeline. RealVisXL + Feminine Body Proportions
+  LoRA (`feminine-body-proportions-sdxl.safetensors`, strength: 0.80) + Curvy Body LoRA
+  (`curvy-body-sdxl.safetensors`, strength: 0.70, no trigger word) + Melanin LoRA
   (for Black/African characters). No Flux conversion, no PuLID — pure SDXL output.
 - SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
 - Trigger words MUST appear at the start of the positive prompt
@@ -195,7 +201,7 @@ For NSFW paired prompts, achieve visual continuity by independently describing t
 2. **Body LoRAs for scene images**: `bodylicious-flux.safetensors` (default) or
    `hourglassv32_FLUX.safetensors` (optional) are loaded for scenes with female characters.
    These are SCENE IMAGE LoRAs for Flux — not used during character approval (which uses
-   RealVisXL + `venus-body-xl.safetensors` instead).
+   RealVisXL + `curvy-body-sdxl.safetensors` + `feminine-body-proportions-sdxl.safetensors` instead).
 3. The only override is when the scene prompt explicitly includes loose/baggy/oversized clothing — this signals a deliberate creative choice and the pipeline adjusts enhancement accordingly.
 
 ## Character LoRA Training Standards
@@ -212,8 +218,8 @@ All female character training datasets must produce characters with:
 These must be visible and consistent across ALL training images.
 When generating training images via /admin/lora-studio, use these
 body descriptors explicitly in every SDXL generation prompt.
-Venus Body LoRA must be active at strength 0.90 during dataset
-generation. Venus Body LoRA at strength 0.90.
+Feminine Body Proportions LoRA at strength 0.80 + Curvy Body LoRA
+at strength 0.70 must be active during dataset generation.
 
 ### Background Diversity Requirements
 Training datasets must include varied backgrounds across these categories:
