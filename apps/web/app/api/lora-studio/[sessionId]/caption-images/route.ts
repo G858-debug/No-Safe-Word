@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { supabase } from '@no-safe-word/story-engine';
+import { anthropicCreateWithRetry } from '@no-safe-word/image-gen';
 
 const CONVERTED_BUCKET = 'lora-converted-images';
 const ANIME_BUCKET = 'lora-anime-images';
@@ -92,20 +93,24 @@ export async function POST(
     }
 
     try {
-      const message = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 200,
-        system: CAPTION_SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'url', url: signedUrl } },
-              { type: 'text', text: 'Write a training caption for this image.' },
-            ],
-          },
-        ],
-      });
+      const message = await anthropicCreateWithRetry(
+        client,
+        {
+          model: 'claude-sonnet-4-6',
+          max_tokens: 200,
+          system: CAPTION_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'url', url: signedUrl } },
+                { type: 'text', text: 'Write a training caption for this image.' },
+              ],
+            },
+          ],
+        },
+        { label: `caption ${id}` },
+      );
 
       const caption =
         message.content[0]?.type === 'text' ? message.content[0].text.trim() : '';

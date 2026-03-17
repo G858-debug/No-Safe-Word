@@ -20,6 +20,7 @@ import type {
   ImageCategory,
 } from './types';
 import { PIPELINE_CONFIG } from './types';
+import { anthropicCreateWithRetry } from '../anthropic-retry';
 
 const EVALUATION_MODEL = 'claude-sonnet-4-6';
 
@@ -347,17 +348,21 @@ async function evaluateSingleImage(
   // Use URL source type to avoid the 5 MB base64 limit.
   // Nano Banana 2 generates 7-9 MB PNGs that exceed the base64 limit but
   // URL sources support up to 20 MB with automatic server-side resizing.
-  const response = await anthropic.messages.create({
-    model: EVALUATION_MODEL,
-    max_tokens: 256,
-    system: systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: messageContent,
-      },
-    ],
-  });
+  const response = await anthropicCreateWithRetry(
+    anthropic,
+    {
+      model: EVALUATION_MODEL,
+      max_tokens: 256,
+      system: systemPrompt,
+      messages: [
+        {
+          role: 'user',
+          content: messageContent,
+        },
+      ],
+    },
+    { label: `eval ${image.prompt_template}` },
+  );
 
   const responseText =
     response.content[0].type === 'text' ? response.content[0].text : '';

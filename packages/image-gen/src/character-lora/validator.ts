@@ -10,6 +10,7 @@ import {
   submitRunPodJob,
   waitForRunPodResult,
 } from '../index';
+import { anthropicCreateWithRetry } from '../anthropic-retry';
 
 const VALIDATION_MODEL = 'claude-sonnet-4-6';
 
@@ -177,29 +178,33 @@ async function evaluateTestImage(
   testImageBase64: string,
   description: string,
 ): Promise<number> {
-  const response = await anthropic.messages.create({
-    model: VALIDATION_MODEL,
-    max_tokens: 128,
-    system: `You are evaluating whether two images show the same person. Score face similarity from 0 to 10 where 10 is identical and 7+ means clearly the same person. Consider: facial structure, skin tone, features. Minor differences in expression, angle, lighting are expected. Respond with JSON only: {"face_score": 8, "notes": "brief reason"}`,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'REFERENCE (approved portrait):' },
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: referenceBase64 },
-          },
-          { type: 'text', text: `TEST IMAGE (${description}):` },
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: testImageBase64 },
-          },
-          { type: 'text', text: 'Rate face similarity. JSON only.' },
-        ],
-      },
-    ],
-  });
+  const response = await anthropicCreateWithRetry(
+    anthropic,
+    {
+      model: VALIDATION_MODEL,
+      max_tokens: 128,
+      system: `You are evaluating whether two images show the same person. Score face similarity from 0 to 10 where 10 is identical and 7+ means clearly the same person. Consider: facial structure, skin tone, features. Minor differences in expression, angle, lighting are expected. Respond with JSON only: {"face_score": 8, "notes": "brief reason"}`,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'REFERENCE (approved portrait):' },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: referenceBase64 },
+            },
+            { type: 'text', text: `TEST IMAGE (${description}):` },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: testImageBase64 },
+            },
+            { type: 'text', text: 'Rate face similarity. JSON only.' },
+          ],
+        },
+      ],
+    },
+    { label: `validate ${description}` },
+  );
 
   const responseText =
     response.content[0].type === 'text' ? response.content[0].text : '';

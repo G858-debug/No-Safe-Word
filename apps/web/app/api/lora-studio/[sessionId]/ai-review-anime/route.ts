@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { supabase } from '@no-safe-word/story-engine';
+import { anthropicCreateWithRetry } from '@no-safe-word/image-gen';
 
 const STORAGE_BUCKET = 'lora-anime-images';
 
@@ -60,26 +61,30 @@ export async function POST(
       }
 
       try {
-        const message = await client.messages.create({
-          model: 'claude-opus-4-6',
-          max_tokens: 200,
-          system: AI_REVIEW_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'image',
-                  source: { type: 'url', url: signed.signedUrl },
-                },
-                {
-                  type: 'text',
-                  text: 'Assess this image for the LoRA training dataset.',
-                },
-              ],
-            },
-          ],
-        });
+        const message = await anthropicCreateWithRetry(
+          client,
+          {
+            model: 'claude-opus-4-6',
+            max_tokens: 200,
+            system: AI_REVIEW_SYSTEM_PROMPT,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'image',
+                    source: { type: 'url', url: signed.signedUrl },
+                  },
+                  {
+                    type: 'text',
+                    text: 'Assess this image for the LoRA training dataset.',
+                  },
+                ],
+              },
+            ],
+          },
+          { label: `ai-review-anime ${img.id}` },
+        );
 
         const rawText =
           message.content[0]?.type === 'text' ? message.content[0].text.trim() : '';

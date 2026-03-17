@@ -33,6 +33,9 @@ export { rewritePromptForFlux } from './flux-prompt-rewriter';
 // Replicate client — Nano Banana 2 for male character portraits
 export { runNanoBanana, readReplicateOutput } from './replicate-client';
 
+// Anthropic API retry wrapper — exponential backoff on 500/502/503/529
+export { anthropicCreateWithRetry } from './anthropic-retry';
+
 // Flux-native prompt builder — assembles prose prompts, strips legacy syntax, and enhances sensuality
 export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFemaleEnhancement, injectFluxGazeEmphasis, buildFluxAtmosphereSuffix, reorderScenePrompt } from './flux-prompt-builder';
 
