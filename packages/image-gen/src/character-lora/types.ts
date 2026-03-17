@@ -80,6 +80,11 @@ export interface EvalDetails {
   /** True when a body-category image has the head cropped (forehead/chin cut off, head out of frame).
    *  Forces FAIL verdict — head-cropped body shots teach incorrect head-to-body proportions. */
   head_cropped?: boolean;
+  /** True when body proportions are anatomically realistic. False = cartoon-like exaggeration.
+   *  Body shots require this to be true to pass evaluation. */
+  proportions_realistic?: boolean;
+  /** Brief reason for the evaluation verdict. */
+  reason?: string;
 }
 
 // ── Training Parameters ─────────────────────────────────────────

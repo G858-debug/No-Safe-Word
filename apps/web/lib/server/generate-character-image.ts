@@ -147,7 +147,7 @@ function buildMaleNanoBananaBodyPrompt(
 
   const sentences = [core + '.'];
   sentences.push(
-    'Handsome, striking facial features. Full body portrait, standing, wearing stylish fitted clothing. Professional fashion photography, editorial lighting, sharp focus, photorealistic.'
+    'Handsome, striking facial features. Full body portrait, standing, wearing a fitted crew neck t-shirt and tight shorts, body shape visible through clothing. Professional fashion photography, editorial lighting, sharp focus, photorealistic.'
   );
 
   return sentences.join(' ');

@@ -93,9 +93,7 @@ function getFramingRules(category: string): string {
 }
 
 function buildBodyEvalPrompt(bodyType: string, skinTone: string, category: string): string {
-  return `You are evaluating a BODY SHOT for LoRA training. This image is meant to teach the model about this character's body proportions, clothing style, and poses.
-
-DO NOT evaluate face similarity — the face in body shots is generated differently from the reference portrait and will not match. This is expected and acceptable.
+  return `You are evaluating body images for a LoRA training dataset.
 
 You will receive:
 1. A REFERENCE FULL-BODY (the approved body image — body proportions are the ground truth)
@@ -105,52 +103,45 @@ The character's described body type is: ${bodyType}
 The character's described skin tone is: ${skinTone}
 The image category is: ${category}
 
-Evaluate the generated image on these criteria:
+Score each image on three criteria (1-10 each):
 
-1. HEAD VISIBILITY (critical):
-   - Is the person's head and face fully visible in frame (crown to chin)?
-   - If the head is cropped, partially out of frame, or missing → set head_cropped: true
-   - Hard fail if head is cropped: set body_score to 2/10
+FACE (face_score): How clearly visible and well-rendered is the face?
+  - Is the head fully in frame (crown to chin)?
+  - If the head is cropped, partially out of frame, or missing → set head_cropped: true and score 2
+  - A clearly visible, well-rendered face scores 7-9
 
-2. BODY TYPE CONSISTENCY (0-10): Does the body match the reference and description?
-   - Body proportions should generally match the described type (${bodyType})
-   - Same general build as the reference full-body image
-   - Some variation in build is acceptable and even beneficial for LoRA training generalization
-   - Only reject if the body type is fundamentally different (e.g. described as curvaceous but image shows very thin)
-   - Do not reject for being slightly more or less muscular/curvy than described
-   - Score 7+ = body type is reasonably consistent
+BODY (body_score): Does the body show a curvy figure with wide hips, full breasts, and thick thighs?
+  - Deduct points if proportions are ANATOMICALLY IMPOSSIBLE — hips wider than 1.5x shoulder width,
+    or a waist so narrow it would be physically impossible.
+  - A realistic curvy figure scores 7-9. Cartoon/impossible proportions score 3-5 regardless of curviness.
+  - Body proportions should generally match the described type (${bodyType})
+  - Skin tone should generally match: ${skinTone}. Only deduct for fundamental mismatches.
+  ${getFramingRules(category)}
 
-3. SKIN TONE ACCURACY (factor into body_score):
-   - Skin tone should generally match: ${skinTone}
-   - Minor shade variations (slightly darker or lighter) are acceptable — do NOT deduct points
-   - Only deduct points if skin tone is fundamentally wrong (e.g. described as dark brown but image shows pale/white skin)
-   - Deduct 2-3 points only for fundamental mismatches
+QUALITY (quality_score): Overall image quality, lighting, and realism.
+  - Sharp and well-rendered (no blurry areas)
+  - No anatomical errors (extra fingers, distorted limbs)
+  - No artifacts or glitches
+  - Single person only — no other people visible
+  - Person is clothed
+  - Score 7+ = training-quality image
 
-4. IMAGE QUALITY (0-10): Is this a high-quality training image?
-   - Sharp and well-rendered (no blurry areas)
-   - No anatomical errors (extra fingers, distorted limbs, extra limbs)
-   - No artifacts or glitches
-   - Good lighting and composition
-   - Single person only — no other people visible
-   - Person is clothed
-   - Score 7+ = training-quality image
+FACE-ONLY CROP FLAG: If the category indicates body should be visible
+but the generated image ONLY shows the head/face (body not visible), set face_only_crop to true.
 
-5. BODY FRAMING (factor into body_score):
-   ${getFramingRules(category)}
-
-6. FACE-ONLY CROP FLAG (boolean): If the category indicates body should be visible
-   but the generated image ONLY shows the head/face (body not visible), set face_only_crop to true.
-
-Set face_score to 7 (neutral — face matching is not evaluated for body shots).
+REJECT if: body_score below 6, face_score below 6, quality_score below 6,
+OR if proportions look physically impossible (cartoon-like exaggeration).
 
 Respond in JSON format only:
 {
   "face_score": 7,
   "body_score": 8,
   "quality_score": 8,
+  "proportions_realistic": true,
   "face_only_crop": false,
   "head_cropped": false,
   "verdict": "PASS",
+  "reason": "brief reason",
   "issues": []
 }`;
 }
@@ -394,13 +385,17 @@ async function evaluateSingleImage(
   // Compute weighted score based on image category
   const weightedScore = computeWeightedScore(evalResult, category);
 
-  // PASS/FAIL: weighted score >= 7 AND no individual category below 5
-  // For body shots, skip face_score floor (face is set to neutral 7)
-  const noCategryBelowFloor =
+  // PASS/FAIL: weighted score >= 7, no individual category below floor,
+  // and for body shots proportions must be realistic
+  const noCategoryBelowFloor =
     (isBodyShot || evalResult.face_score >= 5) &&
-    evalResult.quality_score >= 5 &&
+    evalResult.quality_score >= 6 &&
+    (isBodyShot ? evalResult.face_score >= 6 : true) &&
     // Only enforce body score floor for categories that show the body
-    (category === 'face-closeup' || category === 'head-shoulders' || evalResult.body_score >= 5);
+    (category === 'face-closeup' || category === 'head-shoulders' || evalResult.body_score >= 6);
+
+  // Body shots require proportions_realistic to pass
+  const proportionsOk = !isBodyShot || evalResult.proportions_realistic !== false;
 
   // Force FAIL if a body-category image is actually a face-only crop
   if (evalResult.face_only_crop && isBodyShot) {
@@ -409,8 +404,14 @@ async function evaluateSingleImage(
       ...(evalResult.issues || []),
       'Image is a face-only crop — expected full/partial body framing for this category',
     ];
+  } else if (!proportionsOk) {
+    evalResult.verdict = 'FAIL';
+    evalResult.issues = [
+      ...(evalResult.issues || []),
+      'Anatomically impossible proportions — cartoon-like exaggeration',
+    ];
   } else {
-    evalResult.verdict = weightedScore >= PIPELINE_CONFIG.minEvalScore && noCategryBelowFloor
+    evalResult.verdict = weightedScore >= PIPELINE_CONFIG.minEvalScore && noCategoryBelowFloor
       ? 'PASS'
       : 'FAIL';
   }

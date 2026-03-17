@@ -36,27 +36,27 @@ const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
 const BODY_PROMPT_VARIANTS = [
   {
-    pose: 'standing facing camera, hands on hips, confident pose, softly blurred warm studio background',
+    pose: 'standing facing camera, hands on hips, confident pose, softly blurred studio background, single large softbox from camera left casting warm directional light, soft shadow on right side',
     clothing: 'wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top, high heels, fully clothed',
   },
   {
-    pose: 'body turned three-quarter angle showing hip curve, weight shifted onto one leg, warm indoor background with soft window light',
+    pose: 'body turned three-quarter angle showing hip curve, weight shifted onto one leg, warm indoor background, golden hour window light from the right, warm rim light on shoulder and hip, soft fill from left',
     clothing: 'wearing a form-fitting bodycon dress that shows her curves clearly, high heels, fully clothed',
   },
   {
-    pose: 'turned showing profile and rear, looking over shoulder, outdoor South African street background, golden hour light',
+    pose: 'turned showing profile and rear, looking over shoulder, outdoor South African street background, overcast outdoor natural light, soft diffused shadows, even skin illumination',
     clothing: 'wearing high-waisted skinny jeans and a cropped fitted tank top, sneakers, fully clothed',
   },
   {
-    pose: 'seated on chair or couch, legs crossed, torso upright, warm living room interior background',
+    pose: 'seated on chair or couch, legs crossed, torso upright, warm living room interior background, warm tungsten lamp from above-right, dramatic shadow on left side, skin glowing warm',
     clothing: 'wearing a short wrap dress with plunging neckline, heeled sandals, fully clothed',
   },
   {
-    pose: 'mid-stride walking pose, slight body twist, urban Johannesburg street background, natural daylight',
+    pose: 'mid-stride walking pose, slight body twist, urban Johannesburg street background, bright midday South African sun from above, strong shadows beneath chin and breasts',
     clothing: 'wearing fitted leggings and a tight long-sleeve crop top, running shoes, fully clothed',
   },
   {
-    pose: 'standing relaxed, arms at sides, near a window with natural soft light, home interior background',
+    pose: 'standing relaxed, arms at sides, home interior background, softbox beauty light directly in front, slight shadow under chin, even warm tones',
     clothing: 'wearing a fitted camisole and short shorts, barefoot, fully clothed',
   },
 ];
@@ -526,7 +526,7 @@ export async function generateSdxlBodyShots(
 
   // Build LoRA stack matching generate-character-image.ts female body pipeline
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
-    { filename: 'feminine-body-proportions-sdxl.safetensors', strengthModel: 0.80, strengthClip: 0.80 },
+    { filename: 'feminine-body-proportions-sdxl.safetensors', strengthModel: 0.60, strengthClip: 0.60 },
     { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
   ];
   if (useMelanin) {
@@ -534,6 +534,9 @@ export async function generateSdxlBodyShots(
     loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
     loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
   }
+
+  // Fetch approved body portrait for img2img proportional anchoring
+  const bodyRefBase64 = await imageUrlToBase64(character.fullBodyImageUrl);
 
   const records: LoraDatasetImageRow[] = [];
   const failures: DatasetGenerationResult['failedPrompts'] = [];
@@ -546,7 +549,7 @@ export async function generateSdxlBodyShots(
 
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
       try {
-        // Step 1: Generate SDXL body shot via ComfyUI on RunPod
+        // Step 1: Generate SDXL body shot via ComfyUI on RunPod (img2img from approved body)
         const sdxlSeed = Math.floor(Math.random() * 2_147_483_647);
         const sdxlWorkflow = buildSdxlWorkflow({
           positivePrompt: prompt,
@@ -556,13 +559,17 @@ export async function generateSdxlBodyShots(
           seed: sdxlSeed,
           steps: 40,
           cfg: 4.0,
+          denoise: 0.65,
           samplerName: 'dpmpp_2m_sde',
           checkpointName: SDXL_CHECKPOINT,
           loras,
           filenamePrefix: `sdxl_body_${loraId}`,
+          inputImageName: 'body_ref.png',
         });
 
-        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow);
+        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow, [
+          { name: 'body_ref.png', image: bodyRefBase64 },
+        ]);
         const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
 
         // Step 2: Convert to photorealistic via Flux Kontext img2img

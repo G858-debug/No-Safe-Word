@@ -516,6 +516,7 @@ export interface SdxlWorkflowConfig {
   steps?: number;          // default 30
   cfg?: number;            // default 7.0
   samplerName?: string;    // default 'dpmpp_2m'
+  denoise?: number;        // default 1.0 (txt2img); set <1.0 for img2img
   filenamePrefix: string;
   checkpointName: string;  // e.g. 'realvisxlV50_v50Bakedvae.safetensors'
   loras?: Array<{
@@ -523,6 +524,8 @@ export interface SdxlWorkflowConfig {
     strengthModel: number;
     strengthClip: number;
   }>;
+  /** Input image filename for img2img. When set, uses LoadImage+VAEEncode instead of EmptyLatentImage. */
+  inputImageName?: string;
   /** When set, adds ReActor face-swap post-processing after VAEDecode.
    *  The value is the image filename passed in RunPod's images[] array (e.g. 'source_face.png').
    *  The approved face portrait is swapped onto the generated body. */
@@ -593,15 +596,29 @@ export function buildSdxlWorkflow(config: SdxlWorkflowConfig): Record<string, an
     },
   };
 
-  // Node 103: EmptyLatentImage
-  workflow['103'] = {
-    class_type: 'EmptyLatentImage',
-    inputs: {
-      width: config.width,
-      height: config.height,
-      batch_size: 1,
-    },
-  };
+  // Node 103: Latent source — img2img (LoadImage+VAEEncode) or txt2img (EmptyLatentImage)
+  if (config.inputImageName) {
+    workflow['130'] = {
+      class_type: 'LoadImage',
+      inputs: { image: config.inputImageName },
+    };
+    workflow['103'] = {
+      class_type: 'VAEEncode',
+      inputs: {
+        pixels: ['130', 0],
+        vae: ['100', 2],
+      },
+    };
+  } else {
+    workflow['103'] = {
+      class_type: 'EmptyLatentImage',
+      inputs: {
+        width: config.width,
+        height: config.height,
+        batch_size: 1,
+      },
+    };
+  }
 
   // Node 104: KSampler — SDXL sampling with karras scheduler
   workflow['104'] = {
@@ -616,7 +633,7 @@ export function buildSdxlWorkflow(config: SdxlWorkflowConfig): Record<string, an
       cfg: config.cfg ?? 7.0,
       sampler_name: config.samplerName ?? 'dpmpp_2m',
       scheduler: 'karras',
-      denoise: 1.0,
+      denoise: config.denoise ?? 1.0,
     },
   };
 

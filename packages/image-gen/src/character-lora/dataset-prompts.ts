@@ -24,6 +24,19 @@ export interface DatasetPrompt {
 // These are sent with the approved portrait as a reference image.
 // Nano Banana 2 excels at face consistency but content-restricts body terms.
 
+// Clothing rotation for face close-ups — each prompt gets a different outfit
+// to prevent the LoRA from over-fitting on a single clothing style.
+const FACE_CLOTHING_ROTATION = [
+  'wearing a simple white fitted t-shirt',
+  'wearing a black blazer over a white blouse, professional look',
+  'wearing a colourful ankara-print off-shoulder top',
+  'wearing a strappy olive green tank top',
+  'wearing a rust-coloured turtleneck',
+  'wearing a denim jacket open over a crop top',
+  'wearing a floral summer dress, thin straps',
+  'wearing a simple grey hoodie, casual',
+];
+
 const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
   // Face close-ups (8-10)
   {
@@ -31,7 +44,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'angle',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, front view, neutral expression, soft studio lighting, clean background',
+    prompt: `Close-up portrait, front view, neutral expression, ${FACE_CLOTHING_ROTATION[0]}, soft studio lighting, clean background`,
     description: 'Front-facing close-up, neutral',
   },
   {
@@ -39,7 +52,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'angle',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, 3/4 angle looking slightly right, warm smile, golden hour side lighting',
+    prompt: `Close-up portrait, 3/4 angle looking slightly right, warm smile, ${FACE_CLOTHING_ROTATION[1]}, golden hour side lighting`,
     description: '3/4 right with warm smile',
   },
   {
@@ -47,7 +60,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'expression',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, looking over left shoulder, serious contemplative expression, dramatic shadow lighting',
+    prompt: `Close-up portrait, looking over left shoulder, serious contemplative expression, ${FACE_CLOTHING_ROTATION[2]}, dramatic shadow lighting`,
     description: 'Over-shoulder contemplative',
   },
   {
@@ -55,7 +68,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'expression',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, slight head tilt, laughing genuinely, bright natural daylight',
+    prompt: `Close-up portrait, slight head tilt, laughing genuinely, ${FACE_CLOTHING_ROTATION[3]}, bright natural daylight`,
     description: 'Laughing candid',
   },
   {
@@ -63,7 +76,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'expression',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, direct eye contact, confident subtle smirk, warm indoor ambient light',
+    prompt: `Close-up portrait, direct eye contact, confident subtle smirk, ${FACE_CLOTHING_ROTATION[4]}, warm indoor ambient light`,
     description: 'Confident direct gaze',
   },
   {
@@ -71,7 +84,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'expression',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, eyes slightly downcast, thoughtful vulnerable expression, soft window light from the side',
+    prompt: `Close-up portrait, eyes slightly downcast, thoughtful vulnerable expression, ${FACE_CLOTHING_ROTATION[5]}, soft window light from the side`,
     description: 'Vulnerable downcast gaze',
   },
   {
@@ -79,7 +92,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'angle',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, profile view facing left, serene expression, backlit rim lighting',
+    prompt: `Close-up portrait, profile view facing left, serene expression, ${FACE_CLOTHING_ROTATION[6]}, backlit rim lighting`,
     description: 'Left profile with rim light',
   },
   {
@@ -87,7 +100,7 @@ const NANO_BANANA_PROMPTS: DatasetPrompt[] = [
     variationType: 'angle',
     source: 'nano-banana',
     category: 'face-closeup',
-    prompt: 'Close-up portrait, 3/4 angle looking slightly left, joyful bright expression, outdoor natural light',
+    prompt: `Close-up portrait, 3/4 angle looking slightly left, joyful bright expression, ${FACE_CLOTHING_ROTATION[7]}, outdoor natural light`,
     description: '3/4 left with joy',
   },
 
