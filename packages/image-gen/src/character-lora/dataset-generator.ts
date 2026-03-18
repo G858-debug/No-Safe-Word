@@ -31,6 +31,8 @@ import { readReplicateOutput } from '../replicate-client';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
 const SDXL_CHECKPOINT = 'bigasp_v20.safetensors';
+/** Kontext checkpoint for dataset img2img conversion — hardcoded to decouple from KONTEXT_MODEL env var. */
+const KONTEXT_DATASET_MODEL = 'flux1-dev-kontext_fp8_scaled.safetensors';
 const MAX_GENERATION_RETRIES = 3;
 const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
@@ -517,12 +519,7 @@ export async function generateSdxlBodyShots(
     'white skin, pale skin, asian features, european features, ' +
     'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible';
 
-  const img2imgPrompt =
-    `Photorealistic photograph, extremely wide hips, very large round bubble butt, thick heavy thighs, narrow waist, pear-shaped bottom-heavy figure, ` +
-    `${hairDesc}${ethnicity} woman, ${skinTone} skin, curvaceous figure with large breasts wide hips ` +
-    `and thick thighs, wearing a fitted outfit, fully clothed, ` +
-    `face and head clearly visible, full body, ` +
-    `natural skin texture, soft lighting, high detail`;
+  // img2imgPrompt is built per-variant inside the loop (not static) — see below
 
   // Build LoRA stack matching generate-character-image.ts female body pipeline
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
@@ -538,6 +535,8 @@ export async function generateSdxlBodyShots(
   // Fetch approved body portrait for img2img proportional anchoring
   const bodyRefBase64 = await imageUrlToBase64(character.fullBodyImageUrl);
 
+  console.log(`[LoRA Dataset] Kontext img2img checkpoint: ${KONTEXT_DATASET_MODEL}`);
+
   const records: LoraDatasetImageRow[] = [];
   const failures: DatasetGenerationResult['failedPrompts'] = [];
 
@@ -545,6 +544,16 @@ export async function generateSdxlBodyShots(
     const variant = BODY_PROMPT_VARIANTS[i % BODY_PROMPT_VARIANTS.length];
     const prompt = `${basePositive}, ${variant.clothing}, ${variant.pose}`;
     const promptId = `sdxl_body_${i}_${Date.now()}`;
+
+    // Per-variant Flux img2img prompt — carries clothing/pose/lighting through to Step 2
+    const img2imgPrompt =
+      `Ignore the composition and clothing of the reference image. ` +
+      `Use only the body shape and skin tone from the reference. ` +
+      `Generate a new scene with the following description: ` +
+      `Photorealistic photograph, ${hairDesc}${ethnicity} woman, ${skinTone} skin, ` +
+      `curvaceous figure with wide hips and thick thighs, ` +
+      `${variant.clothing}, ${variant.pose}, ` +
+      `face and head clearly visible, full body, natural skin texture, high detail`;
     let succeeded = false;
 
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
@@ -559,7 +568,7 @@ export async function generateSdxlBodyShots(
           seed: sdxlSeed,
           steps: 40,
           cfg: 4.0,
-          denoise: 0.65,
+          denoise: 0.80,
           samplerName: 'dpmpp_2m_sde',
           checkpointName: SDXL_CHECKPOINT,
           loras,
@@ -575,6 +584,7 @@ export async function generateSdxlBodyShots(
         // Step 2: Convert to photorealistic via Flux Kontext img2img
         const fluxWorkflow = buildKontextWorkflow({
           type: 'img2img',
+          kontextModel: KONTEXT_DATASET_MODEL,
           positivePrompt: img2imgPrompt,
           width: 1024,
           height: 1024,

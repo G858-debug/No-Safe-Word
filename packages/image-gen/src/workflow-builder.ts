@@ -8,6 +8,8 @@ export type KontextWorkflowType = 'portrait' | 'single' | 'dual' | 'img2img';
 
 export interface KontextWorkflowConfig {
   type: KontextWorkflowType;
+  /** Override the Kontext checkpoint filename. When set, bypasses KONTEXT_MODEL env var. */
+  kontextModel?: string;
   positivePrompt: string;
   width: number;
   height: number;
@@ -69,9 +71,10 @@ export function buildKontextWorkflow(config: KontextWorkflowConfig): Record<stri
   // SFW/NSFW checkpoint switching:
   //   sfwMode: true  (default) → KONTEXT_MODEL (Krea Dev SFW or base)
   //   sfwMode: false           → KONTEXT_NSFW_MODEL (Krea Dev Uncensored)
-  const modelName = config.sfwMode === false
-    ? (process.env.KONTEXT_NSFW_MODEL || process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors')
-    : (process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors');
+  const modelName = config.kontextModel
+    ?? (config.sfwMode === false
+      ? (process.env.KONTEXT_NSFW_MODEL || process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors')
+      : (process.env.KONTEXT_MODEL || 'flux1KreaDev_fp8E4m3fn.safetensors'));
 
   const workflow: Record<string, any> = {};
 
