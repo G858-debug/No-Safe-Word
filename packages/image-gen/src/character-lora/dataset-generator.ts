@@ -32,7 +32,7 @@ import { readReplicateOutput } from '../replicate-client';
 const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
 const SDXL_CHECKPOINT = 'bigasp_v20.safetensors';
 /** Kontext checkpoint for dataset img2img conversion — hardcoded to decouple from KONTEXT_MODEL env var. */
-const KONTEXT_DATASET_MODEL = 'flux1-dev-kontext_fp8_scaled.safetensors';
+const KONTEXT_DATASET_MODEL = 'flux1KreaDev_fp8E4m3fn.safetensors';
 const MAX_GENERATION_RETRIES = 3;
 const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
