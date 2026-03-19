@@ -38,7 +38,7 @@ const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
 const BODY_PROMPT_VARIANTS = [
   {
-    pose: 'standing facing camera, hands on hips, confident pose, softly blurred studio background, single large softbox from camera left casting warm directional light, soft shadow on right side',
+    pose: 'standing facing camera, hands on hips, confident pose, softly blurred studio background, warm directional light from camera left, soft shadow on right side',
     clothing: 'wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top, high heels, fully clothed',
   },
   {
@@ -58,7 +58,7 @@ const BODY_PROMPT_VARIANTS = [
     clothing: 'wearing fitted leggings and a tight long-sleeve crop top, running shoes, fully clothed',
   },
   {
-    pose: 'standing relaxed, arms at sides, home interior background, softbox beauty light directly in front, slight shadow under chin, even warm tones',
+    pose: 'standing relaxed, arms at sides, home interior background, soft even beauty light from the front, slight shadow under chin, even warm tones',
     clothing: 'wearing a fitted camisole and short shorts, barefoot, fully clothed',
   },
 ];
@@ -547,9 +547,9 @@ export async function generateSdxlBodyShots(
 
     // Per-variant Flux img2img prompt — carries clothing/pose/lighting through to Step 2
     const img2imgPrompt =
-      `Ignore the composition and clothing of the reference image. ` +
-      `Use only the body shape and skin tone from the reference. ` +
-      `Generate a new scene with the following description: ` +
+      `Do not copy the clothing, background, or pose from the reference image. ` +
+      `Use the reference ONLY for body shape and skin tone. ` +
+      `Generate this exact scene: ` +
       `Photorealistic photograph, ${hairDesc}${ethnicity} woman, ${skinTone} skin, ` +
       `curvaceous figure with wide hips and thick thighs, ` +
       `${variant.clothing}, ${variant.pose}, ` +
@@ -589,7 +589,7 @@ export async function generateSdxlBodyShots(
           width: 1024,
           height: 1024,
           seed: character.portraitSeed + hashCode(promptId),
-          denoiseStrength: 0.80,
+          denoiseStrength: 0.95,
           filenamePrefix: `dataset_${loraId}`,
         });
 
