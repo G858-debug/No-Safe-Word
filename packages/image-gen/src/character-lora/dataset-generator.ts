@@ -589,7 +589,7 @@ export async function generateSdxlBodyShots(
           width: 1024,
           height: 1024,
           seed: character.portraitSeed + hashCode(promptId),
-          denoiseStrength: 0.55,
+          denoiseStrength: 0.80,
           filenamePrefix: `dataset_${loraId}`,
         });
 
