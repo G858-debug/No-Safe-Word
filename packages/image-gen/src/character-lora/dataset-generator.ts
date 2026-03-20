@@ -500,7 +500,11 @@ export async function generateSdxlBodyShots(
 ): Promise<GenerationBatchResult> {
   const { skinTone, ethnicity, hairStyle, hairColor } = character.structuredData;
   const useMelanin = isBlackAfrican(ethnicity);
-  const hairDesc = hairStyle && hairColor ? `${hairStyle} ${hairColor} hair, ` : '';
+  // Assertive hair description — no "or"/"usually" hedging that lets the model pick alternatives
+  const rawHairDesc = hairStyle && hairColor ? `${hairStyle} ${hairColor} hair` : '';
+  const hairDesc = rawHairDesc ? `${rawHairDesc}, ` : '';
+  // For img2img, reinforce hairstyle as mandatory (face can vary, hair cannot)
+  const hairEnforced = rawHairDesc ? `must have exactly this hairstyle: ${rawHairDesc}. ` : '';
 
   const melaninPrefix = useMelanin ? 'melanin, ' : '';
   const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
@@ -546,14 +550,17 @@ export async function generateSdxlBodyShots(
     const promptId = `sdxl_body_${i}_${Date.now()}`;
 
     // Per-variant Flux img2img prompt — carries clothing/pose/lighting through to Step 2
+    // Face should VARY (trained separately via face LoRA). Hairstyle must be CONSISTENT.
     const img2imgPrompt =
       `Do not copy the clothing, background, or pose from the reference image. ` +
-      `Use the reference ONLY for body shape and skin tone. ` +
+      `Match the reference body shape and proportions exactly. ` +
+      `${hairEnforced}` +
       `Generate this exact scene: ` +
-      `Photorealistic photograph, ${hairDesc}${ethnicity} woman, ${skinTone} skin, ` +
-      `curvaceous figure with wide hips and thick thighs, ` +
+      `Photorealistic photograph, ${ethnicity} woman, ${skinTone} skin, ` +
+      `${hairDesc}` +
+      `very curvy voluptuous figure matching the reference proportions, very wide hips, very large natural breasts, narrow waist, thick full thighs, large round butt, ` +
       `${variant.clothing}, ${variant.pose}, ` +
-      `face and head clearly visible, full body, natural skin texture, high detail`;
+      `full body, natural skin texture, high detail`;
     let succeeded = false;
 
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
@@ -589,7 +596,7 @@ export async function generateSdxlBodyShots(
           width: 1024,
           height: 1024,
           seed: character.portraitSeed + hashCode(promptId),
-          denoiseStrength: 0.95,
+          denoiseStrength: 0.85,
           filenamePrefix: `dataset_${loraId}`,
         });
 
