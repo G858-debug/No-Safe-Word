@@ -121,7 +121,7 @@ export function buildFemaleBodySdxlPrompt(params: FemaleBodyPromptParams): {
     }
   } else {
     const clothing = clothingAndPose ||
-      `She is wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top with thin spaghetti straps, deep neckline showing generous cleavage, midriff partially exposed. High heels. Outfit is tight and body-hugging, emphasising every curve. Full body shot from head to toe. Standing pose, confident stance. Softly blurred warm neutral background, slight bokeh, photography studio with warm ambient light. Soft natural window light from camera left, warm fill light from the right, subtle directional shadows creating depth on skin, rich warm skin tones with natural variation, photorealistic skin texture with visible pore detail, subsurface scattering on skin. Natural melanin-rich skin, deep warm undertones, skin has natural sheen not plastic shine, soft catchlights in eyes, DSLR photography, 85mm portrait lens, f/2.8 aperture`;
+      `She is wearing a tiny fitted mini skirt stopping mid-thigh and a strappy fitted crop top, fully clothed. High heels. Outfit is tight and body-hugging, emphasising every curve. Full body shot from head to toe. Standing pose, confident stance. Softly blurred warm neutral background, slight bokeh, photography studio with warm ambient light. Soft natural window light from camera left, warm fill light from the right, subtle directional shadows creating depth on skin, rich warm skin tones with natural variation, photorealistic skin texture with visible pore detail, subsurface scattering on skin. Natural melanin-rich skin, deep warm undertones, skin has natural sheen not plastic shine, soft catchlights in eyes, DSLR photography, 85mm portrait lens, f/2.8 aperture`;
 
     positive =
       `score_7_up, score_6_up, ${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}` +
@@ -161,7 +161,7 @@ export function buildFemaleBodyImg2ImgPrompt(params: {
   const hairEnforced = hairDesc ? `must have exactly this hairstyle: ${hairDesc}. ` : '';
 
   const clothing = clothingAndPose ||
-    'wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top, ' +
+    'wearing a tiny fitted mini skirt stopping mid-thigh and a strappy fitted crop top, fully clothed, ' +
     'high heels, standing pose, confident stance, warm studio background, soft directional lighting';
 
   return (
