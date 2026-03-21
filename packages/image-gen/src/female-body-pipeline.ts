@@ -129,7 +129,9 @@ export function buildFemaleBodySdxlPrompt(params: FemaleBodyPromptParams): {
   const negative =
     'nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage, underwear, lingerie, ' +
     'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
-    'bad anatomy, extra limbs, (worst quality:2), (low quality:2), ' +
+    'bad anatomy, extra limbs, fused limbs, transparent limbs, ghosting, double exposure, see-through body, ' +
+    'missing limbs, floating limbs, disconnected limbs, malformed hands, extra fingers, fused fingers, ' +
+    '(worst quality:2), (low quality:2), ' +
     'white skin, pale skin, asian features, european features, ' +
     'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible, ' +
     'score_1, score_2, score_3, multiple views, watermark, text, logo, signature, ' +
