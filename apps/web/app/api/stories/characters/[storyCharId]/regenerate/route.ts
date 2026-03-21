@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob, runNanoBanana } from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
+import type { Json } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
 type GenerationStage = "face" | "body";
@@ -207,8 +208,8 @@ export async function POST(
             seed: payload.seed,
             pipelineType: 'sdxl-flux-img2img',
             currentStep: 1,
-            step2Config: payload.step2Config,
-          },
+            step2Config: payload.step2Config as unknown as Record<string, unknown>,
+          } as unknown as Json,
           mode: "sfw",
         })
         .select("id")
