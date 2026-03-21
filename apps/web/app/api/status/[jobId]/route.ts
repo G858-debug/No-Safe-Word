@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRunPodJobStatus, base64ToBuffer } from "@no-safe-word/image-gen";
+import { getRunPodJobStatus, base64ToBuffer, buildKontextWorkflow, submitRunPodJob } from "@no-safe-word/image-gen";
 import { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
 import type { Json } from "@no-safe-word/shared";
@@ -19,30 +19,49 @@ export async function GET(
       );
     }
 
-    // Strip the runpod- prefix if present
-    const runpodJobId = jobId.startsWith("runpod-") ? jobId.replace("runpod-", "") : jobId;
+    // Find the image_id from generation_jobs first — needed for two-step pipeline check
+    const { data: jobRow } = await supabase
+      .from("generation_jobs")
+      .select("image_id")
+      .eq("job_id", jobId)
+      .single();
 
-    const status = await getRunPodJobStatus(runpodJobId);
+    // Fetch image settings to check for two-step pipeline
+    const settings: Record<string, unknown> = {};
+    let imageId: string | null = jobRow?.image_id ?? null;
 
-    // Only log on status transitions — suppress routine IN_QUEUE/IN_PROGRESS polls
+    if (imageId) {
+      const { data: imageResult } = await supabase
+        .from("images")
+        .select("settings")
+        .eq("id", imageId)
+        .single();
+      if (imageResult?.settings) {
+        Object.assign(settings, imageResult.settings as Record<string, unknown>);
+      }
+    }
+
+    // Determine which RunPod job to poll
+    const isTwoStep = settings.pipelineType === 'sdxl-flux-img2img';
+    const currentStep = isTwoStep ? Number(settings.currentStep || 1) : 0;
+    const activeRunpodJobId = (isTwoStep && currentStep === 2 && settings.activeRunpodJobId)
+      ? String(settings.activeRunpodJobId)
+      : (jobId.startsWith("runpod-") ? jobId.replace("runpod-", "") : jobId);
+
+    const status = await getRunPodJobStatus(activeRunpodJobId);
+
+    // Only log on status transitions
     if (status.status === "COMPLETED") {
-      console.log(`[StoryPublisher] RunPod job COMPLETED: ${runpodJobId}`);
+      console.log(`[StoryPublisher] RunPod job COMPLETED: ${activeRunpodJobId}${isTwoStep ? ` (step ${currentStep})` : ''}`);
     } else if (status.status === "FAILED") {
-      console.log(`[StoryPublisher] RunPod job FAILED: ${runpodJobId}`);
+      console.log(`[StoryPublisher] RunPod job FAILED: ${activeRunpodJobId}${isTwoStep ? ` (step ${currentStep})` : ''}`);
     }
 
     if (status.status === "COMPLETED" && status.output?.images?.[0]) {
       const imageData = status.output.images[0].data;
       const base64Data = imageData.includes(",") ? imageData.split(",")[1] : imageData;
 
-      // Find the image_id from generation_jobs
-      const { data: jobRow } = await supabase
-        .from("generation_jobs")
-        .select("image_id")
-        .eq("job_id", jobId)
-        .single();
-
-      if (!jobRow?.image_id) {
+      if (!imageId) {
         return NextResponse.json({
           jobId,
           completed: true,
@@ -53,24 +72,21 @@ export async function GET(
         });
       }
 
-      // Fetch image settings and prompt metadata in parallel
-      const [imageResult, promptResult] = await Promise.all([
-        supabase
-          .from("images")
-          .select("settings")
-          .eq("id", jobRow.image_id)
-          .single(),
-        supabase
-          .from("story_image_prompts")
-          .select("id, secondary_character_id")
-          .eq("image_id", jobRow.image_id)
-          .single(),
-      ]);
+      // --- Two-step pipeline: Step 1 complete → submit Step 2 ---
+      if (isTwoStep && currentStep === 1) {
+        return await handleTwoStepTransition(jobId, imageId, base64Data, settings);
+      }
 
-      const settings = (imageResult.data?.settings as Record<string, unknown>) ?? {};
+      // Fetch prompt metadata for dual-character validation
+      const { data: promptResult } = await supabase
+        .from("story_image_prompts")
+        .select("id, secondary_character_id")
+        .eq("image_id", imageId)
+        .single();
+
       const seed = settings.seed != null ? Number(settings.seed) : null;
-      const isDualCharacter = !!promptResult.data?.secondary_character_id;
-      const promptId = promptResult.data?.id;
+      const isDualCharacter = !!promptResult?.secondary_character_id;
+      const promptId = promptResult?.id;
 
       // --- Dual-character person count validation ---
       let validation: { personCountDetected: number; validationPassed: boolean; attempts: number; seedsUsed: number[] } | undefined;
@@ -93,19 +109,16 @@ export async function GET(
         };
 
         if (!passed && canRetryValidation(settings)) {
-          // Validation failed and retries remain — trigger retry
           const newSeed = generateRetrySeed();
           const updatedSettings = buildRetrySettings(settings, newSeed, detected);
 
           console.log(`[PersonValidator] FAILED: detected ${detected} person(s), expected 2. Retrying with seed ${newSeed} (attempt ${attemptNumber}/3)`);
 
-          // Update image settings with new seed and validation tracking
           await supabase
             .from("images")
             .update({ settings: updatedSettings as Json })
-            .eq("id", jobRow.image_id);
+            .eq("id", imageId);
 
-          // Trigger retry via internal endpoint
           if (promptId) {
             try {
               const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -128,11 +141,9 @@ export async function GET(
                 });
               } else {
                 console.error(`[PersonValidator] Retry endpoint failed: ${retryRes.status}`);
-                // Fall through to store the image anyway
               }
             } catch (retryErr) {
               console.error("[PersonValidator] Retry request failed:", retryErr);
-              // Fall through to store the image anyway
             }
           }
         } else if (!passed) {
@@ -145,7 +156,7 @@ export async function GET(
       // --- Store the image ---
       const buffer = base64ToBuffer(base64Data);
       const timestamp = Date.now();
-      const storagePath = `stories/${jobRow.image_id}-${timestamp}.png`;
+      const storagePath = `stories/${imageId}-${timestamp}.png`;
 
       const { error: uploadError } = await supabase.storage
         .from("story-images")
@@ -153,10 +164,8 @@ export async function GET(
 
       if (uploadError) {
         console.error(
-          `[Status][${jobId}] Supabase storage upload FAILED for image ${jobRow.image_id}: ${uploadError.message}`,
+          `[Status][${jobId}] Supabase storage upload FAILED for image ${imageId}: ${uploadError.message}`,
         );
-        // Do NOT mark as completed/generated — the image isn't stored.
-        // Frontend keeps polling; next poll re-fetches from RunPod cache and retries storage.
         return NextResponse.json({
           jobId,
           completed: false,
@@ -172,7 +181,7 @@ export async function GET(
       await supabase
         .from("images")
         .update({ stored_url: publicUrl, sfw_url: publicUrl })
-        .eq("id", jobRow.image_id);
+        .eq("id", imageId);
 
       // Update job status
       await supabase
@@ -199,7 +208,6 @@ export async function GET(
       });
 
     } else if (status.status === "FAILED") {
-      // Update job as failed
       await supabase
         .from("generation_jobs")
         .update({ status: "failed" })
@@ -218,6 +226,7 @@ export async function GET(
         completed: false,
         status: status.status,
         delayTime: status.delayTime ?? null,
+        ...(isTwoStep ? { pipelineStep: currentStep } : {}),
       });
     }
   } catch (err) {
@@ -227,4 +236,62 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+/**
+ * Handle the transition from Step 1 (SDXL) to Step 2 (Flux img2img)
+ * in the two-step female body generation pipeline.
+ */
+async function handleTwoStepTransition(
+  jobId: string,
+  imageId: string,
+  sdxlBase64: string,
+  settings: Record<string, unknown>,
+): Promise<NextResponse> {
+  const step2Config = settings.step2Config as Record<string, unknown>;
+  if (!step2Config) {
+    throw new Error(`Two-step pipeline missing step2Config for image ${imageId}`);
+  }
+
+  console.log(`[TwoStep] Step 1 complete for ${imageId}. Submitting Flux img2img (Step 2)...`);
+
+  // Build the Flux img2img workflow from the stored config
+  const fluxWorkflow = buildKontextWorkflow({
+    type: 'img2img',
+    kontextModel: step2Config.kontextModel as string,
+    positivePrompt: step2Config.img2imgPrompt as string,
+    width: step2Config.width as number,
+    height: step2Config.height as number,
+    seed: step2Config.seed as number,
+    denoiseStrength: step2Config.denoise as number,
+    filenamePrefix: step2Config.filenamePrefix as string,
+    loras: step2Config.loras as Array<{ filename: string; strengthModel: number; strengthClip: number }>,
+  });
+
+  // Submit Step 2 to RunPod with the SDXL output as input
+  const { jobId: fluxJobId } = await submitRunPodJob(fluxWorkflow, [
+    { name: 'input.jpg', image: sdxlBase64 },
+  ]);
+
+  console.log(`[TwoStep] Flux img2img submitted: ${fluxJobId}`);
+
+  // Update image settings to track Step 2
+  const updatedSettings = {
+    ...settings,
+    currentStep: 2,
+    activeRunpodJobId: fluxJobId,
+  };
+
+  await supabase
+    .from("images")
+    .update({ settings: updatedSettings as Json })
+    .eq("id", imageId);
+
+  // Return not-completed so frontend keeps polling
+  return NextResponse.json({
+    jobId,
+    completed: false,
+    status: "STEP2_SUBMITTED",
+    pipelineStep: 2,
+  });
 }

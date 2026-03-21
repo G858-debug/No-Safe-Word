@@ -30,9 +30,19 @@ import {
 import { readReplicateOutput } from '../replicate-client';
 
 const NANO_BANANA_MODEL = 'google/nano-banana-2' as const;
-const SDXL_CHECKPOINT = 'bigasp_v20.safetensors';
-/** Kontext checkpoint for dataset img2img conversion — hardcoded to decouple from KONTEXT_MODEL env var. */
-const KONTEXT_DATASET_MODEL = 'flux1KreaDev_fp8E4m3fn.safetensors';
+import {
+  FEMALE_BODY_SDXL_CHECKPOINT,
+  FEMALE_BODY_KONTEXT_MODEL,
+  FEMALE_BODY_SDXL_CONFIG,
+  FEMALE_BODY_KONTEXT_CONFIG,
+  FEMALE_BODY_KONTEXT_LORAS,
+  isBlackAfrican as isBlackAfricanShared,
+  buildFemaleBodyLoraStack,
+  buildFemaleBodyImg2ImgPrompt,
+} from '../female-body-pipeline';
+
+const SDXL_CHECKPOINT = FEMALE_BODY_SDXL_CHECKPOINT;
+const KONTEXT_DATASET_MODEL = FEMALE_BODY_KONTEXT_MODEL;
 const MAX_GENERATION_RETRIES = 3;
 const RETRY_BASE_DELAY = 30_000; // 30s, 60s, 120s
 
@@ -527,15 +537,8 @@ export async function generateSdxlBodyShots(
 
   // img2imgPrompt is built per-variant inside the loop (not static) — see below
 
-  // Build LoRA stack matching generate-character-image.ts female body pipeline
-  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
-    { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
-  ];
-  if (useMelanin) {
-    loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-    loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-    loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
-  }
+  // LoRA stack from shared female-body-pipeline module
+  const loras = buildFemaleBodyLoraStack(useMelanin);
 
   // Fetch approved body portrait for img2img proportional anchoring
   const bodyRefBase64 = await imageUrlToBase64(character.fullBodyImageUrl);
@@ -550,18 +553,15 @@ export async function generateSdxlBodyShots(
     const prompt = `${basePositive}, ${variant.clothing}, ${variant.pose}`;
     const promptId = `sdxl_body_${i}_${Date.now()}`;
 
-    // Per-variant Flux img2img prompt — carries clothing/pose/lighting through to Step 2
-    // Face should VARY (trained separately via face LoRA). Hairstyle must be CONSISTENT.
-    const img2imgPrompt =
-      `Do not copy the clothing, background, or pose from the reference image. ` +
-      `Match the reference body shape and proportions exactly. ` +
-      `${hairEnforced}` +
-      `Generate this exact scene: ` +
-      `Photorealistic photograph, ${ethnicity} woman, ${skinTone} skin, ` +
-      `${hairDesc}` +
-      `${bodyDesc}, matching the reference proportions, ` +
-      `${variant.clothing}, ${variant.pose}, ` +
-      `full body, natural skin texture, high detail`;
+    // Per-variant Flux img2img prompt from shared module
+    const img2imgPrompt = buildFemaleBodyImg2ImgPrompt({
+      ethnicity,
+      skinTone,
+      bodyType: bodyType || '',
+      hairStyle: hairStyle || '',
+      hairColor: hairColor || '',
+      clothingAndPose: `${variant.clothing}, ${variant.pose}`,
+    });
     let succeeded = false;
 
     for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
@@ -589,16 +589,17 @@ export async function generateSdxlBodyShots(
         ]);
         const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
 
-        // Step 2: Convert to photorealistic via Flux Kontext img2img
+        // Step 2: Convert to photorealistic via Flux Kontext img2img (shared config)
         const fluxWorkflow = buildKontextWorkflow({
           type: 'img2img',
           kontextModel: KONTEXT_DATASET_MODEL,
           positivePrompt: img2imgPrompt,
-          width: 1024,
-          height: 1024,
+          width: FEMALE_BODY_KONTEXT_CONFIG.width,
+          height: FEMALE_BODY_KONTEXT_CONFIG.height,
           seed: character.portraitSeed + hashCode(promptId),
-          denoiseStrength: 0.85,
+          denoiseStrength: FEMALE_BODY_KONTEXT_CONFIG.denoise,
           filenamePrefix: `dataset_${loraId}`,
+          loras: [...FEMALE_BODY_KONTEXT_LORAS],
         });
 
         const { jobId } = await submitRunPodJob(fluxWorkflow, [

@@ -2,7 +2,13 @@ import {
   buildSdxlWorkflow,
   buildKontextWorkflow,
   resolvePromptEthnicity,
+  FEMALE_BODY_SDXL_CHECKPOINT,
+  FEMALE_BODY_SDXL_CONFIG,
+  buildFemaleBodyLoraStack,
+  buildFemaleBodySdxlPrompt,
+  buildFemaleBodyStep2Config,
 } from "@no-safe-word/image-gen";
+import type { FemaleBodyStep2Config } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
@@ -185,6 +191,22 @@ export interface RunPodGenerationPayload {
   images?: Array<{ name: string; image: string }>;
 }
 
+/** Two-step RunPod generation (SDXL → Flux img2img) for female body portraits */
+export interface TwoStepRunPodPayload {
+  engine: 'runpod-two-step';
+  workflow: Record<string, any>;
+  positivePrompt: string;
+  negativePrompt: string;
+  seed: number;
+  width: number;
+  height: number;
+  loras: Array<{ filename: string; strength: number }>;
+  /** Serializable config for the Flux img2img step (stored in images.settings) */
+  step2Config: FemaleBodyStep2Config;
+  /** Additional images to pass in RunPod's images[] array */
+  images?: Array<{ name: string; image: string }>;
+}
+
 /** Replicate-based generation (Nano Banana 2) */
 export interface ReplicateGenerationPayload {
   engine: 'replicate';
@@ -195,7 +217,7 @@ export interface ReplicateGenerationPayload {
   referenceImageUrl?: string;
 }
 
-export type CharacterGenerationPayload = RunPodGenerationPayload | ReplicateGenerationPayload;
+export type CharacterGenerationPayload = RunPodGenerationPayload | TwoStepRunPodPayload | ReplicateGenerationPayload;
 
 // ---------------------------------------------------------------------------
 // Main Entry Point
@@ -334,10 +356,13 @@ function buildFemaleFacePayload(
 }
 
 /**
- * Female body — SDXL RealVisXL + Curvy Body LoRA for body composition, then
- * Flux + PuLID face injection using the approved face portrait.
- * The two stages run as one ComfyUI workflow (one RunPod job).
- * Pure SDXL pipeline — no Flux conversion, no PuLID face injection.
+ * Female body — BigASP (SDXL) → Flux Kontext img2img via ComfyUI on RunPod.
+ *
+ * Two-step pipeline matching the dataset generation stack exactly:
+ *   Step 1: SDXL body shot via BigASP + Curvy Body LoRA
+ *   Step 2: Flux Kontext img2img conversion for photorealistic output
+ *
+ * Config imported from female-body-pipeline.ts (shared with dataset generator).
  */
 function buildFemaleBodyPayload(
   charData: CharacterData,
@@ -346,44 +371,21 @@ function buildFemaleBodyPayload(
   seed: number,
   sluggedName: string,
   customPrompt?: string,
-): RunPodGenerationPayload {
+): TwoStepRunPodPayload {
 
-  const width = 768;
-  const height = 1152;
+  const { width, height, steps, cfg, samplerName, denoiseTxt2Img } = FEMALE_BODY_SDXL_CONFIG;
+  const loras = buildFemaleBodyLoraStack(useMelanin);
 
-  const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-  // feminine-body-proportions-sdxl removed — not on RunPod worker volume
-  loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 });
-  // perfect-breasts-v2.safetensors — re-enable once downloaded to network volume
-  // loras.push({ filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.45, strengthClip: 0.45 });
-  if (useMelanin) {
-    loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-    loras.push({ filename: 'sdxl-skin-tone-xl.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-    loras.push({ filename: 'sdxl-skin-realism.safetensors', strengthModel: 0.4, strengthClip: 0.4 });
-  }
-
-  let positivePrompt: string;
-  if (customPrompt) {
-    positivePrompt = customPrompt;
-    // Ensure LoRA trigger words are present
-    if (useMelanin && !/\bmelanin\b/i.test(positivePrompt)) {
-      positivePrompt = `melanin, ${positivePrompt}`;
-    }
-    if (useMelanin && !/dark chocolate skin tone style/i.test(positivePrompt)) {
-      positivePrompt = `dark chocolate skin tone style, ${positivePrompt}`;
-    }
-    if (useMelanin && !/Detailed natural skin/i.test(positivePrompt)) {
-      positivePrompt = `Detailed natural skin and blemishes without-makeup and acne, ${positivePrompt}`;
-    }
-  } else {
-    const melaninPrefix = useMelanin ? 'melanin, ' : '';
-    const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
-    const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
-    const bodyDesc = charData.bodyType || 'curvaceous figure with large breasts wide hips and thick thighs small waist';
-    positivePrompt = `score_7_up, score_6_up, ${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}photorealistic full body photo of a ${charData.age}-year-old ${resolvedEthnicity} woman, ${charData.skinTone} skin, ${bodyDesc}, ${charData.hairStyle} ${charData.hairColor} hair. She is wearing a tiny fitted mini skirt stopping mid-thigh and a strappy low-cut crop top with thin spaghetti straps, deep neckline showing generous cleavage, midriff partially exposed. High heels. Outfit is tight and body-hugging, emphasising every curve. Full body shot from head to toe. Standing pose, confident stance. Softly blurred warm neutral background, slight bokeh, photography studio with warm ambient light. Soft natural window light from camera left, warm fill light from the right, subtle directional shadows creating depth on skin, rich warm skin tones with natural variation, photorealistic skin texture with visible pore detail, subsurface scattering on skin. Natural melanin-rich skin, deep warm undertones, skin has natural sheen not plastic shine, soft catchlights in eyes, DSLR photography, 85mm portrait lens, f/2.8 aperture`;
-  }
-
-  const negativePrompt = `nude, naked, topless, bare breasts, exposed chest, nsfw, cleavage, underwear, lingerie, score_1, score_2, score_3, multiple views, bad anatomy, watermark, text, logo, signature, overexposed, flat lighting, plastic skin, oversaturated, muddy skin tone, grey skin, ashy skin`;
+  const { positive: positivePrompt, negative: negativePrompt } = buildFemaleBodySdxlPrompt({
+    age: charData.age,
+    ethnicity: resolvedEthnicity,
+    skinTone: charData.skinTone,
+    bodyType: charData.bodyType,
+    hairStyle: charData.hairStyle,
+    hairColor: charData.hairColor,
+    useMelanin,
+    customPrompt,
+  });
 
   const workflow = buildSdxlWorkflow({
     positivePrompt,
@@ -391,16 +393,27 @@ function buildFemaleBodyPayload(
     width,
     height,
     seed,
-    cfg: 4.0,
-    steps: 40,
-    samplerName: 'dpmpp_2m_sde',
-    checkpointName: process.env.SDXL_BODY_CHECKPOINT || 'realvisxlV50_v50Bakedvae.safetensors',
+    cfg,
+    steps,
+    samplerName,
+    denoise: denoiseTxt2Img,
+    checkpointName: FEMALE_BODY_SDXL_CHECKPOINT,
     loras,
     filenamePrefix: `fullbody_${sluggedName}`,
   });
 
+  const step2Config = buildFemaleBodyStep2Config({
+    ethnicity: resolvedEthnicity,
+    skinTone: charData.skinTone,
+    bodyType: charData.bodyType,
+    hairStyle: charData.hairStyle,
+    hairColor: charData.hairColor,
+    seed,
+    filenamePrefix: `fullbody_flux_${sluggedName}`,
+  });
+
   return {
-    engine: 'runpod',
+    engine: 'runpod-two-step',
     workflow,
     positivePrompt,
     negativePrompt,
@@ -408,5 +421,6 @@ function buildFemaleBodyPayload(
     width,
     height,
     loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
+    step2Config,
   };
 }

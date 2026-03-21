@@ -181,8 +181,8 @@ export async function POST(
         seed: payload.seed,
         instant: true,
       });
-    } else {
-      // ---- RunPod path (SDXL via ComfyUI) ----
+    } else if (payload.engine === 'runpod-two-step') {
+      // ---- Two-step RunPod path (SDXL → Flux img2img) ----
       let runpodImages: Array<{ name: string; image: string }> | undefined;
       if (payload.images) {
         runpodImages = [...payload.images];
@@ -201,7 +201,57 @@ export async function POST(
           settings: {
             width: payload.width,
             height: payload.height,
-            engine: stage === 'face' && !isMale ? 'flux-krea' : 'sdxl-realvis',
+            engine: 'sdxl-bigasp',
+            imageType,
+            stage,
+            seed: payload.seed,
+            pipelineType: 'sdxl-flux-img2img',
+            currentStep: 1,
+            step2Config: payload.step2Config,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      await supabase.from("generation_jobs").insert({
+        job_id: `runpod-${jobId}`,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+      });
+
+      console.log(`[StoryPublisher] ${stage} two-step regeneration job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
+
+      return NextResponse.json({
+        jobId: `runpod-${jobId}`,
+        imageId: imageRow.id,
+      });
+    } else {
+      // ---- Single-step RunPod path ----
+      let runpodImages: Array<{ name: string; image: string }> | undefined;
+      if (payload.images) {
+        runpodImages = [...payload.images];
+      }
+
+      const { jobId } = await submitRunPodJob(
+        payload.workflow,
+        runpodImages,
+      );
+
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: payload.positivePrompt,
+          settings: {
+            width: payload.width,
+            height: payload.height,
+            engine: 'flux-krea',
             imageType,
             stage,
             seed: payload.seed,

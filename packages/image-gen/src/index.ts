@@ -30,6 +30,21 @@ export { buildKontextIdentityPrefix, resolvePromptEthnicity } from './kontext-id
 // Flux prompt rewriter — converts tag-style prompts to Flux natural language
 export { rewritePromptForFlux } from './flux-prompt-rewriter';
 
+// Female body pipeline — shared config for portrait + dataset generation
+export {
+  FEMALE_BODY_SDXL_CHECKPOINT,
+  FEMALE_BODY_KONTEXT_MODEL,
+  FEMALE_BODY_SDXL_CONFIG,
+  FEMALE_BODY_KONTEXT_CONFIG,
+  FEMALE_BODY_KONTEXT_LORAS,
+  isBlackAfrican as isBlackAfricanFemaleBody,
+  buildFemaleBodyLoraStack,
+  buildFemaleBodySdxlPrompt,
+  buildFemaleBodyImg2ImgPrompt,
+  buildFemaleBodyStep2Config,
+} from './female-body-pipeline';
+export type { FemaleBodyPromptParams, FemaleBodyStep2Config } from './female-body-pipeline';
+
 // Replicate client — Nano Banana 2 for male character portraits
 export { runNanoBanana, readReplicateOutput } from './replicate-client';
 

@@ -127,30 +127,39 @@ Flux uses 77-token chunking. Front-load the most important information. Cut redu
 
 ### Model Selection
 
+**Pipeline Parity Rule:** Portrait generation (approval UI) and dataset generation
+(LoRA training) MUST use identical model stacks for both male and female characters.
+Female body images share a single config module
+(`packages/image-gen/src/female-body-pipeline.ts`). Changes to checkpoints, LoRAs,
+strengths, or denoise values MUST be made in this module only — never duplicate
+these values in generate-character-image.ts or dataset-generator.ts.
+
 **Character Approval (face + body):**
-- Model: RealVisXL V5.0 BakedVAE (`realvisxlV50_v50Bakedvae.safetensors`) via ComfyUI on RunPod
-- Face generation: RealVisXL + Melanin Girlfriend mix LoRA (`melanin-XL.safetensors`,
-  trigger: `melanin`, strength: 0.5) + Skin Tone XL (`sdxl-skin-tone-xl.safetensors`,
-  trigger: `dark chocolate skin tone style`, strength: 0.6) + Skin Realism
-  (`sdxl-skin-realism.safetensors`, trigger: `Detailed natural skin and blemishes
-  without-makeup and acne`, strength: 0.4) — all three for Black/African characters.
-  Skin Realism strength capped at 0.4 to prevent age regression artifact.
-- Body generation (female): SDXL-only pipeline. RealVisXL + Feminine Body Proportions
-  LoRA (`feminine-body-proportions-sdxl.safetensors`, strength: 0.80) + Curvy Body LoRA
-  (`curvy-body-sdxl.safetensors`, strength: 0.70, no trigger word) + Melanin LoRA
-  (for Black/African characters). No Flux conversion, no PuLID — pure SDXL output.
-- SDXL supports negative prompts — use them to prevent european/asian features and poor anatomy
+- Face generation: Nano Banana 2 (Replicate) for both male and female
+- Body generation (female): Two-step pipeline via ComfyUI on RunPod:
+  - Step 1: BigASP v2.0 (`bigasp_v20.safetensors`) + Curvy Body LoRA
+    (`curvy-body-sdxl.safetensors`, strength: 0.70) + Melanin LoRA stack
+    (for Black/African characters)
+  - Step 2: Flux Kontext img2img conversion (`flux1KreaDev_fp8E4m3fn.safetensors`)
+    with Realism LoRA (0.8) + Add Details LoRA (0.6), denoise: 0.85
+  - The status polling endpoint orchestrates both steps transparently —
+    when Step 1 completes, it submits Step 2 and keeps the frontend polling
+- Body generation (male): Nano Banana 2 (Replicate) with face reference
+- SDXL supports negative prompts — use them to prevent nudity, european/asian features and poor anatomy
 - Trigger words MUST appear at the start of the positive prompt
 
-All character image generation logic (prompt building, LoRA selection, negative
-prompts, workflow construction) lives in a single shared module:
-`apps/web/lib/server/generate-character-image.ts`
+All female body generation config (checkpoints, LoRAs, prompt builders) lives in:
+`packages/image-gen/src/female-body-pipeline.ts`
+
+The portrait route (`generate-character-image.ts`) and the dataset generator
+(`dataset-generator.ts`) both import from this shared module. Changes to the
+pipeline — new LoRAs, prompt fixes, denoise values — must be made ONLY in
+`female-body-pipeline.ts`.
 
 Both the /generate route (first-time generation) and the /regenerate route
-(user-triggered redo with optional fixed seed) call this module. Changes to
-the pipeline — new LoRAs, prompt fixes, clothing rules, skin improvements —
-must be made ONLY in generate-character-image.ts. The routes are thin wrappers
-that handle HTTP, database reads/writes, and RunPod submission only.
+(user-triggered redo with optional fixed seed) call `buildCharacterGenerationPayload()`
+in `generate-character-image.ts`. The routes are thin wrappers that handle HTTP,
+database reads/writes, and RunPod submission only.
 
 The only behavioural difference:
   - /generate: random seed, sets generated state on success
