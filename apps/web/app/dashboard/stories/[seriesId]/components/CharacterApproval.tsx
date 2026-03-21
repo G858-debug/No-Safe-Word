@@ -1753,7 +1753,7 @@ function LoraTrainingSection({
             ) : (
               <Dna className="mr-1.5 h-3.5 w-3.5" />
             )}
-            {locked ? "Approve body first" : "Train Character LoRA"}
+            {locked ? "Approve body first" : "Generate Dataset Images"}
           </Button>
         )}
 
