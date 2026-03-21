@@ -94,6 +94,8 @@ interface LoraTrainingState {
   error: string | null;
   estimatedTimeRemaining: string | null;
   isTriggering: boolean;
+  /** Set when user approves a new face/body while LoRA is deployed */
+  referencesChanged?: boolean;
 }
 
 interface CharState {
@@ -703,6 +705,12 @@ export default function CharacterApproval({
           approvedUrl: finalUrl,
         });
         onCharacterApproved?.(storyCharId, finalUrl!, state.imageId!, type);
+
+        // Flag that references changed if LoRA is already deployed
+        const loraState = charStates[storyCharId]?.lora;
+        if (loraState?.status === 'deployed') {
+          updateLoraState(storyCharId, { referencesChanged: true });
+        }
       } catch (err) {
         console.error(`[StoryPublisher] Error in handleApprove:`, err);
         updateSlot(storyCharId, type, {
@@ -911,6 +919,7 @@ export default function CharacterApproval({
 
         updateLoraState(storyCharId, {
           isTriggering: false,
+          referencesChanged: false,
           status: "pending",
           loraId: data.loraId,
         });
@@ -1804,7 +1813,28 @@ function LoraTrainingSection({
           </div>
         )}
 
-        {isDeployed && (
+        {isDeployed && loraState.referencesChanged && (
+          <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-3 space-y-2">
+            <p className="text-xs text-amber-300">
+              Reference images updated — dataset and LoRA are out of date.
+            </p>
+            <Button
+              onClick={onTrain}
+              disabled={loraState.isTriggering}
+              size="sm"
+              className="bg-amber-600 text-white hover:bg-amber-500"
+            >
+              {loraState.isTriggering ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Regenerate Dataset &amp; Retrain
+            </Button>
+          </div>
+        )}
+
+        {isDeployed && !loraState.referencesChanged && (
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1 text-xs text-green-400">
               <Check className="h-3 w-3" />
