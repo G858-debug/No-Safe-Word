@@ -123,12 +123,13 @@ export async function generateDataset(
   let phase2Count: number;
 
   if (character.gender === 'female') {
-    // Female: BigASP + Feminine Body Proportions + Curvy Body → Flux img2img for curvaceous body shots
-    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img...`);
-    const sdxlResult = await generateSdxlBodyShots(character, loraId, cuLimited.length, deps);
-    imageRecords.push(...sdxlResult.records);
-    failedPrompts.push(...sdxlResult.failures);
-    phase2Count = sdxlResult.records.length;
+    // Female: Nano Banana 2 with dual reference images (face + body) for body shots
+    const bodyCount = FEMALE_NB_BODY_PROMPTS.length;
+    console.log(`[LoRA Dataset] Phase 2: Generating ${bodyCount} body images via Nano Banana 2 (female)...`);
+    const nbBodyResult = await generateNanoBananaFemaleBodyShots(character, loraId, bodyCount, deps);
+    imageRecords.push(...nbBodyResult.records);
+    failedPrompts.push(...nbBodyResult.failures);
+    phase2Count = nbBodyResult.records.length;
   } else {
     // Male: Nano Banana 2 with 3:4 portrait aspect for body shots
     console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via Nano Banana 2 (male)...`);
@@ -473,6 +474,203 @@ export async function generateNanoBananaMaleBodyShots(
           await sleep(delay);
         } else {
           console.error(`[LoRA Dataset] NB male body failed ${prompt.id} after ${attempt} attempt(s): ${error}`);
+        }
+      }
+    }
+
+    if (!succeeded) {
+      failures.push({
+        promptTemplate: prompt.id,
+        variationType: prompt.variationType,
+        source: 'nano-banana',
+      });
+    }
+
+    // Rate limit delay between requests
+    if (i < count - 1) {
+      await sleep(PIPELINE_CONFIG.nanoBananaDelay);
+    }
+  }
+
+  return { records, failures };
+}
+
+// ── Nano Banana 2 Body Pipeline (Female — dual reference: face + body) ──
+
+const FEMALE_NB_BODY_PROMPTS: DatasetPrompt[] = [
+  // ── Full body variants (10) ──────────────────────────────────
+  {
+    id: 'nb_female_body_front_studio',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Standing facing camera, hands on hips, confident pose. Wearing a tiny fitted mini skirt stopping mid-thigh and a strappy fitted crop top, high heels. Softly blurred studio background. Warm directional light from camera left, soft shadow on right side. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Front standing, mini skirt + crop top, studio',
+  },
+  {
+    id: 'nb_female_body_34_indoor',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Body turned three-quarter angle showing hip curve, weight shifted onto one leg. Wearing a form-fitting bodycon dress, high heels. Warm indoor living room background. Golden hour window light from the right, warm rim light on shoulder and hip. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: '3/4 angle, bodycon dress, indoor',
+  },
+  {
+    id: 'nb_female_body_rear_outdoor',
+    variationType: 'framing',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Turned showing profile and rear, looking over shoulder at camera. Wearing high-waisted skinny jeans and a cropped fitted tank top, sneakers. Outdoor South African street background. Overcast natural light, soft diffused shadows. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Rear profile, jeans + tank top, SA street',
+  },
+  {
+    id: 'nb_female_body_seated_interior',
+    variationType: 'lighting',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Seated on couch, legs crossed, torso upright. Wearing a short wrap dress, heeled sandals. Warm living room interior. Tungsten lamp from above-right casting warm tones. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Seated, wrap dress, interior lamp light',
+  },
+  {
+    id: 'nb_female_body_walking_urban',
+    variationType: 'clothing',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Mid-stride walking pose with slight body twist. Wearing fitted leggings and a tight long-sleeve crop top, running shoes. Urban Johannesburg street background. Bright midday sun, strong shadows. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Walking, leggings + crop top, JHB street',
+  },
+  {
+    id: 'nb_female_body_relaxed_home',
+    variationType: 'lighting',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Standing relaxed, arms at sides. Wearing a fitted camisole and short shorts, barefoot. Home interior background. Soft even beauty light from the front, slight shadow under chin. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Relaxed, camisole + shorts, home',
+  },
+  {
+    id: 'nb_female_body_rear_overshoulder',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph from behind. Standing with back to camera, looking over right shoulder toward camera, one hand resting on hip. Wearing a fitted summer dress stopping above the knee, strappy sandals. Outdoor park with green trees background. Golden hour warm sunlight from camera left. Alone in frame, no other people visible. Photorealistic, high quality, face visible over shoulder, full body clearly visible.',
+    description: 'Rear full-body, over shoulder look, park golden hour',
+  },
+  {
+    id: 'nb_female_body_34rear_walking',
+    variationType: 'framing',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph from three-quarter rear angle. Walking away with torso twisted back toward camera, one arm swinging naturally. Wearing high-waisted pencil skirt and a fitted off-shoulder top, heels. Warm restaurant interior with ambient lighting background. Warm tungsten overhead light, soft shadow on floor. Alone in frame, no other people visible. Photorealistic, high quality, face visible in twist, full body clearly visible.',
+    description: '3/4 rear, walking twist, restaurant interior',
+  },
+  {
+    id: 'nb_female_body_doorway',
+    variationType: 'framing',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Standing in doorway, one arm raised resting on door frame, weight on one leg. Wearing a fitted summer romper, sandals. Township home exterior background. Harsh midday South African sun, strong shadow from doorframe. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Doorway, romper, harsh midday sun',
+  },
+  {
+    id: 'nb_female_body_staircase',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'full-body',
+    prompt: '{CHARACTER_NAME}, full body photograph. Walking up stairs, one hand on railing, looking back over shoulder toward camera. Wearing a high-waisted skirt and tucked-in blouse, heels. Indoor staircase with white walls background. Overhead ceiling light casting shadow on steps. Alone in frame, no other people visible. Photorealistic, high quality, face and full body clearly visible.',
+    description: 'Staircase, looking back, skirt + blouse',
+  },
+  // ── Face closeup variants (4) — ~30% of dataset ─────────────
+  {
+    id: 'nb_female_face_closeup_direct',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: '{CHARACTER_NAME}, close-up portrait photograph. Wearing a strappy fitted top, shoulders visible. Warm cafe interior background. Soft window light from the left, warm tones. Alone in frame, no other people visible. Photorealistic, face and shoulders clearly visible, direct eye contact, confident subtle smile.',
+    description: 'Face closeup, direct gaze, cafe window light',
+  },
+  {
+    id: 'nb_female_face_closeup_34',
+    variationType: 'angle',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: '{CHARACTER_NAME}, close-up portrait photograph, three-quarter angle. Wearing a casual denim jacket over fitted top, shoulders visible. Outdoor golden hour background. Warm sunset backlight creating rim light on hair, soft fill from front. Alone in frame, no other people visible. Photorealistic, face and shoulders clearly visible, relaxed genuine smile.',
+    description: 'Face closeup, 3/4 angle, outdoor golden hour',
+  },
+  {
+    id: 'nb_female_face_closeup_serious',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: '{CHARACTER_NAME}, close-up portrait photograph. Wearing a fitted blazer, shoulders visible. Office interior with soft overhead light. Even diffused illumination, slight shadow under chin. Alone in frame, no other people visible. Photorealistic, face and shoulders clearly visible, serious composed expression, direct eye contact.',
+    description: 'Face closeup, serious expression, office',
+  },
+  {
+    id: 'nb_female_face_closeup_laugh',
+    variationType: 'expression',
+    source: 'nano-banana',
+    category: 'face-closeup',
+    prompt: '{CHARACTER_NAME}, close-up portrait photograph. Wearing a colourful off-shoulder top, shoulders visible. Outdoor bright daylight background. Natural sunlight from above, warm even tones. Alone in frame, no other people visible. Photorealistic, face and shoulders clearly visible, mid-laugh joyful expression.',
+    description: 'Face closeup, laughing, outdoor daylight',
+  },
+];
+
+export async function generateNanoBananaFemaleBodyShots(
+  character: CharacterInput,
+  loraId: string,
+  count: number,
+  deps: DatasetGeneratorDeps,
+): Promise<GenerationBatchResult> {
+  const records: LoraDatasetImageRow[] = [];
+  const failures: DatasetGenerationResult['failedPrompts'] = [];
+
+  for (let i = 0; i < count; i++) {
+    const promptTemplate = FEMALE_NB_BODY_PROMPTS[i % FEMALE_NB_BODY_PROMPTS.length];
+    const finalPrompt = promptTemplate.prompt.replace('{CHARACTER_NAME}', character.characterName);
+    const prompt: DatasetPrompt = {
+      ...promptTemplate,
+      id: `${promptTemplate.id}_${i}_${Date.now()}`,
+      prompt: finalPrompt,
+    };
+
+    const isFaceCloseup = promptTemplate.category === 'face-closeup';
+    const aspectRatio = isFaceCloseup ? '1:1' : '3:4';
+    // Dual reference: face portrait + body portrait for body shots; face only for closeups
+    const referenceUrls = isFaceCloseup
+      ? [character.approvedImageUrl]
+      : [character.approvedImageUrl, character.fullBodyImageUrl];
+
+    let succeeded = false;
+    for (let attempt = 1; attempt <= MAX_GENERATION_RETRIES && !succeeded; attempt++) {
+      try {
+        const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+        if (!process.env.REPLICATE_API_TOKEN) {
+          throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+        }
+
+        const output = await replicate.run(NANO_BANANA_MODEL, {
+          input: {
+            prompt: prompt.prompt,
+            image_input: referenceUrls,
+            aspect_ratio: aspectRatio,
+            output_format: 'png',
+            safety_tolerance: 6,
+          },
+        });
+
+        const imageBuffer = await readReplicateOutput(output);
+        const record = await saveDatasetImage(imageBuffer, prompt, loraId, deps);
+        records.push(record);
+        succeeded = true;
+      } catch (error) {
+        const isTransient = isTransientError(error);
+        if (attempt < MAX_GENERATION_RETRIES && isTransient) {
+          const delay = RETRY_BASE_DELAY * attempt;
+          console.warn(
+            `[LoRA Dataset] NB female body ${prompt.id} attempt ${attempt}/${MAX_GENERATION_RETRIES} failed (transient), retrying in ${delay / 1000}s: ${error}`
+          );
+          await sleep(delay);
+        } else {
+          console.error(`[LoRA Dataset] NB female body failed ${prompt.id} after ${attempt} attempt(s): ${error}`);
         }
       }
     }
