@@ -18,6 +18,7 @@ import type {
   LoraDatasetImageRow,
   PipelineProgress,
   VariationType,
+  ImageSource,
 } from './types';
 import { PIPELINE_CONFIG, DEFAULT_TRAINING_PARAMS } from './types';
 import { generateDataset, generateReplacements } from './dataset-generator';
@@ -446,6 +447,7 @@ async function runEvaluation(
       .map((img) => ({
         promptTemplate: img.prompt_template,
         variationType: img.variation_type as VariationType,
+        source: img.source as ImageSource,
       }));
 
     for (const img of allImages) {

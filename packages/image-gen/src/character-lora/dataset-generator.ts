@@ -533,9 +533,6 @@ export async function generateSdxlBodyShots(
   // LoRA stack from shared female-body-pipeline module
   const loras = buildFemaleBodyLoraStack(useMelanin);
 
-  // Fetch approved body portrait for img2img proportional anchoring
-  const bodyRefBase64 = await imageUrlToBase64(character.fullBodyImageUrl);
-
   console.log(`[LoRA Dataset] Kontext img2img checkpoint: ${KONTEXT_DATASET_MODEL}`);
 
   const records: LoraDatasetImageRow[] = [];
@@ -569,17 +566,14 @@ export async function generateSdxlBodyShots(
           seed: sdxlSeed,
           steps: 40,
           cfg: 4.0,
-          denoise: 0.80,
+          denoise: FEMALE_BODY_SDXL_CONFIG.denoiseTxt2Img,
           samplerName: 'dpmpp_2m_sde',
           checkpointName: SDXL_CHECKPOINT,
           loras,
           filenamePrefix: `sdxl_body_${loraId}`,
-          inputImageName: 'body_ref.png',
         });
 
-        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow, [
-          { name: 'body_ref.png', image: bodyRefBase64 },
-        ]);
+        const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow, []);
         const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
 
         // Step 2: Convert to photorealistic via Flux Kontext img2img (shared config)
