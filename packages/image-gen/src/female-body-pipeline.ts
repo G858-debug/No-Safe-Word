@@ -22,9 +22,9 @@ export const FEMALE_BODY_SDXL_CONFIG = {
   steps: 40,
   cfg: 4.0,
   samplerName: 'dpmpp_2m_sde' as const,
-  /** Portrait generation uses txt2img (1.0), dataset uses img2img from approved body (0.80) */
+  /** Portrait generation uses txt2img (1.0), dataset uses img2img from approved body (0.60 — low enough for pose diversity) */
   denoiseTxt2Img: 1.0,
-  denoiseImg2Img: 0.80,
+  denoiseImg2Img: 0.60,
 };
 
 // ── Flux img2img Config ──────────────────────────────────────────────────────
