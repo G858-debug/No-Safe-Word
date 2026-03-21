@@ -1758,13 +1758,29 @@ function LoraTrainingSection({
         )}
 
         {loraState.status === "awaiting_dataset_approval" && (
-          <a
-            href={`/dashboard/stories/${seriesId}/dataset-approval/${storyCharId}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-transparent px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-amber-500/10"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            Review Dataset
-          </a>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleGenerateMore}
+              disabled={generatingMore}
+              size="sm"
+              variant="outline"
+              className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+            >
+              {generatingMore ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Dna className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              Generate Dataset Images
+            </Button>
+            <a
+              href={`/dashboard/stories/${seriesId}/dataset-approval/${storyCharId}`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-transparent px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-amber-500/10"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Review Dataset
+            </a>
+          </div>
         )}
 
         {isFailed && loraState.loraId && (
