@@ -102,7 +102,7 @@ export async function generateDataset(
     ...p,
     prompt: adaptPromptForGender(p.prompt, character.gender),
   }));
-  const nbLimited = promptLimit ? nbPrompts.slice(0, Math.ceil(promptLimit * 0.6)) : nbPrompts;
+  const nbLimited = nbPrompts.slice(0, promptLimit ? Math.ceil(promptLimit * 0.4) : 10);
 
   console.log(`[LoRA Dataset] Phase 1: Generating ${nbLimited.length} face/head images via Nano Banana 2...`);
 
@@ -110,29 +110,22 @@ export async function generateDataset(
   imageRecords.push(...nbResult.records);
   failedPrompts.push(...nbResult.failures);
 
-  // ── Phase 2: Body shots ────────────────────────────────────────
-  const cuPrompts = getComfyUIPrompts().map((p) => ({
-    ...p,
-    prompt: adaptPromptForGender(
-      interpolateComfyUIPrompt(p.prompt, character.structuredData),
-      character.gender,
-    ),
-  }));
-  const cuLimited = promptLimit ? cuPrompts.slice(0, Math.ceil(promptLimit * 0.4)) : cuPrompts;
+  // ── Phase 2: Body shots (10 face / 15 body default split) ─────
+  const bodyCount = promptLimit ? Math.ceil(promptLimit * 0.6) : 15;
 
   let phase2Count: number;
 
   if (character.gender === 'female') {
     // Female: BigASP + Feminine Body Proportions + Curvy Body → Flux img2img for curvaceous body shots
-    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via SDXL→img2img...`);
-    const sdxlResult = await generateSdxlBodyShots(character, loraId, cuLimited.length, deps);
+    console.log(`[LoRA Dataset] Phase 2: Generating ${bodyCount} body images via SDXL→img2img...`);
+    const sdxlResult = await generateSdxlBodyShots(character, loraId, bodyCount, deps);
     imageRecords.push(...sdxlResult.records);
     failedPrompts.push(...sdxlResult.failures);
     phase2Count = sdxlResult.records.length;
   } else {
     // Male: Nano Banana 2 with 3:4 portrait aspect for body shots
-    console.log(`[LoRA Dataset] Phase 2: Generating ${cuLimited.length} body images via Nano Banana 2 (male)...`);
-    const nbBodyResult = await generateNanoBananaMaleBodyShots(character, loraId, cuLimited.length, deps);
+    console.log(`[LoRA Dataset] Phase 2: Generating ${bodyCount} body images via Nano Banana 2 (male)...`);
+    const nbBodyResult = await generateNanoBananaMaleBodyShots(character, loraId, bodyCount, deps);
     imageRecords.push(...nbBodyResult.records);
     failedPrompts.push(...nbBodyResult.failures);
     phase2Count = nbBodyResult.records.length;
