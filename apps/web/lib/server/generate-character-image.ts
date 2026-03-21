@@ -352,7 +352,7 @@ function buildFemaleBodyPayload(
   const height = 1152;
 
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-  loras.push({ filename: 'feminine-body-proportions-sdxl.safetensors', strengthModel: 0.80, strengthClip: 0.80 });
+  // feminine-body-proportions-sdxl removed — not on RunPod worker volume
   loras.push({ filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 });
   // perfect-breasts-v2.safetensors — re-enable once downloaded to network volume
   // loras.push({ filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.45, strengthClip: 0.45 });

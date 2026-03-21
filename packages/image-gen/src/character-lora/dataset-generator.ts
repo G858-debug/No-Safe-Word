@@ -529,7 +529,6 @@ export async function generateSdxlBodyShots(
 
   // Build LoRA stack matching generate-character-image.ts female body pipeline
   const loras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
-    { filename: 'feminine-body-proportions-sdxl.safetensors', strengthModel: 0.60, strengthClip: 0.60 },
     { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
   ];
   if (useMelanin) {
