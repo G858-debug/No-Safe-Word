@@ -38,6 +38,7 @@ export const FEMALE_BODY_KONTEXT_CONFIG = {
 export const FEMALE_BODY_KONTEXT_LORAS = [
   { filename: 'flux_realism_lora.safetensors', strengthModel: 0.8, strengthClip: 0.8 },
   { filename: 'flux-add-details.safetensors', strengthModel: 0.6, strengthClip: 0.6 },
+  { filename: 'bodylicious-flux.safetensors', strengthModel: 0.80, strengthClip: 0.80 },
 ] as const;
 
 // ── LoRA Stack ───────────────────────────────────────────────────────────────
@@ -60,7 +61,9 @@ export function isBlackAfrican(ethnicity: string): boolean {
  */
 export function buildFemaleBodyLoraStack(useMelanin: boolean): LoraEntry[] {
   const loras: LoraEntry[] = [
+    { filename: 'feminine-body-proportions-sdxl.safetensors', strengthModel: 0.80, strengthClip: 0.80 },
     { filename: 'curvy-body-sdxl.safetensors', strengthModel: 0.70, strengthClip: 0.70 },
+    { filename: 'perfect-breasts-v2.safetensors', strengthModel: 0.45, strengthClip: 0.45 },
   ];
   if (useMelanin) {
     loras.push({ filename: 'melanin-XL.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
