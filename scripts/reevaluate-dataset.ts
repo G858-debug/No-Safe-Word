@@ -159,7 +159,6 @@ async function main() {
       fullBodyUrl,
       images as LoraDatasetImageRow[],
       { supabase: sb },
-      { bodyType, skinTone },
     );
 
     // Compare old vs new statuses

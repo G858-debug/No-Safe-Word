@@ -185,7 +185,6 @@ async function main() {
     fullBodyUrl,
     sdxlResult.records,
     { supabase: sb },
-    { bodyType: structuredData.bodyType, skinTone: structuredData.skinTone },
   );
 
   console.log(`\nEvaluation: ${evalResult.passed} passed, ${evalResult.failed} failed`);

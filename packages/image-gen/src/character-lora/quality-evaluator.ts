@@ -93,15 +93,13 @@ function getFramingRules(category: string): string {
   }
 }
 
-function buildBodyEvalPrompt(bodyType: string, skinTone: string, category: string): string {
+function buildBodyEvalPrompt(category: string): string {
   return `You are evaluating body images for a LoRA training dataset.
 
 You will receive:
-1. A REFERENCE FULL-BODY (the approved body image — body proportions are the ground truth)
+1. A REFERENCE FULL-BODY (the approved body image — this is the ground truth for body proportions)
 2. A GENERATED IMAGE (a body shot variation for training)
 
-The character's described body type is: ${bodyType}
-The character's described skin tone is: ${skinTone}
 The image category is: ${category}
 
 Score each image on three criteria (1-10 each):
@@ -111,12 +109,15 @@ FACE (face_score): How clearly visible and well-rendered is the face?
   - If the head is cropped, partially out of frame, or missing → set head_cropped: true and score 2
   - A clearly visible, well-rendered face scores 7-9
 
-BODY (body_score): Does the body show a curvy figure with wide hips, full breasts, and thick thighs?
-  - Deduct points if proportions are ANATOMICALLY IMPOSSIBLE — hips wider than 1.5x shoulder width,
-    or a waist so narrow it would be physically impossible.
-  - A realistic curvy figure scores 7-9. Cartoon/impossible proportions score 3-5 regardless of curviness.
-  - Body proportions should generally match the described type (${bodyType})
-  - Skin tone should generally match: ${skinTone}. Only deduct for fundamental mismatches.
+BODY (body_score): Do the body proportions match the REFERENCE image?
+  - Compare the generated image's body shape directly against the reference
+  - Same general build, proportions, and silhouette as the reference
+  - Same skin tone as the reference — only deduct for fundamental mismatches
+  - Minor variations from pose/angle/clothing are expected and acceptable
+  - Score 7+ = proportions clearly match the reference
+  - Score 4-6 = noticeably different build from reference
+  - Score 1-3 = completely different body type from reference
+  - Deduct points if proportions look physically impossible or cartoon-like
   ${getFramingRules(category)}
 
 QUALITY (quality_score): Overall image quality, lighting, and realism.
@@ -174,7 +175,7 @@ export async function evaluateDataset(
   referenceFullBodyUrl: string,
   images: LoraDatasetImageRow[],
   deps: QualityEvaluatorDeps,
-  characterData: CharacterEvalData,
+  characterData?: CharacterEvalData,
 ): Promise<EvaluationResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -198,7 +199,7 @@ export async function evaluateDataset(
 
     const results = await Promise.allSettled(
       batch.map((image) =>
-        evaluateSingleImage(anthropic, referencePortraitUrl, referenceFullBodyUrl, image, deps, characterData)
+        evaluateSingleImage(anthropic, referencePortraitUrl, referenceFullBodyUrl, image, deps)
       )
     );
 
@@ -288,14 +289,13 @@ async function evaluateSingleImage(
   fullBodyUrl: string,
   image: LoraDatasetImageRow,
   deps: QualityEvaluatorDeps,
-  characterData: CharacterEvalData,
 ): Promise<EvalDetails> {
   const category = (image.category || 'face-closeup') as ImageCategory;
   const isBodyShot = BODY_CATEGORIES.includes(category);
 
   // Build category-specific prompt and message content
   const systemPrompt = isBodyShot
-    ? buildBodyEvalPrompt(characterData.bodyType, characterData.skinTone, category)
+    ? buildBodyEvalPrompt(category)
     : FACE_EVAL_SYSTEM_PROMPT;
 
   const messageContent: Anthropic.Messages.ContentBlockParam[] = isBodyShot

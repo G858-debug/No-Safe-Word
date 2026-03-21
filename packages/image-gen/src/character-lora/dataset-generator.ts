@@ -498,7 +498,7 @@ export async function generateSdxlBodyShots(
   count: number,
   deps: DatasetGeneratorDeps,
 ): Promise<GenerationBatchResult> {
-  const { skinTone, ethnicity, hairStyle, hairColor } = character.structuredData;
+  const { skinTone, ethnicity, hairStyle, hairColor, bodyType } = character.structuredData;
   const useMelanin = isBlackAfrican(ethnicity);
   // Assertive hair description — no "or"/"usually" hedging that lets the model pick alternatives
   const rawHairDesc = hairStyle && hairColor ? `${hairStyle} ${hairColor} hair` : '';
@@ -510,11 +510,13 @@ export async function generateSdxlBodyShots(
   const skinTonePrefix = useMelanin ? 'dark chocolate skin tone style, ' : '';
   const skinRealismPrefix = useMelanin ? 'Detailed natural skin and blemishes without-makeup and acne, ' : '';
 
+  // Use character's bodyType from DB — no hardcoded body descriptors
+  const bodyDesc = bodyType || 'curvaceous figure';
+
   const basePositive =
     `${melaninPrefix}${skinTonePrefix}${skinRealismPrefix}${hairDesc}` +
-    `extremely voluptuous figure, very large natural breasts, very wide hips, very large round ass, narrow defined waist, full thighs, ` +
-    `${ethnicity} woman, ${skinTone} skin, curvaceous figure, ` +
-    `large breasts, wide hips, thick thighs, small waist, hourglass body, ` +
+    `${bodyDesc}, ` +
+    `${ethnicity} woman, ${skinTone} skin, ` +
     `full body from head to feet`;
   const negative =
     'nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, underwear, ' +
@@ -558,7 +560,7 @@ export async function generateSdxlBodyShots(
       `Generate this exact scene: ` +
       `Photorealistic photograph, ${ethnicity} woman, ${skinTone} skin, ` +
       `${hairDesc}` +
-      `very curvy voluptuous figure matching the reference proportions, very wide hips, very large natural breasts, narrow waist, thick full thighs, large round butt, ` +
+      `${bodyDesc}, matching the reference proportions, ` +
       `${variant.clothing}, ${variant.pose}, ` +
       `full body, natural skin texture, high detail`;
     let succeeded = false;
