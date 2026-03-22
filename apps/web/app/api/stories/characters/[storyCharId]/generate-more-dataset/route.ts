@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { generateSdxlBodyShots, generateNanoBananaMaleBodyShots } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
+import { generateDataset, generateSdxlBodyShots, generateNanoBananaMaleBodyShots } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
 import { evaluateDataset } from "@no-safe-word/image-gen/server/character-lora/quality-evaluator";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/generate-more-dataset
-// Generates additional body shots for a failed LoRA that already has face shots.
+// When fullDataset=true: generates full dataset (face + body), deleting existing images first.
+// When fullDataset=false/absent: generates additional body shots only (for failed LoRAs).
 // Runs in the background (fire-and-forget).
 export async function POST(
   request: NextRequest,
@@ -13,6 +14,8 @@ export async function POST(
 ) {
   const params = await props.params;
   const { storyCharId } = params;
+  const body = await request.json().catch(() => ({}));
+  const fullDataset = body?.fullDataset === true;
 
   try {
     // 1. Fetch story character with character data
@@ -30,19 +33,19 @@ export async function POST(
       return NextResponse.json({ error: "Story character not found" }, { status: 404 });
     }
 
-    // 2. Find the failed LoRA for this character
+    // 2. Find the LoRA for this character (failed or awaiting_dataset_approval)
     const { data: lora, error: loraError } = await supabase
       .from("character_loras")
       .select("id, status")
       .eq("character_id", storyChar.character_id)
-      .eq("status", "failed")
+      .in("status", ["failed", "awaiting_dataset_approval"])
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
 
     if (loraError || !lora) {
       return NextResponse.json(
-        { error: "No failed LoRA found for this character" },
+        { error: "No eligible LoRA found for this character (must be failed or awaiting_dataset_approval)" },
         { status: 400 }
       );
     }
@@ -95,41 +98,63 @@ export async function POST(
       .update({ status: "generating_dataset", error: null } as any)
       .eq("id", lora.id);
 
-    console.log(`[Generate More] Starting body generation for ${character.name} (loraId: ${lora.id})`);
+    const mode = fullDataset ? "full dataset" : "body";
+    console.log(`[Generate More] Starting ${mode} generation for ${character.name} (loraId: ${lora.id})`);
 
     // Fire-and-forget background job
     (async () => {
       try {
-        const generateFn = characterInput.gender === 'female' ? generateSdxlBodyShots : generateNanoBananaMaleBodyShots;
-        const sdxlResult = await generateFn(characterInput, lora.id, 16, { supabase });
-        console.log(`[Generate More] ${character.name}: ${sdxlResult.records.length} body images generated`);
+        let allRecords: any[];
 
-        if (sdxlResult.records.length === 0) {
+        if (fullDataset) {
+          // Delete existing dataset images before regenerating
+          const { data: existingImages } = await supabase
+            .from("lora_dataset_images")
+            .select("id, storage_path")
+            .eq("lora_id", lora.id);
+
+          if (existingImages && existingImages.length > 0) {
+            const storagePaths = existingImages.map((img: any) => img.storage_path).filter(Boolean);
+            if (storagePaths.length > 0) {
+              await supabase.storage.from("story-images").remove(storagePaths);
+            }
+            await supabase
+              .from("lora_dataset_images")
+              .delete()
+              .eq("lora_id", lora.id);
+            console.log(`[Generate More] Deleted ${existingImages.length} existing dataset images`);
+          }
+
+          // Generate full dataset (face + body)
+          const result = await generateDataset(characterInput, lora.id, { supabase });
+          allRecords = result.imageRecords;
+          console.log(`[Generate More] ${character.name}: ${allRecords.length} images generated (full dataset)`);
+        } else {
+          // Body-only generation
+          const generateFn = characterInput.gender === 'female' ? generateSdxlBodyShots : generateNanoBananaMaleBodyShots;
+          const sdxlResult = await generateFn(characterInput, lora.id, 16, { supabase });
+          allRecords = sdxlResult.records;
+          console.log(`[Generate More] ${character.name}: ${allRecords.length} body images generated`);
+        }
+
+        if (allRecords.length === 0) {
           await supabase
             .from("character_loras")
-            .update({ status: "failed", error: "Body shot generation produced no images" } as any)
+            .update({ status: "failed", error: "Dataset generation produced no images" } as any)
             .eq("id", lora.id);
           return;
         }
 
-        // Evaluate new body images
+        // Evaluate new images
         await supabase
           .from("character_loras")
           .update({ status: "evaluating" } as any)
           .eq("id", lora.id);
 
-        const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, sdxlResult.records, { supabase });
-        console.log(`[Generate More] ${character.name}: ${evalResult.passed} body images passed evaluation`);
+        const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, allRecords, { supabase });
+        console.log(`[Generate More] ${character.name}: ${evalResult.passed} images passed evaluation`);
 
-        // Count total passed (existing + new)
-        const { count: existingPassed } = await supabase
-          .from("lora_dataset_images")
-          .select("*", { count: "exact", head: true })
-          .eq("lora_id", lora.id)
-          .eq("eval_status", "passed")
-          .not("id", "in", `(${sdxlResult.records.map(r => r.id).join(",")})`);
-
-        // Simpler: just count all passed for this LoRA
+        // Count all passed for this LoRA
         const { count: totalPassed } = await supabase
           .from("lora_dataset_images")
           .select("*", { count: "exact", head: true })
@@ -177,7 +202,7 @@ export async function POST(
         console.error(`[Generate More] ${character.name} FAILED: ${msg}`);
         await supabase
           .from("character_loras")
-          .update({ status: "failed", error: `Body generation failed: ${msg}` } as any)
+          .update({ status: "failed", error: `Dataset generation failed: ${msg}` } as any)
           .eq("id", lora.id);
       }
     })();
@@ -185,7 +210,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       loraId: lora.id,
-      message: `Generating additional body shots for ${character.name}. Poll /lora-progress for status.`,
+      message: `Generating ${fullDataset ? "full dataset" : "additional body shots"} for ${character.name}. Poll /lora-progress for status.`,
     });
   } catch (err) {
     console.error("[Generate More API] Failed:", err);

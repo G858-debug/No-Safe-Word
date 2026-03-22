@@ -1705,11 +1705,13 @@ function LoraTrainingSection({
   const isDeployed = loraState.status === "deployed";
   const isFailed = loraState.status === "failed";
 
-  const handleGenerateMore = async () => {
+  const handleGenerateMore = async (fullDataset = false) => {
     setGeneratingMore(true);
     try {
       const res = await fetch(`/api/stories/characters/${storyCharId}/generate-more-dataset`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullDataset }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -1760,7 +1762,7 @@ function LoraTrainingSection({
         {loraState.status === "awaiting_dataset_approval" && (
           <div className="flex items-center gap-2">
             <Button
-              onClick={handleGenerateMore}
+              onClick={() => handleGenerateMore(true)}
               disabled={generatingMore}
               size="sm"
               variant="outline"
