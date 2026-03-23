@@ -4,7 +4,9 @@ import { regenerateSingleImage } from "@no-safe-word/image-gen/server/character-
 import type { CharacterInput, CharacterStructured, ImageSource, VariationType } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/dataset-images/[imageId]/regenerate
-// Regenerates a single dataset image using the appropriate pipeline.
+// Kicks off dataset image regeneration in the background (fire-and-forget)
+// and returns immediately to avoid Cloudflare's 100-second proxy timeout.
+// The frontend polls GET .../[imageId]/regenerate-status for the result.
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string; imageId: string }> }
@@ -112,8 +114,35 @@ export async function POST(
       .update({ eval_status: "replaced" } as any)
       .eq("id", imageId);
 
-    // 6. Generate replacement image (synchronous — waits for result)
-    const newImage = await regenerateSingleImage(
+    // 6. Fire-and-forget: kick off regeneration in the background.
+    // We store a status marker so the frontend can poll for the result.
+    // Using a simple convention: a row in lora_dataset_images with eval_status='generating'
+    // is the placeholder for the in-progress regeneration.
+    const { data: placeholder, error: phError } = await supabase
+      .from("lora_dataset_images")
+      .insert({
+        lora_id: lora.id,
+        image_url: "",
+        storage_path: "",
+        prompt_template: existingImage.prompt_template,
+        variation_type: existingImage.variation_type,
+        source: existingImage.source,
+        category: existingImage.category,
+        eval_status: "generating",
+      } as any)
+      .select("id")
+      .single();
+
+    if (phError || !placeholder) {
+      throw new Error(`Failed to create placeholder: ${phError?.message}`);
+    }
+
+    const placeholderId = placeholder.id;
+
+    console.log(`[Regenerate Image] Background job started: placeholder=${placeholderId}, replacing=${imageId}`);
+
+    // Run the generation in the background (don't await)
+    regenerateSingleImage(
       characterInput,
       lora.id,
       {
@@ -124,27 +153,36 @@ export async function POST(
       },
       customPrompt,
       { supabase },
-    );
+    ).then(async (newImage) => {
+      // Generation succeeded — delete the placeholder (the real image was already saved)
+      await supabase
+        .from("lora_dataset_images")
+        .delete()
+        .eq("id", placeholderId);
 
+      console.log(`[Regenerate Image] Background job completed: newImage=${newImage.id}, placeholder=${placeholderId} deleted`);
+    }).catch(async (err) => {
+      // Generation failed — update placeholder with error
+      console.error("[Regenerate Image] Background job failed:", {
+        placeholderId,
+        imageId,
+        error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
+      });
+
+      await supabase
+        .from("lora_dataset_images")
+        .update({ eval_status: "failed", eval_details: err instanceof Error ? err.message : "Unknown error" } as any)
+        .eq("id", placeholderId);
+    });
+
+    // 7. Return immediately with the placeholder ID for polling
     return NextResponse.json({
-      success: true,
-      image: {
-        id: newImage.id,
-        image_url: newImage.image_url,
-        category: newImage.category,
-        variation_type: newImage.variation_type,
-        eval_status: newImage.eval_status,
-        eval_score: newImage.eval_score,
-        eval_details: newImage.eval_details,
-        human_approved: newImage.human_approved,
-        caption: newImage.caption,
-        prompt_template: newImage.prompt_template,
-        source: newImage.source,
-        resolvedPrompt: customPrompt || null,
-      },
+      accepted: true,
+      placeholderId,
+      oldImageId: imageId,
     });
   } catch (err) {
-    console.error("[Regenerate Image] Failed:", {
+    console.error("[Regenerate Image] Failed to start:", {
       storyCharId,
       imageId,
       error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
@@ -152,7 +190,6 @@ export async function POST(
     return NextResponse.json(
       {
         error: err instanceof Error ? err.message : "Failed to regenerate image",
-        stack: err instanceof Error ? err.stack : undefined,
       },
       { status: 500 }
     );

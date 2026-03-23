@@ -190,6 +190,7 @@ function ImageLightbox({
         body.customPrompt = editedPrompt;
       }
 
+      // 1. Fire off the regeneration (returns immediately)
       const res = await fetch(
         `/api/stories/characters/${storyCharId}/dataset-images/${image.id}/regenerate`,
         {
@@ -201,14 +202,68 @@ function ImageLightbox({
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        const detail = data.stack ? `\n${data.stack}` : "";
-        setRegenError((data.error || "Regeneration failed") + detail);
+        setRegenError(data.error || "Regeneration failed");
         setRegenerating(false);
         return;
       }
 
       const data = await res.json();
-      onImageRegenerated(image.id, data.image);
+      if (!data.accepted || !data.placeholderId) {
+        // Legacy synchronous response (e.g. nano-banana that completed fast)
+        if (data.image) {
+          onImageRegenerated(image.id, data.image);
+          setRegenerating(false);
+          return;
+        }
+      }
+
+      // 2. Poll for completion
+      const placeholderId = data.placeholderId;
+      const POLL_INTERVAL = 4000;
+      const MAX_POLLS = 120; // 8 minutes max
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+        const statusRes = await fetch(
+          `/api/stories/characters/${storyCharId}/dataset-images/${placeholderId}/regenerate-status`
+        );
+
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+
+        if (statusData.status === "completed") {
+          // Fetch the updated image list to get the new image
+          const listRes = await fetch(
+            `/api/stories/characters/${storyCharId}/dataset-images`
+          );
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            const allImages = listData.images as DatasetImage[];
+            // Find the newest image that wasn't in the original set
+            const newImg = allImages.find((img: DatasetImage) => img.id !== image.id && !images.some((existing) => existing.id === img.id));
+            if (newImg) {
+              onImageRegenerated(image.id, newImg);
+            } else {
+              // Fallback: just reload all images
+              onImageRegenerated(image.id, allImages[allImages.length - 1]);
+            }
+          }
+          setRegenerating(false);
+          return;
+        }
+
+        if (statusData.status === "failed") {
+          setRegenError(statusData.error || "Regeneration failed");
+          setRegenerating(false);
+          return;
+        }
+
+        // Still generating — keep polling
+      }
+
+      setRegenError("Regeneration timed out after 8 minutes");
     } catch {
       setRegenError("Network error");
     }
