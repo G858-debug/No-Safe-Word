@@ -1814,7 +1814,7 @@ function LoraTrainingSection({
             </Button>
             {loraState.loraId && (
               <Button
-                onClick={handleGenerateMore}
+                onClick={() => handleGenerateMore()}
                 disabled={generatingMore}
                 size="sm"
                 variant="outline"
