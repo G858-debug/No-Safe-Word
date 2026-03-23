@@ -442,21 +442,34 @@ async function runEvaluation(
         : '')
     );
 
-    const evalFailures = allImages
-      .filter((img) => !evalResult.passedImages.some((p) => p.id === img.id))
-      .map((img) => ({
-        promptTemplate: img.prompt_template,
-        variationType: img.variation_type as VariationType,
-        source: img.source as ImageSource,
-      }));
+    const failedImages = allImages
+      .filter((img) => !evalResult.passedImages.some((p) => p.id === img.id));
 
-    for (const img of allImages) {
-      if (!evalResult.passedImages.some((p) => p.id === img.id)) {
-        await deps.supabase
+    // Fetch eval_details for failed images to feed back into replacement generation
+    const failedImageIds = failedImages.map((img) => img.id);
+    const { data: failedWithDetails } = failedImageIds.length > 0
+      ? await deps.supabase
           .from('lora_dataset_images')
-          .update({ eval_status: 'replaced' })
-          .eq('id', img.id);
-      }
+          .select('id, eval_details')
+          .in('id', failedImageIds)
+      : { data: [] };
+
+    const evalDetailsMap = new Map(
+      (failedWithDetails || []).map((row: any) => [row.id, row.eval_details])
+    );
+
+    const evalFailures = failedImages.map((img) => ({
+      promptTemplate: img.prompt_template,
+      variationType: img.variation_type as VariationType,
+      source: img.source as ImageSource,
+      evalDetails: evalDetailsMap.get(img.id),
+    }));
+
+    for (const img of failedImages) {
+      await deps.supabase
+        .from('lora_dataset_images')
+        .update({ eval_status: 'replaced' })
+        .eq('id', img.id);
     }
 
     const allFailures = [
@@ -467,7 +480,7 @@ async function runEvaluation(
       })),
     ];
 
-    const replacements = await generateReplacements(character, loraId, allFailures, deps);
+    const replacements = await generateReplacements(character, loraId, allFailures, deps, { round });
 
     const generatedTemplates = new Set(
       replacements.map((r) => r.prompt_template.replace(/_replacement$/, ''))

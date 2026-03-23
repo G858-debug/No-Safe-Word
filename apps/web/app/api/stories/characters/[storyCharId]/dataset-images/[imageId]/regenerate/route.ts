@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { regenerateSingleImage } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
+import { regenerateSingleImage, buildExtraNegativeFromEval } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
 import { evaluateDataset } from "@no-safe-word/image-gen/server/character-lora/quality-evaluator";
 import type { CharacterInput, CharacterStructured, ImageSource, VariationType } from "@no-safe-word/image-gen";
 
@@ -143,39 +143,77 @@ export async function POST(
     console.log(`[Regenerate Image] Background job started: placeholder=${placeholderId}, replacing=${imageId}`);
 
     // Run the generation in the background (don't await)
-    regenerateSingleImage(
-      characterInput,
-      lora.id,
-      {
-        source: existingImage.source as ImageSource,
-        category: existingImage.category,
-        variationType: existingImage.variation_type as VariationType,
-        promptTemplate: existingImage.prompt_template,
-      },
-      customPrompt,
-      { supabase },
-    ).then(async (newImage) => {
-      // Generation succeeded — delete the placeholder (the real image was already saved)
-      await supabase
-        .from("lora_dataset_images")
-        .delete()
-        .eq("id", placeholderId);
+    // Body shots get up to 3 attempts with variant cycling + eval-informed negative prompts.
+    // Face shots remain single-attempt.
+    const isBodyShot = ["waist-up", "full-body", "body-detail"].includes(existingImage.category);
+    const maxAttempts = isBodyShot ? 3 : 1;
 
-      console.log(`[Regenerate Image] Background job completed: newImage=${newImage.id}, placeholder=${placeholderId} deleted`);
+    (async () => {
+      let lastEvalDetails: any = undefined;
+      let passed = false;
 
-      // Evaluate the new image against reference images (same as batch flow)
-      console.log(`[Regenerate Image] Evaluating newImage=${newImage.id}...`);
-      const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, [newImage], { supabase });
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const newImage = await regenerateSingleImage(
+          characterInput,
+          lora.id,
+          {
+            source: existingImage.source as ImageSource,
+            category: existingImage.category,
+            variationType: existingImage.variation_type as VariationType,
+            promptTemplate: existingImage.prompt_template,
+          },
+          customPrompt,
+          { supabase },
+          {
+            variantOffset: attempt,
+            extraNegative: lastEvalDetails ? buildExtraNegativeFromEval(lastEvalDetails) : undefined,
+          },
+        );
 
-      // Set human_approved based on eval verdict (matching batch flow)
-      const passed = evalResult.passed > 0;
-      await supabase
-        .from("lora_dataset_images")
-        .update({ human_approved: passed } as any)
-        .eq("id", newImage.id);
+        // Delete placeholder on first attempt only (real image row already created)
+        if (attempt === 1) {
+          await supabase
+            .from("lora_dataset_images")
+            .delete()
+            .eq("id", placeholderId);
+          console.log(`[Regenerate Image] Background job started: attempt ${attempt}/${maxAttempts}, newImage=${newImage.id}, placeholder=${placeholderId} deleted`);
+        } else {
+          console.log(`[Regenerate Image] Retry attempt ${attempt}/${maxAttempts}: newImage=${newImage.id}`);
+        }
 
-      console.log(`[Regenerate Image] Evaluation complete: ${passed ? "PASS" : "FAIL"} for newImage=${newImage.id}`);
-    }).catch(async (err) => {
+        // Evaluate the new image against reference images
+        const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, [newImage], { supabase });
+        passed = evalResult.passed > 0;
+
+        if (passed || attempt === maxAttempts) {
+          // Final attempt or passed — set human_approved and stop
+          await supabase
+            .from("lora_dataset_images")
+            .update({ human_approved: passed } as any)
+            .eq("id", newImage.id);
+          console.log(
+            `[Regenerate Image] Body shot ${passed ? "passed" : "failed"} on attempt ${attempt}/${maxAttempts} for newImage=${newImage.id}`
+          );
+          break;
+        }
+
+        // Failed but attempts remain — fetch eval details for negative prompt reinforcement
+        const { data: evalRow } = await supabase
+          .from("lora_dataset_images")
+          .select("eval_details")
+          .eq("id", newImage.id)
+          .single();
+        lastEvalDetails = evalRow?.eval_details;
+
+        console.log(`[Regenerate Image] Body shot attempt ${attempt}/${maxAttempts}: FAIL, retrying with different variant...`);
+
+        // Mark this attempt as replaced before generating the next
+        await supabase
+          .from("lora_dataset_images")
+          .update({ eval_status: "replaced" } as any)
+          .eq("id", newImage.id);
+      }
+    })().catch(async (err) => {
       // Generation failed — mark placeholder as failed with error in eval_details
       console.error("[Regenerate Image] Background job failed:", {
         placeholderId,

@@ -145,14 +145,34 @@ export async function generateDataset(
 }
 
 /**
+ * Build extra negative prompt terms from evaluation failure details.
+ * Reinforces the negative prompt on retry based on WHY the previous attempt failed.
+ */
+export function buildExtraNegativeFromEval(evalDetails?: any): string {
+  if (!evalDetails) return '';
+  const terms: string[] = [];
+  if (evalDetails.head_cropped) {
+    terms.push('person without head, cropped at neck, head above frame, no head visible');
+  }
+  if (evalDetails.face_only_crop) {
+    terms.push('face only, portrait, headshot, extreme close-up, no body visible');
+  }
+  if (evalDetails.proportions_realistic === false) {
+    terms.push('cartoon proportions, impossibly exaggerated, anime style, 3d render');
+  }
+  return terms.join(', ');
+}
+
+/**
  * Generate replacement images for failed evaluations.
  * Routes to the correct pipeline based on the original source.
  */
 export async function generateReplacements(
   character: CharacterInput,
   loraId: string,
-  failedImages: Array<{ promptTemplate: string; variationType: VariationType; source?: ImageSource }>,
+  failedImages: Array<{ promptTemplate: string; variationType: VariationType; source?: ImageSource; evalDetails?: any }>,
   deps: DatasetGeneratorDeps,
+  options?: { round?: number },
 ): Promise<LoraDatasetImageRow[]> {
   const allPrompts = [
     ...getNanoBananaPrompts().map((p) => ({
@@ -175,8 +195,13 @@ export async function generateReplacements(
   for (const failed of failedImages) {
     try {
       // SDXL→img2img replacements don't use prompt templates — generate a fresh body shot
+      // Cycle variant based on round number and reinforce negative prompt from eval failures
       if (failed.source === 'sdxl-img2img') {
-        const result = await generateSdxlBodyShots(character, loraId, 1, deps);
+        const extraNeg = buildExtraNegativeFromEval(failed.evalDetails);
+        const result = await generateSdxlBodyShots(character, loraId, 1, deps, {
+          variantOffset: (options?.round ?? 0) + 1,
+          extraNegative: extraNeg || undefined,
+        });
         replacements.push(...result.records);
         continue;
       }
@@ -502,6 +527,7 @@ export async function generateSdxlBodyShots(
   loraId: string,
   count: number,
   deps: DatasetGeneratorDeps,
+  options?: { variantOffset?: number; extraNegative?: string },
 ): Promise<GenerationBatchResult> {
   const { skinTone, ethnicity, hairStyle, hairColor, bodyType } = character.structuredData;
   const useMelanin = isBlackAfrican(ethnicity);
@@ -523,12 +549,15 @@ export async function generateSdxlBodyShots(
     `${bodyDesc}, ` +
     `${ethnicity} woman, ${skinTone} skin, ` +
     `full body from head to feet`;
-  const negative =
+  const baseNegative =
     'nude, naked, topless, bare breasts, exposed chest, nsfw, lingerie, underwear, ' +
     'skinny, thin, flat chest, small breasts, narrow hips, deformed, ' +
     'bad anatomy, extra limbs, (worst quality:2), (low quality:2), ' +
     'white skin, pale skin, asian features, european features, ' +
     'cropped head, cut off head, forehead cropped, head out of frame, headless, partial face, face not visible';
+  const negative = options?.extraNegative
+    ? `${baseNegative}, ${options.extraNegative}`
+    : baseNegative;
 
   // img2imgPrompt is built per-variant inside the loop (not static) — see below
 
@@ -542,7 +571,7 @@ export async function generateSdxlBodyShots(
   let lastError: Error | undefined;
 
   for (let i = 0; i < count; i++) {
-    const variant = BODY_PROMPT_VARIANTS[i % BODY_PROMPT_VARIANTS.length];
+    const variant = BODY_PROMPT_VARIANTS[(i + (options?.variantOffset ?? 0)) % BODY_PROMPT_VARIANTS.length];
     const prompt = `${basePositive}, ${variant.clothing}, ${variant.pose}`;
     const promptId = `sdxl_body_${i}_${Date.now()}`;
 
@@ -693,10 +722,11 @@ export async function regenerateSingleImage(
   },
   customPrompt: string | undefined,
   deps: DatasetGeneratorDeps,
+  options?: { variantOffset?: number; extraNegative?: string },
 ): Promise<LoraDatasetImageRow> {
   if (original.source === 'sdxl-img2img') {
     // SDXL body shots use variant cycling — custom prompt not applicable
-    const result = await generateSdxlBodyShots(character, loraId, 1, deps);
+    const result = await generateSdxlBodyShots(character, loraId, 1, deps, options);
     if (result.records.length === 0) {
       const detail = result.lastError ? `: ${result.lastError.message}` : '';
       throw new Error(`SDXL body shot regeneration produced no images${detail}`);
