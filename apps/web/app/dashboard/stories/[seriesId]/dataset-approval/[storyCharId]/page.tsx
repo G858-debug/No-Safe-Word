@@ -201,7 +201,8 @@ function ImageLightbox({
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setRegenError(data.error || "Regeneration failed");
+        const detail = data.stack ? `\n${data.stack}` : "";
+        setRegenError((data.error || "Regeneration failed") + detail);
         setRegenerating(false);
         return;
       }

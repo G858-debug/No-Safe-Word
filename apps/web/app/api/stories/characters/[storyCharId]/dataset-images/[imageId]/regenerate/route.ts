@@ -144,9 +144,16 @@ export async function POST(
       },
     });
   } catch (err) {
-    console.error("[Regenerate Image] Failed:", err);
+    console.error("[Regenerate Image] Failed:", {
+      storyCharId,
+      imageId,
+      error: err instanceof Error ? { message: err.message, stack: err.stack } : err,
+    });
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to regenerate image" },
+      {
+        error: err instanceof Error ? err.message : "Failed to regenerate image",
+        stack: err instanceof Error ? err.stack : undefined,
+      },
       { status: 500 }
     );
   }

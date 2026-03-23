@@ -213,6 +213,8 @@ export async function generateReplacements(
 interface GenerationBatchResult {
   records: LoraDatasetImageRow[];
   failures: DatasetGenerationResult['failedPrompts'];
+  /** Last error encountered (useful when records is empty to surface why) */
+  lastError?: Error;
 }
 
 async function generateNanoBananaImages(
@@ -537,6 +539,7 @@ export async function generateSdxlBodyShots(
 
   const records: LoraDatasetImageRow[] = [];
   const failures: DatasetGenerationResult['failedPrompts'] = [];
+  let lastError: Error | undefined;
 
   for (let i = 0; i < count; i++) {
     const variant = BODY_PROMPT_VARIANTS[i % BODY_PROMPT_VARIANTS.length];
@@ -558,6 +561,7 @@ export async function generateSdxlBodyShots(
       try {
         // Step 1: Generate SDXL body shot via ComfyUI on RunPod (img2img from approved body)
         const sdxlSeed = Math.floor(Math.random() * 2_147_483_647);
+        console.log(`[LoRA Dataset] SDXL body attempt ${attempt}/${MAX_GENERATION_RETRIES} for ${promptId}, seed=${sdxlSeed}`);
         const sdxlWorkflow = buildSdxlWorkflow({
           positivePrompt: prompt,
           negativePrompt: negative,
@@ -574,8 +578,10 @@ export async function generateSdxlBodyShots(
         });
 
         const { jobId: sdxlJobId } = await submitRunPodJob(sdxlWorkflow, []);
+        console.log(`[LoRA Dataset] SDXL Step 1 submitted for ${promptId}: job=${sdxlJobId}`);
         const { imageBase64: sdxlBase64 } = await waitForRunPodResult(sdxlJobId, 300000, 3000);
 
+        console.log(`[LoRA Dataset] SDXL Step 1 complete for ${promptId}, submitting Flux img2img...`);
         // Step 2: Convert to photorealistic via Flux Kontext img2img (shared config)
         const fluxWorkflow = buildKontextWorkflow({
           type: 'img2img',
@@ -639,6 +645,7 @@ export async function generateSdxlBodyShots(
         records.push(record as LoraDatasetImageRow);
         succeeded = true;
       } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
         const isTransient = isTransientError(error);
         if (attempt < MAX_GENERATION_RETRIES && isTransient) {
           const delay = RETRY_BASE_DELAY * attempt;
@@ -647,7 +654,7 @@ export async function generateSdxlBodyShots(
           );
           await sleep(delay);
         } else {
-          console.error(`[LoRA Dataset] SDXL body failed ${promptId} after ${attempt} attempt(s): ${error}`);
+          console.error(`[LoRA Dataset] SDXL body failed ${promptId} after ${attempt} attempt(s):`, lastError.message, lastError.stack);
         }
       }
     }
@@ -666,7 +673,7 @@ export async function generateSdxlBodyShots(
     }
   }
 
-  return { records, failures };
+  return { records, failures, lastError };
 }
 
 // ── Single Image Regeneration ─────────────────────────────────────
@@ -691,7 +698,8 @@ export async function regenerateSingleImage(
     // SDXL body shots use variant cycling — custom prompt not applicable
     const result = await generateSdxlBodyShots(character, loraId, 1, deps);
     if (result.records.length === 0) {
-      throw new Error('SDXL body shot regeneration produced no images');
+      const detail = result.lastError ? `: ${result.lastError.message}` : '';
+      throw new Error(`SDXL body shot regeneration produced no images${detail}`);
     }
     return result.records[0];
   }
