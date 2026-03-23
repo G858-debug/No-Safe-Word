@@ -115,20 +115,20 @@ export async function POST(
       .eq("id", imageId);
 
     // 6. Fire-and-forget: kick off regeneration in the background.
-    // We store a status marker so the frontend can poll for the result.
-    // Using a simple convention: a row in lora_dataset_images with eval_status='generating'
-    // is the placeholder for the in-progress regeneration.
+    // Use a placeholder row with eval_status='pending' (allowed by DB check constraint)
+    // and a unique marker in prompt_template so the status endpoint can find it.
+    const regenMarker = `__regen_${Date.now()}`;
     const { data: placeholder, error: phError } = await supabase
       .from("lora_dataset_images")
       .insert({
         lora_id: lora.id,
         image_url: "",
         storage_path: "",
-        prompt_template: existingImage.prompt_template,
+        prompt_template: regenMarker,
         variation_type: existingImage.variation_type,
         source: existingImage.source,
         category: existingImage.category,
-        eval_status: "generating",
+        eval_status: "pending",
       } as any)
       .select("id")
       .single();
@@ -162,7 +162,7 @@ export async function POST(
 
       console.log(`[Regenerate Image] Background job completed: newImage=${newImage.id}, placeholder=${placeholderId} deleted`);
     }).catch(async (err) => {
-      // Generation failed — update placeholder with error
+      // Generation failed — mark placeholder as failed with error in eval_details
       console.error("[Regenerate Image] Background job failed:", {
         placeholderId,
         imageId,
@@ -171,7 +171,10 @@ export async function POST(
 
       await supabase
         .from("lora_dataset_images")
-        .update({ eval_status: "failed", eval_details: err instanceof Error ? err.message : "Unknown error" } as any)
+        .update({
+          eval_status: "failed",
+          eval_details: { error: err instanceof Error ? err.message : "Unknown error" },
+        } as any)
         .eq("id", placeholderId);
     });
 

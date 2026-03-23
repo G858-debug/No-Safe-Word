@@ -15,28 +15,20 @@ export async function GET(
     // Check if the placeholder still exists
     const { data: placeholder, error } = await supabase
       .from("lora_dataset_images")
-      .select("id, eval_status, eval_details")
+      .select("id, eval_status, eval_details, image_url")
       .eq("id", placeholderId)
       .single();
 
     if (error || !placeholder) {
-      // Placeholder was deleted = generation succeeded.
-      // Find the newest non-replaced image for this LoRA (the one just created).
-      // We use created_at desc to get the most recent.
-      // The caller already knows the lora_id context, but we need the actual new image.
-      // Since the placeholder is gone, the new image is the latest one created after it.
-      return NextResponse.json({
-        status: "completed",
-      });
-    }
-
-    if (placeholder.eval_status === "generating") {
-      return NextResponse.json({
-        status: "generating",
-      });
+      // Placeholder was deleted = generation succeeded
+      return NextResponse.json({ status: "completed" });
     }
 
     if (placeholder.eval_status === "failed") {
+      // Extract error message from eval_details (stored as JSON object)
+      const details = placeholder.eval_details as Record<string, unknown> | null;
+      const errorMsg = details?.error || "Generation failed";
+
       // Clean up the failed placeholder
       await supabase
         .from("lora_dataset_images")
@@ -45,14 +37,17 @@ export async function GET(
 
       return NextResponse.json({
         status: "failed",
-        error: placeholder.eval_details || "Generation failed",
+        error: errorMsg,
       });
     }
 
-    // Unexpected status — treat as still generating
-    return NextResponse.json({
-      status: "generating",
-    });
+    // Placeholder exists with pending/other status and empty image_url = still generating
+    if (!placeholder.image_url) {
+      return NextResponse.json({ status: "generating" });
+    }
+
+    // Has an image_url but not failed — unexpected, treat as completed
+    return NextResponse.json({ status: "completed" });
   } catch (err) {
     console.error("[Regenerate Status] Failed:", err);
     return NextResponse.json(
