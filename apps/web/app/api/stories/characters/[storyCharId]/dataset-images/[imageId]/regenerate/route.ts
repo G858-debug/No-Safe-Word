@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { regenerateSingleImage } from "@no-safe-word/image-gen/server/character-lora/dataset-generator";
+import { evaluateDataset } from "@no-safe-word/image-gen/server/character-lora/quality-evaluator";
 import type { CharacterInput, CharacterStructured, ImageSource, VariationType } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/dataset-images/[imageId]/regenerate
@@ -161,6 +162,19 @@ export async function POST(
         .eq("id", placeholderId);
 
       console.log(`[Regenerate Image] Background job completed: newImage=${newImage.id}, placeholder=${placeholderId} deleted`);
+
+      // Evaluate the new image against reference images (same as batch flow)
+      console.log(`[Regenerate Image] Evaluating newImage=${newImage.id}...`);
+      const evalResult = await evaluateDataset(portraitUrl, fullBodyUrl, [newImage], { supabase });
+
+      // Set human_approved based on eval verdict (matching batch flow)
+      const passed = evalResult.passed > 0;
+      await supabase
+        .from("lora_dataset_images")
+        .update({ human_approved: passed } as any)
+        .eq("id", newImage.id);
+
+      console.log(`[Regenerate Image] Evaluation complete: ${passed ? "PASS" : "FAIL"} for newImage=${newImage.id}`);
     }).catch(async (err) => {
       // Generation failed — mark placeholder as failed with error in eval_details
       console.error("[Regenerate Image] Background job failed:", {
