@@ -13,6 +13,19 @@ import { DEFAULT_TRAINING_PARAMS, PIPELINE_CONFIG } from './types';
 const LORA_TRAINING_OWNER = 'ostris';
 const LORA_TRAINING_MODEL = 'flux-dev-lora-trainer';
 
+/**
+ * Thrown when dataset ZIP preparation fails (e.g. image download 400/404).
+ * This is NOT a training failure — retrying with different training params
+ * won't help. The pipeline should surface this immediately without
+ * incrementing training_attempts.
+ */
+export class DatasetPreparationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatasetPreparationError';
+  }
+}
+
 async function getFluxTrainerVersion(): Promise<string> {
   const resp = await fetch(
     `https://api.replicate.com/v1/models/${LORA_TRAINING_OWNER}/${LORA_TRAINING_MODEL}`,
@@ -70,7 +83,16 @@ export async function trainLora(
     console.log(`[LoRA Train] Reusing existing ZIP: ${zipUrl}`);
   } else {
     // Step 1: Create ZIP of images + captions
-    const zipBuffer = await createTrainingZip(captionedImages);
+    // Wrap in DatasetPreparationError so the pipeline doesn't count
+    // image download failures as training attempts.
+    let zipBuffer: Buffer;
+    try {
+      zipBuffer = await createTrainingZip(captionedImages);
+    } catch (err) {
+      throw new DatasetPreparationError(
+        `ZIP creation failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
     console.log(`[LoRA Train] ZIP created: ${(zipBuffer.length / 1024 / 1024).toFixed(1)}MB`);
 
     // Step 2: Upload ZIP to Supabase Storage
@@ -83,7 +105,7 @@ export async function trainLora(
       });
 
     if (uploadError) {
-      throw new Error(`Failed to upload training ZIP: ${uploadError.message}`);
+      throw new DatasetPreparationError(`Failed to upload training ZIP: ${uploadError.message}`);
     }
 
     const { data: urlData } = deps.supabase.storage

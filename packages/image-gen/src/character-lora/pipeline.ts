@@ -24,7 +24,7 @@ import { PIPELINE_CONFIG, DEFAULT_TRAINING_PARAMS } from './types';
 import { generateDataset, generateReplacements } from './dataset-generator';
 import { evaluateDataset } from './quality-evaluator';
 import { generateCaptions } from './caption-generator';
-import { trainLora, getRetryParams, getReplicateUsername, ensureReplicateModel } from './trainer';
+import { trainLora, getRetryParams, getReplicateUsername, ensureReplicateModel, DatasetPreparationError } from './trainer';
 import { validateLora } from './validator';
 import { deployLora } from './deployer';
 import Replicate from 'replicate';
@@ -348,6 +348,16 @@ export async function resumePipeline(
             );
           }
         } catch (error) {
+          // Dataset preparation errors (bad image URLs, upload failures) are not
+          // training failures — retrying with different params won't help.
+          // Fail immediately without burning training attempts.
+          if (error instanceof DatasetPreparationError) {
+            console.error(
+              `[LoRA Pipeline] Dataset preparation failed (not a training error): ${error.message}`
+            );
+            throw error;
+          }
+
           console.error(
             `[LoRA Pipeline] Training attempt ${attempt} error: ${error}`
           );
