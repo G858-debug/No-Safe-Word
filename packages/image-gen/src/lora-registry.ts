@@ -105,7 +105,7 @@ export const KONTEXT_LORA_REGISTRY: LoraEntry[] = [
     triggerWord: 'huge breasts, huge hips, huge ass, narrow waist',
     description: 'Exaggerated feminine curves LoRA — huge breasts, huge hips, huge ass, narrow waist (Flux Dev, CivitAI 238105 v979680)',
     compatibleWith: ['sfw', 'nsfw'],
-    installed: false,
+    installed: true,
     genderCategory: 'female',
   },
   {
@@ -335,7 +335,7 @@ export function selectKontextResources(opts: {
   //   'auto' defaults to bodylicious for its stronger curve reinforcement
   if (hasFemaleCharacter) {
     const isSecondaryOnly = !isFemale && secondaryGender === 'female';
-    const secondaryReduction = isSecondaryOnly ? 0.7 : 1.0;
+    const secondaryReduction = isSecondaryOnly ? 0.85 : 1.0;
 
     const useHourglass = bodyShape === 'hourglass';
     if (useHourglass) {
@@ -344,9 +344,9 @@ export function selectKontextResources(opts: {
       loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
     } else {
       // bodylicious or auto
-      let strength = 0.7 * secondaryReduction;
+      let strength = 0.8 * secondaryReduction;
       if (isFullBody) strength = 0.95 * secondaryReduction;
-      if (isCloseUp) strength = 0.4 * secondaryReduction;
+      if (isCloseUp) strength = 0.5 * secondaryReduction;
       // Prompt-based full-body boost for single-character scenes only
       const isPromptFullBody = /\b(full[- ]body|full[- ]length)\b/i.test(prompt);
       if (isPromptFullBody && !hasDualCharacter) strength = Math.min(strength + 0.15, 1.0);
