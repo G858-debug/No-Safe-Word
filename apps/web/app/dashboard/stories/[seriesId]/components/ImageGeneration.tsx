@@ -1171,9 +1171,8 @@ function ImageCard({
         </div>
 
         {/* Diagnostic toggles */}
-        {!isApproved && (
-          <div>
-            <button
+        <div>
+          <button
               onClick={() =>
                 onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
               }
@@ -1192,8 +1191,7 @@ function ImageCard({
                 />
               </div>
             )}
-          </div>
-        )}
+        </div>
 
         {/* Actions */}
         <div className="flex items-center gap-1.5">
