@@ -1,3 +1,5 @@
+import { DEFAULT_DIAGNOSTIC_FLAGS, type DiagnosticFlags } from './diagnostic-flags';
+
 export type LoraCategory = 'detail' | 'skin' | 'eyes' | 'hands' | 'lighting' | 'bodies' | 'style' | 'cinematic' | 'melanin' | 'character';
 export type ContentMode = 'sfw' | 'nsfw';
 
@@ -268,8 +270,11 @@ export function selectKontextResources(opts: {
   bodyShapeLoRA?: 'hourglass' | 'bodylicious' | 'auto';
   /** Include RefControl Kontext pose LoRA for identity+pose transfer */
   hasRefControlPose?: boolean;
+  /** Diagnostic flags to selectively disable LoRA slots */
+  diagnosticFlags?: Partial<DiagnosticFlags>;
 }): KontextResourceSelection {
   const { gender, secondaryGender, isSfw, imageType, prompt, hasDualCharacter } = opts;
+  const flags = { ...DEFAULT_DIAGNOSTIC_FLAGS, ...opts.diagnosticFlags };
   const bodyShape = opts.bodyShapeLoRA ?? 'auto';
   const isFullBody = imageType === 'fullBody';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
@@ -288,52 +293,60 @@ export function selectKontextResources(opts: {
   // Ethnicity LoRA — loaded for Black/African characters, outside the style budget cap.
   // Placed before realism LoRA so it chains first after character identity LoRAs.
   const ethnicityLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
-  const isAfricanEthnicity = (eth?: string) => eth && /\b(black|african)\b/i.test(eth);
-  const africanLora = KONTEXT_LORA_REGISTRY.find(l => l.filename === 'african-woman-flux.safetensors');
-  if (africanLora?.installed && (isAfricanEthnicity(opts.primaryEthnicity) || isAfricanEthnicity(opts.secondaryEthnicity))) {
-    const strength = hasDualCharacter ? 0.5 : 0.6;
-    ethnicityLoras.push({ filename: 'african-woman-flux.safetensors', strengthModel: strength, strengthClip: strength });
+  if (flags.styleLoras) {
+    const isAfricanEthnicity = (eth?: string) => eth && /\b(black|african)\b/i.test(eth);
+    const africanLora = KONTEXT_LORA_REGISTRY.find(l => l.filename === 'african-woman-flux.safetensors');
+    if (africanLora?.installed && (isAfricanEthnicity(opts.primaryEthnicity) || isAfricanEthnicity(opts.secondaryEthnicity))) {
+      const strength = hasDualCharacter ? 0.5 : 0.6;
+      ethnicityLoras.push({ filename: 'african-woman-flux.safetensors', strengthModel: strength, strengthClip: strength });
+    }
   }
 
   // Slot 1: Realism LoRA — always included. Krea Dev still needs this for
   // photorealistic quality. Without it, output is blurry and degraded.
-  let realismStrength = 0.7;
-  if (hasDualCharacter) realismStrength = Math.min(realismStrength, 0.7);
-  loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
+  if (flags.realismLora) {
+    let realismStrength = 0.7;
+    if (hasDualCharacter) realismStrength = Math.min(realismStrength, 0.7);
+    loras.push({ filename: 'flux_realism_lora.safetensors', strengthModel: realismStrength, strengthClip: realismStrength });
+  }
 
   // Slot 2: Detail/Style LoRA — style LoRA for female, detail for others
   //   • SFW female solo (non-full-body) → Fashion Editorial (luxury magazine look)
   //   • NSFW female solo → Boudoir Style (intimate/sensual atmosphere)
   //   • All other cases → Detail LoRA
-  if (hasFemaleCharacter && isSfw && !hasDualCharacter && !isFullBody) {
-    loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
-    pendingTriggers.push('flux-fash');
-  } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
-    loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-    pendingTriggers.push('boud01rstyle');
-  } else {
-    let detailStrength = 0.6;
-    if (isCloseUp) detailStrength = 0.8;
-    else if (isWide) detailStrength = 0.4;
-    if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
-    loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+  if (flags.styleLoras) {
+    if (hasFemaleCharacter && isSfw && !hasDualCharacter && !isFullBody) {
+      loras.push({ filename: 'flux-fashion-editorial.safetensors', strengthModel: 0.5, strengthClip: 0.5 });
+      pendingTriggers.push('flux-fash');
+    } else if (hasFemaleCharacter && !isSfw && !hasDualCharacter) {
+      loras.push({ filename: 'boudoir-style-flux.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+      pendingTriggers.push('boud01rstyle');
+    } else {
+      let detailStrength = 0.6;
+      if (isCloseUp) detailStrength = 0.8;
+      else if (isWide) detailStrength = 0.4;
+      if (hasDualCharacter) detailStrength = Math.min(detailStrength, 0.5);
+      loras.push({ filename: 'flux-add-details.safetensors', strengthModel: detailStrength, strengthClip: detailStrength });
+    }
   }
 
   // Slot 3: Skin texture LoRA — situational, mutually exclusive
   //   Priority: oiled > sweaty > beauty skin (close-up female)
-  if (isOiled) {
-    loras.push({ filename: 'flux-oiled-skin.safetensors', strengthModel: 0.7, strengthClip: 0.7 });
-  } else if (isSweaty) {
-    loras.push({ filename: 'flux-sweat-v2.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
-  } else if (isCloseUp && hasFemaleCharacter) {
-    loras.push({ filename: 'flux-beauty-skin.safetensors', strengthModel: 0.3, strengthClip: 0.3 });
-    pendingTriggers.push('mdlnbaytskn');
+  if (flags.styleLoras) {
+    if (isOiled) {
+      loras.push({ filename: 'flux-oiled-skin.safetensors', strengthModel: 0.7, strengthClip: 0.7 });
+    } else if (isSweaty) {
+      loras.push({ filename: 'flux-sweat-v2.safetensors', strengthModel: 0.6, strengthClip: 0.6 });
+    } else if (isCloseUp && hasFemaleCharacter) {
+      loras.push({ filename: 'flux-beauty-skin.safetensors', strengthModel: 0.3, strengthClip: 0.3 });
+      pendingTriggers.push('mdlnbaytskn');
+    }
   }
 
   // Slot 4: Body shape LoRA — single slot, female characters only
   //   Configurable: 'hourglass' (wide hips, thick thighs) or 'bodylicious' (exaggerated curves)
   //   'auto' defaults to bodylicious for its stronger curve reinforcement
-  if (hasFemaleCharacter) {
+  if (flags.bodyShapeLora && hasFemaleCharacter) {
     const isSecondaryOnly = !isFemale && secondaryGender === 'female';
     const secondaryReduction = isSecondaryOnly ? 0.85 : 1.0;
 
@@ -356,14 +369,14 @@ export function selectKontextResources(opts: {
   }
 
   // Slot 5: Kissing LoRA — dual-character kissing scenes
-  if (hasDualCharacter && isKissing) {
+  if (flags.styleLoras && hasDualCharacter && isKissing) {
     let kissStrength = 0.7;
     if (isCloseUp) kissStrength = 0.85;
     loras.push({ filename: 'flux-two-people-kissing.safetensors', strengthModel: kissStrength, strengthClip: kissStrength });
   }
 
   // Slot 5/6: Anatomy/NSFW LoRA — intimate scenes only
-  if (!isSfw && isIntimate) {
+  if (flags.styleLoras && !isSfw && isIntimate) {
     let nsfwStrength = 0.7;
     if (hasDualCharacter) nsfwStrength = 0.6;
     loras.push({ filename: 'flux_lustly-ai_v1.safetensors', strengthModel: nsfwStrength, strengthClip: nsfwStrength });
@@ -377,12 +390,14 @@ export function selectKontextResources(opts: {
 
   // Slot 7: Cinematic Finisher — interior/night mood OR clothing/fabric sharpness
   //   Skip for close-up (would distort skin pores) and wide/establishing shots.
-  const isInteriorOrNight = /\b(night|evening|dusk|candlelight|amber|interior|bedroom|restaurant|bar|club|kitchen|lounge|workshop|office|low.light|dim)\b/i.test(prompt);
-  const hasClothing = /\b(dress|top|blouse|shirt|blazer|jeans|skirt|fabric|african.print|shweshwe|lace|silk|denim|cloth|outfit|wearing|dressed)\b/i.test(prompt);
-  if (!isCloseUp && !isWide && (isInteriorOrNight || hasClothing)) {
-    const cinematicStrength = hasDualCharacter ? 0.4 : 0.5;
-    loras.push({ filename: 'flux-cinematic-finisher.safetensors', strengthModel: cinematicStrength, strengthClip: cinematicStrength });
-    pendingTriggers.push('realism_cinema');
+  if (flags.styleLoras) {
+    const isInteriorOrNight = /\b(night|evening|dusk|candlelight|amber|interior|bedroom|restaurant|bar|club|kitchen|lounge|workshop|office|low.light|dim)\b/i.test(prompt);
+    const hasClothing = /\b(dress|top|blouse|shirt|blazer|jeans|skirt|fabric|african.print|shweshwe|lace|silk|denim|cloth|outfit|wearing|dressed)\b/i.test(prompt);
+    if (!isCloseUp && !isWide && (isInteriorOrNight || hasClothing)) {
+      const cinematicStrength = hasDualCharacter ? 0.4 : 0.5;
+      loras.push({ filename: 'flux-cinematic-finisher.safetensors', strengthModel: cinematicStrength, strengthClip: cinematicStrength });
+      pendingTriggers.push('realism_cinema');
+    }
   }
 
   // Strength budget cap — scale down if total exceeds 4.0

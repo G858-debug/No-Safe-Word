@@ -7,6 +7,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -27,7 +29,49 @@ import {
   Zap,
   CheckCircle2,
   Bug,
+  Settings2,
 } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// Diagnostic flags for isolating scene generation components
+// ---------------------------------------------------------------------------
+
+interface DiagnosticFlags {
+  characterLora: boolean;
+  pulid: boolean;
+  identityPrefix: boolean;
+  promptEnhancement: boolean;
+  femaleEnhancement: boolean;
+  realismLora: boolean;
+  styleLoras: boolean;
+  bodyShapeLora: boolean;
+}
+
+const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
+  characterLora: true,
+  pulid: true,
+  identityPrefix: true,
+  promptEnhancement: true,
+  femaleEnhancement: true,
+  realismLora: true,
+  styleLoras: true,
+  bodyShapeLora: true,
+};
+
+const DIAGNOSTIC_TOGGLE_CONFIG: Array<{
+  key: keyof DiagnosticFlags;
+  label: string;
+  group: string;
+}> = [
+  { key: "characterLora", label: "Character LoRA", group: "Character Identity" },
+  { key: "pulid", label: "PuLID Face", group: "Character Identity" },
+  { key: "identityPrefix", label: "Identity Prefix", group: "Character Identity" },
+  { key: "promptEnhancement", label: "AI Enhancement", group: "Prompt Processing" },
+  { key: "femaleEnhancement", label: "Female Enhancement", group: "Prompt Processing" },
+  { key: "realismLora", label: "Realism LoRA", group: "LoRA Stack" },
+  { key: "styleLoras", label: "Style LoRAs", group: "LoRA Stack" },
+  { key: "bodyShapeLora", label: "Body Shape LoRA", group: "LoRA Stack" },
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,6 +110,8 @@ interface PromptState {
   promptText: string;
   showPrompt: boolean;
   error: string | null;
+  diagnosticFlags: DiagnosticFlags;
+  showDiagnostic: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +212,8 @@ export default function ImageGeneration({
           promptText: ip.prompt,
           showPrompt: false,
           error: null,
+          diagnosticFlags: { ...DEFAULT_DIAGNOSTIC_FLAGS },
+          showDiagnostic: false,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -418,13 +466,19 @@ export default function ImageGeneration({
         error: null,
       });
 
+      // Include diagnostic flags if any are non-default
+      const diagFlags = state.diagnosticFlags;
+      const hasCustomFlags = Object.entries(diagFlags).some(
+        ([k, v]) => v !== DEFAULT_DIAGNOSTIC_FLAGS[k as keyof DiagnosticFlags]
+      );
+
       try {
         const res = await fetch(
           `/api/stories/images/${promptId}/regenerate`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify(hasCustomFlags ? { diagnosticFlags: diagFlags } : {}),
           }
         );
 
@@ -778,12 +832,17 @@ export default function ImageGeneration({
                                 error: null,
                               });
                               try {
+                                const pState = promptStates[ip.id];
+                                const dFlags = pState?.diagnosticFlags;
+                                const hasCustom = dFlags && Object.entries(dFlags).some(
+                                  ([k, v]) => v !== DEFAULT_DIAGNOSTIC_FLAGS[k as keyof DiagnosticFlags]
+                                );
                                 const res = await fetch(
                                   `/api/stories/images/${ip.id}/regenerate`,
                                   {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({}),
+                                    body: JSON.stringify(hasCustom ? { diagnosticFlags: dFlags } : {}),
                                   }
                                 );
                                 if (!res.ok) {
@@ -843,6 +902,99 @@ export default function ImageGeneration({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DiagnosticPanel sub-component
+// ---------------------------------------------------------------------------
+
+function DiagnosticPanel({
+  flags,
+  onChange,
+}: {
+  flags: DiagnosticFlags;
+  onChange: (flags: DiagnosticFlags) => void;
+}) {
+  const allOn = Object.values(flags).every(Boolean);
+  const allOff = Object.values(flags).every((v) => !v);
+
+  const groups = DIAGNOSTIC_TOGGLE_CONFIG.reduce<
+    Record<string, Array<{ key: keyof DiagnosticFlags; label: string }>>
+  >((acc, item) => {
+    if (!acc[item.group]) acc[item.group] = [];
+    acc[item.group].push({ key: item.key, label: item.label });
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-medium text-amber-400">
+          Diagnostic Toggles
+        </span>
+        <div className="flex gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              const allTrue = {} as DiagnosticFlags;
+              for (const k of Object.keys(flags) as Array<keyof DiagnosticFlags>) {
+                allTrue[k] = true;
+              }
+              onChange(allTrue);
+            }}
+            disabled={allOn}
+          >
+            All On
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              const allFalse = {} as DiagnosticFlags;
+              for (const k of Object.keys(flags) as Array<keyof DiagnosticFlags>) {
+                allFalse[k] = false;
+              }
+              onChange(allFalse);
+            }}
+            disabled={allOff}
+          >
+            All Off
+          </Button>
+        </div>
+      </div>
+
+      {Object.entries(groups).map(([group, items]) => (
+        <div key={group}>
+          <p className="mb-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            {group}
+          </p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {items.map(({ key, label }) => (
+              <div key={key} className="flex items-center gap-2">
+                <Switch
+                  id={`diag-${key}`}
+                  checked={flags[key]}
+                  onCheckedChange={(checked) =>
+                    onChange({ ...flags, [key]: checked })
+                  }
+                  className="h-4 w-7 data-[state=checked]:bg-amber-500"
+                />
+                <Label
+                  htmlFor={`diag-${key}`}
+                  className="text-[11px] text-muted-foreground cursor-pointer"
+                >
+                  {label}
+                </Label>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -977,6 +1129,14 @@ function ImageCard({
               {metaLabel}
             </span>
           )}
+          {state.diagnosticFlags && Object.values(state.diagnosticFlags).some((v) => !v) && (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30"
+            >
+              Diagnostic
+            </Badge>
+          )}
         </div>
 
         {/* Error */}
@@ -1009,6 +1169,31 @@ function ImageCard({
             />
           )}
         </div>
+
+        {/* Diagnostic toggles */}
+        {!isApproved && (
+          <div>
+            <button
+              onClick={() =>
+                onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
+              }
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-amber-400 transition-colors"
+            >
+              <Settings2 className="h-3 w-3" />
+              {state.showDiagnostic ? "Hide diagnostics" : "Diagnostics"}
+            </button>
+            {state.showDiagnostic && (
+              <div className="mt-1.5">
+                <DiagnosticPanel
+                  flags={state.diagnosticFlags}
+                  onChange={(newFlags) =>
+                    onUpdatePrompt(ip.id, { diagnosticFlags: newFlags })
+                  }
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center gap-1.5">

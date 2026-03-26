@@ -51,6 +51,10 @@ export { runNanoBanana, readReplicateOutput } from './replicate-client';
 // Anthropic API retry wrapper — exponential backoff on 500/502/503/529
 export { anthropicCreateWithRetry } from './anthropic-retry';
 
+// Diagnostic flags for isolating scene generation components
+export { DEFAULT_DIAGNOSTIC_FLAGS } from './diagnostic-flags';
+export type { DiagnosticFlags } from './diagnostic-flags';
+
 // Flux-native prompt builder — assembles prose prompts, strips legacy syntax, and enhances sensuality
 export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFemaleEnhancement, injectFluxGazeEmphasis, buildFluxAtmosphereSuffix, reorderScenePrompt } from './flux-prompt-builder';
 

@@ -16,9 +16,10 @@ import {
   rewritePromptForFlux,
   buildFluxPrompt,
   injectFluxFemaleEnhancement,
+  DEFAULT_DIAGNOSTIC_FLAGS,
 } from "@no-safe-word/image-gen";
 import { concatImagesHorizontally, concatImagesVertically, compressImageForPayload } from "./image-concat";
-import type { KontextWorkflowType, CharacterLoraDownload } from "@no-safe-word/image-gen";
+import type { KontextWorkflowType, CharacterLoraDownload, DiagnosticFlags } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 // ── Types ──
@@ -51,8 +52,8 @@ interface GenerateSceneParams {
   seriesId: string;
   characterDataMap: Map<string, CharacterData>;
   seed: number;
-  /** Test mode: skip all LoRAs except realism, rely on PuLID only */
-  pulidOnlyMode?: boolean;
+  /** Diagnostic flags to selectively disable pipeline components */
+  diagnosticFlags?: Partial<DiagnosticFlags>;
 }
 
 // ── Helpers ──
@@ -162,6 +163,7 @@ export async function buildSceneGenerationPayload(
   params: GenerateSceneParams,
 ): Promise<SceneGenerationResult> {
   const { imgPrompt, seriesId, characterDataMap, seed } = params;
+  const flags = { ...DEFAULT_DIAGNOSTIC_FLAGS, ...params.diagnosticFlags };
   const promptId = imgPrompt.id;
 
   // ── Mode & type ──
@@ -183,11 +185,11 @@ export async function buildSceneGenerationPayload(
 
   // ── Character LoRA preflight check ──
   // Every referenced character must have a deployed LoRA before scene generation.
-  // In pulidOnlyMode, skip entirely — identity comes from PuLID + Redux only.
+  // When character LoRA is disabled via diagnostic flags, skip entirely.
   const characterLoraDownloads: CharacterLoraDownload[] = [];
 
-  if (params.pulidOnlyMode) {
-    console.log(`[Kontext][${promptId}] PuLID-only mode: skipping character LoRA preflight`);
+  if (!flags.characterLora) {
+    console.log(`[Kontext][${promptId}] Diagnostic: character LoRA disabled — skipping preflight`);
   } else {
     for (const charId of [imgPrompt.character_id, imgPrompt.secondary_character_id]) {
       if (!charId) continue;
@@ -440,27 +442,33 @@ export async function buildSceneGenerationPayload(
 
   // ── Identity prefix ──
   let identityPrefix = "";
-  if (imgPrompt.character_id) {
-    identityPrefix = await buildKontextIdentityPrefix(charData);
-    if (identityPrefix) {
-      console.log(`[Kontext][${promptId}] Identity prefix for primary: ${identityPrefix.trim()}`);
-    }
-  }
-  if (imgPrompt.secondary_character_id) {
-    const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
-    if (secondaryCharData) {
-      const secondaryPrefix = await buildKontextIdentityPrefix(secondaryCharData);
-      if (secondaryPrefix) {
-        identityPrefix += `The second person in this scene is: ${secondaryPrefix}`;
-        console.log(`[Kontext][${promptId}] Identity prefix for secondary: ${secondaryPrefix.trim()}`);
+  if (flags.identityPrefix) {
+    if (imgPrompt.character_id) {
+      identityPrefix = await buildKontextIdentityPrefix(charData);
+      if (identityPrefix) {
+        console.log(`[Kontext][${promptId}] Identity prefix for primary: ${identityPrefix.trim()}`);
       }
     }
+    if (imgPrompt.secondary_character_id) {
+      const secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id);
+      if (secondaryCharData) {
+        const secondaryPrefix = await buildKontextIdentityPrefix(secondaryCharData);
+        if (secondaryPrefix) {
+          identityPrefix += `The second person in this scene is: ${secondaryPrefix}`;
+          console.log(`[Kontext][${promptId}] Identity prefix for secondary: ${secondaryPrefix.trim()}`);
+        }
+      }
+    }
+  } else {
+    console.log(`[Kontext][${promptId}] Diagnostic: identity prefix disabled`);
   }
 
   // Female enhancement
   const primaryIsFemale = charData?.gender === "female";
-  if (primaryIsFemale && identityPrefix) {
+  if (flags.femaleEnhancement && primaryIsFemale && identityPrefix) {
     identityPrefix = injectFluxFemaleEnhancement(identityPrefix, mode, imgPrompt.prompt);
+  } else if (!flags.femaleEnhancement) {
+    console.log(`[Kontext][${promptId}] Diagnostic: female enhancement disabled`);
   }
 
   // ── Gaze redirection for dual scenes ──
@@ -497,25 +505,35 @@ export async function buildSceneGenerationPayload(
   }
 
   // ── Flux prompt assembly ──
-  const { prompt: fluxPrompt, needsLlmRewrite } = buildFluxPrompt(identityPrefix, sceneForFlux, {
-    mode,
-    hasDualCharacter: hasSecondary,
-  });
-  let kontextPositivePrompt = fluxPrompt;
+  let kontextPositivePrompt: string;
 
-  console.log(
-    `[Kontext][${promptId}] Pre-rewrite prompt (${kontextPositivePrompt.length} chars, needsLlmRewrite=${needsLlmRewrite}):`,
-  );
-  console.log(`  ${kontextPositivePrompt}`);
+  if (flags.promptEnhancement) {
+    const { prompt: fluxPrompt, needsLlmRewrite } = buildFluxPrompt(identityPrefix, sceneForFlux, {
+      mode,
+      hasDualCharacter: hasSecondary,
+    });
+    kontextPositivePrompt = fluxPrompt;
 
-  if (needsLlmRewrite) {
-    const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
-    if (rewrittenPrompt !== kontextPositivePrompt) {
-      kontextPositivePrompt = rewrittenPrompt;
-      console.log(`[Kontext][${promptId}] Prompt rewritten by LLM for Flux`);
+    console.log(
+      `[Kontext][${promptId}] Pre-rewrite prompt (${kontextPositivePrompt.length} chars, needsLlmRewrite=${needsLlmRewrite}):`,
+    );
+    console.log(`  ${kontextPositivePrompt}`);
+
+    if (needsLlmRewrite) {
+      const rewrittenPrompt = await rewritePromptForFlux(kontextPositivePrompt, sfwMode);
+      if (rewrittenPrompt !== kontextPositivePrompt) {
+        kontextPositivePrompt = rewrittenPrompt;
+        console.log(`[Kontext][${promptId}] Prompt rewritten by LLM for Flux`);
+      }
+    } else {
+      console.log(`[Kontext][${promptId}] Prompt is already natural language — skipping LLM rewrite`);
     }
   } else {
-    console.log(`[Kontext][${promptId}] Prompt is already natural language — skipping LLM rewrite`);
+    // Diagnostic: skip all prompt processing — raw identity + scene prompt
+    kontextPositivePrompt = identityPrefix
+      ? `${identityPrefix}\n${sceneForFlux}`
+      : sceneForFlux;
+    console.log(`[Kontext][${promptId}] Diagnostic: prompt enhancement disabled — using raw prompt (${kontextPositivePrompt.length} chars)`);
   }
 
   // ── LoRA selection ──
@@ -530,17 +548,19 @@ export async function buildSceneGenerationPayload(
   let kontextLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   let kontextTriggerWords: string[] = [];
 
-  if (params.pulidOnlyMode) {
-    // PuLID-only test mode: realism LoRA only, no character or style LoRAs
-    kontextLoras = [{ filename: 'flux_realism_lora.safetensors', strengthModel: 0.7, strengthClip: 0.7 }];
-    console.log(`[Kontext][${promptId}] PuLID-only mode: realism LoRA only (0.7), all other LoRAs skipped`);
-  } else {
+  {
     // Character identity LoRAs go first in the stack (highest priority)
-    const characterLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = characterLoraDownloads.map((dl) => ({
-      filename: dl.filename,
-      strengthModel: 0.65,
-      strengthClip: 0.65,
-    }));
+    const characterLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = flags.characterLora
+      ? characterLoraDownloads.map((dl) => ({
+          filename: dl.filename,
+          strengthModel: 0.65,
+          strengthClip: 0.65,
+        }))
+      : [];
+
+    if (!flags.characterLora) {
+      console.log(`[Kontext][${promptId}] Diagnostic: character LoRA injection disabled`);
+    }
 
     if (effectiveKontextType !== "portrait") {
       const resources = selectKontextResources({
@@ -552,6 +572,7 @@ export async function buildSceneGenerationPayload(
         hasDualCharacter: hasSecondary,
         primaryEthnicity: charData?.ethnicity,
         secondaryEthnicity: secondaryCharData?.ethnicity,
+        diagnosticFlags: flags,
       });
       // Character LoRAs first, then style LoRAs
       kontextLoras = [...characterLoras, ...resources.loras];
@@ -611,7 +632,7 @@ export async function buildSceneGenerationPayload(
   const pulidWeight = isDarkScene ? 0.55 : 0.85;
   const pulidDenoise = isDarkScene ? 0.20 : 0.40;
 
-  const pulidConfig = primaryFaceUrl
+  const pulidConfig = flags.pulid && primaryFaceUrl
     ? {
         primaryFaceImageName: 'face_reference.jpg',
         secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.jpg' : undefined,
@@ -619,6 +640,10 @@ export async function buildSceneGenerationPayload(
         denoiseStrength: pulidDenoise,
       }
     : undefined;
+
+  if (!flags.pulid) {
+    console.log(`[Kontext][${promptId}] Diagnostic: PuLID disabled`);
+  }
 
   if (effectiveKontextType !== 'portrait') {
     if (primaryFaceUrl) {
@@ -677,6 +702,9 @@ export async function buildSceneGenerationPayload(
           identityPrefixLength: identityPrefix.length,
           seed,
           dimensions: `${kontextWidth}x${kontextHeight}`,
+          diagnosticFlagsOff: Object.entries(flags)
+            .filter(([, v]) => !v)
+            .map(([k]) => k),
         },
         null,
         2,

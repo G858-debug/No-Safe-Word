@@ -75,10 +75,13 @@ export async function POST(
 
     // 6. Build full generation payload via shared pipeline
     const body = await request.json().catch(() => ({}));
-    const pulidOnlyMode = body?.pulidOnlyMode === true;
+    const diagnosticFlags = body?.diagnosticFlags ?? undefined;
 
-    if (pulidOnlyMode) {
-      console.log(`[Kontext][${promptId}] PuLID-only test mode — no character LoRAs, realism LoRA only`);
+    if (diagnosticFlags) {
+      const disabledFlags = Object.entries(diagnosticFlags).filter(([, v]) => !v).map(([k]) => k);
+      if (disabledFlags.length > 0) {
+        console.log(`[Kontext][${promptId}] Diagnostic mode — disabled: ${disabledFlags.join(', ')}`);
+      }
     }
 
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
@@ -88,7 +91,7 @@ export async function POST(
       seriesId,
       characterDataMap,
       seed,
-      pulidOnlyMode,
+      diagnosticFlags,
     });
 
     console.log(
