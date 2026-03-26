@@ -278,7 +278,7 @@ export function selectKontextResources(opts: {
   const bodyShape = opts.bodyShapeLoRA ?? 'auto';
   const isFullBody = imageType === 'fullBody';
   const isCloseUp = /\b(close-up|closeup|detail|portrait|face)\b/i.test(prompt);
-  const isIntimate = /\b(naked|nude|sex|intimate|penetrat|straddle|undress|topless)\b/i.test(prompt);
+  const isIntimate = /\b(naked|nude|sex|penetrat|straddle|undress|topless)\b/i.test(prompt);
   const isOiled = /\b(oil(?:ed)?|glistening.skin|shiny.skin|slick.skin|oily)\b/i.test(prompt);
   const isSweaty = /\b(sweat(?:y|ing)?|perspir|gym|workout|post-workout|athletic)\b/i.test(prompt);
   const isFemale = gender === 'female';
@@ -364,7 +364,7 @@ export function selectKontextResources(opts: {
       const isPromptFullBody = /\b(full[- ]body|full[- ]length)\b/i.test(prompt);
       if (isPromptFullBody && !hasDualCharacter) strength = Math.min(strength + 0.15, 1.0);
       loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
-      pendingTriggers.push('huge breasts', 'huge hips', 'huge ass', 'narrow waist');
+      pendingTriggers.push('voluptuous figure', 'wide hips', 'large round butt', 'narrow waist');
     }
   }
 
