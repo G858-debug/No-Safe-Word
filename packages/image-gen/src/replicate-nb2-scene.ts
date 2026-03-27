@@ -66,18 +66,40 @@ export async function runNb2Scene(config: Nb2SceneConfig): Promise<Nb2SceneResul
     input.seed = config.seed;
   }
 
-  console.log(
-    `[NB2 Scene] Generating scene with ${config.referenceImageUrls.length} reference images, ` +
-    `aspect=${config.aspectRatio || '3:4'}, seed=${config.seed ?? 'random'}`,
-  );
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(
+      `[NB2 Scene] Generating scene (attempt ${attempt}/${maxRetries}) with ` +
+      `${config.referenceImageUrls.length} reference images, ` +
+      `aspect=${config.aspectRatio || '3:4'}, seed=${input.seed ?? 'random'}`,
+    );
 
-  const output = await replicate.run(NANO_BANANA_MODEL, { input });
-  const imageBuffer = await readReplicateOutput(output);
-  const imageBase64 = imageBuffer.toString('base64');
+    try {
+      const output = await replicate.run(NANO_BANANA_MODEL, { input });
+      const imageBuffer = await readReplicateOutput(output);
+      const imageBase64 = imageBuffer.toString('base64');
 
-  console.log(
-    `[NB2 Scene] Generated: ${Math.round(imageBuffer.length / 1024)}KB`,
-  );
+      console.log(
+        `[NB2 Scene] Generated: ${Math.round(imageBuffer.length / 1024)}KB`,
+      );
 
-  return { imageBuffer, imageBase64 };
+      return { imageBuffer, imageBase64 };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[NB2 Scene] Attempt ${attempt} failed: ${message}`,
+      );
+
+      if (attempt === maxRetries) {
+        throw new Error(`NB2 scene generation failed after ${maxRetries} attempts: ${message}`);
+      }
+
+      // Retry with a new seed to avoid hitting the same failure
+      input.seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+      console.log(`[NB2 Scene] Retrying with new seed: ${input.seed}`);
+    }
+  }
+
+  // Unreachable, but TypeScript needs it
+  throw new Error('NB2 scene generation failed');
 }
