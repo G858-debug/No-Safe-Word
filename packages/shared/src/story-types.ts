@@ -98,7 +98,7 @@ export interface MarketingImport {
 // DATABASE ROW TYPES (what Supabase stores)
 // ============================================================
 
-export type ImageEngine = 'kontext';
+export type ImageEngine = 'kontext' | 'nb2_uncanny';
 
 export interface StorySeriesRow {
   id: string;
@@ -109,6 +109,7 @@ export interface StorySeriesRow {
   hashtag: string | null;
   status: SeriesStatus;
   image_engine: ImageEngine;
+  inpaint_prompt: string | null;
   marketing: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -174,6 +175,7 @@ export interface StoryImagePromptRow {
   secondary_character_id: string | null;
   prompt: string;
   image_id: string | null;
+  sfw_image_id: string | null;
   status: ImagePromptStatus;
   created_at: string;
   updated_at: string;

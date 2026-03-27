@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
 import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
+import { generateV2Scene, buildRefUrlMap } from "@/lib/server/generate-scene-image-v2";
 
 interface QueuedJob {
   promptId: string;
-  jobId: string;
+  jobId: string | null;
+  completed?: boolean;
 }
 
 interface FailedJob {
@@ -51,6 +53,15 @@ export async function POST(
     }
 
     // Approval is editorial only — no longer gates scene generation
+
+    // Check series image engine for V1/V2 dispatch
+    const { data: series } = await supabase
+      .from("story_series")
+      .select("image_engine, inpaint_prompt")
+      .eq("id", seriesId)
+      .single();
+
+    const isV2 = series?.image_engine === "nb2_uncanny";
 
     // Build character_id → approved_seed map
     const seedMap = new Map<string, number | null>();
@@ -126,6 +137,9 @@ export async function POST(
 
     const characterDataMap = await fetchCharacterDataMap(characterIds);
 
+    // V2: build reference URL map for NB2 character consistency
+    const refUrlMap = isV2 ? await buildRefUrlMap(seriesId) : null;
+
     // 5. Generate each image sequentially with delays
     const jobs: QueuedJob[] = [];
     const failed: FailedJob[] = [];
@@ -152,66 +166,110 @@ export async function POST(
           seed = Math.floor(Math.random() * 2_147_483_647) + 1;
         }
 
-        // Build full generation payload via shared pipeline
-        const result = await buildSceneGenerationPayload({
-          imgPrompt,
-          seriesId,
-          characterDataMap,
-          seed,
-        });
+        if (isV2 && refUrlMap) {
+          // ── V2 Pipeline: NB2 → Florence-2/SAM2 → UnCanny ──
+          const inpaintPrompt = series?.inpaint_prompt || "bare skin, natural body, photorealistic skin texture";
 
-        // NOTE: Do NOT persist the assembled prompt back to the DB.
-        // The DB stores scene-only text; identity prefix + atmosphere suffix
-        // are injected at generation time.
+          const v2Result = await generateV2Scene({
+            imgPrompt,
+            seriesId,
+            refUrlMap,
+            seed,
+            inpaintPrompt,
+          });
 
-        // Submit to RunPod
-        const { jobId: kontextJobId } = await submitRunPodJob(
-          result.workflow,
-          result.images.length > 0 ? result.images : undefined,
-          result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
-        );
+          if (v2Result.nsfwImageId) {
+            // NSFW paired: image_id = inpainted NSFW, sfw_image_id = NB2 base
+            await supabase
+              .from("story_image_prompts")
+              .update({
+                image_id: v2Result.nsfwImageId,
+                sfw_image_id: v2Result.nb2ImageId,
+              })
+              .eq("id", imgPrompt.id);
 
-        // Create image record
-        const { data: kontextImageRow, error: kontextImgError } = await supabase
-          .from("images")
-          .insert({
-            character_id: imgPrompt.character_id || null,
-            prompt: result.assembledPrompt,
-            negative_prompt: "",
-            settings: {
-              width: result.width,
-              height: result.height,
-              steps: 20,
-              cfg: result.effectiveKontextType === "portrait" ? 1.0 : 2.5,
-              seed: result.seed,
-              engine: "runpod-kontext",
-              workflowType: result.effectiveKontextType,
-            },
-            mode: result.mode,
-          })
-          .select("id")
-          .single();
+            jobs.push({
+              promptId: imgPrompt.id,
+              jobId: v2Result.runpodJobId,
+            });
+          } else {
+            // SFW-only: image_id = NB2 base, mark as generated immediately
+            await supabase
+              .from("story_image_prompts")
+              .update({
+                image_id: v2Result.nb2ImageId,
+                status: "generated",
+              })
+              .eq("id", imgPrompt.id);
 
-        if (kontextImgError || !kontextImageRow) {
-          throw new Error(`Failed to create image record: ${kontextImgError?.message}`);
+            jobs.push({
+              promptId: imgPrompt.id,
+              jobId: null,
+              completed: true,
+            });
+          }
+        } else {
+          // ── V1 Pipeline: Flux Kontext + PuLID + Character LoRAs ──
+          const result = await buildSceneGenerationPayload({
+            imgPrompt,
+            seriesId,
+            characterDataMap,
+            seed,
+          });
+
+          // NOTE: Do NOT persist the assembled prompt back to the DB.
+          // The DB stores scene-only text; identity prefix + atmosphere suffix
+          // are injected at generation time.
+
+          // Submit to RunPod
+          const { jobId: kontextJobId } = await submitRunPodJob(
+            result.workflow,
+            result.images.length > 0 ? result.images : undefined,
+            result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
+          );
+
+          // Create image record
+          const { data: kontextImageRow, error: kontextImgError } = await supabase
+            .from("images")
+            .insert({
+              character_id: imgPrompt.character_id || null,
+              prompt: result.assembledPrompt,
+              negative_prompt: "",
+              settings: {
+                width: result.width,
+                height: result.height,
+                steps: 20,
+                cfg: result.effectiveKontextType === "portrait" ? 1.0 : 2.5,
+                seed: result.seed,
+                engine: "runpod-kontext",
+                workflowType: result.effectiveKontextType,
+              },
+              mode: result.mode,
+            })
+            .select("id")
+            .single();
+
+          if (kontextImgError || !kontextImageRow) {
+            throw new Error(`Failed to create image record: ${kontextImgError?.message}`);
+          }
+
+          await supabase.from("generation_jobs").insert({
+            job_id: `runpod-${kontextJobId}`,
+            image_id: kontextImageRow.id,
+            status: "pending",
+            cost: 0,
+          });
+
+          await supabase
+            .from("story_image_prompts")
+            .update({ image_id: kontextImageRow.id })
+            .eq("id", imgPrompt.id);
+
+          jobs.push({
+            promptId: imgPrompt.id,
+            jobId: `runpod-${kontextJobId}`,
+          });
         }
-
-        await supabase.from("generation_jobs").insert({
-          job_id: `runpod-${kontextJobId}`,
-          image_id: kontextImageRow.id,
-          status: "pending",
-          cost: 0,
-        });
-
-        await supabase
-          .from("story_image_prompts")
-          .update({ image_id: kontextImageRow.id })
-          .eq("id", imgPrompt.id);
-
-        jobs.push({
-          promptId: imgPrompt.id,
-          jobId: `runpod-${kontextJobId}`,
-        });
 
         if (i < prompts.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, 500));

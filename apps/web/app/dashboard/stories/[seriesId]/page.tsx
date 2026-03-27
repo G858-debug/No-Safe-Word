@@ -435,13 +435,50 @@ export default function SeriesDetailPage() {
                               <Zap className="h-3.5 w-3.5 text-yellow-500" />
                             </span>
                           </SelectItem>
+                          <SelectItem value="nb2_uncanny">
+                            <span className="flex items-center gap-1.5">
+                              NB2 + UnCanny V2
+                              <Zap className="h-3.5 w-3.5 text-purple-500" />
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <p className="flex-1 text-xs text-muted-foreground mt-5">
-                      Better prompt adherence, native character consistency
+                      {series.image_engine === "nb2_uncanny"
+                        ? "NB2 scene gen + Florence-2/SAM2 masking + UnCanny inpainting"
+                        : "Better prompt adherence, native character consistency"}
                     </p>
                   </div>
+                  {series.image_engine === "nb2_uncanny" && (
+                    <div className="mt-3">
+                      <label className="text-sm text-muted-foreground mb-1 block">
+                        Default Inpaint Prompt
+                      </label>
+                      <textarea
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
+                        placeholder="bare skin, natural body, photorealistic skin texture"
+                        defaultValue={series.inpaint_prompt || ""}
+                        onBlur={(e) => {
+                          const val = e.target.value.trim();
+                          if (val !== (series.inpaint_prompt || "")) {
+                            fetch(`/api/stories/${seriesId}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ inpaint_prompt: val || null }),
+                            }).then(() => {
+                              setData((prev) =>
+                                prev ? { ...prev, series: { ...prev.series, inpaint_prompt: val || null } } : prev
+                              );
+                            });
+                          }
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Describes what replaces masked clothing in NSFW paired images
+                      </p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -578,6 +615,7 @@ export default function SeriesDetailPage() {
             posts={posts}
             imageUrls={data.image_urls}
             allCharactersApproved={allReadyForImages}
+            imageEngine={series.image_engine}
           />
           {allCharsApproved && !allLorasDeployed && loraCheckDone && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">

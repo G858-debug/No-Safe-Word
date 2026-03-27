@@ -102,6 +102,7 @@ interface ImageGenerationProps {
   posts: PostWithPrompts[];
   imageUrls: Record<string, string>;
   allCharactersApproved: boolean;
+  imageEngine?: string;
 }
 
 interface PromptState {
@@ -174,6 +175,7 @@ export default function ImageGeneration({
   posts,
   imageUrls,
   allCharactersApproved,
+  imageEngine,
 }: ImageGenerationProps) {
   // ---- State ----
   const [promptStates, setPromptStates] = useState<
@@ -415,14 +417,23 @@ export default function ImageGeneration({
 
         // Update state for all queued prompts
         for (const job of data.jobs || []) {
-          if (job.jobId) {
+          if (job.completed) {
+            // V2 SFW-only: NB2 generation completed synchronously, no polling needed
+            updatePrompt(job.promptId, { status: "generated", error: null });
+            // Fetch stored URL via status endpoint
+            fetch(`/api/stories/images/${job.promptId}/status`)
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.storedUrl || d.blobUrl) {
+                  updatePrompt(job.promptId, { imageUrl: d.storedUrl || d.blobUrl });
+                }
+              })
+              .catch(() => {});
+          } else if (job.jobId) {
             promptToJobIdRef.current.set(job.promptId, job.jobId);
+            updatePrompt(job.promptId, { status: "generating", error: null });
+            pollingIdsRef.current.add(job.promptId);
           }
-          updatePrompt(job.promptId, {
-            status: "generating",
-            error: null,
-          });
-          pollingIdsRef.current.add(job.promptId);
         }
 
         // Mark any failures
@@ -488,12 +499,22 @@ export default function ImageGeneration({
         }
 
         const data = await res.json();
-        if (data.jobId) {
+        if (data.completed) {
+          // V2 SFW-only: completed synchronously
+          updatePrompt(promptId, { status: "generated", error: null });
+          fetch(`/api/stories/images/${promptId}/status`)
+            .then((r) => r.json())
+            .then((d) => {
+              if (d.storedUrl || d.blobUrl) {
+                updatePrompt(promptId, { imageUrl: d.storedUrl || d.blobUrl });
+              }
+            })
+            .catch(() => {});
+        } else if (data.jobId) {
           promptToJobIdRef.current.set(promptId, data.jobId);
+          pollingIdsRef.current.add(promptId);
+          setIsPolling(true);
         }
-
-        pollingIdsRef.current.add(promptId);
-        setIsPolling(true);
       } catch (err) {
         updatePrompt(promptId, {
           status: "failed",

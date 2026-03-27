@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
 import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
+import { generateV2Scene, buildRefUrlMap } from "@/lib/server/generate-scene-image-v2";
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
@@ -67,6 +68,61 @@ export async function POST(
 
     const seriesId = post.series_id;
 
+    // Check series image engine for V1/V2 dispatch
+    const { data: series } = await supabase
+      .from("story_series")
+      .select("image_engine, inpaint_prompt")
+      .eq("id", seriesId)
+      .single();
+
+    const isV2 = series?.image_engine === "nb2_uncanny";
+    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+
+    if (isV2) {
+      // ── V2 Pipeline: NB2 → Florence-2/SAM2 → UnCanny ──
+      const refUrlMap = await buildRefUrlMap(seriesId);
+      const inpaintPrompt = series?.inpaint_prompt || "bare skin, natural body, photorealistic skin texture";
+
+      const v2Result = await generateV2Scene({
+        imgPrompt,
+        seriesId,
+        refUrlMap,
+        seed,
+        inpaintPrompt,
+      });
+
+      if (v2Result.nsfwImageId) {
+        await supabase
+          .from("story_image_prompts")
+          .update({
+            image_id: v2Result.nsfwImageId,
+            sfw_image_id: v2Result.nb2ImageId,
+          })
+          .eq("id", promptId);
+
+        return NextResponse.json({
+          jobId: v2Result.runpodJobId,
+          imageId: v2Result.nsfwImageId,
+        });
+      } else {
+        await supabase
+          .from("story_image_prompts")
+          .update({
+            image_id: v2Result.nb2ImageId,
+            status: "generated",
+          })
+          .eq("id", promptId);
+
+        return NextResponse.json({
+          jobId: null,
+          imageId: v2Result.nb2ImageId,
+          completed: true,
+        });
+      }
+    }
+
+    // ── V1 Pipeline: Flux Kontext + PuLID + Character LoRAs ──
+
     // 5. Fetch character data for identity prefix + LoRA selection
     const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
       (id): id is string => id !== null,
@@ -83,8 +139,6 @@ export async function POST(
         console.log(`[Kontext][${promptId}] Diagnostic mode — disabled: ${disabledFlags.join(', ')}`);
       }
     }
-
-    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
     const result = await buildSceneGenerationPayload({
       imgPrompt,
