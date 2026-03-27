@@ -65,10 +65,17 @@ export interface V2SceneResult {
 export async function buildRefUrlMap(
   seriesId: string,
 ): Promise<Map<string, string[]>> {
-  const { data: storyChars } = await supabase
+  const { data: storyChars } = await (supabase as any)
     .from("story_characters")
     .select("character_id, face_url, approved_image_id, approved_fullbody_image_id")
-    .eq("series_id", seriesId);
+    .eq("series_id", seriesId) as {
+      data: Array<{
+        character_id: string;
+        face_url: string | null;
+        approved_image_id: string | null;
+        approved_fullbody_image_id: string | null;
+      }> | null;
+    };
 
   const refUrlMap = new Map<string, string[]>();
   if (!storyChars) return refUrlMap;

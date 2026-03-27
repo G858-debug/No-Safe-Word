@@ -55,11 +55,11 @@ export async function POST(
     // Approval is editorial only — no longer gates scene generation
 
     // Check series image engine for V1/V2 dispatch
-    const { data: series } = await supabase
+    const { data: series } = await (supabase as any)
       .from("story_series")
       .select("image_engine, inpaint_prompt")
       .eq("id", seriesId)
-      .single();
+      .single() as { data: { image_engine: string; inpaint_prompt: string | null } | null };
 
     const isV2 = series?.image_engine === "nb2_uncanny";
 
@@ -180,7 +180,7 @@ export async function POST(
 
           if (v2Result.nsfwImageId) {
             // NSFW paired: image_id = inpainted NSFW, sfw_image_id = NB2 base
-            await supabase
+            await (supabase as any)
               .from("story_image_prompts")
               .update({
                 image_id: v2Result.nsfwImageId,
