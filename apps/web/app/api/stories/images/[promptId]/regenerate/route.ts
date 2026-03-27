@@ -71,9 +71,9 @@ export async function POST(
     // Check series image engine for V1/V2 dispatch
     const { data: series } = await (supabase as any)
       .from("story_series")
-      .select("image_engine, inpaint_prompt")
+      .select("image_engine, inpaint_prompt, sfw_inpaint_prompt")
       .eq("id", seriesId)
-      .single() as { data: { image_engine: string; inpaint_prompt: string | null } | null };
+      .single() as { data: { image_engine: string; inpaint_prompt: string | null; sfw_inpaint_prompt: string | null } | null };
 
     const isV2 = series?.image_engine === "nb2_uncanny";
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
@@ -89,36 +89,21 @@ export async function POST(
         refUrlMap,
         seed,
         inpaintPrompt,
+        sfwInpaintPrompt: series?.sfw_inpaint_prompt || undefined,
       });
 
-      if (v2Result.nsfwImageId) {
-        await (supabase as any)
-          .from("story_image_prompts")
-          .update({
-            image_id: v2Result.nsfwImageId,
-            sfw_image_id: v2Result.nb2ImageId,
-          })
-          .eq("id", promptId);
+      await (supabase as any)
+        .from("story_image_prompts")
+        .update({
+          image_id: v2Result.inpaintedImageId,
+          sfw_image_id: v2Result.nb2ImageId,
+        })
+        .eq("id", promptId);
 
-        return NextResponse.json({
-          jobId: v2Result.runpodJobId,
-          imageId: v2Result.nsfwImageId,
-        });
-      } else {
-        await supabase
-          .from("story_image_prompts")
-          .update({
-            image_id: v2Result.nb2ImageId,
-            status: "generated",
-          })
-          .eq("id", promptId);
-
-        return NextResponse.json({
-          jobId: null,
-          imageId: v2Result.nb2ImageId,
-          completed: true,
-        });
-      }
+      return NextResponse.json({
+        jobId: v2Result.runpodJobId,
+        imageId: v2Result.inpaintedImageId,
+      });
     }
 
     // ── V1 Pipeline: Flux Kontext + PuLID + Character LoRAs ──

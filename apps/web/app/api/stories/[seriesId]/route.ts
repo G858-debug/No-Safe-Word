@@ -106,7 +106,7 @@ export async function PATCH(
   const { seriesId } = params;
   const body = await request.json();
 
-  const allowedFields = ["title", "description", "hashtag", "status", "marketing", "image_engine", "inpaint_prompt"];
+  const allowedFields = ["title", "description", "hashtag", "status", "marketing", "image_engine", "inpaint_prompt", "sfw_inpaint_prompt"];
   const updates: Record<string, unknown> = {};
 
   for (const field of allowedFields) {

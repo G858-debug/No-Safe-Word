@@ -37,21 +37,24 @@ export interface V2SceneParams {
   seriesId: string;
   refUrlMap: Map<string, string[]>;
   seed: number;
+  /** NSFW inpaint prompt — describes bare body replacing clothing */
   inpaintPrompt: string;
+  /** SFW inpaint prompt — describes voluptuous figure in clothing */
+  sfwInpaintPrompt?: string;
   maskQuery?: string;
   denoiseStrength?: number;
   aspectRatio?: string;
 }
 
 export interface V2SceneResult {
-  /** Image record ID for the NB2 base (SFW) image */
+  /** Image record ID for the NB2 base image (pre-inpainting) */
   nb2ImageId: string;
   /** Supabase Storage URL for the NB2 base image */
   nb2StoredUrl: string | null;
-  /** RunPod job ID for Stage B+C inpainting (null for SFW-only) */
-  runpodJobId: string | null;
-  /** Image record ID for the inpainted NSFW image (null for SFW-only) */
-  nsfwImageId: string | null;
+  /** RunPod job ID for Stage B+C inpainting */
+  runpodJobId: string;
+  /** Image record ID for the inpainted image (SFW enhanced or NSFW) */
+  inpaintedImageId: string;
   /** Seed used for generation */
   seed: number;
 }
@@ -129,14 +132,25 @@ export async function generateV2Scene(
     imgPrompt,
     seed,
     inpaintPrompt,
-    maskQuery = "clothing",
-    denoiseStrength = 0.90,
+    sfwInpaintPrompt,
     aspectRatio = "3:4",
     refUrlMap,
   } = params;
 
   const isNsfwPaired = imgPrompt.image_type === "website_nsfw_paired";
   const mode = isNsfwPaired ? "nsfw" : "sfw";
+
+  // SFW: mask the body to enhance curves through clothing (lower denoise preserves scene)
+  // NSFW: mask clothing to replace with bare skin (higher denoise for full replacement)
+  const effectiveMaskQuery = isNsfwPaired
+    ? (params.maskQuery || "clothing")
+    : "woman's body";
+  const effectiveInpaintPrompt = isNsfwPaired
+    ? inpaintPrompt
+    : (sfwInpaintPrompt || "voluptuous woman, very large natural breasts, wide hips, huge round butt, narrow waist, fitted clothing showing curves");
+  const effectiveDenoise = isNsfwPaired
+    ? (params.denoiseStrength ?? 0.90)
+    : (params.denoiseStrength ?? 0.70);
 
   // Collect character reference URLs for NB2
   const referenceImageUrls: string[] = [];
@@ -216,19 +230,9 @@ export async function generateV2Scene(
     );
   }
 
-  // ── SFW-only: done ──
-  if (!isNsfwPaired) {
-    console.log(`[V2][${imgPrompt.id}] SFW-only complete: ${nb2ImageRow.id}`);
-    return {
-      nb2ImageId: nb2ImageRow.id,
-      nb2StoredUrl,
-      runpodJobId: null,
-      nsfwImageId: null,
-      seed,
-    };
-  }
-
-  // ── Stage B+C: Masking + Inpainting (NSFW paired only) ──
+  // ── Stage B+C: Masking + Inpainting (ALL images) ──
+  // SFW: enhances body curves through clothing
+  // NSFW: replaces clothing with bare skin
   if (!nb2StoredUrl) {
     throw new Error(
       `[V2][${imgPrompt.id}] Cannot submit inpainting: NB2 image upload failed. ` +
@@ -240,46 +244,47 @@ export async function generateV2Scene(
 
   const { jobId, seed: usedSeed } = await submitUncannyInpaintJob({
     baseImageUrl: nb2StoredUrl,
-    maskQuery,
-    inpaintPrompt,
+    maskQuery: effectiveMaskQuery,
+    inpaintPrompt: effectiveInpaintPrompt,
     seed: inpaintSeed,
-    denoiseStrength,
+    denoiseStrength: effectiveDenoise,
     filenamePrefix: `uncanny_v2_${imgPrompt.id.substring(0, 8)}`,
   });
 
   console.log(
-    `[V2][${imgPrompt.id}] Stage B+C submitted: job=${jobId}, inpaintSeed=${usedSeed}`,
+    `[V2][${imgPrompt.id}] Stage B+C submitted: job=${jobId}, ` +
+    `mode=${mode}, maskQuery="${effectiveMaskQuery}", denoise=${effectiveDenoise}`,
   );
 
-  // Create NSFW image record for the inpainting result
-  const { data: nsfwImageRow, error: nsfwImgError } = await supabase
+  // Create image record for the inpainted result
+  const { data: inpaintedImageRow, error: inpaintImgError } = await supabase
     .from("images")
     .insert({
       character_id: imgPrompt.character_id || null,
-      prompt: inpaintPrompt,
+      prompt: effectiveInpaintPrompt,
       negative_prompt: "",
       settings: {
         seed: usedSeed,
         engine: "runpod-uncanny-v2",
         pipelineVersion: "v2",
-        maskQuery,
-        denoiseStrength,
+        maskQuery: effectiveMaskQuery,
+        denoiseStrength: effectiveDenoise,
         nb2ImageId: nb2ImageRow.id,
         nb2Seed: seed,
       },
-      mode: "nsfw",
+      mode,
     })
     .select("id")
     .single();
 
-  if (nsfwImgError || !nsfwImageRow) {
-    throw new Error(`Failed to create NSFW image record: ${nsfwImgError?.message}`);
+  if (inpaintImgError || !inpaintedImageRow) {
+    throw new Error(`Failed to create inpainted image record: ${inpaintImgError?.message}`);
   }
 
   // Create generation job for polling
   await supabase.from("generation_jobs").insert({
     job_id: `runpod-${jobId}`,
-    image_id: nsfwImageRow.id,
+    image_id: inpaintedImageRow.id,
     status: "pending",
     cost: 0,
   });
@@ -288,7 +293,7 @@ export async function generateV2Scene(
     nb2ImageId: nb2ImageRow.id,
     nb2StoredUrl,
     runpodJobId: `runpod-${jobId}`,
-    nsfwImageId: nsfwImageRow.id,
+    inpaintedImageId: inpaintedImageRow.id,
     seed,
   };
 }

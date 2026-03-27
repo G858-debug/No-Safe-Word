@@ -451,32 +451,61 @@ export default function SeriesDetailPage() {
                     </p>
                   </div>
                   {series.image_engine === "nb2_uncanny" && (
-                    <div className="mt-3">
-                      <label className="text-sm text-muted-foreground mb-1 block">
-                        Default Inpaint Prompt
-                      </label>
-                      <textarea
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
-                        placeholder="bare skin, natural body, photorealistic skin texture"
-                        defaultValue={series.inpaint_prompt || ""}
-                        onBlur={(e) => {
-                          const val = e.target.value.trim();
-                          if (val !== (series.inpaint_prompt || "")) {
-                            fetch(`/api/stories/${seriesId}`, {
-                              method: "PATCH",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ inpaint_prompt: val || null }),
-                            }).then(() => {
-                              setData((prev) =>
-                                prev ? { ...prev, series: { ...prev.series, inpaint_prompt: val || null } } : prev
-                              );
-                            });
-                          }
-                        }}
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Describes what replaces masked clothing in NSFW paired images
-                      </p>
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label className="text-sm text-muted-foreground mb-1 block">
+                          SFW Inpaint Prompt (body enhancement)
+                        </label>
+                        <textarea
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
+                          placeholder="voluptuous woman, very large natural breasts, wide hips, huge round butt, narrow waist, fitted clothing showing curves"
+                          defaultValue={series.sfw_inpaint_prompt || ""}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            if (val !== (series.sfw_inpaint_prompt || "")) {
+                              fetch(`/api/stories/${seriesId}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ sfw_inpaint_prompt: val || null }),
+                              }).then(() => {
+                                setData((prev) =>
+                                  prev ? { ...prev, series: { ...prev.series, sfw_inpaint_prompt: val || null } } : prev
+                                );
+                              });
+                            }
+                          }}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Enhances female body shape through clothing in SFW images
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm text-muted-foreground mb-1 block">
+                          NSFW Inpaint Prompt (clothing removal)
+                        </label>
+                        <textarea
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
+                          placeholder="bare skin, natural body, photorealistic skin texture"
+                          defaultValue={series.inpaint_prompt || ""}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            if (val !== (series.inpaint_prompt || "")) {
+                              fetch(`/api/stories/${seriesId}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ inpaint_prompt: val || null }),
+                              }).then(() => {
+                                setData((prev) =>
+                                  prev ? { ...prev, series: { ...prev.series, inpaint_prompt: val || null } } : prev
+                                );
+                              });
+                            }
+                          }}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Describes what replaces masked clothing in NSFW paired images
+                        </p>
+                      </div>
                     </div>
                   )}
                 </div>

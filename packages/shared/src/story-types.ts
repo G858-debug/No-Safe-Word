@@ -110,6 +110,7 @@ export interface StorySeriesRow {
   status: SeriesStatus;
   image_engine: ImageEngine;
   inpaint_prompt: string | null;
+  sfw_inpaint_prompt: string | null;
   marketing: Record<string, unknown>;
   created_at: string;
   updated_at: string;

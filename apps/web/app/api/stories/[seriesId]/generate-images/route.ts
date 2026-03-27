@@ -57,9 +57,9 @@ export async function POST(
     // Check series image engine for V1/V2 dispatch
     const { data: series } = await (supabase as any)
       .from("story_series")
-      .select("image_engine, inpaint_prompt")
+      .select("image_engine, inpaint_prompt, sfw_inpaint_prompt")
       .eq("id", seriesId)
-      .single() as { data: { image_engine: string; inpaint_prompt: string | null } | null };
+      .single() as { data: { image_engine: string; inpaint_prompt: string | null; sfw_inpaint_prompt: string | null } | null };
 
     const isV2 = series?.image_engine === "nb2_uncanny";
 
@@ -176,38 +176,22 @@ export async function POST(
             refUrlMap,
             seed,
             inpaintPrompt,
+            sfwInpaintPrompt: series?.sfw_inpaint_prompt || undefined,
           });
 
-          if (v2Result.nsfwImageId) {
-            // NSFW paired: image_id = inpainted NSFW, sfw_image_id = NB2 base
-            await (supabase as any)
-              .from("story_image_prompts")
-              .update({
-                image_id: v2Result.nsfwImageId,
-                sfw_image_id: v2Result.nb2ImageId,
-              })
-              .eq("id", imgPrompt.id);
+          // All V2 images go through inpainting — store NB2 base as sfw_image_id
+          await (supabase as any)
+            .from("story_image_prompts")
+            .update({
+              image_id: v2Result.inpaintedImageId,
+              sfw_image_id: v2Result.nb2ImageId,
+            })
+            .eq("id", imgPrompt.id);
 
-            jobs.push({
-              promptId: imgPrompt.id,
-              jobId: v2Result.runpodJobId,
-            });
-          } else {
-            // SFW-only: image_id = NB2 base, mark as generated immediately
-            await supabase
-              .from("story_image_prompts")
-              .update({
-                image_id: v2Result.nb2ImageId,
-                status: "generated",
-              })
-              .eq("id", imgPrompt.id);
-
-            jobs.push({
-              promptId: imgPrompt.id,
-              jobId: null,
-              completed: true,
-            });
-          }
+          jobs.push({
+            promptId: imgPrompt.id,
+            jobId: v2Result.runpodJobId,
+          });
         } else {
           // ── V1 Pipeline: Flux Kontext + PuLID + Character LoRAs ──
           const result = await buildSceneGenerationPayload({
