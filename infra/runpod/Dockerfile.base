@@ -53,8 +53,7 @@ RUN if [ "$BUILD_V2_PIPELINE" = "true" ]; then \
       cd /comfyui/custom_nodes && \
       git clone https://github.com/kijai/ComfyUI-Florence2 && \
       pip install -r ComfyUI-Florence2/requirements.txt --break-system-packages && \
-      git clone https://github.com/kijai/ComfyUI-segment-anything-2 && \
-      pip install -r ComfyUI-segment-anything-2/requirements.txt --break-system-packages; \
+      git clone https://github.com/kijai/ComfyUI-segment-anything-2; \
     fi
 
 # ---- Runtime Model Download ----
