@@ -578,15 +578,20 @@ if [ "${DOWNLOAD_V2_MODELS}" = "true" ]; then
   elif [ -d "/runpod-volume/models" ]; then
       if [ -n "${UNCANNY_MODEL_URL:-}" ]; then
           mkdir -p "/runpod-volume/models/diffusion_models"
+          # CivitAI uses ?token= query param for auth (not Authorization header)
+          UNCANNY_DL_URL="${UNCANNY_MODEL_URL}"
+          if [ -n "${CIVITAI_API_KEY:-}" ]; then
+              case "$UNCANNY_DL_URL" in
+                  *\?*) UNCANNY_DL_URL="${UNCANNY_DL_URL}&token=${CIVITAI_API_KEY}" ;;
+                  *)    UNCANNY_DL_URL="${UNCANNY_DL_URL}?token=${CIVITAI_API_KEY}" ;;
+              esac
+          fi
           echo "[NSW] Downloading uncanny_v1.3_fp8.safetensors..."
           python3 -c "
 import urllib.request, sys, shutil
 try:
-    req = urllib.request.Request('${UNCANNY_MODEL_URL}')
-    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
-    token = '${CIVITAI_API_KEY:-}'
-    if token:
-        req.add_header('Authorization', f'Bearer {token}')
+    req = urllib.request.Request('${UNCANNY_DL_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
     resp = urllib.request.urlopen(req, timeout=900)
     with open('${UNCANNY_DEST}.tmp', 'wb') as f:
         shutil.copyfileobj(resp, f)
