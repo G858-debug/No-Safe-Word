@@ -559,6 +559,57 @@ except Exception as e:
     { rm -f "${INSWAPPER_DEST}.tmp"; echo "[NSW] ✗✗ inswapper_128.onnx FAILED"; FAILED=$((FAILED + 1)); }
 fi
 
+# ========================================================
+# V2 PIPELINE MODELS (NB2 → Florence-2/SAM2 → UnCanny)
+# Only downloaded when DOWNLOAD_V2_MODELS=true
+# ========================================================
+if [ "${DOWNLOAD_V2_MODELS}" = "true" ]; then
+
+  echo "[NSW] ========================================="
+  echo "[NSW] Downloading V2 pipeline models..."
+  echo "[NSW] ========================================="
+
+  # UnCanny v1.3 fp8 (photorealism fine-tune of Chroma, ~8.3GB)
+  # Architecture: Chroma (Flux.1-schnell based), Apache 2.0
+  # Goes in diffusion_models/ alongside Flux Krea Dev
+  UNCANNY_DEST="/runpod-volume/models/diffusion_models/uncanny_v1.3_fp8.safetensors"
+  if [ -f "$UNCANNY_DEST" ]; then
+      echo "[NSW] ✓ uncanny_v1.3_fp8.safetensors (exists)"
+  elif [ -d "/runpod-volume/models" ]; then
+      if [ -n "${UNCANNY_MODEL_URL:-}" ]; then
+          mkdir -p "/runpod-volume/models/diffusion_models"
+          echo "[NSW] Downloading uncanny_v1.3_fp8.safetensors..."
+          python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${UNCANNY_MODEL_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    token = '${CIVITAI_API_KEY:-}'
+    if token:
+        req.add_header('Authorization', f'Bearer {token}')
+    resp = urllib.request.urlopen(req, timeout=900)
+    with open('${UNCANNY_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${UNCANNY_DEST}.tmp" "${UNCANNY_DEST}" && \
+          echo "[NSW] ✓ uncanny_v1.3_fp8.safetensors (downloaded)" || \
+          { rm -f "${UNCANNY_DEST}.tmp"; echo "[NSW] ✗✗ uncanny_v1.3_fp8.safetensors FAILED"; FAILED=$((FAILED + 1)); }
+      else
+          echo "[NSW] UNCANNY_MODEL_URL not set — skipping UnCanny download"
+          echo "[NSW] Set UNCANNY_MODEL_URL to the CivitAI or HuggingFace download URL"
+      fi
+  fi
+
+  # Florence-2 and SAM2 are auto-downloaded by ComfyUI custom nodes at runtime.
+  # No manual download needed — ComfyUI-Florence2 and ComfyUI-segment-anything-2
+  # handle model caching on first use.
+
+  echo "[NSW] V2 pipeline model check complete."
+fi
+
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then
     echo "[NSW] WARNING: ${FAILED} model(s) failed to download."

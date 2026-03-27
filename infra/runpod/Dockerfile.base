@@ -44,6 +44,19 @@ RUN echo "=== buffalo_l verification ===" && \
     echo "=== buffalo_l OK ===" || \
     (echo "=== buffalo_l FAILED — aborting build ===" && exit 1)
 
+# ---- V2 Pipeline: Florence-2 + SAM2 custom nodes ----
+# Only installed when BUILD_V2_PIPELINE=true to avoid bloating existing image.
+# Florence-2: Phrase grounding for automated region detection.
+# SAM2: Segment Anything 2 for pixel-perfect mask generation.
+ARG BUILD_V2_PIPELINE=false
+RUN if [ "$BUILD_V2_PIPELINE" = "true" ]; then \
+      cd /comfyui/custom_nodes && \
+      git clone https://github.com/kijai/ComfyUI-Florence2 && \
+      pip install -r ComfyUI-Florence2/requirements.txt --break-system-packages && \
+      git clone https://github.com/kijai/ComfyUI-segment-anything-2 && \
+      pip install -r ComfyUI-segment-anything-2/requirements.txt --break-system-packages; \
+    fi
+
 # ---- Runtime Model Download ----
 # Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
 # on first startup to keep the image buildable on GitHub Actions runners.

@@ -73,3 +73,11 @@ export type {
   ImageCategory,
   VariationType,
 } from './character-lora/types';
+
+// V2 Pipeline exports (NB2 → Florence-2/SAM2 → UnCanny)
+export { runUncannyInpaintPipeline, submitUncannyInpaintJob, runV2FullPipeline } from './uncanny-inpaint-pipeline';
+export type { UncannyInpaintConfig, UncannyInpaintResult, V2FullPipelineConfig, V2FullPipelineResult } from './uncanny-inpaint-pipeline';
+export { buildFlorenceSam2MaskWorkflow, buildUncannyInpaintWorkflow } from './workflow-builder-uncanny';
+export type { FlorenceSam2MaskConfig, UncannyInpaintWorkflowConfig } from './workflow-builder-uncanny';
+export { runNb2Scene } from './replicate-nb2-scene';
+export type { Nb2SceneConfig, Nb2SceneResult } from './replicate-nb2-scene';

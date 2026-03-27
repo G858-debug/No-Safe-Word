@@ -17,6 +17,11 @@ on:
         description: 'Image version tag (e.g. v1.0.0)'
         required: false
         default: ''
+      build_v2_pipeline:
+        description: 'Install Florence-2 + SAM2 custom nodes for V2 inpainting pipeline'
+        required: false
+        type: boolean
+        default: true
 
 env:
   REGISTRY: ghcr.io
@@ -73,6 +78,7 @@ jobs:
             --progress=plain \
             --build-arg CIVITAI_API_KEY="${{ secrets.CIVITAI_API_KEY }}" \
             --build-arg GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            --build-arg BUILD_V2_PIPELINE="${{ github.event.inputs.build_v2_pipeline || 'false' }}" \
             -f ./infra/runpod/Dockerfile.base \
             -t ${{ steps.tags.outputs.latest }} \
             -t ${{ steps.tags.outputs.sha }} \
