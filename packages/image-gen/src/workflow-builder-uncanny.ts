@@ -173,14 +173,9 @@ export function buildFlorenceSam2MaskWorkflow(
     },
   };
 
-  // Node 110: SaveImage — save the pre-blur mask for debugging and UI display
-  workflow['110'] = {
-    class_type: 'SaveImage',
-    inputs: {
-      filename_prefix: `${config.filenamePrefix}_mask`,
-      images: ['107', 0], // Pre-blur mask image for clear debugging view
-    },
-  };
+  // Mask debug save removed — it was being returned as the final output
+  // instead of the inpainted image. The mask is still generated internally
+  // by the workflow for the inpainting step (node 109).
 
   return workflow;
 }
