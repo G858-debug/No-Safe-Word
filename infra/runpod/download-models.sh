@@ -590,8 +590,9 @@ if [ "${DOWNLOAD_V2_MODELS}" = "true" ]; then
                   *)    UNCANNY_DL_URL="${UNCANNY_DL_URL}?token=${CIVITAI_API_KEY}" ;;
               esac
           fi
-          echo "[NSW] Starting background download: uncanny_v1.3_fp8.safetensors (~8.3GB)..."
-          nohup python3 -c "
+          echo "[NSW] Launching UnCanny download daemon (~8.3GB)..."
+          # setsid creates a new session so the process survives exec in start-wrapper.sh
+          setsid python3 -c "
 import urllib.request, sys, shutil, os
 try:
     req = urllib.request.Request('${UNCANNY_DL_URL}')
@@ -608,8 +609,7 @@ except Exception as e:
     try: os.remove('${UNCANNY_DEST}.tmp')
     except: pass
 " > /tmp/uncanny_download.log 2>&1 &
-          disown
-          echo "[NSW] Background download PID: $! (nohup + disown, survives exec)"
+          echo "[NSW] Download daemon PID: $! (setsid, survives exec)"
       else
           echo "[NSW] UNCANNY_MODEL_URL not set — skipping UnCanny download"
       fi
