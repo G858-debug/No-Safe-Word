@@ -357,9 +357,9 @@ export async function buildV3SceneGenerationPayload(
     // If the scene prompt mentions clothing, reinforce it; otherwise add generic
     const hasClothing = /\b(wearing|dressed in|clad in|outfit|dress|skirt|top|blouse|shirt|jeans|pants)\b/i.test(sceneForFlux);
     if (!hasClothing) {
-      sceneForFlux += " She is fully clothed in a stylish fitted outfit.";
+      sceneForFlux += " She is fully clothed in a stylish fitted outfit with thick opaque fabric.";
     }
-    sceneForFlux += " All clothing remains on and in place throughout the scene. No exposed breasts or nipples.";
+    sceneForFlux += " All clothing remains on and in place throughout the scene. Clothing is opaque and thick enough that nipples are not visible through the fabric. No exposed breasts, no visible nipples, no see-through clothing.";
     console.log(`[V3][${promptId}] SFW clothing enforcement injected`);
   }
 
