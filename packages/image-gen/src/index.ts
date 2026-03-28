@@ -89,5 +89,5 @@ export { runNb2Scene } from './replicate-nb2-scene';
 export type { Nb2SceneConfig, Nb2SceneResult } from './replicate-nb2-scene';
 
 // V4 Pipeline exports (Flux 2 Pro via Replicate — multi-reference, no LoRAs)
-export { runFlux2Pro } from './replicate-flux2-pro';
+export { runFlux2Pro, rewriteNsfwPromptForFlux2Pro } from './replicate-flux2-pro';
 export type { Flux2ProConfig, Flux2ProResult } from './replicate-flux2-pro';

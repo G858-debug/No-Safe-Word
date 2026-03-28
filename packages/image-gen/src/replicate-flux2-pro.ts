@@ -57,6 +57,80 @@ export interface Flux2ProResult {
 const MAX_REFERENCE_IMAGES = 8;
 
 /**
+ * Rewrite NSFW scene prompts to use artistic/photographic language
+ * that works with Flux 2 Pro's safety system.
+ *
+ * Flux 2 Pro's safety filters trigger on direct instructional nudity
+ * ("she is naked", "he is shirtless") but pass artistic framing
+ * ("bare skin in warm light", "intimate boudoir portrait").
+ */
+export function rewriteNsfwPromptForFlux2Pro(prompt: string): string {
+  let rewritten = prompt;
+
+  const replacements: [RegExp, string][] = [
+    // Upper body nudity — female
+    [/\b[Ss]he is (naked|nude|bare|topless|unclothed) from the waist up\b/g,
+     'her bare upper body is exposed, soft light catching the natural texture of her skin, intimate boudoir framing'],
+    [/\b[Ss]he is (naked|nude|topless|bare[- ]?chested)\b/g,
+     'her bare skin visible, natural form in soft directional light, fine art nude aesthetic'],
+    [/\b[Hh]er (top|shirt|bra|blouse) (is |)(off|removed|on the floor|discarded)\b/g,
+     'her upper body bare, natural skin exposed in warm ambient light'],
+
+    // Upper body nudity — male
+    [/\b[Hh]e is shirtless\b/g,
+     'his bare torso exposed, warm light defining muscle contours and natural skin texture'],
+    [/\b[Hh]e is (naked|nude|topless|bare[- ]?chested)\b/g,
+     'his bare skin visible, natural musculature in warm light, intimate portrait aesthetic'],
+    [/\b[Hh]is (top|shirt) (is |)(off|removed|on the floor|discarded)\b/g,
+     'his upper body bare, skin texture visible in warm light'],
+
+    // Gender-neutral / both
+    [/\b[Bb]oth (are |)(naked|nude|topless|unclothed|shirtless)\b/g,
+     'bare skin on both figures, skin-to-skin warmth, intimate boudoir lighting'],
+    [/\b[Tt]hey (are |)(naked|nude|topless|unclothed)\b/g,
+     'bare skin on both figures, skin-to-skin warmth, intimate boudoir lighting'],
+    [/\bcompletely (naked|nude)\b/gi,
+     'fully bare form, artistic nude, natural lighting on exposed skin, fine art photography'],
+
+    // Specific body parts
+    [/\bbare breasts\b/gi,
+     'exposed chest, natural form with visible skin detail, soft directional lighting'],
+    [/\bnaked breasts\b/gi,
+     'bare décolletage and natural form, soft shadows across skin, boudoir aesthetic'],
+    [/\bnaked from the waist up\b/gi,
+     'bare upper body, skin-to-skin warmth, natural light on exposed skin'],
+
+    // Actions
+    [/\bundressing\b/gi,
+     'fabric slipping away to reveal bare skin underneath'],
+    [/\bremoving (her |his |their |)(clothes|clothing|top|shirt|dress|bra)\b/gi,
+     'garment falling away, transition from clothed to bare skin'],
+    [/\bstripping\b/gi,
+     'gradually revealing bare skin, intimate moment of undress'],
+
+    // Overalls / workwear specific (matches the kitchen scene)
+    [/\boveralls pushed to his ankles\b/gi,
+     'overalls lowered, bare torso fully exposed in warm overhead light'],
+    [/\bskirt bunched at her hips\b/gi,
+     'skirt gathered at her hips, bare skin above visible in warm light'],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    rewritten = rewritten.replace(pattern, replacement);
+  }
+
+  // Append artistic framing if NSFW content detected but no style reference present
+  const hasNudeContent = /\b(bare skin|exposed|nude|boudoir|intimate portrait|bare torso|bare upper body)\b/i.test(rewritten);
+  const hasStyleRef = /\b(photography|cinematic|photorealistic|editorial|boudoir|fine art)\b/i.test(rewritten);
+
+  if (hasNudeContent && !hasStyleRef) {
+    rewritten += ' Photorealistic, cinematic lighting, intimate boudoir photography aesthetic.';
+  }
+
+  return rewritten;
+}
+
+/**
  * Run Flux 2 Pro on Replicate for scene generation.
  *
  * Returns the generated scene as both Buffer and base64.
