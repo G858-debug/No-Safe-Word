@@ -312,7 +312,7 @@ export function buildUncannyInpaintWorkflow(config: {
       latent_image: ['207', 0], // VAEEncodeForInpaint output
       seed: inpaint.seed,
       steps: 30,
-      cfg: 1.0,               // Chroma's distilled guidance layer handles guidance internally
+      cfg: 3.5,               // Chroma needs real CFG 3.0-4.0 for text prompt to take effect
       sampler_name: 'dpmpp_sde',
       scheduler: 'beta',
       denoise: inpaint.denoiseStrength,
