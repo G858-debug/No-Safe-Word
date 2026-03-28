@@ -404,6 +404,8 @@ export default function ImageGeneration({
 
         const batchEndpoint = imageEngine === "flux_pulid"
           ? `/api/stories/${seriesId}/generate-images-v3`
+          : imageEngine === "flux2_pro"
+          ? `/api/stories/${seriesId}/generate-images-v4`
           : `/api/stories/${seriesId}/generate-images`;
         const res = await fetch(
           batchEndpoint,

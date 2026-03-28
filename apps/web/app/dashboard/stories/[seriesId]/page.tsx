@@ -447,6 +447,12 @@ export default function SeriesDetailPage() {
                               <Zap className="h-3.5 w-3.5 text-green-500" />
                             </span>
                           </SelectItem>
+                          <SelectItem value="flux2_pro">
+                            <span className="flex items-center gap-1.5">
+                              Flux 2 Pro (Replicate)
+                              <Zap className="h-3.5 w-3.5 text-blue-500" />
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -455,6 +461,8 @@ export default function SeriesDetailPage() {
                         ? "NB2 scene gen + Florence-2/SAM2 masking + UnCanny inpainting"
                         : series.image_engine === "flux_pulid"
                         ? "No LoRA training — PuLID face consistency + text body prompts"
+                        : series.image_engine === "flux2_pro"
+                        ? "Flux 2 Pro via Replicate — multi-reference character consistency, 4MP output, no LoRAs needed"
                         : "Better prompt adherence, native character consistency"}
                     </p>
                   </div>
