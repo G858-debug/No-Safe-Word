@@ -88,6 +88,14 @@ export type { FlorenceSam2MaskConfig, UncannyInpaintWorkflowConfig } from './wor
 export { runNb2Scene } from './replicate-nb2-scene';
 export type { Nb2SceneConfig, Nb2SceneResult } from './replicate-nb2-scene';
 
-// V4 Pipeline exports (Flux 2 Pro via Replicate — multi-reference, no LoRAs)
+// V4 Pipeline exports (Multi-LoRA scene generation + Easel face swap)
+export { runMultiLoraScene, runFaceSwap, runV4Pipeline } from './replicate-flux2-pro';
+export type {
+  MultiLoraSceneConfig, MultiLoraSceneResult,
+  FaceSwapConfig, FaceSwapResult,
+  V4PipelineConfig, V4PipelineResult,
+} from './replicate-flux2-pro';
+
+// Flux 2 Pro client (kept for SFW-only workflows)
 export { runFlux2Pro, rewriteNsfwPromptForFlux2Pro } from './replicate-flux2-pro';
 export type { Flux2ProConfig, Flux2ProResult } from './replicate-flux2-pro';

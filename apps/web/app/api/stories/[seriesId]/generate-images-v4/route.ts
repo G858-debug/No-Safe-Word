@@ -131,6 +131,15 @@ export async function POST(
           .from("story-images")
           .getPublicUrl(storagePath);
 
+        // Store pre-face-swap scene image for debugging/comparison
+        if (result.sceneImageBase64) {
+          const sceneStoragePath = `stories/${imageId}-${timestamp}_scene.png`;
+          const sceneBuffer = Buffer.from(result.sceneImageBase64, "base64");
+          await supabase.storage
+            .from("story-images")
+            .upload(sceneStoragePath, sceneBuffer, { contentType: "image/png", upsert: true });
+        }
+
         // Create image record
         const { data: imageRow, error: imgError } = await supabase
           .from("images")
@@ -140,12 +149,11 @@ export async function POST(
             prompt: result.assembledPrompt,
             negative_prompt: "",
             settings: {
-              width: result.width,
-              height: result.height,
               seed: result.seed,
-              engine: "replicate-v4-flux2-pro",
-              safetyTolerance: result.mode === "nsfw" ? 5 : 2,
-              referenceCount: result.referenceCount,
+              engine: "replicate-v4-multi-lora-faceswap",
+              mode: result.mode,
+              hasFaceSwap: result.hasFaceSwap,
+              pipelineSteps: ["multi-lora-scene", result.hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
             },
             mode: result.mode,
             stored_url: publicUrl,

@@ -1,30 +1,360 @@
 /**
- * Flux 2 Pro Scene Generation via Replicate
+ * V4 Scene Generation Pipeline: Multi-LoRA + Face Swap via Replicate
  *
- * Cloud-only pipeline — no LoRAs, no PuLID, no RunPod/ComfyUI.
- * Character consistency comes from multi-reference images (up to 8)
- * passed as `input_images` array (URI strings).
+ * Two-step cloud pipeline — no RunPod, no ComfyUI, no PuLID:
  *
- * NSFW GENERATION BEST PRACTICES (Flux 2 Pro):
+ * Step 1: lucataco/flux-dev-multi-lora
+ *         Flux 1 Dev base + Uncensored LoRA (+ optional style LoRAs)
+ *         → Generates scene with natural poses, NSFW works, no character identity
  *
- * 1. safety_tolerance=5 for NSFW, safety_tolerance=2 for SFW
- * 2. Use artistic/photographic terminology in prompts:
- *    - "boudoir photography" not "naked woman"
- *    - "intimate portrait, skin texture, natural lighting" not explicit keywords
- *    - "elegant pose, draped fabric revealing form" for tasteful nudity
- * 3. Portrait orientation (3:4 / 2:3) for figure-focused content
- * 4. NO negative prompts — Flux 2 Pro will ADD what you try to exclude
- * 5. Describe what you WANT explicitly. Positive descriptions only.
- * 6. Include: lighting source, camera angle, depth of field, film stock reference
- * 7. For dark-skinned characters: specify "rich dark brown skin with visible
- *    skin texture and pores" — generic prompts often lighten skin tone
- * 8. Reference images are critical for character identity. Always include
- *    face + body refs for each character in the scene.
- * 9. seed control enables reproducible results — save seeds for good outputs
+ * Step 2: easel/advanced-face-swap
+ *         Takes generated scene + approved character face portraits
+ *         → Swaps in the correct faces while preserving scene, lighting, skin tone
+ *         → Supports TWO faces in one pass for dual-character scenes
+ *
+ * Also exports the original Flux 2 Pro client for SFW-only workflows.
+ *
+ * Cost per image: ~$0.038 (multi-LoRA) + ~$0.04 (face swap) = ~$0.08 total
  */
 
 import Replicate from 'replicate';
 import { readReplicateOutput } from './replicate-client';
+
+// ════════════════════════════════════════════════════════════════════
+// V4 Pipeline: Multi-LoRA Scene Generation + Easel Face Swap
+// ════════════════════════════════════════════════════════════════════
+
+const FLUX_MULTI_LORA_MODEL = 'lucataco/flux-dev-multi-lora' as const;
+const FACE_SWAP_MODEL = 'easel/advanced-face-swap' as const;
+
+/** Uncensored LoRA — removes Flux 1 Dev's content restrictions for NSFW */
+const UNCENSORED_LORA_URL = 'https://huggingface.co/enhanceaiteam/Flux-Uncensored-V2/resolve/main/lora.safetensors';
+
+// ── Multi-LoRA Scene Types ──
+
+export interface MultiLoraSceneConfig {
+  /** Scene prompt — Five Layers format, flowing prose.
+   *  Focus on: setting, lighting, pose, clothing state, composition, atmosphere.
+   *  Character identity is handled by the face swap step. */
+  prompt: string;
+  /** Aspect ratio. Default: '2:3' (portrait) for single character, '3:2' (landscape) for dual. */
+  aspectRatio?: string;
+  /** Additional style LoRA URLs from HuggingFace or CivitAI.
+   *  The uncensored LoRA is added automatically when isNsfw=true. */
+  styleLoraUrls?: string[];
+  /** LoRA scales matching styleLoraUrls order. Default: 0.8 for each. */
+  styleLoraScales?: number[];
+  /** Whether this is NSFW content (adds uncensored LoRA). */
+  isNsfw: boolean;
+  /** Seed for reproducibility. */
+  seed?: number;
+  /** Guidance scale. Default: 3.5. Lower (2-3) = more natural. Higher (4-5) = more stylized. */
+  guidanceScale?: number;
+  /** Number of inference steps. Default: 28. */
+  numInferenceSteps?: number;
+  /** Output format. Default: 'png'. */
+  outputFormat?: 'png' | 'jpg' | 'webp';
+}
+
+export interface MultiLoraSceneResult {
+  imageBuffer: Buffer;
+  imageBase64: string;
+  /** Scene image URL from Replicate — temporary, valid for passing to face swap. */
+  imageUrl: string;
+}
+
+// ── Face Swap Types ──
+
+export interface FaceSwapConfig {
+  /** URL of the generated scene image (output from multi-LoRA step) */
+  targetImageUrl: string;
+  /** URL of the primary character's approved face portrait */
+  primaryFaceUrl: string;
+  /** Gender of the primary character. Sent as "a man" / "a woman" per Easel API. */
+  primaryGender: 'male' | 'female';
+  /** URL of the secondary character's approved face portrait (dual-character scenes) */
+  secondaryFaceUrl?: string;
+  /** Gender of the secondary character */
+  secondaryGender?: 'male' | 'female';
+  /** Hair source: 'target' preserves scene's hair, 'user' uses face reference's hair.
+   *  Default: 'target' — we want the scene's hair since the prompt describes it. */
+  hairSource?: 'target' | 'user';
+}
+
+export interface FaceSwapResult {
+  imageBuffer: Buffer;
+  imageBase64: string;
+}
+
+// ── Combined V4 Pipeline Types ──
+
+export interface V4PipelineConfig {
+  /** Scene prompt — setting, lighting, pose, clothing, composition. */
+  prompt: string;
+  /** Primary character's approved face image URL */
+  primaryFaceUrl: string;
+  primaryGender: 'male' | 'female';
+  /** Secondary character (for dual-character scenes) */
+  secondaryFaceUrl?: string;
+  secondaryGender?: 'male' | 'female';
+  /** Whether this is NSFW content */
+  isNsfw: boolean;
+  /** Additional style LoRAs */
+  styleLoraUrls?: string[];
+  styleLoraScales?: number[];
+  /** Aspect ratio override */
+  aspectRatio?: string;
+  /** Seed */
+  seed?: number;
+}
+
+export interface V4PipelineResult {
+  /** Final image with faces swapped */
+  finalImageBuffer: Buffer;
+  finalImageBase64: string;
+  /** Intermediate scene image before face swap (for debugging) */
+  sceneImageBase64: string;
+  seed: number;
+}
+
+// ── Multi-LoRA Scene Generation ──
+
+/**
+ * Extract a URL string from Replicate output.
+ * FileOutput objects have a .url() method; legacy outputs are plain URL strings.
+ */
+function extractReplicateUrl(output: unknown): string | null {
+  const value = Array.isArray(output) ? output[0] : output;
+  if (!value) return null;
+
+  // FileOutput — has a url() method
+  if (typeof value === 'object' && 'url' in value && typeof (value as any).url === 'function') {
+    return String((value as any).url());
+  }
+
+  // Plain URL string
+  if (typeof value === 'string' && value.startsWith('http')) {
+    return value;
+  }
+
+  return null;
+}
+
+/**
+ * Generate a scene image using Flux Dev Multi-LoRA on Replicate.
+ *
+ * Applies the uncensored LoRA for NSFW content and any additional style LoRAs.
+ * Returns the image buffer + a temporary Replicate URL for the face swap step.
+ */
+export async function runMultiLoraScene(config: MultiLoraSceneConfig): Promise<MultiLoraSceneResult> {
+  if (!process.env.REPLICATE_API_TOKEN) {
+    throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+  }
+
+  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+
+  // Build LoRA stack
+  const loras: string[] = [];
+  const scales: number[] = [];
+
+  if (config.isNsfw) {
+    loras.push(UNCENSORED_LORA_URL);
+    scales.push(0.8);
+  }
+
+  if (config.styleLoraUrls) {
+    loras.push(...config.styleLoraUrls);
+    const styleScales = config.styleLoraScales || config.styleLoraUrls.map(() => 0.8);
+    scales.push(...styleScales);
+  }
+
+  const input: Record<string, unknown> = {
+    prompt: config.prompt,
+    aspect_ratio: config.aspectRatio || '2:3',
+    output_format: config.outputFormat || 'png',
+    output_quality: 95,
+    guidance_scale: config.guidanceScale ?? 3.5,
+    num_inference_steps: config.numInferenceSteps ?? 28,
+    disable_safety_checker: true,
+    num_outputs: 1,
+  };
+
+  // hf_loras and lora_scales are both arrays per the Replicate schema
+  if (loras.length > 0) {
+    input.hf_loras = loras;
+    input.lora_scales = scales;
+  }
+
+  if (config.seed !== undefined) {
+    input.seed = config.seed;
+  }
+
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(
+      `[MultiLoRA] Generating scene (attempt ${attempt}/${maxRetries}) — ` +
+      `${loras.length} LoRA(s) [${config.isNsfw ? 'uncensored' : 'SFW'}], ` +
+      `aspect=${config.aspectRatio || '2:3'}, seed=${input.seed ?? 'random'}`,
+    );
+
+    try {
+      const output = await replicate.run(FLUX_MULTI_LORA_MODEL, { input });
+
+      // Extract URL before consuming the stream (FileOutput can only be read once)
+      const imageUrl = extractReplicateUrl(output);
+      const imageBuffer = imageUrl
+        ? await fetchImageBuffer(imageUrl)
+        : await readReplicateOutput(output);
+
+      if (!imageUrl) {
+        throw new Error('Could not extract URL from Replicate output — face swap requires a URL');
+      }
+
+      console.log(
+        `[MultiLoRA] Generated: ${Math.round(imageBuffer.length / 1024)}KB`,
+      );
+
+      return {
+        imageBuffer,
+        imageBase64: imageBuffer.toString('base64'),
+        imageUrl,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[MultiLoRA] Attempt ${attempt} failed: ${message}`);
+
+      if (attempt === maxRetries) {
+        throw new Error(`Multi-LoRA scene generation failed after ${maxRetries} attempts: ${message}`);
+      }
+
+      input.seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+      console.log(`[MultiLoRA] Retrying with new seed: ${input.seed}`);
+    }
+  }
+
+  throw new Error('Multi-LoRA scene generation failed');
+}
+
+/** Download an image from a URL into a Buffer */
+async function fetchImageBuffer(url: string): Promise<Buffer> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download image from ${url}: ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+// ── Face Swap ──
+
+/**
+ * Swap one or two faces onto a generated scene using Easel Advanced Face Swap.
+ *
+ * Preserves scene composition, lighting, skin tone, and body.
+ * The face swap model accepts gender as descriptive strings: "a man", "a woman".
+ */
+export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResult> {
+  if (!process.env.REPLICATE_API_TOKEN) {
+    throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+  }
+
+  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+
+  const genderLabel = (g: 'male' | 'female') => g === 'male' ? 'a man' : 'a woman';
+
+  const input: Record<string, unknown> = {
+    target_image: config.targetImageUrl,
+    swap_image: config.primaryFaceUrl,
+    hair_source: config.hairSource || 'target',
+    user_gender: genderLabel(config.primaryGender),
+  };
+
+  if (config.secondaryFaceUrl) {
+    input.swap_image_b = config.secondaryFaceUrl;
+  }
+  if (config.secondaryGender) {
+    input.user_b_gender = genderLabel(config.secondaryGender);
+  }
+
+  console.log(
+    `[FaceSwap] Swapping ${config.secondaryFaceUrl ? '2 faces' : '1 face'} ` +
+    `onto scene, hair_source=${config.hairSource || 'target'}, ` +
+    `primary=${config.primaryGender}, secondary=${config.secondaryGender || 'none'}`,
+  );
+
+  const output = await replicate.run(FACE_SWAP_MODEL, { input });
+  const imageBuffer = await readReplicateOutput(output);
+
+  console.log(`[FaceSwap] Complete: ${Math.round(imageBuffer.length / 1024)}KB`);
+
+  return {
+    imageBuffer,
+    imageBase64: imageBuffer.toString('base64'),
+  };
+}
+
+// ── Combined V4 Pipeline ──
+
+/**
+ * Run the full V4 pipeline: Multi-LoRA scene generation → Easel face swap.
+ *
+ * If primaryFaceUrl is empty, skips the face swap step and returns the raw scene.
+ */
+export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4PipelineResult> {
+  const seed = config.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
+  const isDual = !!config.secondaryFaceUrl;
+  const aspectRatio = config.aspectRatio || (isDual ? '3:2' : '2:3');
+
+  console.log(`[V4 Pipeline] Step 1: Generating scene via flux-dev-multi-lora...`);
+  console.log(`[V4 Pipeline]   NSFW: ${config.isNsfw}, LoRAs: ${(config.styleLoraUrls?.length || 0)} style + ${config.isNsfw ? '1 uncensored' : '0'}`);
+  console.log(`[V4 Pipeline]   Aspect: ${aspectRatio}, Seed: ${seed}`);
+
+  // Step 1: Generate scene
+  const sceneResult = await runMultiLoraScene({
+    prompt: config.prompt,
+    isNsfw: config.isNsfw,
+    aspectRatio,
+    styleLoraUrls: config.styleLoraUrls,
+    styleLoraScales: config.styleLoraScales,
+    seed,
+  });
+
+  console.log(`[V4 Pipeline] Step 1 complete: ${Math.round(sceneResult.imageBuffer.length / 1024)}KB`);
+
+  // Step 2: Face swap (skip if no face URL provided)
+  if (!config.primaryFaceUrl) {
+    console.log(`[V4 Pipeline] No face URL — skipping face swap, returning raw scene`);
+    return {
+      finalImageBuffer: sceneResult.imageBuffer,
+      finalImageBase64: sceneResult.imageBase64,
+      sceneImageBase64: sceneResult.imageBase64,
+      seed,
+    };
+  }
+
+  console.log(`[V4 Pipeline] Step 2: Face swap — ${isDual ? '2 faces' : '1 face'}...`);
+
+  const swapResult = await runFaceSwap({
+    targetImageUrl: sceneResult.imageUrl,
+    primaryFaceUrl: config.primaryFaceUrl,
+    primaryGender: config.primaryGender,
+    secondaryFaceUrl: config.secondaryFaceUrl,
+    secondaryGender: config.secondaryGender,
+    hairSource: 'target',
+  });
+
+  console.log(`[V4 Pipeline] Step 2 complete: ${Math.round(swapResult.imageBuffer.length / 1024)}KB`);
+
+  return {
+    finalImageBuffer: swapResult.imageBuffer,
+    finalImageBase64: swapResult.imageBase64,
+    sceneImageBase64: sceneResult.imageBase64,
+    seed,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Original Flux 2 Pro Client (kept for SFW-only workflows)
+// ════════════════════════════════════════════════════════════════════
 
 const FLUX_2_PRO_MODEL = 'black-forest-labs/flux-2-pro' as const;
 
