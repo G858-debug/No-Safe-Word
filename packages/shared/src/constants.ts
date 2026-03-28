@@ -8,14 +8,14 @@ import type {
 } from "./types";
 
 export const ASPECT_RATIOS: AspectRatio[] = [
-  { label: "Square (512x512)", width: 512, height: 512 },
+  { label: "Square (1280x1280)", width: 1280, height: 1280 },
+  { label: "Portrait (960x1280)", width: 960, height: 1280 },
+  { label: "Landscape (1280x960)", width: 1280, height: 960 },
   { label: "Square (1024x1024)", width: 1024, height: 1024 },
+  { label: "Portrait (832x1216)", width: 832, height: 1216 },
+  { label: "Landscape (1216x832)", width: 1216, height: 832 },
   { label: "Portrait (512x768)", width: 512, height: 768 },
-  { label: "Portrait (768x1152)", width: 768, height: 1152 },
   { label: "Landscape (768x512)", width: 768, height: 512 },
-  { label: "Landscape (1152x768)", width: 1152, height: 768 },
-  { label: "Wide (1216x832)", width: 1216, height: 832 },
-  { label: "Tall (832x1216)", width: 832, height: 1216 },
 ];
 
 /** @deprecated SDXL models removed — Kontext uses a single model */
@@ -27,8 +27,8 @@ export const SCHEDULERS: SchedulerOption[] = [];
 /** @deprecated SDXL generation defaults — kept for dashboard backward compat */
 export const DEFAULT_SETTINGS: GenerationSettings = {
   modelUrn: "",
-  width: 832,
-  height: 1216,
+  width: 960,
+  height: 1280,
   steps: 20,
   cfgScale: 1,
   scheduler: "euler",

@@ -22,6 +22,8 @@ export interface DiagnosticFlags {
   styleLoras: boolean;
   /** Slot 4: BodyLicious or Hourglass (female only) */
   bodyShapeLora: boolean;
+  /** PuLID spatial face masking — restricts refinement to head region */
+  pulidMask: boolean;
 }
 
 export const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
@@ -33,4 +35,5 @@ export const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
   realismLora: true,
   styleLoras: true,
   bodyShapeLora: true,
+  pulidMask: true,
 };

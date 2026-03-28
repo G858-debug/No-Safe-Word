@@ -69,8 +69,8 @@ export async function POST(request: NextRequest) {
     const workflow = buildKontextWorkflow({
       type: "portrait",
       positivePrompt: finalPrompt,
-      width: 832,
-      height: 1216,
+      width: 960,
+      height: 1280,
       seed,
       filenamePrefix: "imggen_test",
       loras,

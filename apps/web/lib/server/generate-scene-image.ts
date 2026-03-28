@@ -629,8 +629,10 @@ export async function buildSceneGenerationPayload(
   // PuLID weight and denoise are reduced for dark scenes to prevent
   // the refinement pass from overriding the scene with a standing portrait.
   const isDarkScene = detectSceneDarkness(imgPrompt.prompt);
-  const pulidWeight = isDarkScene ? 0.55 : 0.85;
-  const pulidDenoise = isDarkScene ? 0.20 : 0.40;
+  const useFaceMask = flags.pulidMask;
+  // Higher PuLID params are safe when spatial masking protects the scene
+  const pulidWeight = isDarkScene ? (useFaceMask ? 0.75 : 0.55) : (useFaceMask ? 0.95 : 0.85);
+  const pulidDenoise = isDarkScene ? (useFaceMask ? 0.35 : 0.20) : (useFaceMask ? 0.55 : 0.40);
 
   const pulidConfig = flags.pulid && primaryFaceUrl
     ? {
@@ -638,6 +640,7 @@ export async function buildSceneGenerationPayload(
         secondaryFaceImageName: secondaryFaceUrl ? 'secondary_face_reference.jpg' : undefined,
         weight: pulidWeight,
         denoiseStrength: pulidDenoise,
+        useFaceMask,
       }
     : undefined;
 
@@ -647,7 +650,7 @@ export async function buildSceneGenerationPayload(
 
   if (effectiveKontextType !== 'portrait') {
     if (primaryFaceUrl) {
-      console.log(`[Kontext][${promptId}] PuLID enabled: weight=${pulidWeight}, denoise=${pulidDenoise}, dark=${isDarkScene}${secondaryFaceUrl ? ', secondary face ref present' : ''}`);
+      console.log(`[Kontext][${promptId}] PuLID enabled: weight=${pulidWeight}, denoise=${pulidDenoise}, dark=${isDarkScene}, faceMask=${useFaceMask}${secondaryFaceUrl ? ', secondary face ref present' : ''}`);
     } else {
       console.log(`[Kontext][${promptId}] PuLID disabled: no face_url for primary character`);
     }

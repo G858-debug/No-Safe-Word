@@ -449,8 +449,10 @@ export async function buildV3SceneGenerationPayload(
 
   // ── PuLID config ──
   const isDarkScene = detectSceneDarkness(imgPrompt.prompt);
-  const pulidWeight = isDarkScene ? 0.55 : 0.85;
-  const pulidDenoise = isDarkScene ? 0.20 : 0.40;
+  // Spatial masking is always on for V3 (no diagnostic panel)
+  const useFaceMask = true;
+  const pulidWeight = isDarkScene ? 0.75 : 0.95;
+  const pulidDenoise = isDarkScene ? 0.35 : 0.55;
 
   const pulidConfig = primaryFaceUrl
     ? {
@@ -458,12 +460,13 @@ export async function buildV3SceneGenerationPayload(
         secondaryFaceImageName: secondaryFaceUrl ? "secondary_face_reference.jpg" : undefined,
         weight: pulidWeight,
         denoiseStrength: pulidDenoise,
+        useFaceMask,
       }
     : undefined;
 
   if (effectiveKontextType !== "portrait") {
     if (primaryFaceUrl) {
-      console.log(`[V3][${promptId}] PuLID enabled: weight=${pulidWeight}, denoise=${pulidDenoise}, dark=${isDarkScene}${secondaryFaceUrl ? ", secondary face ref present" : ""}`);
+      console.log(`[V3][${promptId}] PuLID enabled: weight=${pulidWeight}, denoise=${pulidDenoise}, dark=${isDarkScene}, faceMask=${useFaceMask}${secondaryFaceUrl ? ", secondary face ref present" : ""}`);
     } else {
       console.log(`[V3][${promptId}] PuLID disabled: no face_url for primary character`);
     }

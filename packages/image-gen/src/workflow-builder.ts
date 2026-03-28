@@ -54,7 +54,84 @@ export interface KontextWorkflowConfig {
     weight?: number;
     /** KSampler denoise for the refinement pass. Default: 0.5 */
     denoiseStrength?: number;
+    /** Enable spatial face masking to restrict PuLID to the head region.
+     *  When true, an attention mask is generated based on scene type.
+     *  Default: true */
+    useFaceMask?: boolean;
   };
+}
+
+/**
+ * Build face region mask nodes for PuLID spatial masking.
+ * Returns nodes that create a feathered rectangular mask over the face area.
+ * All nodes used (SolidMask, MaskComposite, GrowMask, MaskToImage, ImageBlur, ImageToMask)
+ * are built-in ComfyUI — no custom dependencies.
+ *
+ * @param startNodeId - First node ID in this mask chain (7 nodes total: startNodeId..startNodeId+6)
+ * @param imgWidth - Output image width
+ * @param imgHeight - Output image height
+ * @param regionX - Face region X offset (pixels from left)
+ * @param regionY - Face region Y offset (pixels from top)
+ * @param regionWidth - Face region width
+ * @param regionHeight - Face region height
+ */
+function buildFaceMaskNodes(
+  startNodeId: number,
+  imgWidth: number,
+  imgHeight: number,
+  regionX: number,
+  regionY: number,
+  regionWidth: number,
+  regionHeight: number,
+): Record<string, any> {
+  const n = (offset: number) => String(startNodeId + offset);
+  const nodes: Record<string, any> = {};
+
+  // Full-black (zero) mask at output dimensions
+  nodes[n(0)] = {
+    class_type: 'SolidMask',
+    inputs: { value: 0, width: imgWidth, height: imgHeight },
+  };
+
+  // White (1.0) mask for the face region
+  nodes[n(1)] = {
+    class_type: 'SolidMask',
+    inputs: { value: 1.0, width: regionWidth, height: regionHeight },
+  };
+
+  // Composite white region onto black background
+  nodes[n(2)] = {
+    class_type: 'MaskComposite',
+    inputs: {
+      destination: [n(0), 0],
+      source: [n(1), 0],
+      x: regionX,
+      y: regionY,
+      operation: 'add',
+    },
+  };
+
+  // Expand mask slightly to avoid hard edges
+  nodes[n(3)] = {
+    class_type: 'GrowMask',
+    inputs: { mask: [n(2), 0], expand: 20, tapered_corners: true },
+  };
+
+  // Feather edges: MaskToImage → ImageBlur → ImageToMask
+  nodes[n(4)] = {
+    class_type: 'MaskToImage',
+    inputs: { mask: [n(3), 0] },
+  };
+  nodes[n(5)] = {
+    class_type: 'ImageBlur',
+    inputs: { image: [n(4), 0], blur_radius: 40, sigma: 20 },
+  };
+  nodes[n(6)] = {
+    class_type: 'ImageToMask',
+    inputs: { image: [n(5), 0], channel: 'red' },
+  };
+
+  return nodes;
 }
 
 /**
@@ -351,6 +428,20 @@ function buildKontextSingleWorkflow(
       inputs: { provider: 'CUDA' },
     };
 
+    // ── Optional spatial face mask (nodes 320–326) ──
+    // Restricts PuLID attention to the face/head region so higher denoise
+    // values don't corrupt scene composition.
+    if (config.pulid.useFaceMask !== false) {
+      const faceRegionWidth = Math.round(config.width * 0.65);
+      const faceRegionHeight = Math.round(config.height * 0.40);
+      const faceRegionX = Math.round((config.width - faceRegionWidth) / 2);
+      const faceRegionY = Math.round(config.height * 0.02);
+      Object.assign(workflow, buildFaceMaskNodes(
+        320, config.width, config.height,
+        faceRegionX, faceRegionY, faceRegionWidth, faceRegionHeight,
+      ));
+    }
+
     // Node 303: ApplyPulid — patch Flux model with face identity
     workflow['303'] = {
       class_type: 'ApplyPulidFlux',
@@ -363,6 +454,7 @@ function buildKontextSingleWorkflow(
         weight: pulidWeight,
         start_at: 0.0,
         end_at: 1.0,
+        ...(config.pulid.useFaceMask !== false ? { attn_mask: ['326', 0] } : {}),
       },
     };
 
@@ -794,6 +886,26 @@ function buildKontextDualWorkflow(
       inputs: { provider: 'CUDA' },
     };
 
+    // ── Optional spatial face masks for dual scene (left + right) ──
+    if (config.pulid.useFaceMask !== false) {
+      const dualFaceWidth = Math.round(config.width * 0.45);
+      const dualFaceHeight = Math.round(config.height * 0.45);
+      const leftX = Math.round(config.width * 0.03);
+      const rightX = Math.round(config.width * 0.52);
+      const dualY = Math.round(config.height * 0.02);
+
+      // Left mask for pass 1 (primary character) — nodes 320–326
+      Object.assign(workflow, buildFaceMaskNodes(
+        320, config.width, config.height,
+        leftX, dualY, dualFaceWidth, dualFaceHeight,
+      ));
+      // Right mask for pass 2 (secondary character) — nodes 330–336
+      Object.assign(workflow, buildFaceMaskNodes(
+        330, config.width, config.height,
+        rightX, dualY, dualFaceWidth, dualFaceHeight,
+      ));
+    }
+
     // ── Pass 1: Primary character face ──
     workflow['300'] = {
       class_type: 'LoadImage',
@@ -810,6 +922,7 @@ function buildKontextDualWorkflow(
         weight: pulidWeight,
         start_at: 0.0,
         end_at: 1.0,
+        ...(config.pulid.useFaceMask !== false ? { attn_mask: ['326', 0] } : {}),
       },
     };
     workflow['304'] = {
@@ -853,6 +966,7 @@ function buildKontextDualWorkflow(
           weight: pulidWeight,
           start_at: 0.0,
           end_at: 1.0,
+          ...(config.pulid.useFaceMask !== false ? { attn_mask: ['336', 0] } : {}),
         },
       };
       workflow['312'] = {

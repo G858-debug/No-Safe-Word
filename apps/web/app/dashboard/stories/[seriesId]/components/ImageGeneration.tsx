@@ -45,6 +45,7 @@ interface DiagnosticFlags {
   realismLora: boolean;
   styleLoras: boolean;
   bodyShapeLora: boolean;
+  pulidMask: boolean;
 }
 
 const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
@@ -56,6 +57,7 @@ const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
   realismLora: true,
   styleLoras: true,
   bodyShapeLora: true,
+  pulidMask: true,
 };
 
 const DIAGNOSTIC_TOGGLE_CONFIG: Array<{
@@ -71,6 +73,7 @@ const DIAGNOSTIC_TOGGLE_CONFIG: Array<{
   { key: "realismLora", label: "Realism LoRA", group: "LoRA Stack" },
   { key: "styleLoras", label: "Style LoRAs", group: "LoRA Stack" },
   { key: "bodyShapeLora", label: "Body Shape LoRA", group: "LoRA Stack" },
+  { key: "pulidMask", label: "PuLID Face Mask", group: "Character Identity" },
 ];
 
 // ---------------------------------------------------------------------------
