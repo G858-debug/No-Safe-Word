@@ -17,8 +17,8 @@
  */
 
 import { supabase } from "@no-safe-word/story-engine";
-import { runV4PipelineAsync } from "@no-safe-word/image-gen";
-import type { V4PipelineAsyncResult } from "@no-safe-word/image-gen";
+import { runV4SceneGeneration } from "@no-safe-word/image-gen";
+import type { V4SceneOnlyResult } from "@no-safe-word/image-gen";
 
 // Re-export fetchCharacterDataMap from V1 — shared across all pipelines
 export { fetchCharacterDataMap } from "./generate-scene-image";
@@ -37,15 +37,22 @@ export interface ScenePromptInput {
 }
 
 export interface V4SceneResult {
-  /** Scene image buffer (pre-face-swap — this is what gets stored immediately) */
+  /** Scene image buffer — store to Supabase immediately */
   sceneImageBuffer: Buffer;
   sceneImageBase64: string;
   assembledPrompt: string;
   mode: "sfw" | "nsfw";
   seed: number;
   engine: "flux2_pro";
-  /** Replicate prediction ID for the face swap step, or null if no face swap */
-  faceSwapPredictionId: string | null;
+  /** Face swap config — null if no face images available. Caller must:
+   *  1. Upload scene image to Supabase to get a permanent URL
+   *  2. Call submitFaceSwap() with that permanent URL as targetImageUrl */
+  faceSwapConfig: {
+    primaryFaceUrl: string;
+    primaryGender: "male" | "female";
+    secondaryFaceUrl?: string;
+    secondaryGender?: "male" | "female";
+  } | null;
 }
 
 interface V4GenerateSceneParams {
@@ -193,7 +200,7 @@ export async function generateSceneImageV4(
     }, null, 2),
   );
 
-  const result: V4PipelineAsyncResult = await runV4PipelineAsync({
+  const result: V4SceneOnlyResult = await runV4SceneGeneration({
     prompt: imgPrompt.prompt,
     primaryFaceUrl: primaryFaceUrl || "",
     primaryGender,
@@ -211,6 +218,13 @@ export async function generateSceneImageV4(
     mode,
     seed: result.seed,
     engine: "flux2_pro",
-    faceSwapPredictionId: result.faceSwapPredictionId,
+    faceSwapConfig: primaryFaceUrl
+      ? {
+          primaryFaceUrl,
+          primaryGender,
+          secondaryFaceUrl: secondaryFaceUrl || undefined,
+          secondaryGender,
+        }
+      : null,
   };
 }

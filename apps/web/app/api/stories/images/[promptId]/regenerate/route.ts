@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob } from "@no-safe-word/image-gen";
+import { submitRunPodJob, submitFaceSwap } from "@no-safe-word/image-gen";
 import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
 import { generateV2Scene, buildRefUrlMap } from "@/lib/server/generate-scene-image-v2";
 import { buildV3SceneGenerationPayload } from "@/lib/server/generate-scene-image-v3";
@@ -90,9 +90,9 @@ export async function POST(
         seed,
       });
 
-      const hasFaceSwap = !!result.faceSwapPredictionId;
+      const hasFaceSwap = !!result.faceSwapConfig;
 
-      // Store the scene image immediately (pre-face-swap)
+      // Store the scene image to Supabase (permanent URL needed for face swap)
       const timestamp = Date.now();
       const imageId = crypto.randomUUID();
       const storagePath = `stories/${imageId}-${timestamp}.png`;
@@ -109,6 +109,20 @@ export async function POST(
         .from("story-images")
         .getPublicUrl(storagePath);
 
+      // Submit face swap AFTER upload — uses the permanent Supabase URL, not Replicate's temp URL
+      let faceSwapPredictionId: string | null = null;
+      if (result.faceSwapConfig) {
+        faceSwapPredictionId = await submitFaceSwap({
+          targetImageUrl: publicUrl,
+          primaryFaceUrl: result.faceSwapConfig.primaryFaceUrl,
+          primaryGender: result.faceSwapConfig.primaryGender,
+          secondaryFaceUrl: result.faceSwapConfig.secondaryFaceUrl,
+          secondaryGender: result.faceSwapConfig.secondaryGender,
+          hairSource: "target",
+        });
+        console.log(`[V4][${promptId}] Face swap submitted: ${faceSwapPredictionId}`);
+      }
+
       // Create image record with scene image (face-swapped version replaces it when ready)
       const { data: imageRow, error: imgError } = await supabase
         .from("images")
@@ -122,7 +136,7 @@ export async function POST(
             engine: "replicate-v4-multi-lora-faceswap",
             mode: result.mode,
             hasFaceSwap,
-            faceSwapPredictionId: result.faceSwapPredictionId,
+            faceSwapPredictionId,
             pipelineSteps: ["multi-lora-scene", hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
           },
           mode: result.mode,
@@ -138,7 +152,7 @@ export async function POST(
 
       // Create generation job — pending if face swap is running, completed if no swap needed
       const jobId = hasFaceSwap
-        ? `replicate-faceswap-${result.faceSwapPredictionId}`
+        ? `replicate-faceswap-${faceSwapPredictionId}`
         : `replicate-v4-${imageId}`;
 
       await supabase.from("generation_jobs").insert({
@@ -159,7 +173,7 @@ export async function POST(
         .eq("id", promptId);
 
       if (hasFaceSwap) {
-        // Face swap is running async — client should poll status endpoint
+        // Face swap is running async — client polls /api/status/{jobId}
         return NextResponse.json({
           jobId,
           imageId: imageRow.id,

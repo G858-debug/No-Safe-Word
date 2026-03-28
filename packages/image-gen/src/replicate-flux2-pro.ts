@@ -372,34 +372,33 @@ export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResul
 
 // ── Combined V4 Pipeline ──
 
-export interface V4PipelineAsyncResult {
-  /** Scene image buffer (pre-face-swap) — store this immediately */
+export interface V4SceneOnlyResult {
+  /** Scene image buffer (pre-face-swap) — caller must store this to Supabase */
   sceneImageBuffer: Buffer;
   sceneImageBase64: string;
-  /** Replicate prediction ID for the face swap step (poll via checkFaceSwapStatus) */
-  faceSwapPredictionId: string | null;
   seed: number;
 }
 
 /**
- * Run V4 pipeline Step 1 synchronously, then submit Step 2 (face swap) async.
+ * Run V4 pipeline Step 1 only: generate the scene image via multi-LoRA.
  *
- * Returns immediately after submitting the face swap prediction.
- * The caller should store the scene image, then poll checkFaceSwapStatus()
- * to get the final face-swapped image when ready.
+ * Returns the scene image buffer. The caller is responsible for:
+ * 1. Uploading to Supabase Storage to get a permanent URL
+ * 2. Calling submitFaceSwap() with that permanent URL (NOT the Replicate temp URL)
+ * 3. Polling checkFaceSwapStatus() for the face-swapped result
  *
- * If no face URL is provided, faceSwapPredictionId is null (no swap needed).
+ * This separation exists because Replicate's temporary output URLs expire quickly,
+ * and the face swap model may cold-boot for 30-60s before accessing the image.
  */
-export async function runV4PipelineAsync(config: V4PipelineConfig): Promise<V4PipelineAsyncResult> {
+export async function runV4SceneGeneration(config: V4PipelineConfig): Promise<V4SceneOnlyResult> {
   const seed = config.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
   const isDual = !!config.secondaryFaceUrl;
   const aspectRatio = config.aspectRatio || (isDual ? '3:2' : '2:3');
 
-  console.log(`[V4 Pipeline] Step 1: Generating scene via flux-dev-multi-lora...`);
+  console.log(`[V4 Pipeline] Generating scene via flux-dev-multi-lora...`);
   console.log(`[V4 Pipeline]   NSFW: ${config.isNsfw}, LoRAs: ${(config.styleLoraUrls?.length || 0)} style + ${config.isNsfw ? '1 uncensored' : '0'}`);
   console.log(`[V4 Pipeline]   Aspect: ${aspectRatio}, Seed: ${seed}`);
 
-  // Step 1: Generate scene (synchronous, ~30s)
   const sceneResult = await runMultiLoraScene({
     prompt: config.prompt,
     isNsfw: config.isNsfw,
@@ -409,34 +408,11 @@ export async function runV4PipelineAsync(config: V4PipelineConfig): Promise<V4Pi
     seed,
   });
 
-  console.log(`[V4 Pipeline] Step 1 complete: ${Math.round(sceneResult.imageBuffer.length / 1024)}KB`);
-
-  // Step 2: Submit face swap async (non-blocking)
-  if (!config.primaryFaceUrl) {
-    console.log(`[V4 Pipeline] No face URL — skipping face swap`);
-    return {
-      sceneImageBuffer: sceneResult.imageBuffer,
-      sceneImageBase64: sceneResult.imageBase64,
-      faceSwapPredictionId: null,
-      seed,
-    };
-  }
-
-  console.log(`[V4 Pipeline] Step 2: Submitting face swap — ${isDual ? '2 faces' : '1 face'}...`);
-
-  const predictionId = await submitFaceSwap({
-    targetImageUrl: sceneResult.imageUrl,
-    primaryFaceUrl: config.primaryFaceUrl,
-    primaryGender: config.primaryGender,
-    secondaryFaceUrl: config.secondaryFaceUrl,
-    secondaryGender: config.secondaryGender,
-    hairSource: 'target',
-  });
+  console.log(`[V4 Pipeline] Scene complete: ${Math.round(sceneResult.imageBuffer.length / 1024)}KB`);
 
   return {
     sceneImageBuffer: sceneResult.imageBuffer,
     sceneImageBase64: sceneResult.imageBase64,
-    faceSwapPredictionId: predictionId,
     seed,
   };
 }
