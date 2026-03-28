@@ -307,21 +307,22 @@ export function buildUncannyInpaintWorkflow(config: {
   };
 
   // Node 208: KSampler — inpaint within the masked region
-  // denoise controls how much of the masked region is regenerated:
-  //   0.85–0.95 = strong regeneration (good for clothing→skin replacement)
-  //   < 0.8 = too much original bleeds through
+  // Chroma/UnCanny uses different sampler settings than Flux Dev:
+  //   - cfg 3.5 (real CFG, not FluxGuidance — Chroma ignores FluxGuidance)
+  //   - dpmpp_sde sampler + beta scheduler (optimized for Chroma's noise schedule)
+  //   - 30 steps (20 is too low for Chroma, causes pixelation)
   workflow['208'] = {
     class_type: 'KSampler',
     inputs: {
       model: ['200', 0],
-      positive: ['204', 0],     // FluxGuidance output
+      positive: ['204', 0],     // FluxGuidance output (Chroma may ignore this)
       negative: ['205', 0],     // Zeroed-out conditioning
       latent_image: ['207', 0], // VAEEncodeForInpaint output
       seed: inpaint.seed,
-      steps: 20,
-      cfg: 1.0,
-      sampler_name: 'euler',
-      scheduler: 'simple',
+      steps: 30,
+      cfg: 3.5,
+      sampler_name: 'dpmpp_sde',
+      scheduler: 'beta',
       denoise: inpaint.denoiseStrength,
     },
   };
