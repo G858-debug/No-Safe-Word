@@ -1,22 +1,25 @@
 /**
  * V2 Scene Image Generation Logic
  *
- * Encapsulates the NB2 → Florence-2/SAM2 → UnCanny inpainting pipeline
- * for scene image generation. Called from the batch generation route and
- * the single-image regenerate route when the series uses `nb2_uncanny` engine.
+ * Encapsulates the NB2-based scene generation pipeline.
+ * Called from the batch generation route and the single-image regenerate
+ * route when the series uses `nb2_uncanny` engine.
  *
- * For SFW images (facebook_sfw, website_only):
- *   Stage A only — NB2 generates the clothed scene, stored immediately.
+ * SFW images (facebook_sfw, website_only):
+ *   Stage A: NB2 generates the clothed scene
+ *   Stage D: Flux Krea Dev img2img with body LoRAs enhances body proportions
  *
- * For NSFW paired images (website_nsfw_paired):
- *   Stage A: NB2 generates clothed scene → stored as sfw_image_id
- *   Stage B+C: Florence-2/SAM2 masking + UnCanny inpainting → RunPod job → image_id
+ * NSFW paired images (website_nsfw_paired):
+ *   Stage A: NB2 generates clothed scene
+ *   Stage B+C: Florence-2/SAM2 masking + UnCanny inpainting replaces clothing
  */
 
 import { supabase } from "@no-safe-word/story-engine";
 import {
   runNb2Scene,
   submitUncannyInpaintJob,
+  buildKontextWorkflow,
+  submitRunPodJob,
 } from "@no-safe-word/image-gen";
 
 // ── Types ──
@@ -39,22 +42,24 @@ export interface V2SceneParams {
   seed: number;
   /** NSFW inpaint prompt — describes bare body replacing clothing */
   inpaintPrompt: string;
-  /** SFW inpaint prompt — describes voluptuous figure in clothing */
-  sfwInpaintPrompt?: string;
+  /** SFW body enhancement denoise strength. Default: 0.30 */
+  sfwDenoise?: number;
+  /** NSFW mask query. Default: 'clothing' */
   maskQuery?: string;
+  /** NSFW denoise strength. Default: 0.90 */
   denoiseStrength?: number;
   aspectRatio?: string;
 }
 
 export interface V2SceneResult {
-  /** Image record ID for the NB2 base image (pre-inpainting) */
+  /** Image record ID for the NB2 base image */
   nb2ImageId: string;
   /** Supabase Storage URL for the NB2 base image */
   nb2StoredUrl: string | null;
-  /** RunPod job ID for Stage B+C inpainting */
+  /** RunPod job ID for the enhancement/inpainting step */
   runpodJobId: string;
-  /** Image record ID for the inpainted image (SFW enhanced or NSFW) */
-  inpaintedImageId: string;
+  /** Image record ID for the enhanced/inpainted image */
+  enhancedImageId: string;
   /** Seed used for generation */
   seed: number;
 }
@@ -116,14 +121,19 @@ export async function buildRefUrlMap(
   return refUrlMap;
 }
 
+// Default SFW body enhancement prompt for the Flux img2img pass
+const DEFAULT_SFW_BODY_PROMPT =
+  "Photorealistic photograph, voluptuous Black South African woman, very large natural breasts, " +
+  "wide hips, huge round butt, narrow waist, soft stomach, fully clothed, " +
+  "natural skin texture, high detail, cinematic lighting";
+
 // ── Main Pipeline ──
 
 /**
  * Generate a scene image using the V2 pipeline.
  *
- * For SFW-only images: runs NB2 (Stage A) and returns immediately.
- * For NSFW paired images: runs NB2 (Stage A), then submits inpainting
- * (Stage B+C) to RunPod asynchronously.
+ * SFW images: NB2 → Flux Krea Dev img2img with body LoRAs
+ * NSFW images: NB2 → Florence-2/SAM2 masking → UnCanny inpainting
  */
 export async function generateV2Scene(
   params: V2SceneParams,
@@ -132,25 +142,12 @@ export async function generateV2Scene(
     imgPrompt,
     seed,
     inpaintPrompt,
-    sfwInpaintPrompt,
     aspectRatio = "3:4",
     refUrlMap,
   } = params;
 
   const isNsfwPaired = imgPrompt.image_type === "website_nsfw_paired";
   const mode = isNsfwPaired ? "nsfw" : "sfw";
-
-  // SFW: mask the body to enhance curves through clothing (lower denoise preserves scene)
-  // NSFW: mask clothing to replace with bare skin (higher denoise for full replacement)
-  const effectiveMaskQuery = isNsfwPaired
-    ? (params.maskQuery || "clothing")
-    : "woman's body";
-  const effectiveInpaintPrompt = isNsfwPaired
-    ? inpaintPrompt
-    : (sfwInpaintPrompt || "voluptuous woman, very large natural breasts, wide hips, huge round butt, narrow waist, fitted clothing showing curves");
-  const effectiveDenoise = isNsfwPaired
-    ? (params.denoiseStrength ?? 0.90)
-    : (params.denoiseStrength ?? 0.70);
 
   // Collect character reference URLs for NB2
   const referenceImageUrls: string[] = [];
@@ -230,46 +227,148 @@ export async function generateV2Scene(
     );
   }
 
-  // ── Stage B+C: Masking + Inpainting (ALL images) ──
-  // SFW: enhances body curves through clothing
-  // NSFW: replaces clothing with bare skin
   if (!nb2StoredUrl) {
     throw new Error(
-      `[V2][${imgPrompt.id}] Cannot submit inpainting: NB2 image upload failed. ` +
-      `Stage B+C requires a stored URL for the base image.`,
+      `[V2][${imgPrompt.id}] Cannot proceed: NB2 image upload failed.`,
     );
   }
 
+  // ── Branch: SFW vs NSFW ──
+
+  if (isNsfwPaired) {
+    // ── NSFW: Florence-2/SAM2 masking + UnCanny inpainting ──
+    return submitNsfwInpainting(params, imgPrompt, nb2ImageRow.id, nb2StoredUrl, seed, mode);
+  } else {
+    // ── SFW: Flux Krea Dev img2img with body LoRAs ──
+    return submitSfwBodyEnhancement(params, imgPrompt, nb2ImageRow.id, nb2StoredUrl, nb2Result.imageBase64, seed);
+  }
+}
+
+// ── SFW: Flux img2img body enhancement ──
+
+async function submitSfwBodyEnhancement(
+  params: V2SceneParams,
+  imgPrompt: ScenePromptInput,
+  nb2ImageId: string,
+  nb2StoredUrl: string,
+  nb2ImageBase64: string,
+  seed: number,
+): Promise<V2SceneResult> {
+  const sfwDenoise = params.sfwDenoise ?? 0.30;
+  const enhanceSeed = seed + 2000;
+
+  // Build Flux img2img workflow with body shape LoRAs
+  const bodyPrompt = DEFAULT_SFW_BODY_PROMPT;
+
+  const workflow = buildKontextWorkflow({
+    type: 'img2img',
+    positivePrompt: bodyPrompt,
+    width: 0,   // img2img uses source image dimensions
+    height: 0,
+    seed: enhanceSeed,
+    denoiseStrength: sfwDenoise,
+    filenamePrefix: `v2_sfw_${imgPrompt.id.substring(0, 8)}`,
+    loras: [
+      { filename: 'flux_realism_lora.safetensors', strengthModel: 0.7, strengthClip: 0.7 },
+      { filename: 'bodylicious-flux.safetensors', strengthModel: 0.85, strengthClip: 0.85 },
+      { filename: 'flux-add-details.safetensors', strengthModel: 0.5, strengthClip: 0.5 },
+    ],
+    guidance: 3.5,
+  });
+
+  console.log(
+    `[V2][${imgPrompt.id}] SFW body enhancement: Flux img2img, ` +
+    `denoise=${sfwDenoise}, seed=${enhanceSeed}, 3 LoRAs (realism+bodylicious+details)`,
+  );
+
+  // Submit to RunPod with NB2 image as input
+  const images = [{ name: 'input.jpg', image: nb2ImageBase64 }];
+  const { jobId } = await submitRunPodJob(workflow, images);
+
+  console.log(`[V2][${imgPrompt.id}] SFW RunPod job: ${jobId}`);
+
+  // Create image record for the enhanced result
+  const { data: enhancedRow, error: enhancedError } = await supabase
+    .from("images")
+    .insert({
+      character_id: imgPrompt.character_id || null,
+      prompt: bodyPrompt,
+      negative_prompt: "",
+      settings: {
+        seed: enhanceSeed,
+        engine: "runpod-flux-img2img",
+        pipelineVersion: "v2-sfw-enhanced",
+        denoiseStrength: sfwDenoise,
+        nb2ImageId,
+        nb2Seed: seed,
+        loras: ["flux_realism_lora", "bodylicious-flux", "flux-add-details"],
+      },
+      mode: "sfw",
+    })
+    .select("id")
+    .single();
+
+  if (enhancedError || !enhancedRow) {
+    throw new Error(`Failed to create enhanced image record: ${enhancedError?.message}`);
+  }
+
+  await supabase.from("generation_jobs").insert({
+    job_id: `runpod-${jobId}`,
+    image_id: enhancedRow.id,
+    status: "pending",
+    cost: 0,
+  });
+
+  return {
+    nb2ImageId,
+    nb2StoredUrl,
+    runpodJobId: `runpod-${jobId}`,
+    enhancedImageId: enhancedRow.id,
+    seed,
+  };
+}
+
+// ── NSFW: UnCanny inpainting ──
+
+async function submitNsfwInpainting(
+  params: V2SceneParams,
+  imgPrompt: ScenePromptInput,
+  nb2ImageId: string,
+  nb2StoredUrl: string,
+  seed: number,
+  mode: string,
+): Promise<V2SceneResult> {
+  const maskQuery = params.maskQuery || "clothing";
+  const denoiseStrength = params.denoiseStrength ?? 0.90;
   const inpaintSeed = seed + 1000;
 
   const { jobId, seed: usedSeed } = await submitUncannyInpaintJob({
     baseImageUrl: nb2StoredUrl,
-    maskQuery: effectiveMaskQuery,
-    inpaintPrompt: effectiveInpaintPrompt,
+    maskQuery,
+    inpaintPrompt: params.inpaintPrompt,
     seed: inpaintSeed,
-    denoiseStrength: effectiveDenoise,
+    denoiseStrength,
     filenamePrefix: `uncanny_v2_${imgPrompt.id.substring(0, 8)}`,
   });
 
   console.log(
-    `[V2][${imgPrompt.id}] Stage B+C submitted: job=${jobId}, ` +
-    `mode=${mode}, maskQuery="${effectiveMaskQuery}", denoise=${effectiveDenoise}`,
+    `[V2][${imgPrompt.id}] NSFW inpainting submitted: job=${jobId}, ` +
+    `maskQuery="${maskQuery}", denoise=${denoiseStrength}`,
   );
 
-  // Create image record for the inpainted result
-  const { data: inpaintedImageRow, error: inpaintImgError } = await supabase
+  const { data: nsfwRow, error: nsfwError } = await supabase
     .from("images")
     .insert({
       character_id: imgPrompt.character_id || null,
-      prompt: effectiveInpaintPrompt,
+      prompt: params.inpaintPrompt,
       negative_prompt: "",
       settings: {
         seed: usedSeed,
         engine: "runpod-uncanny-v2",
-        pipelineVersion: "v2",
-        maskQuery: effectiveMaskQuery,
-        denoiseStrength: effectiveDenoise,
-        nb2ImageId: nb2ImageRow.id,
+        pipelineVersion: "v2-nsfw",
+        maskQuery,
+        denoiseStrength,
+        nb2ImageId,
         nb2Seed: seed,
       },
       mode,
@@ -277,23 +376,22 @@ export async function generateV2Scene(
     .select("id")
     .single();
 
-  if (inpaintImgError || !inpaintedImageRow) {
-    throw new Error(`Failed to create inpainted image record: ${inpaintImgError?.message}`);
+  if (nsfwError || !nsfwRow) {
+    throw new Error(`Failed to create NSFW image record: ${nsfwError?.message}`);
   }
 
-  // Create generation job for polling
   await supabase.from("generation_jobs").insert({
     job_id: `runpod-${jobId}`,
-    image_id: inpaintedImageRow.id,
+    image_id: nsfwRow.id,
     status: "pending",
     cost: 0,
   });
 
   return {
-    nb2ImageId: nb2ImageRow.id,
+    nb2ImageId,
     nb2StoredUrl,
     runpodJobId: `runpod-${jobId}`,
-    inpaintedImageId: inpaintedImageRow.id,
+    enhancedImageId: nsfwRow.id,
     seed,
   };
 }

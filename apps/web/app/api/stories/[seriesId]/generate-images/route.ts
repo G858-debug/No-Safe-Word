@@ -176,14 +176,13 @@ export async function POST(
             refUrlMap,
             seed,
             inpaintPrompt,
-            sfwInpaintPrompt: series?.sfw_inpaint_prompt || undefined,
           });
 
           // All V2 images go through inpainting — store NB2 base as sfw_image_id
           await (supabase as any)
             .from("story_image_prompts")
             .update({
-              image_id: v2Result.inpaintedImageId,
+              image_id: v2Result.enhancedImageId,
               sfw_image_id: v2Result.nb2ImageId,
             })
             .eq("id", imgPrompt.id);

@@ -89,20 +89,19 @@ export async function POST(
         refUrlMap,
         seed,
         inpaintPrompt,
-        sfwInpaintPrompt: series?.sfw_inpaint_prompt || undefined,
       });
 
       await (supabase as any)
         .from("story_image_prompts")
         .update({
-          image_id: v2Result.inpaintedImageId,
+          image_id: v2Result.enhancedImageId,
           sfw_image_id: v2Result.nb2ImageId,
         })
         .eq("id", promptId);
 
       return NextResponse.json({
         jobId: v2Result.runpodJobId,
-        imageId: v2Result.inpaintedImageId,
+        imageId: v2Result.enhancedImageId,
       });
     }
 
