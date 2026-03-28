@@ -285,31 +285,40 @@ export function buildUncannyInpaintWorkflow(config: {
     },
   };
 
-  // Node 207: VAEEncodeForInpaint — encode original image with mask into latent space
-  // The mask (from node 109, post-blur) defines the inpaint region.
-  // Pixels inside the mask become noise; pixels outside are preserved.
+  // Node 207: VAEEncode — encode original image to latent space (standard, no masking)
+  // Unlike VAEEncodeForInpaint, this does NOT set masked pixels to grey.
+  // Chroma is not an inpaint-trained model — VAEEncodeForInpaint produces grey silhouettes.
   workflow['207'] = {
-    class_type: 'VAEEncodeForInpaint',
+    class_type: 'VAEEncode',
     inputs: {
       pixels: ['206', 0],
       vae: ['202', 0],
-      mask: ['109', 0], // Post-blur feathered mask from Stage B
-      grow_mask_by: 0,  // Already grown in Stage B via GrowMask node
+    },
+  };
+
+  // Node 212: SetLatentNoiseMask — tell KSampler to only denoise the masked region
+  // This is the correct inpainting approach for non-inpaint-trained models.
+  // The mask defines WHERE noise is added; KSampler denoises only those areas.
+  workflow['212'] = {
+    class_type: 'SetLatentNoiseMask',
+    inputs: {
+      samples: ['207', 0],  // VAEEncode output (full image latent)
+      mask: ['109', 0],     // Feathered mask from Stage B
     },
   };
 
   // Node 208: KSampler — inpaint within the masked region
-  // Chroma/UnCanny uses different sampler settings than Flux Dev:
-  //   - cfg 3.5 (real CFG, not FluxGuidance — Chroma ignores FluxGuidance)
+  // Chroma/UnCanny sampler settings:
+  //   - cfg 3.5 (real CFG — Chroma ignores FluxGuidance)
   //   - dpmpp_sde sampler + beta scheduler (optimized for Chroma's noise schedule)
-  //   - 30 steps (20 is too low for Chroma, causes pixelation)
+  //   - 30 steps (minimum for Chroma quality)
   workflow['208'] = {
     class_type: 'KSampler',
     inputs: {
       model: ['200', 0],
       positive: ['203', 0],     // CLIPTextEncode directly (no FluxGuidance for Chroma)
       negative: ['205', 0],     // Zeroed-out conditioning
-      latent_image: ['207', 0], // VAEEncodeForInpaint output
+      latent_image: ['212', 0], // SetLatentNoiseMask output (only masked area denoises)
       seed: inpaint.seed,
       steps: 30,
       cfg: 3.5,               // Chroma needs real CFG 3.0-4.0 for text prompt to take effect
