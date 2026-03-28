@@ -591,8 +591,8 @@ if [ "${DOWNLOAD_V2_MODELS}" = "true" ]; then
               esac
           fi
           echo "[NSW] Starting background download: uncanny_v1.3_fp8.safetensors (~8.3GB)..."
-          (python3 -c "
-import urllib.request, sys, shutil
+          nohup python3 -c "
+import urllib.request, sys, shutil, os
 try:
     req = urllib.request.Request('${UNCANNY_DL_URL}')
     req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
@@ -600,13 +600,16 @@ try:
     with open('${UNCANNY_DEST}.tmp', 'wb') as f:
         shutil.copyfileobj(resp, f)
     resp.close()
+    os.rename('${UNCANNY_DEST}.tmp', '${UNCANNY_DEST}')
+    sz = os.path.getsize('${UNCANNY_DEST}') / (1024*1024)
+    print(f'[NSW] uncanny download complete: {sz:.0f} MB')
 except Exception as e:
     print(f'[NSW] UnCanny download error: {e}', file=sys.stderr)
-    sys.exit(1)
-" 2>&1 && mv "${UNCANNY_DEST}.tmp" "${UNCANNY_DEST}" && \
-          echo "[NSW] ✓ uncanny_v1.3_fp8.safetensors (background download complete)" || \
-          rm -f "${UNCANNY_DEST}.tmp") &
-          echo "[NSW] Background download PID: $!"
+    try: os.remove('${UNCANNY_DEST}.tmp')
+    except: pass
+" > /tmp/uncanny_download.log 2>&1 &
+          disown
+          echo "[NSW] Background download PID: $! (nohup + disown, survives exec)"
       else
           echo "[NSW] UNCANNY_MODEL_URL not set — skipping UnCanny download"
       fi
