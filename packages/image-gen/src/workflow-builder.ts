@@ -124,7 +124,7 @@ function buildFaceMaskNodes(
   };
   nodes[n(5)] = {
     class_type: 'ImageBlur',
-    inputs: { image: [n(4), 0], blur_radius: 40, sigma: 20 },
+    inputs: { image: [n(4), 0], blur_radius: 31, sigma: 10.0 },
   };
   nodes[n(6)] = {
     class_type: 'ImageToMask',
