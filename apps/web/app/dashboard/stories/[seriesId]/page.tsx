@@ -225,7 +225,8 @@ export default function SeriesDetailPage() {
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
   const allLorasDeployed =
     loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
-  const allReadyForImages = allCharsApproved && allLorasDeployed;
+  const noLoraEngine = series.image_engine === "flux_pulid" || series.image_engine === "flux2_pro";
+  const allReadyForImages = allCharsApproved && (noLoraEngine || allLorasDeployed);
 
   // Engine update handler
   async function handleEngineChange(engine: ImageEngine) {
@@ -663,7 +664,7 @@ export default function SeriesDetailPage() {
             allCharactersApproved={allReadyForImages}
             imageEngine={series.image_engine}
           />
-          {allCharsApproved && !allLorasDeployed && loraCheckDone && (
+          {allCharsApproved && !allLorasDeployed && loraCheckDone && !noLoraEngine && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">
               <p className="text-sm font-medium text-amber-400 mb-2">
                 LoRA training required before generating images
