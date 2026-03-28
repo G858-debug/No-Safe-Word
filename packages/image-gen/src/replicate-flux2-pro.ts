@@ -26,7 +26,9 @@ import { readReplicateOutput } from './replicate-client';
 
 // Must use owner/name:version format — this model doesn't support the /models/.../predictions shorthand
 const FLUX_MULTI_LORA_MODEL = 'lucataco/flux-dev-multi-lora:ad0314563856e714367fdc7244b19b160d25926d305fec270c9e00f64665d352' as const;
-const FACE_SWAP_MODEL = 'easel/advanced-face-swap' as const;
+// codeplugtech — actually works (Easel model is broken/stuck on Replicate)
+// Needs version hash — doesn't support /models/.../predictions shorthand
+const FACE_SWAP_MODEL = 'codeplugtech/face-swap:278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34' as const;
 
 /** Uncensored LoRA — removes Flux 1 Dev's content restrictions for NSFW */
 const UNCENSORED_LORA_URL = 'https://huggingface.co/enhanceaiteam/Flux-Uncensored-V2/resolve/main/lora.safetensors';
@@ -247,33 +249,26 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
 
 // ── Face Swap ──
 
-/** Build the Replicate input object for Easel face swap */
+/**
+ * Build Replicate input for codeplugtech/face-swap.
+ * This model only swaps ONE face at a time. For dual-character scenes,
+ * the caller must run two sequential swaps.
+ *
+ * Params: input_image (target scene), swap_image (face to insert)
+ */
 function buildFaceSwapInput(config: FaceSwapConfig): Record<string, unknown> {
-  const genderLabel = (g: 'male' | 'female') => g === 'male' ? 'a man' : 'a woman';
-
-  const input: Record<string, unknown> = {
-    target_image: config.targetImageUrl,
+  return {
+    input_image: config.targetImageUrl,
     swap_image: config.primaryFaceUrl,
-    hair_source: config.hairSource || 'target',
-    user_gender: genderLabel(config.primaryGender),
   };
-
-  if (config.secondaryFaceUrl) {
-    input.swap_image_b = config.secondaryFaceUrl;
-  }
-  if (config.secondaryGender) {
-    input.user_b_gender = genderLabel(config.secondaryGender);
-  }
-
-  return input;
 }
 
 /**
  * Submit a face swap as an async Replicate prediction (non-blocking).
  * Returns the prediction ID for polling via checkFaceSwapStatus().
  *
- * Use this instead of runFaceSwap() when the total pipeline time
- * would exceed the HTTP request timeout (e.g. Cloudflare's 100s limit).
+ * For dual-character scenes, this only swaps the PRIMARY face.
+ * The secondary face swap must be submitted separately after the first completes.
  */
 export async function submitFaceSwap(config: FaceSwapConfig): Promise<string> {
   if (!process.env.REPLICATE_API_TOKEN) {
@@ -284,13 +279,14 @@ export async function submitFaceSwap(config: FaceSwapConfig): Promise<string> {
   const input = buildFaceSwapInput(config);
 
   console.log(
-    `[FaceSwap] Submitting async: ${config.secondaryFaceUrl ? '2 faces' : '1 face'}, ` +
-    `hair_source=${config.hairSource || 'target'}, ` +
-    `primary=${config.primaryGender}, secondary=${config.secondaryGender || 'none'}`,
+    `[FaceSwap] Submitting async: primary face swap, ` +
+    `primary=${config.primaryGender}${config.secondaryFaceUrl ? ' (secondary will be separate)' : ''}`,
   );
 
+  const version = FACE_SWAP_MODEL.split(':')[1];
+
   const prediction = await replicate.predictions.create({
-    model: FACE_SWAP_MODEL,
+    version,
     input,
   });
 
@@ -354,9 +350,7 @@ export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResul
   const input = buildFaceSwapInput(config);
 
   console.log(
-    `[FaceSwap] Swapping ${config.secondaryFaceUrl ? '2 faces' : '1 face'} ` +
-    `onto scene, hair_source=${config.hairSource || 'target'}, ` +
-    `primary=${config.primaryGender}, secondary=${config.secondaryGender || 'none'}`,
+    `[FaceSwap] Swapping primary face (${config.primaryGender}) onto scene`,
   );
 
   const output = await replicate.run(FACE_SWAP_MODEL, { input });
