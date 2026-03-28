@@ -4,6 +4,7 @@ import { submitRunPodJob } from "@no-safe-word/image-gen";
 import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
 import { generateV2Scene, buildRefUrlMap } from "@/lib/server/generate-scene-image-v2";
 import { buildV3SceneGenerationPayload } from "@/lib/server/generate-scene-image-v3";
+import { generateSceneImageV4 } from "@/lib/server/generate-scene-image-v4";
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
@@ -78,7 +79,80 @@ export async function POST(
 
     const isV2 = series?.image_engine === "nb2_uncanny";
     const isV3 = series?.image_engine === "flux_pulid";
+    const isV4 = series?.image_engine === "flux2_pro";
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+
+    if (isV4) {
+      // ── V4 Pipeline: Flux 2 Pro via Replicate (no RunPod/ComfyUI) ──
+      const result = await generateSceneImageV4({
+        imgPrompt,
+        seriesId,
+        seed,
+      });
+
+      // Store image in Supabase Storage
+      const timestamp = Date.now();
+      const imageId = crypto.randomUUID();
+      const storagePath = `stories/${imageId}-${timestamp}.png`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("story-images")
+        .upload(storagePath, result.imageBuffer, { contentType: "image/png", upsert: true });
+
+      if (uploadError) {
+        throw new Error(`Image storage failed: ${uploadError.message}`);
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("story-images")
+        .getPublicUrl(storagePath);
+
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          id: imageId,
+          character_id: imgPrompt.character_id || null,
+          prompt: result.assembledPrompt,
+          negative_prompt: "",
+          settings: {
+            width: result.width,
+            height: result.height,
+            seed: result.seed,
+            engine: "replicate-v4-flux2-pro",
+            safetyTolerance: result.mode === "nsfw" ? 5 : 2,
+            referenceCount: result.referenceCount,
+          },
+          mode: result.mode,
+          stored_url: publicUrl,
+          sfw_url: publicUrl,
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      await supabase.from("generation_jobs").insert({
+        job_id: `replicate-v4-${imageId}`,
+        image_id: imageRow.id,
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        cost: 0,
+      });
+
+      await supabase
+        .from("story_image_prompts")
+        .update({ image_id: imageRow.id, status: "generated" })
+        .eq("id", promptId);
+
+      return NextResponse.json({
+        jobId: `replicate-v4-${imageId}`,
+        imageId: imageRow.id,
+        imageUrl: publicUrl,
+        completed: true,
+      });
+    }
 
     if (isV3) {
       // ── V3 Pipeline: Flux Krea + PuLID (no character LoRAs) ──
