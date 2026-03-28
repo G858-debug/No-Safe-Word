@@ -3,7 +3,7 @@
  *
  * Cloud-only pipeline — no LoRAs, no PuLID, no RunPod/ComfyUI.
  * Character consistency comes from multi-reference images (up to 8)
- * passed as input_image, input_image_2, ..., input_image_9.
+ * passed as `input_images` array (URI strings).
  *
  * NSFW GENERATION BEST PRACTICES (Flux 2 Pro):
  *
@@ -42,7 +42,7 @@ export interface Flux2ProConfig {
   /** Seed for reproducibility */
   seed?: number;
   /** Safety tolerance: 2 for SFW (Facebook), 5 for NSFW (website).
-   *  1=most strict, 6=most permissive. */
+   *  1=most strict, 5=most permissive. */
   safetyTolerance?: number;
   /** Output format. Default: 'png' */
   outputFormat?: 'png' | 'jpg' | 'webp';
@@ -53,24 +53,8 @@ export interface Flux2ProResult {
   imageBase64: string;
 }
 
-/**
- * Map reference image URLs to Flux 2 Pro's input_image, input_image_2, etc.
- * Flux 2 Pro accepts up to 8 reference images via numbered parameters.
- */
-function buildReferenceInputs(urls: string[]): Record<string, string> {
-  const inputs: Record<string, string> = {};
-  const maxRefs = 8;
-
-  for (let i = 0; i < Math.min(urls.length, maxRefs); i++) {
-    if (i === 0) {
-      inputs.input_image = urls[i];
-    } else {
-      inputs[`input_image_${i + 1}`] = urls[i];
-    }
-  }
-
-  return inputs;
-}
+/** Max 8 reference images per Replicate API schema */
+const MAX_REFERENCE_IMAGES = 8;
 
 /**
  * Run Flux 2 Pro on Replicate for scene generation.
@@ -88,13 +72,16 @@ export async function runFlux2Pro(config: Flux2ProConfig): Promise<Flux2ProResul
   const width = config.width ?? 1440;
   const height = config.height ?? 1920;
 
+  const refUrls = config.referenceImageUrls.slice(0, MAX_REFERENCE_IMAGES);
+
   const input: Record<string, unknown> = {
     prompt: config.prompt,
+    aspect_ratio: 'custom',
     width,
     height,
     output_format: config.outputFormat ?? 'png',
     safety_tolerance: config.safetyTolerance ?? 2,
-    ...buildReferenceInputs(config.referenceImageUrls),
+    input_images: refUrls.length > 0 ? refUrls : undefined,
   };
 
   if (config.seed !== undefined) {
@@ -105,9 +92,12 @@ export async function runFlux2Pro(config: Flux2ProConfig): Promise<Flux2ProResul
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     console.log(
       `[Flux2Pro] Generating scene (attempt ${attempt}/${maxRetries}) with ` +
-      `${config.referenceImageUrls.length} reference images, ` +
-      `${width}x${height}, safety=${config.safetyTolerance ?? 2}, seed=${input.seed ?? 'random'}`,
+      `${refUrls.length} reference images via input_images[], ` +
+      `${width}x${height} (aspect_ratio=custom), safety=${config.safetyTolerance ?? 2}, seed=${input.seed ?? 'random'}`,
     );
+    if (attempt === 1 && refUrls.length > 0) {
+      console.log(`[Flux2Pro] Reference URLs: ${refUrls.map((u, i) => `[${i}] ${u.substring(0, 80)}...`).join(', ')}`);
+    }
 
     try {
       const output = await replicate.run(FLUX_2_PRO_MODEL, { input });
