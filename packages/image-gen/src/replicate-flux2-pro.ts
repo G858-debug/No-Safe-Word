@@ -247,19 +247,8 @@ async function fetchImageBuffer(url: string): Promise<Buffer> {
 
 // ── Face Swap ──
 
-/**
- * Swap one or two faces onto a generated scene using Easel Advanced Face Swap.
- *
- * Preserves scene composition, lighting, skin tone, and body.
- * The face swap model accepts gender as descriptive strings: "a man", "a woman".
- */
-export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResult> {
-  if (!process.env.REPLICATE_API_TOKEN) {
-    throw new Error('Missing REPLICATE_API_TOKEN environment variable');
-  }
-
-  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-
+/** Build the Replicate input object for Easel face swap */
+function buildFaceSwapInput(config: FaceSwapConfig): Record<string, unknown> {
   const genderLabel = (g: 'male' | 'female') => g === 'male' ? 'a man' : 'a woman';
 
   const input: Record<string, unknown> = {
@@ -275,6 +264,94 @@ export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResul
   if (config.secondaryGender) {
     input.user_b_gender = genderLabel(config.secondaryGender);
   }
+
+  return input;
+}
+
+/**
+ * Submit a face swap as an async Replicate prediction (non-blocking).
+ * Returns the prediction ID for polling via checkFaceSwapStatus().
+ *
+ * Use this instead of runFaceSwap() when the total pipeline time
+ * would exceed the HTTP request timeout (e.g. Cloudflare's 100s limit).
+ */
+export async function submitFaceSwap(config: FaceSwapConfig): Promise<string> {
+  if (!process.env.REPLICATE_API_TOKEN) {
+    throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+  }
+
+  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+  const input = buildFaceSwapInput(config);
+
+  console.log(
+    `[FaceSwap] Submitting async: ${config.secondaryFaceUrl ? '2 faces' : '1 face'}, ` +
+    `hair_source=${config.hairSource || 'target'}, ` +
+    `primary=${config.primaryGender}, secondary=${config.secondaryGender || 'none'}`,
+  );
+
+  const prediction = await replicate.predictions.create({
+    model: FACE_SWAP_MODEL,
+    input,
+  });
+
+  console.log(`[FaceSwap] Prediction submitted: ${prediction.id}, status=${prediction.status}`);
+  return prediction.id;
+}
+
+export interface FaceSwapStatus {
+  status: 'starting' | 'processing' | 'succeeded' | 'failed' | 'canceled';
+  /** Set when status === 'succeeded' */
+  imageBuffer?: Buffer;
+  imageBase64?: string;
+  /** Set when status === 'failed' */
+  error?: string;
+}
+
+/**
+ * Check the status of an async face swap prediction.
+ * When succeeded, downloads and returns the result image.
+ */
+export async function checkFaceSwapStatus(predictionId: string): Promise<FaceSwapStatus> {
+  if (!process.env.REPLICATE_API_TOKEN) {
+    throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+  }
+
+  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+  const prediction = await replicate.predictions.get(predictionId);
+
+  if (prediction.status === 'failed' || prediction.status === 'canceled') {
+    return {
+      status: prediction.status,
+      error: prediction.error ? String(prediction.error) : `Face swap ${prediction.status}`,
+    };
+  }
+
+  if (prediction.status === 'succeeded') {
+    const imageBuffer = await readReplicateOutput(prediction.output);
+    console.log(`[FaceSwap] Complete: ${Math.round(imageBuffer.length / 1024)}KB`);
+    return {
+      status: 'succeeded',
+      imageBuffer,
+      imageBase64: imageBuffer.toString('base64'),
+    };
+  }
+
+  // Still running
+  return { status: prediction.status as FaceSwapStatus['status'] };
+}
+
+/**
+ * Swap faces synchronously (blocking). Only use when timeout is not a concern
+ * (e.g. batch scripts, background workers). For HTTP routes, use
+ * submitFaceSwap() + checkFaceSwapStatus() instead.
+ */
+export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResult> {
+  if (!process.env.REPLICATE_API_TOKEN) {
+    throw new Error('Missing REPLICATE_API_TOKEN environment variable');
+  }
+
+  const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+  const input = buildFaceSwapInput(config);
 
   console.log(
     `[FaceSwap] Swapping ${config.secondaryFaceUrl ? '2 faces' : '1 face'} ` +
@@ -295,12 +372,25 @@ export async function runFaceSwap(config: FaceSwapConfig): Promise<FaceSwapResul
 
 // ── Combined V4 Pipeline ──
 
+export interface V4PipelineAsyncResult {
+  /** Scene image buffer (pre-face-swap) — store this immediately */
+  sceneImageBuffer: Buffer;
+  sceneImageBase64: string;
+  /** Replicate prediction ID for the face swap step (poll via checkFaceSwapStatus) */
+  faceSwapPredictionId: string | null;
+  seed: number;
+}
+
 /**
- * Run the full V4 pipeline: Multi-LoRA scene generation → Easel face swap.
+ * Run V4 pipeline Step 1 synchronously, then submit Step 2 (face swap) async.
  *
- * If primaryFaceUrl is empty, skips the face swap step and returns the raw scene.
+ * Returns immediately after submitting the face swap prediction.
+ * The caller should store the scene image, then poll checkFaceSwapStatus()
+ * to get the final face-swapped image when ready.
+ *
+ * If no face URL is provided, faceSwapPredictionId is null (no swap needed).
  */
-export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4PipelineResult> {
+export async function runV4PipelineAsync(config: V4PipelineConfig): Promise<V4PipelineAsyncResult> {
   const seed = config.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
   const isDual = !!config.secondaryFaceUrl;
   const aspectRatio = config.aspectRatio || (isDual ? '3:2' : '2:3');
@@ -309,7 +399,7 @@ export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4Pipelin
   console.log(`[V4 Pipeline]   NSFW: ${config.isNsfw}, LoRAs: ${(config.styleLoraUrls?.length || 0)} style + ${config.isNsfw ? '1 uncensored' : '0'}`);
   console.log(`[V4 Pipeline]   Aspect: ${aspectRatio}, Seed: ${seed}`);
 
-  // Step 1: Generate scene
+  // Step 1: Generate scene (synchronous, ~30s)
   const sceneResult = await runMultiLoraScene({
     prompt: config.prompt,
     isNsfw: config.isNsfw,
@@ -321,9 +411,56 @@ export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4Pipelin
 
   console.log(`[V4 Pipeline] Step 1 complete: ${Math.round(sceneResult.imageBuffer.length / 1024)}KB`);
 
-  // Step 2: Face swap (skip if no face URL provided)
+  // Step 2: Submit face swap async (non-blocking)
   if (!config.primaryFaceUrl) {
-    console.log(`[V4 Pipeline] No face URL — skipping face swap, returning raw scene`);
+    console.log(`[V4 Pipeline] No face URL — skipping face swap`);
+    return {
+      sceneImageBuffer: sceneResult.imageBuffer,
+      sceneImageBase64: sceneResult.imageBase64,
+      faceSwapPredictionId: null,
+      seed,
+    };
+  }
+
+  console.log(`[V4 Pipeline] Step 2: Submitting face swap — ${isDual ? '2 faces' : '1 face'}...`);
+
+  const predictionId = await submitFaceSwap({
+    targetImageUrl: sceneResult.imageUrl,
+    primaryFaceUrl: config.primaryFaceUrl,
+    primaryGender: config.primaryGender,
+    secondaryFaceUrl: config.secondaryFaceUrl,
+    secondaryGender: config.secondaryGender,
+    hairSource: 'target',
+  });
+
+  return {
+    sceneImageBuffer: sceneResult.imageBuffer,
+    sceneImageBase64: sceneResult.imageBase64,
+    faceSwapPredictionId: predictionId,
+    seed,
+  };
+}
+
+/**
+ * Run the full V4 pipeline synchronously (blocking).
+ * Only use in batch scripts or workers where timeout is not a concern.
+ * For HTTP routes, use runV4PipelineAsync() + checkFaceSwapStatus() instead.
+ */
+export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4PipelineResult> {
+  const seed = config.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
+  const isDual = !!config.secondaryFaceUrl;
+  const aspectRatio = config.aspectRatio || (isDual ? '3:2' : '2:3');
+
+  const sceneResult = await runMultiLoraScene({
+    prompt: config.prompt,
+    isNsfw: config.isNsfw,
+    aspectRatio,
+    styleLoraUrls: config.styleLoraUrls,
+    styleLoraScales: config.styleLoraScales,
+    seed,
+  });
+
+  if (!config.primaryFaceUrl) {
     return {
       finalImageBuffer: sceneResult.imageBuffer,
       finalImageBase64: sceneResult.imageBase64,
@@ -331,8 +468,6 @@ export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4Pipelin
       seed,
     };
   }
-
-  console.log(`[V4 Pipeline] Step 2: Face swap — ${isDual ? '2 faces' : '1 face'}...`);
 
   const swapResult = await runFaceSwap({
     targetImageUrl: sceneResult.imageUrl,
@@ -342,8 +477,6 @@ export async function runV4Pipeline(config: V4PipelineConfig): Promise<V4Pipelin
     secondaryGender: config.secondaryGender,
     hairSource: 'target',
   });
-
-  console.log(`[V4 Pipeline] Step 2 complete: ${Math.round(swapResult.imageBuffer.length / 1024)}KB`);
 
   return {
     finalImageBuffer: swapResult.imageBuffer,

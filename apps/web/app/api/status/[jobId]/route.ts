@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRunPodJobStatus, base64ToBuffer, buildKontextWorkflow, submitRunPodJob } from "@no-safe-word/image-gen";
 import { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from "@no-safe-word/image-gen";
+import { checkFaceSwapStatus } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
 import type { Json } from "@no-safe-word/shared";
 
@@ -17,6 +18,11 @@ export async function GET(
         { error: "Missing jobId parameter" },
         { status: 400 }
       );
+    }
+
+    // ── V4 Face Swap: poll Replicate prediction instead of RunPod ──
+    if (jobId.startsWith("replicate-faceswap-")) {
+      return handleFaceSwapStatus(jobId);
     }
 
     // Find the image_id from generation_jobs first — needed for two-step pipeline check
@@ -236,6 +242,124 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+/**
+ * Handle V4 face swap prediction status check.
+ * Polls Replicate for the async face swap prediction, stores the result when done.
+ */
+async function handleFaceSwapStatus(jobId: string): Promise<NextResponse> {
+  const predictionId = jobId.replace("replicate-faceswap-", "");
+
+  // Find the image record linked to this job
+  const { data: jobRow } = await supabase
+    .from("generation_jobs")
+    .select("image_id, status")
+    .eq("job_id", jobId)
+    .single();
+
+  if (!jobRow || !jobRow.image_id) {
+    return NextResponse.json({ jobId, completed: false, error: "Job not found" });
+  }
+
+  const imageId = jobRow.image_id;
+
+  // Already completed (cached from previous poll)
+  if (jobRow.status === "completed") {
+    const { data: img } = await supabase
+      .from("images")
+      .select("stored_url")
+      .eq("id", imageId)
+      .single();
+
+    return NextResponse.json({
+      jobId,
+      completed: true,
+      imageUrl: img?.stored_url || null,
+      seed: null,
+      cost: 0,
+    });
+  }
+
+  // Poll Replicate
+  const swapStatus = await checkFaceSwapStatus(predictionId);
+
+  if (swapStatus.status === "succeeded" && swapStatus.imageBuffer) {
+    // Store the face-swapped image
+    const timestamp = Date.now();
+    const storagePath = `stories/${imageId}-${timestamp}_faceswap.png`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("story-images")
+      .upload(storagePath, swapStatus.imageBuffer, {
+        contentType: "image/png",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error(`[FaceSwap Status] Upload failed: ${uploadError.message}`);
+      return NextResponse.json({ jobId, completed: false, error: `Upload failed: ${uploadError.message}` });
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from("story-images")
+      .getPublicUrl(storagePath);
+
+    // Update image record with face-swapped version
+    await supabase
+      .from("images")
+      .update({ stored_url: publicUrl, sfw_url: publicUrl })
+      .eq("id", imageId);
+
+    // Mark job as completed
+    await supabase
+      .from("generation_jobs")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("job_id", jobId);
+
+    console.log(`[FaceSwap Status] Complete: ${imageId} → ${publicUrl}`);
+
+    return NextResponse.json({
+      jobId,
+      completed: true,
+      imageUrl: publicUrl,
+      seed: null,
+      cost: 0,
+    });
+  }
+
+  if (swapStatus.status === "failed" || swapStatus.status === "canceled") {
+    console.error(`[FaceSwap Status] ${swapStatus.status}: ${swapStatus.error}`);
+
+    // Mark job as completed (fall back to scene image without face swap)
+    await supabase
+      .from("generation_jobs")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("job_id", jobId);
+
+    // Return the scene image URL as fallback
+    const { data: img } = await supabase
+      .from("images")
+      .select("stored_url")
+      .eq("id", imageId)
+      .single();
+
+    return NextResponse.json({
+      jobId,
+      completed: true,
+      imageUrl: img?.stored_url || null,
+      seed: null,
+      cost: 0,
+      warning: `Face swap ${swapStatus.status}: ${swapStatus.error}`,
+    });
+  }
+
+  // Still processing
+  return NextResponse.json({
+    jobId,
+    completed: false,
+    status: swapStatus.status.toUpperCase(),
+  });
 }
 
 /**

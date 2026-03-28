@@ -89,11 +89,11 @@ export { runNb2Scene } from './replicate-nb2-scene';
 export type { Nb2SceneConfig, Nb2SceneResult } from './replicate-nb2-scene';
 
 // V4 Pipeline exports (Multi-LoRA scene generation + Easel face swap)
-export { runMultiLoraScene, runFaceSwap, runV4Pipeline } from './replicate-flux2-pro';
+export { runMultiLoraScene, runFaceSwap, submitFaceSwap, checkFaceSwapStatus, runV4Pipeline, runV4PipelineAsync } from './replicate-flux2-pro';
 export type {
   MultiLoraSceneConfig, MultiLoraSceneResult,
-  FaceSwapConfig, FaceSwapResult,
-  V4PipelineConfig, V4PipelineResult,
+  FaceSwapConfig, FaceSwapResult, FaceSwapStatus,
+  V4PipelineConfig, V4PipelineResult, V4PipelineAsyncResult,
 } from './replicate-flux2-pro';
 
 // Flux 2 Pro client (kept for SFW-only workflows)

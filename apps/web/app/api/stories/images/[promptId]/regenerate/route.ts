@@ -83,21 +83,23 @@ export async function POST(
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
     if (isV4) {
-      // ── V4 Pipeline: Flux 2 Pro via Replicate (no RunPod/ComfyUI) ──
+      // ── V4 Pipeline: Multi-LoRA scene (sync) + Face Swap (async) ──
       const result = await generateSceneImageV4({
         imgPrompt,
         seriesId,
         seed,
       });
 
-      // Store image in Supabase Storage
+      const hasFaceSwap = !!result.faceSwapPredictionId;
+
+      // Store the scene image immediately (pre-face-swap)
       const timestamp = Date.now();
       const imageId = crypto.randomUUID();
       const storagePath = `stories/${imageId}-${timestamp}.png`;
 
       const { error: uploadError } = await supabase.storage
         .from("story-images")
-        .upload(storagePath, result.imageBuffer, { contentType: "image/png", upsert: true });
+        .upload(storagePath, result.sceneImageBuffer, { contentType: "image/png", upsert: true });
 
       if (uploadError) {
         throw new Error(`Image storage failed: ${uploadError.message}`);
@@ -107,15 +109,7 @@ export async function POST(
         .from("story-images")
         .getPublicUrl(storagePath);
 
-      // Store pre-face-swap scene image for debugging
-      if (result.sceneImageBase64) {
-        const sceneStoragePath = `stories/${imageId}-${timestamp}_scene.png`;
-        const sceneBuffer = Buffer.from(result.sceneImageBase64, "base64");
-        await supabase.storage
-          .from("story-images")
-          .upload(sceneStoragePath, sceneBuffer, { contentType: "image/png", upsert: true });
-      }
-
+      // Create image record with scene image (face-swapped version replaces it when ready)
       const { data: imageRow, error: imgError } = await supabase
         .from("images")
         .insert({
@@ -127,8 +121,9 @@ export async function POST(
             seed: result.seed,
             engine: "replicate-v4-multi-lora-faceswap",
             mode: result.mode,
-            hasFaceSwap: result.hasFaceSwap,
-            pipelineSteps: ["multi-lora-scene", result.hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
+            hasFaceSwap,
+            faceSwapPredictionId: result.faceSwapPredictionId,
+            pipelineSteps: ["multi-lora-scene", hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
           },
           mode: result.mode,
           stored_url: publicUrl,
@@ -141,21 +136,40 @@ export async function POST(
         throw new Error(`Failed to create image record: ${imgError?.message}`);
       }
 
+      // Create generation job — pending if face swap is running, completed if no swap needed
+      const jobId = hasFaceSwap
+        ? `replicate-faceswap-${result.faceSwapPredictionId}`
+        : `replicate-v4-${imageId}`;
+
       await supabase.from("generation_jobs").insert({
-        job_id: `replicate-v4-${imageId}`,
+        job_id: jobId,
         image_id: imageRow.id,
-        status: "completed",
-        completed_at: new Date().toISOString(),
+        status: hasFaceSwap ? "pending" : "completed",
+        completed_at: hasFaceSwap ? null : new Date().toISOString(),
         cost: 0,
       });
 
+      // Link image to prompt
       await supabase
         .from("story_image_prompts")
-        .update({ image_id: imageRow.id, status: "generated" })
+        .update({
+          image_id: imageRow.id,
+          status: hasFaceSwap ? "generating" : "generated",
+        })
         .eq("id", promptId);
 
+      if (hasFaceSwap) {
+        // Face swap is running async — client should poll status endpoint
+        return NextResponse.json({
+          jobId,
+          imageId: imageRow.id,
+          completed: false,
+        });
+      }
+
+      // No face swap needed — image is complete
       return NextResponse.json({
-        jobId: `replicate-v4-${imageId}`,
+        jobId,
         imageId: imageRow.id,
         imageUrl: publicUrl,
         completed: true,

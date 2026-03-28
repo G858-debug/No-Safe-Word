@@ -107,21 +107,23 @@ export async function POST(
 
         const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
-        // Generate image synchronously via Replicate
+        // Generate scene (sync ~30s) + submit face swap (async, non-blocking)
         const result = await generateSceneImageV4({
           imgPrompt,
           seriesId,
           seed,
         });
 
-        // Store image in Supabase Storage
+        const hasFaceSwap = !!result.faceSwapPredictionId;
+
+        // Store the scene image immediately
         const timestamp = Date.now();
         const imageId = crypto.randomUUID();
         const storagePath = `stories/${imageId}-${timestamp}.png`;
 
         const { error: uploadError } = await supabase.storage
           .from("story-images")
-          .upload(storagePath, result.imageBuffer, { contentType: "image/png", upsert: true });
+          .upload(storagePath, result.sceneImageBuffer, { contentType: "image/png", upsert: true });
 
         if (uploadError) {
           throw new Error(`Image storage failed: ${uploadError.message}`);
@@ -131,16 +133,7 @@ export async function POST(
           .from("story-images")
           .getPublicUrl(storagePath);
 
-        // Store pre-face-swap scene image for debugging/comparison
-        if (result.sceneImageBase64) {
-          const sceneStoragePath = `stories/${imageId}-${timestamp}_scene.png`;
-          const sceneBuffer = Buffer.from(result.sceneImageBase64, "base64");
-          await supabase.storage
-            .from("story-images")
-            .upload(sceneStoragePath, sceneBuffer, { contentType: "image/png", upsert: true });
-        }
-
-        // Create image record
+        // Create image record with scene image
         const { data: imageRow, error: imgError } = await supabase
           .from("images")
           .insert({
@@ -152,8 +145,9 @@ export async function POST(
               seed: result.seed,
               engine: "replicate-v4-multi-lora-faceswap",
               mode: result.mode,
-              hasFaceSwap: result.hasFaceSwap,
-              pipelineSteps: ["multi-lora-scene", result.hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
+              hasFaceSwap,
+              faceSwapPredictionId: result.faceSwapPredictionId,
+              pipelineSteps: ["multi-lora-scene", hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
             },
             mode: result.mode,
             stored_url: publicUrl,
@@ -166,19 +160,26 @@ export async function POST(
           throw new Error(`Failed to create image record: ${imgError?.message}`);
         }
 
-        // Create generation job record (completed immediately — no async polling)
+        // Create generation job — pending if face swap running, completed otherwise
+        const jobId = hasFaceSwap
+          ? `replicate-faceswap-${result.faceSwapPredictionId}`
+          : `replicate-v4-${imageId}`;
+
         await supabase.from("generation_jobs").insert({
-          job_id: `replicate-v4-${imageId}`,
+          job_id: jobId,
           image_id: imageRow.id,
-          status: "completed",
-          completed_at: new Date().toISOString(),
+          status: hasFaceSwap ? "pending" : "completed",
+          completed_at: hasFaceSwap ? null : new Date().toISOString(),
           cost: 0,
         });
 
-        // Link image to prompt and mark as generated
+        // Link image to prompt
         await supabase
           .from("story_image_prompts")
-          .update({ image_id: imageRow.id, status: "generated" })
+          .update({
+            image_id: imageRow.id,
+            status: hasFaceSwap ? "generating" : "generated",
+          })
           .eq("id", imgPrompt.id);
 
         generated.push({
@@ -188,7 +189,7 @@ export async function POST(
           seed: result.seed,
         });
 
-        console.log(`[V4] Generated image ${i + 1}/${prompts.length}: ${imageRow.id} (${Math.round(result.imageBuffer.length / 1024)}KB)`);
+        console.log(`[V4] Image ${i + 1}/${prompts.length}: ${imageRow.id} (${Math.round(result.sceneImageBuffer.length / 1024)}KB scene${hasFaceSwap ? ', face swap pending' : ''})`);
 
         // Brief pause between generations to respect rate limits
         if (i < prompts.length - 1) {

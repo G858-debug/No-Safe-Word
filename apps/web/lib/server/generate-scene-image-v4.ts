@@ -3,21 +3,22 @@
  *
  * Two-step cloud pipeline — no RunPod, no ComfyUI, no PuLID:
  *
- * Step 1: lucataco/flux-dev-multi-lora (scene generation)
+ * Step 1: lucataco/flux-dev-multi-lora (scene generation) — synchronous, ~30s
  *   Flux 1 Dev + Uncensored LoRA for NSFW, optional style LoRAs.
  *   Generates scene with natural poses — no character identity yet.
  *
- * Step 2: easel/advanced-face-swap (character identity)
+ * Step 2: easel/advanced-face-swap (character identity) — ASYNC, submitted then polled
  *   Takes the generated scene + approved character face portraits.
  *   Swaps in correct faces, preserving scene/lighting/skin tone.
  *   Supports 1 or 2 faces per pass for dual-character scenes.
  *
- * Synchronous: both Replicate calls return results directly (no job polling).
+ * The route returns after Step 1 completes + Step 2 is submitted.
+ * The status endpoint polls Replicate for Step 2 completion.
  */
 
 import { supabase } from "@no-safe-word/story-engine";
-import { runV4Pipeline } from "@no-safe-word/image-gen";
-import type { V4PipelineResult } from "@no-safe-word/image-gen";
+import { runV4PipelineAsync } from "@no-safe-word/image-gen";
+import type { V4PipelineAsyncResult } from "@no-safe-word/image-gen";
 
 // Re-export fetchCharacterDataMap from V1 — shared across all pipelines
 export { fetchCharacterDataMap } from "./generate-scene-image";
@@ -36,15 +37,15 @@ export interface ScenePromptInput {
 }
 
 export interface V4SceneResult {
-  imageBuffer: Buffer;
-  imageBase64: string;
+  /** Scene image buffer (pre-face-swap — this is what gets stored immediately) */
+  sceneImageBuffer: Buffer;
+  sceneImageBase64: string;
   assembledPrompt: string;
   mode: "sfw" | "nsfw";
   seed: number;
   engine: "flux2_pro";
-  hasFaceSwap: boolean;
-  /** Pre-face-swap scene image for debugging */
-  sceneImageBase64: string;
+  /** Replicate prediction ID for the face swap step, or null if no face swap */
+  faceSwapPredictionId: string | null;
 }
 
 interface V4GenerateSceneParams {
@@ -126,15 +127,14 @@ async function getCharacterGender(characterId: string): Promise<"male" | "female
 // ── Main Pipeline ──
 
 /**
- * Generate a scene image using the V4 pipeline:
- * Multi-LoRA scene generation → Easel face swap.
+ * Generate a scene image using the V4 pipeline (async face swap).
  *
  * Flow:
  * 1. Determine SFW/NSFW mode
  * 2. Fetch approved face URLs + gender for each character
- * 3. Run multi-LoRA scene generation (Flux Dev + uncensored LoRA for NSFW)
- * 4. Run face swap with character face portraits
- * 5. Return final image buffer + metadata
+ * 3. Run multi-LoRA scene generation synchronously (~30s)
+ * 4. Submit face swap as async Replicate prediction (returns immediately)
+ * 5. Return scene image + face swap prediction ID for polling
  */
 export async function generateSceneImageV4(
   params: V4GenerateSceneParams,
@@ -172,13 +172,12 @@ export async function generateSceneImageV4(
 
   const isDualCharacter = !!imgPrompt.secondary_character_id;
   const aspectRatio = isDualCharacter ? "3:2" : "2:3";
-  const hasFaceSwap = !!primaryFaceUrl;
 
   // ── Generate ──
   console.log(
     `[V4][${promptId}] === GENERATION SUMMARY ===\n` +
     JSON.stringify({
-      pipeline: "V4 (multi-lora + face-swap)",
+      pipeline: "V4 (multi-lora + async-face-swap)",
       promptId,
       primaryCharacter: imgPrompt.character_id
         ? { id: imgPrompt.character_id, name: imgPrompt.character_name, gender: primaryGender, hasFace: !!primaryFaceUrl }
@@ -189,12 +188,12 @@ export async function generateSceneImageV4(
       aspectRatio,
       mode,
       seed,
-      hasFaceSwap,
+      hasFaceSwap: !!primaryFaceUrl,
       promptLength: imgPrompt.prompt.length,
     }, null, 2),
   );
 
-  const result: V4PipelineResult = await runV4Pipeline({
+  const result: V4PipelineAsyncResult = await runV4PipelineAsync({
     prompt: imgPrompt.prompt,
     primaryFaceUrl: primaryFaceUrl || "",
     primaryGender,
@@ -206,13 +205,12 @@ export async function generateSceneImageV4(
   });
 
   return {
-    imageBuffer: result.finalImageBuffer,
-    imageBase64: result.finalImageBase64,
+    sceneImageBuffer: result.sceneImageBuffer,
+    sceneImageBase64: result.sceneImageBase64,
     assembledPrompt: imgPrompt.prompt,
     mode,
     seed: result.seed,
     engine: "flux2_pro",
-    hasFaceSwap,
-    sceneImageBase64: result.sceneImageBase64,
+    faceSwapPredictionId: result.faceSwapPredictionId,
   };
 }
