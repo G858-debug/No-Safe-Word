@@ -238,14 +238,14 @@ export function buildUncannyInpaintWorkflow(config: {
     },
   };
 
-  // Node 201: DualCLIPLoader — same text encoders as Flux
-  // Chroma inherits the Flux.1-schnell architecture, same CLIP stack
+  // Node 201: CLIPLoader — Chroma uses T5-XXL ONLY (no clip_l)
+  // This is different from Flux which uses DualCLIPLoader with t5xxl + clip_l.
+  // Chroma has its own text encoder config (type: "chroma") that uses only T5.
   workflow['201'] = {
-    class_type: 'DualCLIPLoader',
+    class_type: 'CLIPLoader',
     inputs: {
-      clip_name1: 't5xxl_fp8_e4m3fn_scaled.safetensors',
-      clip_name2: 'clip_l.safetensors',
-      type: 'flux',
+      clip_name: 't5xxl_fp8_e4m3fn_scaled.safetensors',
+      type: 'chroma',
     },
   };
 
@@ -258,7 +258,6 @@ export function buildUncannyInpaintWorkflow(config: {
   };
 
   // Node 203: CLIPTextEncode — encode the inpainting prompt
-  // Standard ComfyUI text encoder, works with Flux/Chroma CLIP stack
   workflow['203'] = {
     class_type: 'CLIPTextEncode',
     inputs: {
@@ -267,16 +266,9 @@ export function buildUncannyInpaintWorkflow(config: {
     },
   };
 
-  // Node 204: FluxGuidance — apply guidance to the inpaint prompt conditioning
-  workflow['204'] = {
-    class_type: 'FluxGuidance',
-    inputs: {
-      conditioning: ['203', 0],
-      guidance: 3.5,
-    },
-  };
-
   // Node 205: ConditioningZeroOut — zero out negative (Chroma has no negative prompt)
+  // No FluxGuidance node — Chroma handles guidance internally via its
+  // distilled_guidance_layer, hardcoding guidance to 0.0 in extra_conds.
   workflow['205'] = {
     class_type: 'ConditioningZeroOut',
     inputs: {
@@ -315,12 +307,12 @@ export function buildUncannyInpaintWorkflow(config: {
     class_type: 'KSampler',
     inputs: {
       model: ['200', 0],
-      positive: ['204', 0],     // FluxGuidance output (Chroma may ignore this)
+      positive: ['203', 0],     // CLIPTextEncode directly (no FluxGuidance for Chroma)
       negative: ['205', 0],     // Zeroed-out conditioning
       latent_image: ['207', 0], // VAEEncodeForInpaint output
       seed: inpaint.seed,
       steps: 30,
-      cfg: 3.5,
+      cfg: 1.0,               // Chroma's distilled guidance layer handles guidance internally
       sampler_name: 'dpmpp_sde',
       scheduler: 'beta',
       denoise: inpaint.denoiseStrength,
