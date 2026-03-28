@@ -225,7 +225,7 @@ export default function SeriesDetailPage() {
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
   const allLorasDeployed =
     loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
-  const noLoraEngine = series.image_engine === "flux_pulid" || series.image_engine === "flux2_pro";
+  const noLoraEngine = data?.series.image_engine === "flux_pulid" || data?.series.image_engine === "flux2_pro";
   const allReadyForImages = allCharsApproved && (noLoraEngine || allLorasDeployed);
 
   // Engine update handler
