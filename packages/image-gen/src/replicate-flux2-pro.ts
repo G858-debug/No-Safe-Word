@@ -24,7 +24,8 @@ import { readReplicateOutput } from './replicate-client';
 // V4 Pipeline: Multi-LoRA Scene Generation + Easel Face Swap
 // ════════════════════════════════════════════════════════════════════
 
-const FLUX_MULTI_LORA_MODEL = 'lucataco/flux-dev-multi-lora' as const;
+// Must use owner/name:version format — this model doesn't support the /models/.../predictions shorthand
+const FLUX_MULTI_LORA_MODEL = 'lucataco/flux-dev-multi-lora:ad0314563856e714367fdc7244b19b160d25926d305fec270c9e00f64665d352' as const;
 const FACE_SWAP_MODEL = 'easel/advanced-face-swap' as const;
 
 /** Uncensored LoRA — removes Flux 1 Dev's content restrictions for NSFW */
