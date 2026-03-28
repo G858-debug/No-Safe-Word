@@ -66,7 +66,10 @@ export async function resolvePromptEthnicity(
  *
  * Returns a multi-sentence prose string ending with a newline.
  */
-export async function buildKontextIdentityPrefix(charData: CharacterData): Promise<string> {
+export async function buildKontextIdentityPrefix(
+  charData: CharacterData,
+  opts?: { bodyPromptOverride?: string },
+): Promise<string> {
   const sentences: string[] = [];
 
   // ── 1. Core identity sentence: "A 26-year-old African woman with ..." ──
@@ -119,49 +122,55 @@ export async function buildKontextIdentityPrefix(charData: CharacterData): Promi
 
   // ── 3. Body sentence: "She has a curvaceous figure with ..." ──
   const isFemale = charData.gender === "female";
-  const bt = (charData.bodyType || "").toLowerCase();
-  if (bt) {
-    const pronoun = isFemale ? "She" :
-                    charData.gender === "male" ? "He" : "They";
-    const verb = pronoun === "They" ? "have" : "has";
 
-    // Extract the core build descriptor and any supplemental body details
-    const bodyDetails: string[] = [];
+  if (opts?.bodyPromptOverride) {
+    // V3 pipeline: use the approved body prompt text directly
+    sentences.push(opts.bodyPromptOverride);
+  } else {
+    const bt = (charData.bodyType || "").toLowerCase();
+    if (bt) {
+      const pronoun = isFemale ? "She" :
+                      charData.gender === "male" ? "He" : "They";
+      const verb = pronoun === "They" ? "have" : "has";
 
-    // Start with the raw bodyType as the base
-    bodyDetails.push(charData.bodyType);
+      // Extract the core build descriptor and any supplemental body details
+      const bodyDetails: string[] = [];
 
-    // For female characters, ensure body LoRAs get text reinforcement.
-    // If bodyType mentions curvy/curvaceous but lacks specifics, add them.
-    if (isFemale) {
-      const hasCurvyBase = /curv|voluptuous|hourglass|full[- ]figured/i.test(bt);
-      if (hasCurvyBase && !/\bbreasts?\b/i.test(bt)) {
-        bodyDetails.push("full breasts");
+      // Start with the raw bodyType as the base
+      bodyDetails.push(charData.bodyType);
+
+      // For female characters, ensure body LoRAs get text reinforcement.
+      // If bodyType mentions curvy/curvaceous but lacks specifics, add them.
+      if (isFemale) {
+        const hasCurvyBase = /curv|voluptuous|hourglass|full[- ]figured/i.test(bt);
+        if (hasCurvyBase && !/\bbreasts?\b/i.test(bt)) {
+          bodyDetails.push("full breasts");
+        }
+        if (hasCurvyBase && !/\bhips?\b/i.test(bt)) {
+          bodyDetails.push("wide hips");
+        }
+        if (hasCurvyBase && !/\bwaist\b/i.test(bt)) {
+          bodyDetails.push("a slim waist");
+        }
       }
-      if (hasCurvyBase && !/\bhips?\b/i.test(bt)) {
-        bodyDetails.push("wide hips");
+
+      // Add supplemental descriptors if not already present (any gender)
+      if (/large breasts|full breasts|big breasts|busty/i.test(bt) && !/large breasts/i.test(bt) && !/full breasts/i.test(bt)) {
+        bodyDetails.push("large breasts");
       }
-      if (hasCurvyBase && !/\bwaist\b/i.test(bt)) {
+      if (/large butt|big ass|round hips|full hips/i.test(bt) && !/full round ass/i.test(bt)) {
+        bodyDetails.push("a full round ass and wide hips");
+      }
+      if (/slim waist|defined waist/i.test(bt) && !/slim waist/i.test(bt)) {
         bodyDetails.push("a slim waist");
       }
-    }
 
-    // Add supplemental descriptors if not already present (any gender)
-    if (/large breasts|full breasts|big breasts|busty/i.test(bt) && !/large breasts/i.test(bt) && !/full breasts/i.test(bt)) {
-      bodyDetails.push("large breasts");
-    }
-    if (/large butt|big ass|round hips|full hips/i.test(bt) && !/full round ass/i.test(bt)) {
-      bodyDetails.push("a full round ass and wide hips");
-    }
-    if (/slim waist|defined waist/i.test(bt) && !/slim waist/i.test(bt)) {
-      bodyDetails.push("a slim waist");
-    }
-
-    if (bodyDetails.length === 1) {
-      sentences.push(`${pronoun} ${verb} a ${bodyDetails[0]} build.`);
-    } else {
-      const [base, ...rest] = bodyDetails;
-      sentences.push(`${pronoun} ${verb} a ${base} build with ${joinWithAnd(rest)}.`);
+      if (bodyDetails.length === 1) {
+        sentences.push(`${pronoun} ${verb} a ${bodyDetails[0]} build.`);
+      } else {
+        const [base, ...rest] = bodyDetails;
+        sentences.push(`${pronoun} ${verb} a ${base} build with ${joinWithAnd(rest)}.`);
+      }
     }
   }
 
@@ -187,4 +196,35 @@ function joinWithAnd(items: string[]): string {
 /** Return "A" or "An" depending on the first letter of the word */
 function article(word: string): string {
   return /^[aeiou]/i.test(word) ? "An" : "A";
+}
+
+/**
+ * Generate a default body prompt from structured character data.
+ *
+ * Used by V3 pipeline (flux_pulid) to auto-populate the body_prompt
+ * column on story import. The user can edit before approving.
+ *
+ * Female emphasis order: ass/hips/thighs FIRST, then breasts, then waist.
+ */
+export function generateDefaultBodyPrompt(charData: CharacterData): string {
+  const gender = charData.gender?.toLowerCase();
+
+  if (gender === "female") {
+    const skinTone = charData.skinTone || "dark";
+    const bodyBase = charData.bodyType || "curvaceous";
+
+    return (
+      `She has a ${bodyBase} figure with a very large, round ass, ` +
+      `wide hips, thick thighs, large natural breasts, and a narrow defined waist. ` +
+      `Her body is full-figured with smooth, glowing ${skinTone} skin.`
+    );
+  }
+
+  if (gender === "male") {
+    const bodyBase = charData.bodyType || "athletic";
+    const skinTone = charData.skinTone || "dark";
+    return `He has a ${bodyBase} build with broad shoulders and a strong frame. ${skinTone} skin.`;
+  }
+
+  return charData.bodyType || "";
 }

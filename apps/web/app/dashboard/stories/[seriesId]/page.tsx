@@ -441,12 +441,20 @@ export default function SeriesDetailPage() {
                               <Zap className="h-3.5 w-3.5 text-purple-500" />
                             </span>
                           </SelectItem>
+                          <SelectItem value="flux_pulid">
+                            <span className="flex items-center gap-1.5">
+                              Flux Krea + PuLID V3
+                              <Zap className="h-3.5 w-3.5 text-green-500" />
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <p className="flex-1 text-xs text-muted-foreground mt-5">
                       {series.image_engine === "nb2_uncanny"
                         ? "NB2 scene gen + Florence-2/SAM2 masking + UnCanny inpainting"
+                        : series.image_engine === "flux_pulid"
+                        ? "No LoRA training — PuLID face consistency + text body prompts"
                         : "Better prompt adherence, native character consistency"}
                     </p>
                   </div>
@@ -622,6 +630,7 @@ export default function SeriesDetailPage() {
           <CharacterApproval
             seriesId={seriesId}
             characters={characters}
+            imageEngine={series.image_engine}
             onProceedToImages={() => setActiveTab("images")}
             onCharacterApproved={(storyCharId, imageUrl, imageId, type) => {
               setCharacters((prev) =>

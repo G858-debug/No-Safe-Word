@@ -268,6 +268,8 @@ export function selectKontextResources(opts: {
   secondaryEthnicity?: string;
   /** Which body shape LoRA to use: 'hourglass', 'bodylicious', or 'auto' (default: bodylicious) */
   bodyShapeLoRA?: 'hourglass' | 'bodylicious' | 'auto';
+  /** Override base strength for body shape LoRA (default: 0.8 bodylicious, 0.9 hourglass) */
+  bodyShapeStrength?: number;
   /** Include RefControl Kontext pose LoRA for identity+pose transfer */
   hasRefControlPose?: boolean;
   /** Diagnostic flags to selectively disable LoRA slots */
@@ -352,19 +354,19 @@ export function selectKontextResources(opts: {
 
     const useHourglass = bodyShape === 'hourglass';
     if (useHourglass) {
-      let strength = 0.9 * secondaryReduction;
+      let strength = (opts.bodyShapeStrength ?? 0.9) * secondaryReduction;
       if (isCloseUp) strength = 0.5 * secondaryReduction; // less body emphasis for close-ups
       loras.push({ filename: 'hourglassv32_FLUX.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
     } else {
       // bodylicious or auto
-      let strength = 0.8 * secondaryReduction;
+      let strength = (opts.bodyShapeStrength ?? 0.8) * secondaryReduction;
       if (isFullBody) strength = 0.95 * secondaryReduction;
       if (isCloseUp) strength = 0.5 * secondaryReduction;
       // Prompt-based full-body boost for single-character scenes only
       const isPromptFullBody = /\b(full[- ]body|full[- ]length)\b/i.test(prompt);
       if (isPromptFullBody && !hasDualCharacter) strength = Math.min(strength + 0.15, 1.0);
       loras.push({ filename: 'bodylicious-flux.safetensors', strengthModel: Math.round(strength * 100) / 100, strengthClip: Math.round(strength * 100) / 100 });
-      pendingTriggers.push('voluptuous figure', 'wide hips', 'large round butt', 'narrow waist');
+      pendingTriggers.push('voluptuous figure', 'wide hips', 'huge round ass', 'thick thighs', 'narrow waist');
     }
   }
 

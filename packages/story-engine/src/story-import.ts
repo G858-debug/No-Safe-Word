@@ -6,7 +6,7 @@ import {
   type ImportResult,
   type CharacterImport,
 } from "@no-safe-word/shared";
-import { cleanScenePrompt } from "@no-safe-word/image-gen";
+import { cleanScenePrompt, generateDefaultBodyPrompt } from "@no-safe-word/image-gen";
 import { detectSecondaryCharacters } from "./detect-secondary-character";
 
 /**
@@ -60,14 +60,36 @@ export async function importStory(
 
   const seriesId = series.id;
 
-  // 3. Link characters to series
-  const storyCharacterRows = payload.characters.map((char) => ({
-    series_id: seriesId,
-    character_id: characterMap.get(char.name)!,
-    role: char.role,
-    prose_description: char.prose_description || null,
-    approved: false,
-  }));
+  // 3. Link characters to series (with auto-generated body prompts)
+  const storyCharacterRows = payload.characters.map((char) => {
+    // Auto-generate body prompt from structured data for V3 pipeline readiness
+    const bodyPrompt = char.structured
+      ? generateDefaultBodyPrompt({
+          name: char.name,
+          gender: (char.structured.gender as any) || "female",
+          ethnicity: char.structured.ethnicity || "",
+          bodyType: char.structured.bodyType || "",
+          hairColor: char.structured.hairColor || "",
+          hairStyle: char.structured.hairStyle || "",
+          eyeColor: char.structured.eyeColor || "",
+          skinTone: char.structured.skinTone || "",
+          distinguishingFeatures: char.structured.distinguishingFeatures || "",
+          clothing: char.structured.clothing || "",
+          pose: char.structured.pose || "",
+          expression: char.structured.expression || "",
+          age: char.structured.age || "",
+        })
+      : null;
+
+    return {
+      series_id: seriesId,
+      character_id: characterMap.get(char.name)!,
+      role: char.role,
+      prose_description: char.prose_description || null,
+      approved: false,
+      body_prompt: bodyPrompt,
+    };
+  });
 
   const { error: linkError } = await supabase
     .from("story_characters")

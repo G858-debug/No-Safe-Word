@@ -1,28 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
-
-function buildSystemPrompt(nsfw: boolean): string {
-  return `You are an image prompt specialist for a South African adult ${nsfw ? "NSFW" : "SFW"} romance fiction platform.
-Enhance the user's rough prompt into a vivid, cinematic image generation prompt using these five layers:
-
-Expression & Gaze — specify the character's exact expression and eye direction
-Narrative Implication — capture a specific moment; something just happened or is about to
-Lighting & Atmosphere — name a specific light source (e.g. "single amber streetlight", "bedside lamp glow", "candlelight")
-Composition & Framing — specify shot type, camera angle, depth of field
-Setting & Cultural Grounding — include specific South African environmental details where relevant
-
-Rules:
-
-Write in flowing prose sentences, not comma-separated tags
-End with "Photorealistic."
-Do not include character names — describe appearance inline if needed
-Do not add LoRA tags, weights, or technical parameters
-CRITICAL: Preserve all physical and body descriptions EXACTLY as written — do not soften, euphemise, reword, or tone down any anatomical details. If the user describes large breasts, a large ass, explicit nudity, or any other body attribute, reproduce that description faithfully in the enhanced prompt.
-Return ONLY the enhanced prompt, nothing else`;
-}
+import { enhancePromptForScene } from "@no-safe-word/image-gen";
 
 // POST /api/image-generator/enhance
-// Body: { prompt: string }
+// Body: { prompt: string, nsfw?: boolean }
 // Returns: { enhancedPrompt: string }
 export async function POST(request: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -36,17 +16,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
     }
 
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 512,
-      system: buildSystemPrompt(!!nsfw),
-      messages: [{ role: "user", content: prompt.trim() }],
-    });
-
-    const enhancedPrompt =
-      message.content[0].type === "text" ? message.content[0].text.trim() : prompt.trim();
+    const enhancedPrompt = await enhancePromptForScene(prompt, { nsfw: !!nsfw });
 
     return NextResponse.json({ enhancedPrompt });
   } catch (err) {

@@ -439,6 +439,8 @@ export interface Database {
           regen_count: number;
           active_lora_id: string | null;
           face_url: string | null;
+          body_prompt: string | null;
+          body_prompt_status: string;
         };
         Insert: {
           id?: string;
@@ -457,6 +459,8 @@ export interface Database {
           regen_count?: number;
           active_lora_id?: string | null;
           face_url?: string | null;
+          body_prompt?: string | null;
+          body_prompt_status?: string;
         };
         Update: {
           id?: string;
@@ -475,6 +479,8 @@ export interface Database {
           regen_count?: number;
           active_lora_id?: string | null;
           face_url?: string | null;
+          body_prompt?: string | null;
+          body_prompt_status?: string;
         };
         Relationships: [
           {

@@ -45,6 +45,8 @@ export interface CharacterFromAPI {
   approved_fullbody_image_id: string | null;
   approved_fullbody_seed: number | null;
   face_url: string | null;
+  body_prompt: string | null;
+  body_prompt_status: string;
   characters: {
     id: string;
     name: string;
@@ -62,6 +64,7 @@ interface CharacterApprovalProps {
   seriesId: string;
   characters: CharacterFromAPI[];
   modelUrn?: string;
+  imageEngine?: string;
   onProceedToImages?: () => void;
   onCharacterApproved?: (storyCharId: string, imageUrl: string, imageId: string, type: ImageType) => void;
 }
@@ -108,6 +111,10 @@ interface CharState {
   descriptionDraft: Record<string, string>;  // in-progress edits
   savingDescription: boolean;
   descriptionError: string | null;
+  // V3 body prompt fields
+  bodyPrompt: string;
+  bodyPromptStatus: "pending" | "approved";
+  bodyPromptSaving: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,9 +210,11 @@ export default function CharacterApproval({
   seriesId,
   characters,
   modelUrn,
+  imageEngine,
   onProceedToImages,
   onCharacterApproved,
 }: CharacterApprovalProps) {
+  const isV3 = imageEngine === "flux_pulid";
   // Per-character state keyed by story_character id
   const [charStates, setCharStates] = useState<Record<string, CharState>>({});
   const pollTimers = useRef<Record<string, NodeJS.Timeout>>({});
@@ -280,6 +289,9 @@ export default function CharacterApproval({
         descriptionDraft: localDesc,
         savingDescription: false,
         descriptionError: null,
+        bodyPrompt: ch.body_prompt || "",
+        bodyPromptStatus: (ch.body_prompt_status === "approved" ? "approved" : "pending") as "pending" | "approved",
+        bodyPromptSaving: false,
       };
     }
     setCharStates(initial);
@@ -869,6 +881,52 @@ export default function CharacterApproval({
     [charStates, updateCharMeta, updateSlot]
   );
 
+  // ------- V3 Body Prompt Actions -------
+
+  const saveBodyPrompt = useCallback(
+    async (storyCharId: string, approve: boolean) => {
+      const state = charStates[storyCharId];
+      if (!state) return;
+
+      setCharStates((prev) => ({
+        ...prev,
+        [storyCharId]: { ...prev[storyCharId], bodyPromptSaving: true },
+      }));
+
+      try {
+        const res = await fetch(`/api/stories/characters/${storyCharId}/body-prompt`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            body_prompt: state.bodyPrompt,
+            approve,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Save failed");
+        }
+
+        setCharStates((prev) => ({
+          ...prev,
+          [storyCharId]: {
+            ...prev[storyCharId],
+            bodyPromptSaving: false,
+            bodyPromptStatus: approve ? "approved" : "pending",
+          },
+        }));
+      } catch (err) {
+        console.error("[V3] Body prompt save failed:", err);
+        setCharStates((prev) => ({
+          ...prev,
+          [storyCharId]: { ...prev[storyCharId], bodyPromptSaving: false },
+        }));
+      }
+    },
+    [charStates],
+  );
+
   // ------- LoRA Training Actions -------
 
   const updateLoraState = useCallback(
@@ -1035,10 +1093,15 @@ export default function CharacterApproval({
 
   // ------- Derived state -------
 
-  // A character is "fully ready" when portrait + fullBody approved AND LoRA deployed
-  const approvedCount = Object.values(charStates).filter(
-    (s) => s.portrait?.approved && s.fullBody?.approved && s.lora?.status === "deployed"
-  ).length;
+  // A character is "fully ready":
+  // V1/V2: portrait + fullBody approved AND LoRA deployed
+  // V3: portrait approved AND body prompt approved (no LoRA, no body image)
+  const approvedCount = Object.values(charStates).filter((s) => {
+    if (isV3) {
+      return s.portrait?.approved && s.bodyPromptStatus === "approved";
+    }
+    return s.portrait?.approved && s.fullBody?.approved && s.lora?.status === "deployed";
+  }).length;
   const totalCount = characters.length;
   const allApproved = totalCount > 0 && approvedCount === totalCount;
   const anyGenerating = Object.values(charStates).some(
@@ -1149,11 +1212,15 @@ export default function CharacterApproval({
           if (!s) continue;
           const reasons: string[] = [];
           if (!s.portrait.approved) reasons.push("face not approved");
-          else if (!s.fullBody.approved) reasons.push("body not approved");
-          if (s.portrait.approved && s.fullBody.approved && s.lora.status !== "deployed") {
-            const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(s.lora.status);
-            const needsReview = s.lora.status === "awaiting_dataset_approval";
-            reasons.push(loraInProgress ? "LoRA training in progress" : needsReview ? "dataset needs review" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
+          if (isV3) {
+            if (s.bodyPromptStatus !== "approved") reasons.push("body prompt not approved");
+          } else {
+            if (!s.fullBody.approved) reasons.push("body not approved");
+            if (s.portrait.approved && s.fullBody.approved && s.lora.status !== "deployed") {
+              const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(s.lora.status);
+              const needsReview = s.lora.status === "awaiting_dataset_approval";
+              reasons.push(loraInProgress ? "LoRA training in progress" : needsReview ? "dataset needs review" : s.lora.status === "failed" ? "LoRA training failed" : "LoRA not started");
+            }
           }
           if (reasons.length > 0) blockers.push(`${ch.characters.name} (${reasons.join(", ")})`);
         }
@@ -1174,7 +1241,9 @@ export default function CharacterApproval({
           if (!state) return null;
 
           const role = ROLE_STYLES[ch.role] || ROLE_STYLES.supporting;
-          const fullyApproved = state.portrait.approved && state.fullBody.approved;
+          const fullyApproved = isV3
+            ? state.portrait.approved && state.bodyPromptStatus === "approved"
+            : state.portrait.approved && state.fullBody.approved;
 
           return (
             <Card
@@ -1215,6 +1284,27 @@ export default function CharacterApproval({
                   {(() => {
                     const faceColor = state.portrait.approved ? "text-green-400" : state.portrait.isGenerating ? "text-amber-400" : "text-muted-foreground/40";
                     const faceDot = state.portrait.approved ? "bg-green-400" : state.portrait.isGenerating ? "bg-amber-400" : "bg-muted-foreground/30";
+
+                    if (isV3) {
+                      // V3: Face → Body Prompt (no body image, no LoRA)
+                      const bpColor = state.bodyPromptStatus === "approved" ? "text-green-400" : "text-amber-400";
+                      const bpDot = state.bodyPromptStatus === "approved" ? "bg-green-400" : "bg-amber-400";
+                      return (
+                        <>
+                          <span className={`inline-flex items-center gap-1 ${faceColor}`}>
+                            <span className={`inline-block h-2 w-2 rounded-full ${faceDot}`} />
+                            Face{state.portrait.approved && <Check className="h-2.5 w-2.5" />}
+                          </span>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground/30" />
+                          <span className={`inline-flex items-center gap-1 ${bpColor}`}>
+                            <span className={`inline-block h-2 w-2 rounded-full ${bpDot}`} />
+                            Body Prompt{state.bodyPromptStatus === "approved" && <Check className="h-2.5 w-2.5" />}
+                          </span>
+                        </>
+                      );
+                    }
+
+                    // V1/V2: Face → Body → LoRA
                     const bodyColor = state.fullBody.approved ? "text-green-400" : state.fullBody.isGenerating ? "text-amber-400" : "text-muted-foreground/40";
                     const bodyDot = state.fullBody.approved ? "bg-green-400" : state.fullBody.isGenerating ? "bg-amber-400" : "bg-muted-foreground/30";
                     const loraInProgress = ["pending", "generating_dataset", "evaluating", "captioning", "training", "validating"].includes(state.lora.status);
@@ -1381,9 +1471,9 @@ export default function CharacterApproval({
                   )}
                 </div>
 
-                {/* Dual image slots: Portrait + Full Body */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {(["portrait", "fullBody"] as const).map((type) => {
+                {/* Image slots: V3 shows only portrait, V1/V2 shows portrait + full body */}
+                <div className={isV3 ? "grid grid-cols-1 gap-4" : "grid grid-cols-1 md:grid-cols-2 gap-4"}>
+                  {(isV3 ? ["portrait"] as const : ["portrait", "fullBody"] as const).map((type) => {
                     const slot = state[type];
                     const hasImage = !!slot.imageUrl;
                     const displayUrl = slot.approved
@@ -1599,6 +1689,69 @@ export default function CharacterApproval({
                   })}
                 </div>
 
+                {/* V3: Body Prompt Editor */}
+                {isV3 && (
+                  <div className="space-y-2 border-t border-muted/50 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">Body Description Prompt</span>
+                      {state.bodyPromptStatus === "approved" ? (
+                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px] px-1.5 py-0">
+                          <Check className="h-2.5 w-2.5 mr-0.5" />Approved
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0">
+                          Pending
+                        </Badge>
+                      )}
+                    </div>
+                    <textarea
+                      value={state.bodyPrompt}
+                      onChange={(e) => {
+                        setCharStates((prev) => ({
+                          ...prev,
+                          [ch.id]: {
+                            ...prev[ch.id],
+                            bodyPrompt: e.target.value,
+                            bodyPromptStatus: "pending", // Reset to pending on edit
+                          },
+                        }));
+                      }}
+                      rows={3}
+                      className="w-full rounded px-2 py-1.5 text-xs bg-background border border-muted text-foreground focus:outline-none focus:border-blue-500/50 resize-none"
+                      placeholder="Describe the character's body shape and proportions..."
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() => saveBodyPrompt(ch.id, false)}
+                        disabled={state.bodyPromptSaving || !state.bodyPrompt.trim()}
+                      >
+                        {state.bodyPromptSaving ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Save className="h-3 w-3 mr-1" />
+                        )}
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                        onClick={() => saveBodyPrompt(ch.id, true)}
+                        disabled={state.bodyPromptSaving || !state.bodyPrompt.trim()}
+                      >
+                        {state.bodyPromptSaving ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Check className="h-3 w-3 mr-1" />
+                        )}
+                        Approve
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Combined status line */}
                 <div className="flex items-center gap-3 text-xs text-muted-foreground border-t border-muted/50 pt-3">
                   <span>
@@ -1610,28 +1763,46 @@ export default function CharacterApproval({
                       <span className="text-muted-foreground/50">Not generated</span>
                     )}
                   </span>
-                  <span className="text-muted-foreground/30">|</span>
-                  <span>
-                    Full Body: {state.fullBody.approved ? (
-                      <span className="text-green-400">Approved</span>
-                    ) : state.fullBody.imageUrl ? (
-                      <span className="text-blue-400">Pending approval</span>
-                    ) : (
-                      <span className="text-muted-foreground/50">Not generated</span>
-                    )}
-                  </span>
+                  {!isV3 && (
+                    <>
+                      <span className="text-muted-foreground/30">|</span>
+                      <span>
+                        Full Body: {state.fullBody.approved ? (
+                          <span className="text-green-400">Approved</span>
+                        ) : state.fullBody.imageUrl ? (
+                          <span className="text-blue-400">Pending approval</span>
+                        ) : (
+                          <span className="text-muted-foreground/50">Not generated</span>
+                        )}
+                      </span>
+                    </>
+                  )}
+                  {isV3 && (
+                    <>
+                      <span className="text-muted-foreground/30">|</span>
+                      <span>
+                        Body Prompt: {state.bodyPromptStatus === "approved" ? (
+                          <span className="text-green-400">Approved</span>
+                        ) : (
+                          <span className="text-amber-400">Pending</span>
+                        )}
+                      </span>
+                    </>
+                  )}
                 </div>
 
-                {/* LoRA Training Section */}
-                <LoraTrainingSection
-                  storyCharId={ch.id}
-                  seriesId={seriesId}
-                  characterName={ch.characters.name}
-                  loraState={state.lora}
-                  onTrain={() => handleTrainLora(ch.id)}
-                  onStartPolling={() => startLoraPolling(ch.id)}
-                  locked={!fullyApproved}
-                />
+                {/* LoRA Training Section — hidden for V3 (no LoRA training needed) */}
+                {!isV3 && (
+                  <LoraTrainingSection
+                    storyCharId={ch.id}
+                    seriesId={seriesId}
+                    characterName={ch.characters.name}
+                    loraState={state.lora}
+                    onTrain={() => handleTrainLora(ch.id)}
+                    onStartPolling={() => startLoraPolling(ch.id)}
+                    locked={!fullyApproved}
+                  />
+                )}
               </CardContent>
             </Card>
           );

@@ -2,6 +2,7 @@ import {
   buildSdxlWorkflow,
   buildKontextWorkflow,
   resolvePromptEthnicity,
+  enhancePromptForScene,
   FEMALE_BODY_SDXL_CHECKPOINT,
   FEMALE_BODY_SDXL_CONFIG,
   buildFemaleBodyLoraStack,
@@ -422,5 +423,135 @@ function buildFemaleBodyPayload(
     height,
     loras: loras.map(l => ({ filename: l.filename, strength: l.strengthModel })),
     step2Config,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// V3 Pipeline — Flux Krea Face Generation (text-to-image, no reference image)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a V3 face prompt for Flux Krea text-to-image generation.
+ * Face-only fields: age, ethnicity, skin tone, hair, eyes, distinguishing features.
+ * No body attributes, no clothing. All gender.
+ */
+function buildV3FacePrompt(
+  charData: CharacterData,
+  resolvedEthnicity: string,
+): string {
+  const genderWord = charData.gender === "male" ? "man"
+    : charData.gender === "female" ? "woman"
+    : "person";
+
+  const details: string[] = [];
+  if (charData.hairStyle || charData.hairColor) {
+    const hair = [charData.hairStyle, charData.hairColor].filter(Boolean).join(" ");
+    details.push(`${hair} hair`);
+  }
+  if (charData.eyeColor) details.push(`${charData.eyeColor} eyes`);
+  if (charData.skinTone) details.push(`${charData.skinTone} skin`);
+
+  const age = charData.age ? `${charData.age}-year-old ` : "";
+  const core = details.length > 0
+    ? `A ${age}${resolvedEthnicity} ${genderWord} with ${details.join(", ")}`
+    : `A ${age}${resolvedEthnicity} ${genderWord}`;
+
+  const sentences = [core + "."];
+  if (charData.distinguishingFeatures) {
+    const pronoun = charData.gender === "female" ? "She"
+      : charData.gender === "male" ? "He" : "They";
+    sentences.push(`${pronoun} has ${charData.distinguishingFeatures}.`);
+  }
+
+  const expression = charData.expression || "natural relaxed expression";
+  sentences.push(
+    `Head and shoulders portrait with a ${expression}. ` +
+    "Soft studio lighting, clean blurred background. " +
+    "Shot on Hasselblad X2D, 80mm f/2.8, shallow depth of field. Photorealistic.",
+  );
+
+  return sentences.join(" ");
+}
+
+/**
+ * V3 face generation: Flux Krea Dev text-to-image via ComfyUI on RunPod.
+ * Uses face-specific LoRAs (realism, details, beauty-skin, african-woman).
+ * All prompts enhanced by Claude before generation.
+ */
+export async function buildV3FaceGenerationPayload(
+  params: CharacterGenerationInput,
+): Promise<RunPodGenerationPayload> {
+  const { character, customPrompt } = params;
+  const desc = character.description;
+  const seed = params.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
+
+  const characterData: CharacterData = {
+    name: character.name,
+    gender: (["male", "female", "non-binary", "other"].includes(desc.gender)
+      ? desc.gender as CharacterData["gender"]
+      : "female") as CharacterData["gender"],
+    ethnicity: desc.ethnicity || "",
+    bodyType: desc.bodyType || "",
+    hairColor: desc.hairColor || "",
+    hairStyle: desc.hairStyle || "",
+    eyeColor: desc.eyeColor || "",
+    skinTone: desc.skinTone || "",
+    distinguishingFeatures: desc.distinguishingFeatures || "",
+    clothing: desc.clothing || "",
+    pose: desc.pose || "",
+    expression: desc.expression || "",
+    age: desc.age || "",
+  };
+
+  const resolvedEthnicity = await resolvePromptEthnicity(
+    characterData.ethnicity,
+    characterData.gender,
+    characterData.skinTone,
+  );
+
+  // Build face prompt and enhance via Claude
+  const rawPrompt = customPrompt || buildV3FacePrompt(characterData, resolvedEthnicity);
+  const enhancedPrompt = await enhancePromptForScene(rawPrompt, { nsfw: false });
+
+  // Face LoRAs for Flux Krea
+  const faceLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [
+    { filename: "flux_realism_lora.safetensors", strengthModel: 0.8, strengthClip: 0.8 },
+    { filename: "flux-add-details.safetensors", strengthModel: 0.7, strengthClip: 0.7 },
+    { filename: "flux-beauty-skin.safetensors", strengthModel: 0.3, strengthClip: 0.3 },
+  ];
+
+  // Add African Woman LoRA for Black/African characters (female only)
+  if (isBlackAfrican(characterData.ethnicity) && characterData.gender === "female") {
+    faceLoras.push({
+      filename: "african-woman-flux.safetensors",
+      strengthModel: 0.6,
+      strengthClip: 0.6,
+    });
+  }
+
+  const sluggedName = character.name.replace(/\s+/g, "_").toLowerCase();
+
+  // Build portrait workflow (text-to-image, no reference image)
+  const workflow = buildKontextWorkflow({
+    type: "portrait",
+    positivePrompt: enhancedPrompt,
+    width: 832,
+    height: 1216,
+    seed,
+    filenamePrefix: `v3_face_${sluggedName}`,
+    loras: faceLoras,
+    guidance: 3.5,
+    sfwMode: true,
+  });
+
+  return {
+    engine: "runpod",
+    workflow,
+    positivePrompt: enhancedPrompt,
+    negativePrompt: "",
+    seed,
+    width: 832,
+    height: 1216,
+    loras: faceLoras.map((l) => ({ filename: l.filename, strength: l.strengthModel })),
   };
 }

@@ -399,8 +399,11 @@ export default function ImageGeneration({
         if (postId) body.post_id = postId;
         if (regenerate) body.regenerate = true;
 
+        const batchEndpoint = imageEngine === "flux_pulid"
+          ? `/api/stories/${seriesId}/generate-images-v3`
+          : `/api/stories/${seriesId}/generate-images`;
         const res = await fetch(
-          `/api/stories/${seriesId}/generate-images`,
+          batchEndpoint,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -444,7 +447,7 @@ export default function ImageGeneration({
         setBatchGenerating(false);
       }
     },
-    [seriesId, updatePrompt]
+    [seriesId, imageEngine, updatePrompt]
   );
 
   const handleRegenerate = useCallback(

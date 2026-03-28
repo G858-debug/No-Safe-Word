@@ -25,7 +25,13 @@ export { validatePersonCount, canRetryValidation, buildRetrySettings, generateRe
 export type { PersonValidationResult } from './person-validator';
 
 // Kontext identity prefix for natural-language character description
-export { buildKontextIdentityPrefix, resolvePromptEthnicity } from './kontext-identity';
+export { buildKontextIdentityPrefix, resolvePromptEthnicity, generateDefaultBodyPrompt } from './kontext-identity';
+
+// Scene darkness detection — shared by V1 and V3 pipelines
+export { detectSceneDarkness } from './scene-darkness';
+
+// Claude prompt enhancement — shared by enhance endpoint and V3 pipeline
+export { enhancePromptForScene } from './prompt-enhancer';
 
 // Flux prompt rewriter — converts tag-style prompts to Flux natural language
 export { rewritePromptForFlux } from './flux-prompt-rewriter';
