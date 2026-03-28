@@ -570,9 +570,17 @@ if [ "${DOWNLOAD_V2_MODELS}" = "true" ]; then
   # The RunPod health check times out if we block here for ~5 min.
   # Once downloaded, the file persists on the network volume.
   UNCANNY_DEST="/runpod-volume/models/diffusion_models/uncanny_v1.3_fp8.safetensors"
+  UNCANNY_MIN_SIZE=5000000000  # 5GB minimum — full file is ~8.3GB
   if [ -f "$UNCANNY_DEST" ]; then
-      echo "[NSW] ✓ uncanny_v1.3_fp8.safetensors (exists)"
-  elif [ -d "/runpod-volume/models" ]; then
+      UNCANNY_SIZE=$(stat -c%s "$UNCANNY_DEST" 2>/dev/null || stat -f%z "$UNCANNY_DEST" 2>/dev/null || echo 0)
+      if [ "$UNCANNY_SIZE" -lt "$UNCANNY_MIN_SIZE" ]; then
+          echo "[NSW] uncanny_v1.3_fp8.safetensors is truncated (${UNCANNY_SIZE} bytes < ${UNCANNY_MIN_SIZE}). Deleting and re-downloading."
+          rm -f "$UNCANNY_DEST"
+      else
+          echo "[NSW] ✓ uncanny_v1.3_fp8.safetensors (exists, ${UNCANNY_SIZE} bytes)"
+      fi
+  fi
+  if [ ! -f "$UNCANNY_DEST" ] && [ -d "/runpod-volume/models" ]; then
       if [ -n "${UNCANNY_MODEL_URL:-}" ]; then
           mkdir -p "/runpod-volume/models/diffusion_models"
           UNCANNY_DL_URL="${UNCANNY_MODEL_URL}"
