@@ -423,16 +423,27 @@ export default function ImageGeneration({
 
         const data = await res.json();
 
-        // Update state for all queued prompts
-        for (const job of data.jobs || []) {
-          if (job.jobId) {
-            promptToJobIdRef.current.set(job.promptId, job.jobId);
+        if (data.results) {
+          // V4 (Flux 2 Pro): images already generated and stored — no polling
+          for (const result of data.results) {
+            updatePrompt(result.promptId, {
+              status: "generated",
+              imageUrl: result.storedUrl || null,
+              error: null,
+            });
           }
-          updatePrompt(job.promptId, {
-            status: "generating",
-            error: null,
-          });
-          pollingIdsRef.current.add(job.promptId);
+        } else {
+          // V1/V2/V3: async RunPod jobs — poll for completion
+          for (const job of data.jobs || []) {
+            if (job.jobId) {
+              promptToJobIdRef.current.set(job.promptId, job.jobId);
+            }
+            updatePrompt(job.promptId, {
+              status: "generating",
+              error: null,
+            });
+            pollingIdsRef.current.add(job.promptId);
+          }
         }
 
         // Mark any failures
@@ -498,11 +509,22 @@ export default function ImageGeneration({
         }
 
         const data = await res.json();
-        if (data.jobId) {
-          promptToJobIdRef.current.set(promptId, data.jobId);
+
+        if (data.completed) {
+          // V4 (Flux 2 Pro): image already generated and stored — no polling needed
+          updatePrompt(promptId, {
+            status: "generated",
+            imageUrl: data.imageUrl || null,
+            error: null,
+          });
+        } else {
+          // V1/V2/V3: async RunPod job — poll for completion
+          if (data.jobId) {
+            promptToJobIdRef.current.set(promptId, data.jobId);
+          }
+          pollingIdsRef.current.add(promptId);
+          setIsPolling(true);
         }
-        pollingIdsRef.current.add(promptId);
-        setIsPolling(true);
       } catch (err) {
         updatePrompt(promptId, {
           status: "failed",
