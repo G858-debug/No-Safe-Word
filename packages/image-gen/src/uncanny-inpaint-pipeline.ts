@@ -169,7 +169,17 @@ export async function submitUncannyInpaintJob(
   });
 
   const images = [{ name: inputImageName, image: baseImageBase64 }];
-  const { jobId } = await submitRunPodJob(workflow, images);
+
+  // Ensure the UnCanny model is available on the worker.
+  // The model is downloaded via character_lora_downloads handler to /comfyui/models/loras/,
+  // which is mapped as a diffusion_models search path in extra_model_paths.yaml.
+  // The handler caches the file — subsequent jobs skip the download.
+  const uncannyDownloadUrl = process.env.UNCANNY_MODEL_DOWNLOAD_URL || '';
+  const characterLoraDownloads = uncannyDownloadUrl
+    ? [{ filename: uncannyModelName, url: uncannyDownloadUrl }]
+    : undefined;
+
+  const { jobId } = await submitRunPodJob(workflow, images, characterLoraDownloads);
 
   console.log(
     `[V2 Pipeline] Async job submitted: ${jobId}, seed=${seed}, ` +

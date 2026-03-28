@@ -16,3 +16,10 @@ a_custom_path:
   clip_vision: models/clip_vision
   insightface: models/insightface
   pulid: models/pulid
+
+# V2 Pipeline: allows UNETLoader to find models downloaded via
+# character_lora_downloads handler (which writes to /comfyui/models/loras/).
+# This makes the loras directory also searchable as diffusion_models.
+b_loras_as_diffusion:
+  base_path: /comfyui
+  diffusion_models: models/loras
