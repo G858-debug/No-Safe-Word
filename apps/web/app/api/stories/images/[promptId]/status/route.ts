@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { checkFaceSwapStatus } from "@no-safe-word/image-gen";
 
 // GET /api/stories/images/[promptId]/status — Check generation status of an image prompt
 export async function GET(
@@ -52,113 +51,7 @@ export async function GET(
       .limit(1)
       .single();
 
-    // 4. Handle V4 face swap polling — check Replicate prediction status
-    if (
-      job?.job_id?.startsWith("replicate-faceswap-") &&
-      job.status === "pending" &&
-      imgPrompt.status === "generating"
-    ) {
-      const predictionId = job.job_id.replace("replicate-faceswap-", "");
-      console.log(`[V4 Status][${promptId}] Polling face swap prediction: ${predictionId}`);
-
-      const swapStatus = await checkFaceSwapStatus(predictionId);
-
-      if (swapStatus.status === "succeeded" && swapStatus.imageBuffer) {
-        // Face swap complete — store the final image, replacing the scene image
-        const timestamp = Date.now();
-        const storagePath = `stories/${imgPrompt.image_id}-${timestamp}_faceswap.png`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("story-images")
-          .upload(storagePath, swapStatus.imageBuffer, {
-            contentType: "image/png",
-            upsert: true,
-          });
-
-        if (uploadError) {
-          console.error(`[V4 Status][${promptId}] Face swap image upload failed:`, uploadError.message);
-          return NextResponse.json({
-            promptId,
-            status: "generating",
-            jobId: job.job_id,
-            blobUrl: null,
-            storedUrl: null,
-            error: `Face swap upload failed: ${uploadError.message}`,
-          });
-        }
-
-        const { data: { publicUrl } } = supabase.storage
-          .from("story-images")
-          .getPublicUrl(storagePath);
-
-        // Update the image record with the face-swapped version
-        await supabase
-          .from("images")
-          .update({ stored_url: publicUrl, sfw_url: publicUrl })
-          .eq("id", imgPrompt.image_id);
-
-        // Mark job as completed
-        await supabase
-          .from("generation_jobs")
-          .update({ status: "completed", completed_at: new Date().toISOString() })
-          .eq("job_id", job.job_id);
-
-        // Mark prompt as generated
-        await supabase
-          .from("story_image_prompts")
-          .update({ status: "generated" })
-          .eq("id", promptId);
-
-        console.log(`[V4 Status][${promptId}] Face swap complete, stored at ${publicUrl}`);
-
-        return NextResponse.json({
-          promptId,
-          status: "generated",
-          jobId: job.job_id,
-          blobUrl: publicUrl,
-          storedUrl: publicUrl,
-        });
-      }
-
-      if (swapStatus.status === "failed" || swapStatus.status === "canceled") {
-        // Face swap failed — mark as failed but keep the scene image
-        console.error(`[V4 Status][${promptId}] Face swap ${swapStatus.status}: ${swapStatus.error}`);
-
-        await supabase
-          .from("generation_jobs")
-          .update({ status: "completed", completed_at: new Date().toISOString() })
-          .eq("job_id", job.job_id);
-
-        // Fall back to scene image (no face swap) — still usable
-        await supabase
-          .from("story_image_prompts")
-          .update({ status: "generated" })
-          .eq("id", promptId);
-
-        const fallbackUrl = image?.stored_url || image?.sfw_url;
-
-        return NextResponse.json({
-          promptId,
-          status: "generated",
-          jobId: job.job_id,
-          blobUrl: fallbackUrl,
-          storedUrl: fallbackUrl,
-          warning: `Face swap ${swapStatus.status}: ${swapStatus.error}. Using scene image without face swap.`,
-        });
-      }
-
-      // Still processing — tell client to keep polling
-      console.log(`[V4 Status][${promptId}] Face swap still ${swapStatus.status}...`);
-      return NextResponse.json({
-        promptId,
-        status: "generating",
-        jobId: job.job_id,
-        blobUrl: null,
-        storedUrl: null,
-      });
-    }
-
-    // 5. Standard status check (V1/V2/V3 and completed V4)
+    // 4. Standard status check
     const blobUrl = image?.sfw_url || image?.nsfw_url || null;
     const storedUrl = image?.stored_url || null;
 

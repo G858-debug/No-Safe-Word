@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob, runNanoBanana } from "@no-safe-word/image-gen";
-import { buildCharacterGenerationPayload, buildV3FaceGenerationPayload } from "@/lib/server/generate-character-image";
+import { submitRunPodJob } from "@no-safe-word/image-gen";
 import { buildPonyCharacterGenerationPayload } from "@/lib/server/pony-character-image";
-import type { Json } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
 type GenerationStage = "face" | "body";
@@ -40,10 +38,10 @@ export async function POST(
       // No body or invalid JSON — use defaults
     }
 
-    // 1. Fetch the story_character row (include face_url for body stage)
+    // 1. Fetch the story_character row
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
-      .select("id, character_id, face_url")
+      .select("id, character_id")
       .eq("id", storyCharId)
       .single();
 
@@ -73,151 +71,10 @@ export async function POST(
     const desc = character.description as Record<string, string>;
     const isMale = desc.gender === 'male';
 
-    // Check series engine for V3 dispatch
-    const { data: seriesRow } = await (supabase as any)
-      .from("story_characters")
-      .select("series_id")
-      .eq("id", storyCharId)
-      .single() as { data: { series_id: string } | null };
+    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name}`);
 
-    let seriesEngine: string | null = null;
-    if (seriesRow) {
-      const { data: series } = await (supabase as any)
-        .from("story_series")
-        .select("image_engine")
-        .eq("id", seriesRow.series_id)
-        .single() as { data: { image_engine: string } | null };
-      seriesEngine = series?.image_engine || null;
-    }
-
-    const isV3 = seriesEngine === "flux_pulid";
-    const isPony = seriesEngine === "pony_cyberreal";
-
-    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} (engine: ${seriesEngine || 'default'})`);
-
-    // ── Pony CyberRealistic pipeline: face + body via RunPod/ComfyUI SDXL ──
-    if (isPony) {
-      const ponyPayload = buildPonyCharacterGenerationPayload({
-        character: {
-          id: character.id,
-          name: character.name,
-          description: desc,
-        },
-        imageType,
-        stage,
-        seed: customSeed,
-        customPrompt,
-      });
-
-      const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
-      console.log(`[StoryPublisher] Pony ${stage} generation: ${ponyPayload.positivePrompt.substring(0, 100)}...`);
-
-      const { jobId } = await submitRunPodJob(ponyPayload.workflow, undefined, undefined, ponyEndpointId);
-
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt: ponyPayload.positivePrompt,
-          negative_prompt: ponyPayload.negativePrompt,
-          settings: {
-            width: ponyPayload.width,
-            height: ponyPayload.height,
-            engine: "pony-cyberreal",
-            imageType,
-            stage,
-            seed: ponyPayload.seed,
-          },
-          mode: "sfw",
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      await supabase.from("generation_jobs").insert({
-        job_id: `runpod-${jobId}`,
-        image_id: imageRow.id,
-        status: "pending",
-        cost: 0,
-      });
-
-      console.log(`[StoryPublisher] Pony ${stage} job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
-
-      return NextResponse.json({
-        jobId: `runpod-${jobId}`,
-        imageId: imageRow.id,
-      });
-    }
-
-    // V3 pipeline: face-only generation via Flux Krea text-to-image
-    // Body generation is text-only in V3 — no body image generated
-    if (isV3 && stage === "face") {
-      const v3Payload = await buildV3FaceGenerationPayload({
-        character: {
-          id: character.id,
-          name: character.name,
-          description: desc,
-        },
-        imageType,
-        stage,
-        seed: customSeed,
-        customPrompt,
-      });
-
-      console.log(`[StoryPublisher] V3 Flux Krea face generation: ${v3Payload.positivePrompt.substring(0, 100)}...`);
-
-      const { jobId } = await submitRunPodJob(v3Payload.workflow);
-
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt: v3Payload.positivePrompt,
-          settings: {
-            width: v3Payload.width,
-            height: v3Payload.height,
-            engine: "flux-krea-v3-face",
-            imageType,
-            stage,
-            seed: v3Payload.seed,
-          },
-          mode: "sfw",
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      await supabase.from("generation_jobs").insert({
-        job_id: `runpod-${jobId}`,
-        image_id: imageRow.id,
-        status: "pending",
-        cost: 0,
-      });
-
-      console.log(`[StoryPublisher] V3 face job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
-
-      return NextResponse.json({
-        jobId: `runpod-${jobId}`,
-        imageId: imageRow.id,
-      });
-    }
-
-    // V3 body stage: not applicable — body is text-only in V3
-    if (isV3 && stage === "body") {
-      return NextResponse.json(
-        { error: "V3 pipeline does not generate body images. Use the body prompt editor instead." },
-        { status: 400 },
-      );
-    }
-
-    // 3. Build generation payload (prompt, LoRAs, workflow/API params)
-    const payload = await buildCharacterGenerationPayload({
+    // Build Pony CyberRealistic payload
+    const ponyPayload = buildPonyCharacterGenerationPayload({
       character: {
         id: character.id,
         name: character.name,
@@ -227,198 +84,49 @@ export async function POST(
       stage,
       seed: customSeed,
       customPrompt,
-      approvedFaceUrl: stage === 'body' ? (storyChar.face_url ?? undefined) : undefined,
     });
 
-    console.log(`[StoryPublisher] Engine: ${payload.engine}, Prompt: ${payload.positivePrompt.substring(0, 100)}...`);
-    console.log(`[StoryPublisher] Seed: ${payload.seed}`);
+    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+    console.log(`[StoryPublisher] Pony ${stage} generation: ${ponyPayload.positivePrompt.substring(0, 100)}...`);
 
-    // 4a. Pre-flight: for body stage with a face reference, verify the image exists in storage
-    if (stage === 'body' && payload.engine === 'replicate' && payload.referenceImageUrl) {
-      const headRes = await fetch(payload.referenceImageUrl, { method: 'HEAD' });
-      if (!headRes.ok) {
-        return NextResponse.json(
-          { error: "Face reference image not found — please regenerate and re-approve the face portrait first, then retry the body." },
-          { status: 422 },
-        );
-      }
+    const { jobId } = await submitRunPodJob(ponyPayload.workflow, undefined, undefined, ponyEndpointId);
+
+    const { data: imageRow, error: imgError } = await supabase
+      .from("images")
+      .insert({
+        character_id: character.id,
+        prompt: ponyPayload.positivePrompt,
+        negative_prompt: ponyPayload.negativePrompt,
+        settings: {
+          width: ponyPayload.width,
+          height: ponyPayload.height,
+          engine: "pony-cyberreal",
+          imageType,
+          stage,
+          seed: ponyPayload.seed,
+        },
+        mode: "sfw",
+      })
+      .select("id")
+      .single();
+
+    if (imgError || !imageRow) {
+      throw new Error(`Failed to create image record: ${imgError?.message}`);
     }
 
-    // 4. Branch by engine
-    if (payload.engine === 'replicate') {
-      // ---- Replicate path (Nano Banana 2 — synchronous) ----
-      console.log(`[StoryPublisher] Calling Nano Banana 2 via Replicate...`);
+    await supabase.from("generation_jobs").insert({
+      job_id: `runpod-${jobId}`,
+      image_id: imageRow.id,
+      status: "pending",
+      cost: 0,
+    });
 
-      const imageBuffer = await runNanoBanana(
-        payload.positivePrompt,
-        payload.referenceImageUrl,
-        payload.seed,
-      );
+    console.log(`[StoryPublisher] Pony ${stage} job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
 
-      // Create image record first to get the ID for storage path
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt: payload.positivePrompt,
-          settings: {
-            engine: "nano-banana",
-            imageType,
-            stage,
-            seed: payload.seed,
-          },
-          mode: "sfw",
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      // Upload to Supabase Storage
-      const storagePath = `characters/${imageRow.id}.png`;
-      const { error: uploadError } = await supabase.storage
-        .from("story-images")
-        .upload(storagePath, imageBuffer, {
-          contentType: "image/png",
-          upsert: true,
-        });
-
-      if (uploadError) {
-        throw new Error(`Storage upload failed: ${uploadError.message}`);
-      }
-
-      const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(storagePath);
-      const publicUrl = urlData.publicUrl;
-
-      // Update image record with stored URL
-      await supabase
-        .from("images")
-        .update({ stored_url: publicUrl })
-        .eq("id", imageRow.id);
-
-      // Create completed generation job record
-      await supabase.from("generation_jobs").insert({
-        job_id: `replicate-instant-${imageRow.id}`,
-        image_id: imageRow.id,
-        status: "completed",
-        cost: 0,
-      });
-
-      console.log(`[StoryPublisher] Nano Banana 2 complete: ${imageRow.id}, stored at: ${publicUrl}`);
-
-      return NextResponse.json({
-        jobId: `replicate-instant-${imageRow.id}`,
-        imageId: imageRow.id,
-        storedUrl: publicUrl,
-        seed: payload.seed,
-        instant: true,
-      });
-    } else if (payload.engine === 'runpod-two-step') {
-      // ---- Two-step RunPod path (SDXL → Flux img2img) ----
-      console.log(`[StoryPublisher] Submitting Step 1 (SDXL BigASP) to RunPod...`);
-
-      let runpodImages: Array<{ name: string; image: string }> | undefined;
-      if (payload.images) {
-        runpodImages = [...payload.images];
-      }
-
-      const { jobId } = await submitRunPodJob(
-        payload.workflow,
-        runpodImages,
-      );
-
-      // Create image record with two-step pipeline metadata
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt: payload.positivePrompt,
-          settings: {
-            width: payload.width,
-            height: payload.height,
-            engine: 'sdxl-bigasp',
-            imageType,
-            stage,
-            seed: payload.seed,
-            pipelineType: 'sdxl-flux-img2img',
-            currentStep: 1,
-            step2Config: payload.step2Config as unknown as Record<string, unknown>,
-          } as unknown as Json,
-          mode: "sfw",
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      await supabase.from("generation_jobs").insert({
-        job_id: `runpod-${jobId}`,
-        image_id: imageRow.id,
-        status: "pending",
-        cost: 0,
-      });
-
-      console.log(`[StoryPublisher] ${stage} two-step job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
-
-      return NextResponse.json({
-        jobId: `runpod-${jobId}`,
-        imageId: imageRow.id,
-      });
-    } else {
-      // ---- Single-step RunPod path (Flux Krea face via ComfyUI) ----
-      console.log(`[StoryPublisher] Submitting to RunPod (Flux Krea)...`);
-
-      let runpodImages: Array<{ name: string; image: string }> | undefined;
-      if (payload.images) {
-        runpodImages = [...payload.images];
-      }
-
-      const { jobId } = await submitRunPodJob(
-        payload.workflow,
-        runpodImages,
-      );
-
-      // Create image record
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: character.id,
-          prompt: payload.positivePrompt,
-          settings: {
-            width: payload.width,
-            height: payload.height,
-            engine: 'flux-krea',
-            imageType,
-            stage,
-            seed: payload.seed,
-          },
-          mode: "sfw",
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      await supabase.from("generation_jobs").insert({
-        job_id: `runpod-${jobId}`,
-        image_id: imageRow.id,
-        status: "pending",
-        cost: 0,
-      });
-
-      console.log(`[StoryPublisher] ${stage} job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
-
-      return NextResponse.json({
-        jobId: `runpod-${jobId}`,
-        imageId: imageRow.id,
-      });
-    }
+    return NextResponse.json({
+      jobId: `runpod-${jobId}`,
+      imageId: imageRow.id,
+    });
   } catch (err) {
     console.error("Character portrait generation failed:", err);
     return NextResponse.json(
