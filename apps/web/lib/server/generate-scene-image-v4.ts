@@ -23,6 +23,10 @@ import type { V4SceneOnlyResult } from "@no-safe-word/image-gen";
 /** BodyLicious trigger words — bias Flux toward curvaceous body proportions */
 const BODY_TRIGGER_WORDS = "voluptuous figure, wide hips, huge round ass, thick thighs, narrow waist";
 
+/** BodyLicious Flux LoRA on HuggingFace — body shaping for curvaceous female characters */
+const BODYLICIOUS_LORA_URL = "https://huggingface.co/G858/bodylicious-flux/resolve/main/bodylicious-flux.safetensors";
+const BODYLICIOUS_STRENGTH = 0.8;
+
 // Re-export fetchCharacterDataMap from V1 — shared across all pipelines
 export { fetchCharacterDataMap } from "./generate-scene-image";
 
@@ -183,16 +187,21 @@ export async function generateSceneImageV4(
   const isDualCharacter = !!imgPrompt.secondary_character_id;
   const aspectRatio = isDualCharacter ? "3:2" : "2:3";
 
-  // ── Female body enhancement (prompt-only — no LoRA, CivitAI URLs don't work with multi-LoRA model) ──
+  // ── Female body enhancement: prompt descriptors + BodyLicious LoRA ──
   const hasFemale = primaryGender === "female" || secondaryGender === "female";
   let enhancedPrompt = imgPrompt.prompt;
+  const styleLoraUrls: string[] = [];
+  const styleLoraScales: number[] = [];
 
   if (hasFemale) {
     // Inject body enhancement prose (curvaceous descriptors)
     enhancedPrompt = injectFluxFemaleEnhancement("", mode, enhancedPrompt).trim() + " " + enhancedPrompt;
     // Prepend BodyLicious trigger words to bias Flux toward curvy proportions
     enhancedPrompt = BODY_TRIGGER_WORDS + ", " + enhancedPrompt;
-    console.log(`[V4][${promptId}] Female body enhancement: trigger words + body prose injected`);
+    // Add BodyLicious LoRA from HuggingFace for body shaping
+    styleLoraUrls.push(BODYLICIOUS_LORA_URL);
+    styleLoraScales.push(BODYLICIOUS_STRENGTH);
+    console.log(`[V4][${promptId}] Female body enhancement: trigger words + prose + BodyLicious LoRA (${BODYLICIOUS_STRENGTH})`);
   }
 
   // ── Generate ──
@@ -224,6 +233,8 @@ export async function generateSceneImageV4(
     secondaryGender,
     isNsfw,
     aspectRatio,
+    styleLoraUrls: styleLoraUrls.length > 0 ? styleLoraUrls : undefined,
+    styleLoraScales: styleLoraScales.length > 0 ? styleLoraScales : undefined,
     seed,
   });
 
