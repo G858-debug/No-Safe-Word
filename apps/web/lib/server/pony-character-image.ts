@@ -77,7 +77,21 @@ function mapSkinToneToPonyTags(skinTone: string, gender: string): string[] {
  * characters that are recognisably Black African across all skin tones.
  * A light-skinned Black woman should still have African facial features.
  */
-function mapEthnicityToPonyTags(ethnicity: string): string[] {
+/**
+ * Short male hairstyles where "afro-textured hair" would conflict and produce
+ * an afro instead of the intended style. For these, the style tag alone is enough.
+ */
+const SHORT_MALE_HAIRSTYLES = [
+  "fade", "buzz", "crew cut", "caesar", "bald", "shaved", "close crop",
+  "taper", "flat top", "waves", "line up", "temple fade", "skin fade",
+];
+
+function hasShortMaleHairstyle(hairStyle: string): boolean {
+  const style = hairStyle.toLowerCase();
+  return SHORT_MALE_HAIRSTYLES.some((s) => style.includes(s));
+}
+
+function mapEthnicityToPonyTags(ethnicity: string, opts?: { gender?: string; hairStyle?: string }): string[] {
   if (!ethnicity) return [];
   const eth = ethnicity.toLowerCase();
 
@@ -87,7 +101,15 @@ function mapEthnicityToPonyTags(ethnicity: string): string[] {
     eth.includes("sotho") || eth.includes("tswana") || eth.includes("venda") ||
     eth.includes("tsonga") || eth.includes("pedi") || eth.includes("swazi")
   ) {
-    return ["full lips", "broad nose", "afro-textured hair"];
+    const tags = ["full lips", "broad nose"];
+    // Only add afro-textured hair if the character doesn't have a specific short male hairstyle
+    // that would conflict (e.g. "low fade" + "afro-textured hair" = model generates an afro)
+    const skipHairTexture =
+      opts?.gender === "male" && opts?.hairStyle && hasShortMaleHairstyle(opts.hairStyle);
+    if (!skipHairTexture) {
+      tags.push("afro-textured hair");
+    }
+    return tags;
   }
 
   if (eth.includes("coloured") || eth.includes("mixed") || eth.includes("cape malay")) {
@@ -110,9 +132,15 @@ function buildPonyFacePrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
+  // Semi-realistic style direction
+  tags.push("semi-realistic", "digital art", "detailed illustration");
+
   // Skin tone + ethnicity via mappers, deduplicated
   const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
-  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity);
+  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity, {
+    gender: charData.gender,
+    hairStyle: charData.hairStyle,
+  });
   const identityTags = skinTags.concat(ethnicityTags.filter((t) => !skinTags.includes(t)));
   tags.push(...identityTags);
 
@@ -155,9 +183,15 @@ function buildPonyBodyPrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
+  // Semi-realistic style direction
+  tags.push("semi-realistic", "digital art", "detailed illustration");
+
   // Skin tone + ethnicity via mappers, deduplicated
   const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
-  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity);
+  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity, {
+    gender: charData.gender,
+    hairStyle: charData.hairStyle,
+  });
   const identityTags = skinTags.concat(ethnicityTags.filter((t) => !skinTags.includes(t)));
   tags.push(...identityTags);
 

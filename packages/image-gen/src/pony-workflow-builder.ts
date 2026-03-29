@@ -1,7 +1,7 @@
 /**
- * Pony V6 / CyberRealistic Pony ComfyUI workflow builder.
+ * Pony V6 / CyberRealistic Pony Semi-Realistic ComfyUI workflow builder.
  *
- * Builds SDXL-architecture workflows for CyberRealistic Pony v17.
+ * Builds SDXL-architecture workflows for CyberRealistic Pony Semi-Realistic v4.5.
  * Based on the existing buildSdxlWorkflow() pattern in workflow-builder.ts
  * but with Pony-specific defaults and no ReActor/PuLID.
  *
@@ -10,8 +10,8 @@
  *   → EmptyLatentImage → KSampler → VAEDecode → SaveImage
  */
 
-const PONY_CHECKPOINT = 'cyberrealisticPony_v160.safetensors';
-const PONY_DEFAULT_CFG = 6.5;
+const PONY_CHECKPOINT = 'CyberRealistic_PonySemi_V4.5.safetensors';
+const PONY_DEFAULT_CFG = 5.5;
 const PONY_DEFAULT_STEPS = 30;
 const PONY_DEFAULT_SAMPLER = 'dpmpp_2m_sde';
 const PONY_DEFAULT_SCHEDULER = 'karras';
@@ -28,7 +28,7 @@ export interface PonyWorkflowConfig {
   scheduler?: string;
   denoise?: number;
   filenamePrefix: string;
-  /** Override checkpoint (default: cyberrealisticPony_v17.safetensors) */
+  /** Override checkpoint (default: CyberRealistic_PonySemi_V4.5.safetensors) */
   checkpointName?: string;
   /** LoRA stack — character LoRAs first, then style LoRAs */
   loras?: Array<{
@@ -39,7 +39,7 @@ export interface PonyWorkflowConfig {
 }
 
 /**
- * Build a ComfyUI workflow for CyberRealistic Pony v17 (SDXL).
+ * Build a ComfyUI workflow for CyberRealistic Pony Semi-Realistic v4.5 (SDXL).
  *
  * Produces a text-to-image workflow with optional LoRA chain.
  * Character identity comes from trained SDXL LoRAs in the chain,

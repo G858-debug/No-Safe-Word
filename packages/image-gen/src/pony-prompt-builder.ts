@@ -25,6 +25,7 @@ export function buildPonyNegativePrompt(mode: 'sfw' | 'nsfw'): string {
     'score_4, score_3, score_2, score_1',
     'source_pony',
     'worst quality, low quality, normal quality',
+    'photorealistic, photograph, RAW photo, hyperrealistic',
     'bad anatomy, bad hands, bad feet, extra limbs, missing limbs',
     'extra fingers, fewer digits, fused fingers',
     'watermark, signature, text, username',
