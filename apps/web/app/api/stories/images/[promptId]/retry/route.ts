@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
-import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
+import { buildV4SceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image-v4";
 
 // POST /api/stories/images/[promptId]/retry — Internal retry for failed person validation
 // Called by the status route when dual-character validation detects wrong person count.
@@ -49,25 +49,27 @@ export async function POST(
       throw new Error(`Post ${imgPrompt.post_id} not found — cannot determine series`);
     }
 
-    // 3. Fetch character data for identity prefix + LoRA selection
+    // 3. Fetch character data
     const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
       (id): id is string => id !== null,
     );
     const characterDataMap = await fetchCharacterDataMap(characterIds);
 
-    // 4. Build full generation payload via shared pipeline
-    const result = await buildSceneGenerationPayload({
+    // 4. Build V4 Pony generation payload with new seed
+    const result = await buildV4SceneGenerationPayload({
       imgPrompt,
       seriesId: post.series_id,
       characterDataMap,
       seed: newSeed,
     });
 
-    // 5. Submit to RunPod
+    // 5. Submit to RunPod (Pony endpoint)
+    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
     const { jobId: runpodJobId } = await submitRunPodJob(
       result.workflow,
       result.images.length > 0 ? result.images : undefined,
       result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
+      ponyEndpointId,
     );
 
     const newJobId = `runpod-${runpodJobId}`;
@@ -77,7 +79,7 @@ export async function POST(
       .update({ job_id: newJobId, status: "pending", completed_at: null })
       .eq("job_id", oldJobId);
 
-    console.log(`[Retry/Kontext][${promptId}] Resubmitted with seed ${newSeed}, new job: ${newJobId}`);
+    console.log(`[Retry/Pony][${promptId}] Resubmitted with seed ${newSeed}, new job: ${newJobId}`);
 
     return NextResponse.json({ jobId: newJobId, seed: newSeed });
   } catch (err) {
