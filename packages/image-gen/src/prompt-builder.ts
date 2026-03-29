@@ -1,3 +1,29 @@
+import type { CharacterData } from "@no-safe-word/shared";
+
+/** Generate a default body description for a character based on gender and body type. */
+export function generateDefaultBodyPrompt(charData: CharacterData): string {
+  const gender = charData.gender?.toLowerCase();
+
+  if (gender === "female") {
+    const skinTone = charData.skinTone || "dark";
+    const bodyBase = charData.bodyType || "curvaceous";
+
+    return (
+      `She has a ${bodyBase} figure with a very large, round ass, ` +
+      `wide hips, thick thighs, large natural breasts, and a narrow defined waist. ` +
+      `Her body is full-figured with smooth, glowing ${skinTone} skin.`
+    );
+  }
+
+  if (gender === "male") {
+    const bodyBase = charData.bodyType || "athletic";
+    const skinTone = charData.skinTone || "dark";
+    return `He has a ${bodyBase} build with broad shoulders and a strong frame. ${skinTone} skin.`;
+  }
+
+  return charData.bodyType || "";
+}
+
 /**
  * Extract just the character-description tags from a full portrait prompt.
  * Strips the quality prefix, portrait-scene suffix, clothing field, and
