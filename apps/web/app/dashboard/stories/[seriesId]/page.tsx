@@ -17,13 +17,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+// Select components removed — engine selector no longer needed
 import {
   BookOpen,
   Users,
@@ -32,17 +26,26 @@ import {
   Hash,
   FileText,
   ArrowLeft,
-  Zap,
 } from "lucide-react";
-import CharacterApproval, {
-  type CharacterFromAPI,
-} from "./components/CharacterApproval";
+// TODO: Phase 3 — rebuild CharacterApproval for Pony-only pipeline
+// import CharacterApproval, {
+//   type CharacterFromAPI,
+// } from "./components/CharacterApproval";
+type CharacterFromAPI = {
+  id: string;
+  character_id: string;
+  approved: boolean;
+  approved_image_id: string | null;
+  approved_fullbody: boolean;
+  approved_fullbody_image_id: string | null;
+  active_lora_id: string | null;
+  characters: { id: string; name: string; description: Record<string, unknown> };
+};
 import ImageGeneration from "./components/ImageGeneration";
 import PublishPanel from "./components/PublishPanel";
 import type {
   StorySeriesRow,
   StoryPostRow,
-  ImageEngine,
 } from "@no-safe-word/shared";
 
 // ---------------------------------------------------------------------------
@@ -225,26 +228,8 @@ export default function SeriesDetailPage() {
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
   const allLorasDeployed =
     loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
-  const noLoraEngine = data?.series.image_engine === "flux_pulid" || data?.series.image_engine === "flux2_pro";
-  // pony_cyberreal REQUIRES character LoRAs — it is NOT a noLoraEngine
-  const allReadyForImages = allCharsApproved && (noLoraEngine || allLorasDeployed);
-
-  // Engine update handler
-  async function handleEngineChange(engine: ImageEngine) {
-    try {
-      const res = await fetch(`/api/stories/${seriesId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_engine: engine }),
-      });
-      if (!res.ok) throw new Error("Failed to update engine");
-      setData((prev) =>
-        prev ? { ...prev, series: { ...prev.series, image_engine: engine } } : prev
-      );
-    } catch (err) {
-      console.error("Engine update failed:", err);
-    }
-  }
+  // Pony CyberRealistic requires character LoRAs for scene generation
+  const allReadyForImages = allCharsApproved && allLorasDeployed;
 
   // ------- Loading state -------
   if (loading) {
@@ -415,125 +400,14 @@ export default function SeriesDetailPage() {
                   </div>
                 </dl>
 
-                {/* Image Engine selector */}
+                {/* Image Engine */}
                 <div className="pt-3 border-t">
                   <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <label className="text-sm text-muted-foreground mb-1 block">
-                        Image Engine
-                      </label>
-                      <Select
-                        value={series.image_engine || "sdxl"}
-                        onValueChange={(v) => handleEngineChange(v as ImageEngine)}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sdxl">SDXL (Current Pipeline)</SelectItem>
-                          <SelectItem value="kontext">
-                            <span className="flex items-center gap-1.5">
-                              Flux Kontext [dev]
-                              <Zap className="h-3.5 w-3.5 text-yellow-500" />
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="nb2_uncanny">
-                            <span className="flex items-center gap-1.5">
-                              NB2 + UnCanny V2
-                              <Zap className="h-3.5 w-3.5 text-purple-500" />
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="flux_pulid">
-                            <span className="flex items-center gap-1.5">
-                              Flux Krea + PuLID V3
-                              <Zap className="h-3.5 w-3.5 text-green-500" />
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="flux2_pro">
-                            <span className="flex items-center gap-1.5">
-                              Flux 2 Pro (Replicate)
-                              <Zap className="h-3.5 w-3.5 text-blue-500" />
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="pony_cyberreal">
-                            <span className="flex items-center gap-1.5">
-                              Pony CyberRealistic V4
-                              <Zap className="h-3.5 w-3.5 text-pink-500" />
-                            </span>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <p className="flex-1 text-xs text-muted-foreground mt-5">
-                      {series.image_engine === "nb2_uncanny"
-                        ? "NB2 scene gen + Florence-2/SAM2 masking + UnCanny inpainting"
-                        : series.image_engine === "flux_pulid"
-                        ? "No LoRA training — PuLID face consistency + text body prompts"
-                        : series.image_engine === "flux2_pro"
-                        ? "Flux 2 Pro via Replicate — multi-reference character consistency, 4MP output, no LoRAs needed"
-                        : series.image_engine === "pony_cyberreal"
-                        ? "CyberRealistic Pony (SDXL) — semi-realistic 2.5D, booru tags, negative prompts, character LoRAs"
-                        : "Better prompt adherence, native character consistency"}
+                    <p className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">Engine:</span>{" "}
+                      CyberRealistic Pony Semi-Realistic (SDXL) — booru tags, negative prompts, character LoRAs
                     </p>
                   </div>
-                  {series.image_engine === "nb2_uncanny" && (
-                    <div className="mt-3 space-y-3">
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-1 block">
-                          SFW Inpaint Prompt (body enhancement)
-                        </label>
-                        <textarea
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
-                          placeholder="voluptuous woman, very large natural breasts, wide hips, huge round butt, narrow waist, fitted clothing showing curves"
-                          defaultValue={series.sfw_inpaint_prompt || ""}
-                          onBlur={(e) => {
-                            const val = e.target.value.trim();
-                            if (val !== (series.sfw_inpaint_prompt || "")) {
-                              fetch(`/api/stories/${seriesId}`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ sfw_inpaint_prompt: val || null }),
-                              }).then(() => {
-                                setData((prev) =>
-                                  prev ? { ...prev, series: { ...prev.series, sfw_inpaint_prompt: val || null } } : prev
-                                );
-                              });
-                            }
-                          }}
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Enhances female body shape through clothing in SFW images
-                        </p>
-                      </div>
-                      <div>
-                        <label className="text-sm text-muted-foreground mb-1 block">
-                          NSFW Inpaint Prompt (clothing removal)
-                        </label>
-                        <textarea
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-y"
-                          placeholder="bare skin, natural body, photorealistic skin texture"
-                          defaultValue={series.inpaint_prompt || ""}
-                          onBlur={(e) => {
-                            const val = e.target.value.trim();
-                            if (val !== (series.inpaint_prompt || "")) {
-                              fetch(`/api/stories/${seriesId}`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ inpaint_prompt: val || null }),
-                              }).then(() => {
-                                setData((prev) =>
-                                  prev ? { ...prev, series: { ...prev.series, inpaint_prompt: val || null } } : prev
-                                );
-                              });
-                            }
-                          }}
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Describes what replaces masked clothing in NSFW paired images
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </CardContent>
             </Card>
@@ -644,24 +518,21 @@ export default function SeriesDetailPage() {
         </div>
 
         {/* ===================== CHARACTERS TAB ===================== */}
+        {/* TODO: Phase 3 — rebuild CharacterApproval for Pony-only pipeline */}
         <div className={activeTab === "characters" ? "mt-6" : "hidden"}>
-          <CharacterApproval
-            seriesId={seriesId}
-            characters={characters}
-            imageEngine={series.image_engine}
-            onProceedToImages={() => setActiveTab("images")}
-            onCharacterApproved={(storyCharId, imageUrl, imageId, type) => {
-              setCharacters((prev) =>
-                prev.map((c) =>
-                  c.id === storyCharId
-                    ? type === "fullBody"
-                      ? { ...c, approved_fullbody: true, approved_fullbody_image_url: imageUrl, approved_fullbody_image_id: imageId }
-                      : { ...c, approved: true, approved_image_url: imageUrl, approved_image_id: imageId }
-                    : c
-                )
-              );
-            }}
-          />
+          <Card>
+            <CardHeader>
+              <CardTitle>Character Approval</CardTitle>
+              <CardDescription>
+                Character approval component is being rebuilt for the Pony pipeline.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                {characters.length} character(s) in this series. Use the API directly for now.
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* ====================== IMAGES TAB ======================== */}
@@ -673,7 +544,7 @@ export default function SeriesDetailPage() {
             allCharactersApproved={allReadyForImages}
             imageEngine={series.image_engine}
           />
-          {allCharsApproved && !allLorasDeployed && loraCheckDone && !noLoraEngine && (
+          {allCharsApproved && !allLorasDeployed && loraCheckDone && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">
               <p className="text-sm font-medium text-amber-400 mb-2">
                 LoRA training required before generating images
