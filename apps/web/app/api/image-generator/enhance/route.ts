@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { prompt, nsfw = true, format = 'prose', engine } = await request.json();
+    const { prompt, nsfw = true, format = 'prose' } = await request.json();
 
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     if (format === 'booru') {
       enhancedPrompt = await convertProseToBooru(prompt, { nsfw: !!nsfw });
     } else {
-      enhancedPrompt = await enhancePromptForScene(prompt, { nsfw: !!nsfw, engine });
+      enhancedPrompt = await enhancePromptForScene(prompt, { nsfw: !!nsfw });
     }
 
     return NextResponse.json({ enhancedPrompt });

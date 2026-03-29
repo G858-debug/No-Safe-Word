@@ -1,14 +1,14 @@
 /**
- * Shared Claude prompt enhancement for image generation.
+ * Claude prompt enhancement for Pony CyberRealistic image generation.
  *
- * Extracted from /api/image-generator/enhance so both the HTTP endpoint
- * and the V3 pipeline can call it without an internal HTTP round-trip.
+ * Converts rough scene descriptions into booru-style tags optimized for
+ * CyberRealistic Pony Semi-Realistic v4.5.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
 
-function buildPonySystemPrompt(nsfw: boolean): string {
-  return `You are an expert at writing image generation prompts for CyberRealistic Pony (a semi-realistic SDXL model based on Pony Diffusion V6).
+function buildSystemPrompt(nsfw: boolean): string {
+  return `You are an expert at writing image generation prompts for CyberRealistic Pony Semi-Realistic (a stylized semi-realistic SDXL model based on Pony Diffusion V6).
 
 OUTPUT FORMAT: Comma-separated booru-style tags ONLY. No prose sentences. No emphasis weights.
 
@@ -48,36 +48,13 @@ FOR PAIRED IMAGES: The NSFW version should describe the same setting (same room,
 This prompt is for a ${nsfw ? "NSFW explicit" : "SFW suggestive"} image.`;
 }
 
-function buildSystemPrompt(nsfw: boolean, engine?: string): string {
-  if (engine === 'pony_cyberreal') {
-    return buildPonySystemPrompt(nsfw);
-  }
-  return `You are an image prompt specialist for a South African adult ${nsfw ? "NSFW" : "SFW"} romance fiction platform.
-Enhance the user's rough prompt into a vivid, cinematic image generation prompt using these five layers:
-
-Expression & Gaze — specify the character's exact expression and eye direction
-Narrative Implication — capture a specific moment; something just happened or is about to
-Lighting & Atmosphere — name a specific light source (e.g. "single amber streetlight", "bedside lamp glow", "candlelight")
-Composition & Framing — specify shot type, camera angle, depth of field
-Setting & Cultural Grounding — include specific South African environmental details where relevant
-
-Rules:
-
-Write in flowing prose sentences, not comma-separated tags
-End with "Photorealistic."
-Do not include character names — describe appearance inline if needed
-Do not add LoRA tags, weights, or technical parameters
-CRITICAL: Preserve all physical and body descriptions EXACTLY as written — do not soften, euphemise, reword, or tone down any anatomical details. If the user describes large breasts, a large ass, explicit nudity, or any other body attribute, reproduce that description faithfully in the enhanced prompt.
-Return ONLY the enhanced prompt, nothing else`;
-}
-
 /**
  * Enhance an image prompt using Claude.
- * Returns the enhanced prompt text, or the original prompt if enhancement fails.
+ * Returns booru-style tags for Pony CyberRealistic, or the original prompt if enhancement fails.
  */
 export async function enhancePromptForScene(
   prompt: string,
-  opts: { nsfw: boolean; engine?: string },
+  opts: { nsfw: boolean },
 ): Promise<string> {
   const trimmed = prompt.trim();
   if (!trimmed) return trimmed;
@@ -86,9 +63,9 @@ export async function enhancePromptForScene(
     const anthropic = new Anthropic();
 
     const message = await anthropic.messages.create({
-      model: opts.engine === 'pony_cyberreal' ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 512,
-      system: buildSystemPrompt(opts.nsfw, opts.engine),
+      system: buildSystemPrompt(opts.nsfw),
       messages: [{ role: "user", content: trimmed }],
     });
 

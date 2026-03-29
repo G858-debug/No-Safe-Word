@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { runPipeline, getPipelineProgress } from "@no-safe-word/image-gen/server/character-lora";
+// TODO: Phase 3 — implement Pony LoRA training pipeline orchestrator
+// import { runPipeline, getPipelineProgress } from "@no-safe-word/image-gen/server/pony-character-lora";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/train-lora
@@ -54,10 +55,19 @@ export async function POST(
     }
 
     // 4. Check if a LoRA is already training or deployed for this character
-    const existingProgress = await getPipelineProgress(
-      storyChar.character_id,
-      { supabase },
-    );
+    // TODO: Phase 3 — replace with Pony pipeline progress check
+    const existingLoraQuery = await (supabase as any)
+      .from("character_loras")
+      .select("id, status")
+      .eq("character_id", storyChar.character_id)
+      .not("status", "in", '("failed","archived")')
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single() as { data: { id: string; status: string } | null; error: any };
+
+    const existingProgress = existingLoraQuery.data
+      ? { loraId: existingLoraQuery.data.id, status: existingLoraQuery.data.status }
+      : null;
 
     if (existingProgress) {
       if (existingProgress.status === 'deployed') {
@@ -184,11 +194,10 @@ export async function POST(
     };
 
     // 8. Fire-and-forget — start the pipeline in the background
+    // TODO: Phase 3 — implement Pony LoRA training pipeline and call it here
     console.log(`[LoRA API] Triggering LoRA pipeline for ${character.name} (loraId: ${loraRecord.id})`);
-
-    runPipeline(characterInput, loraRecord.id, { supabase }).catch((err) => {
-      console.error(`[LoRA API] Pipeline background error:`, err);
-    });
+    console.warn(`[LoRA API] Pipeline orchestrator not yet implemented for Pony — record created but training not started`);
+    void characterInput; // suppress unused warning
 
     // 9. Update story_characters to link the LoRA
     await supabase
