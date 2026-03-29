@@ -137,7 +137,7 @@ if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
     [ -f "$ckpt_file" ] || continue
     ckpt_name=$(basename "$ckpt_file")
     case "$ckpt_name" in
-      realvisxlV50_v50Bakedvae.safetensors|bigasp_v20.safetensors|cyberrealisticPony_v160.safetensors)
+      CyberRealistic_PonySemi_V4.5.safetensors)
         ;; # keep
       *)
         echo "[NSW] Removing old checkpoint: $ckpt_name"
@@ -145,7 +145,7 @@ if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
         ;;
     esac
   done
-  echo "[NSW] ✓ Old SDXL checkpoints removed (kept realvisxlV50_v50Bakedvae, bigasp_v20)"
+  echo "[NSW] ✓ Old checkpoints removed (kept CyberRealistic_PonySemi_V4.5)"
 fi
 
 # FaceDetailer YOLO models no longer cleaned up — ultralytics/ may be needed by ReActor
@@ -253,16 +253,16 @@ except Exception as e:
     echo "[LoRA] flux-cinematic-finisher.safetensors downloaded successfully"
 fi
 
-# ---- Pony / CyberRealistic checkpoint (for V4 pony_cyberreal pipeline) ----
-# CivitAI model 443821, version 2581228 (v17.0)
-# https://civitai.com/models/443821/cyberrealistic-pony
-PONY_CKPT_DEST="${VOLUME_MODELS}/checkpoints/cyberrealisticPony_v160.safetensors"
+# ---- Pony / CyberRealistic Semi-Realistic checkpoint (for V4 pony_cyberreal pipeline) ----
+# CivitAI model 709404, version 2601141 (v4.5)
+# https://civitai.com/models/709404/cyberrealistic-pony-semi-realistic
+PONY_CKPT_DEST="${VOLUME_MODELS}/checkpoints/CyberRealistic_PonySemi_V4.5.safetensors"
 if [ -f "$PONY_CKPT_DEST" ]; then
-    echo "[NSW] ✓ cyberrealisticPony_v160.safetensors (exists)"
+    echo "[NSW] ✓ CyberRealistic_PonySemi_V4.5.safetensors (exists)"
 elif [ -d "${VOLUME_MODELS}/checkpoints" ]; then
-    PONY_URL="https://civitai.com/api/download/models/2581228"
+    PONY_URL="https://civitai.com/api/download/models/2601141"
     [ -n "${CIVITAI_API_KEY:-}" ] && PONY_URL="${PONY_URL}?token=${CIVITAI_API_KEY}"
-    echo "[NSW] Downloading cyberrealisticPony_v160.safetensors (~6GB)..."
+    echo "[NSW] Downloading CyberRealistic_PonySemi_V4.5.safetensors (~6GB)..."
     python3 -c "
 import urllib.request, sys, shutil
 try:
@@ -276,15 +276,15 @@ except Exception as e:
     print(f'Error: {e}', file=sys.stderr)
     sys.exit(1)
 " 2>&1 && mv "${PONY_CKPT_DEST}.tmp" "${PONY_CKPT_DEST}" || \
-    { rm -f "${PONY_CKPT_DEST}.tmp"; echo "[NSW] ERROR: cyberrealisticPony_v17 download failed"; }
+    { rm -f "${PONY_CKPT_DEST}.tmp"; echo "[NSW] ERROR: CyberRealistic Pony Semi-Realistic download failed"; }
     # Sanity check: SDXL checkpoints are typically 6-7GB
     if [ -f "$PONY_CKPT_DEST" ]; then
         PONY_SIZE=$(stat -c%s "${PONY_CKPT_DEST}" 2>/dev/null || stat -f%z "${PONY_CKPT_DEST}" 2>/dev/null || echo 0)
         if [ "$PONY_SIZE" -lt 2000000000 ]; then
-            echo "[NSW] ERROR: cyberrealisticPony_v17 file too small (${PONY_SIZE} bytes) — likely a redirect/error page"
+            echo "[NSW] ERROR: CyberRealistic Pony Semi-Realistic file too small (${PONY_SIZE} bytes) — likely a redirect/error page"
             rm -f "${PONY_CKPT_DEST}"
         else
-            echo "[NSW] ✓ cyberrealisticPony_v160.safetensors downloaded ($(( PONY_SIZE / 1024 / 1024 ))MB)"
+            echo "[NSW] ✓ CyberRealistic_PonySemi_V4.5.safetensors downloaded ($(( PONY_SIZE / 1024 / 1024 ))MB)"
         fi
     fi
 fi
@@ -293,65 +293,9 @@ fi
 # Larger models (Flux Kontext UNET ~8GB, CLIP encoders, VAE) live on the
 # network volume and are managed via scripts/download-kontext-models.mjs
 
-# ---- LoRA Studio: RealVisXL V5.0 checkpoint + Curvy body LoRA ----
-# Used for photorealistic body image generation in the LoRA training pipeline.
-# Both downloaded to network volume so they persist across container restarts.
-# RealVisXL V5.0 BakedVAE fp16 (~6.6GB) — CivitAI version 789646.
+# ---- RealVisXL and BigASP removed — no longer needed for Pony pipeline ----
+# CyberRealistic Pony Semi-Realistic v4.5 is downloaded via scripts/download-pony-via-endpoint.mjs
 CKPT_DIR="/runpod-volume/models/checkpoints"
-CKPT_FILE="realvisxlV50_v50Bakedvae.safetensors"
-if [ -f "${CKPT_DIR}/${CKPT_FILE}" ]; then
-    echo "[NSW] ✓ ${CKPT_FILE} (volume checkpoint, exists)"
-elif [ -d "/runpod-volume/models" ]; then
-    mkdir -p "${CKPT_DIR}"
-    CKPT_URL="https://civitai.com/api/download/models/789646"
-    [ -n "${CIVITAI_API_KEY:-}" ] && CKPT_URL="${CKPT_URL}?token=${CIVITAI_API_KEY}"
-    echo "[NSW] Downloading ${CKPT_FILE} to volume checkpoints..."
-    python3 -c "
-import urllib.request, sys, shutil
-try:
-    req = urllib.request.Request('${CKPT_URL}')
-    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
-    resp = urllib.request.urlopen(req, timeout=900)
-    with open('${CKPT_DIR}/${CKPT_FILE}.tmp', 'wb') as f:
-        shutil.copyfileobj(resp, f)
-    resp.close()
-except Exception as e:
-    print(f'Error: {e}', file=sys.stderr)
-    sys.exit(1)
-" 2>&1 && mv "${CKPT_DIR}/${CKPT_FILE}.tmp" "${CKPT_DIR}/${CKPT_FILE}" && \
-    echo "[NSW] ✓ ${CKPT_FILE} (volume checkpoint, downloaded)" || \
-    { rm -f "${CKPT_DIR}/${CKPT_FILE}.tmp"; echo "[NSW] ✗✗ ${CKPT_FILE} FAILED"; FAILED=$((FAILED + 1)); }
-else
-    echo "[NSW] Volume not mounted — skipping ${CKPT_FILE}"
-fi
-
-# bigASP v2.0 — alternative SDXL checkpoint for body portrait generation (~6.4GB)
-# CivitAI model 502468, version 991916. Set SDXL_BODY_CHECKPOINT=bigasp_v20.safetensors to use.
-BIGASP_FILE="bigasp_v20.safetensors"
-if [ -f "${CKPT_DIR}/${BIGASP_FILE}" ]; then
-    echo "[NSW] ✓ ${BIGASP_FILE} (volume checkpoint, exists)"
-elif [ -d "/runpod-volume/models" ]; then
-    mkdir -p "${CKPT_DIR}"
-    BIGASP_URL="https://civitai.com/api/download/models/991916"
-    [ -n "${CIVITAI_API_KEY:-}" ] && BIGASP_URL="${BIGASP_URL}?token=${CIVITAI_API_KEY}"
-    echo "[NSW] Downloading ${BIGASP_FILE} to volume checkpoints..."
-    python3 -c "
-import urllib.request, sys, shutil
-try:
-    req = urllib.request.Request('${BIGASP_URL}')
-    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
-    resp = urllib.request.urlopen(req, timeout=900)
-    with open('${CKPT_DIR}/${BIGASP_FILE}.tmp', 'wb') as f:
-        shutil.copyfileobj(resp, f)
-    resp.close()
-except Exception as e:
-    print(f'Error: {e}', file=sys.stderr)
-    sys.exit(1)
-" 2>&1 && mv "${CKPT_DIR}/${BIGASP_FILE}.tmp" "${CKPT_DIR}/${BIGASP_FILE}" && \
-    echo "[NSW] ✓ ${BIGASP_FILE} (volume checkpoint, downloaded)" || \
-    { rm -f "${CKPT_DIR}/${BIGASP_FILE}.tmp"; echo "[NSW] ✗✗ ${BIGASP_FILE} FAILED"; FAILED=$((FAILED + 1)); }
-else
-    echo "[NSW] Volume not mounted — skipping ${BIGASP_FILE}"
 fi
 
 # BodyLicious FLUX — exaggerated feminine curves (CivitAI model 238105, version 979680)
