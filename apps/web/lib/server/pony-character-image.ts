@@ -156,19 +156,24 @@ function buildPonyFacePrompt(charData: CharacterData): string {
     tags.push(charData.distinguishingFeatures.toLowerCase());
   }
 
-  // Portrait composition
-  tags.push(
-    "looking at viewer",
-    "slight smile",
-    "beautiful face",
-    "detailed eyes",
-    "portrait",
-    "head and shoulders",
-    "face focus",
-    "soft studio lighting",
-    "clean background",
-    "shallow depth of field",
-  );
+  // Portrait composition — gender-specific tags to prevent Pony defaulting to female
+  if (charData.gender === "male") {
+    tags.push(
+      "solo male", "male focus", "masculine",
+      "handsome", "sharp jawline",
+      "looking at viewer",
+      "portrait", "head and shoulders", "face focus",
+      "soft studio lighting", "clean background", "shallow depth of field",
+    );
+  } else {
+    tags.push(
+      "solo female",
+      "looking at viewer", "slight smile",
+      "beautiful face", "detailed eyes",
+      "portrait", "head and shoulders", "face focus",
+      "soft studio lighting", "clean background", "shallow depth of field",
+    );
+  }
 
   return tags.join(", ");
 }
@@ -229,16 +234,22 @@ function buildPonyBodyPrompt(charData: CharacterData): string {
     );
   }
 
-  // Full body composition
-  tags.push(
-    "standing",
-    "confident pose",
-    "looking at viewer",
-    "full body",
-    "head to toe",
-    "warm studio lighting",
-    "clean background",
-  );
+  // Full body composition — gender-specific reinforcement
+  if (charData.gender === "male") {
+    tags.push(
+      "solo male", "male focus", "masculine",
+      "standing", "confident pose", "looking at viewer",
+      "full body", "head to toe",
+      "warm studio lighting", "clean background",
+    );
+  } else {
+    tags.push(
+      "solo female",
+      "standing", "confident pose", "looking at viewer",
+      "full body", "head to toe",
+      "warm studio lighting", "clean background",
+    );
+  }
 
   return tags.join(", ");
 }
