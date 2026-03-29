@@ -27,20 +27,9 @@ import {
   FileText,
   ArrowLeft,
 } from "lucide-react";
-// TODO: Phase 3 — rebuild CharacterApproval for Pony-only pipeline
-// import CharacterApproval, {
-//   type CharacterFromAPI,
-// } from "./components/CharacterApproval";
-type CharacterFromAPI = {
-  id: string;
-  character_id: string;
-  approved: boolean;
-  approved_image_id: string | null;
-  approved_fullbody: boolean;
-  approved_fullbody_image_id: string | null;
-  active_lora_id: string | null;
-  characters: { id: string; name: string; description: Record<string, unknown> };
-};
+import CharacterApproval, {
+  type CharacterFromAPI,
+} from "./components/CharacterApproval";
 import ImageGeneration from "./components/ImageGeneration";
 import PublishPanel from "./components/PublishPanel";
 import type {
@@ -518,21 +507,12 @@ export default function SeriesDetailPage() {
         </div>
 
         {/* ===================== CHARACTERS TAB ===================== */}
-        {/* TODO: Phase 3 — rebuild CharacterApproval for Pony-only pipeline */}
+        {/* ===================== CHARACTERS TAB ===================== */}
         <div className={activeTab === "characters" ? "mt-6" : "hidden"}>
-          <Card>
-            <CardHeader>
-              <CardTitle>Character Approval</CardTitle>
-              <CardDescription>
-                Character approval component is being rebuilt for the Pony pipeline.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                {characters.length} character(s) in this series. Use the API directly for now.
-              </p>
-            </CardContent>
-          </Card>
+          <CharacterApproval
+            seriesId={seriesId}
+            onAllReady={() => setActiveTab("images")}
+          />
         </div>
 
         {/* ====================== IMAGES TAB ======================== */}

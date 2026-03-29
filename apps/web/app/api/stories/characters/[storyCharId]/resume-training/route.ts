@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { resumePipeline } from "@no-safe-word/image-gen/server/character-lora";
+import { resumePonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 const MIN_PASSED_IMAGES = 20;
@@ -115,7 +115,7 @@ export async function POST(
     // 5. Fire-and-forget — resume the pipeline in the background
     console.log(`[LoRA API] Resuming pipeline for ${character.name} (loraId: ${lora.id}, ${approvedCount} approved images)`);
 
-    resumePipeline(characterInput, lora.id, { supabase }).catch((err) => {
+    resumePonyPipeline(characterInput, lora.id, { supabase }).catch((err) => {
       console.error(`[LoRA API] Resume pipeline background error:`, err);
     });
 
