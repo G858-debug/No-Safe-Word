@@ -23,10 +23,6 @@ import type { V4SceneOnlyResult } from "@no-safe-word/image-gen";
 /** BodyLicious trigger words — bias Flux toward curvaceous body proportions */
 const BODY_TRIGGER_WORDS = "voluptuous figure, wide hips, huge round ass, thick thighs, narrow waist";
 
-/** CivitAI direct download URL for BodyLicious Flux LoRA (v979680) */
-const BODYLICIOUS_LORA_URL = "https://civitai.com/api/download/models/979680?type=Model&format=SafeTensor";
-const BODYLICIOUS_STRENGTH = 0.8;
-
 // Re-export fetchCharacterDataMap from V1 — shared across all pipelines
 export { fetchCharacterDataMap } from "./generate-scene-image";
 
@@ -187,21 +183,16 @@ export async function generateSceneImageV4(
   const isDualCharacter = !!imgPrompt.secondary_character_id;
   const aspectRatio = isDualCharacter ? "3:2" : "2:3";
 
-  // ── Female body enhancement ──
+  // ── Female body enhancement (prompt-only — no LoRA, CivitAI URLs don't work with multi-LoRA model) ──
   const hasFemale = primaryGender === "female" || secondaryGender === "female";
   let enhancedPrompt = imgPrompt.prompt;
-  const styleLoraUrls: string[] = [];
-  const styleLoraScales: number[] = [];
 
   if (hasFemale) {
     // Inject body enhancement prose (curvaceous descriptors)
     enhancedPrompt = injectFluxFemaleEnhancement("", mode, enhancedPrompt).trim() + " " + enhancedPrompt;
     // Prepend BodyLicious trigger words to bias Flux toward curvy proportions
     enhancedPrompt = BODY_TRIGGER_WORDS + ", " + enhancedPrompt;
-    // Add BodyLicious LoRA for body shape (CivitAI direct URL — may or may not work with multi-LoRA model)
-    styleLoraUrls.push(BODYLICIOUS_LORA_URL);
-    styleLoraScales.push(BODYLICIOUS_STRENGTH);
-    console.log(`[V4][${promptId}] Female body enhancement: trigger words + BodyLicious LoRA (${BODYLICIOUS_STRENGTH})`);
+    console.log(`[V4][${promptId}] Female body enhancement: trigger words + body prose injected`);
   }
 
   // ── Generate ──
@@ -221,7 +212,6 @@ export async function generateSceneImageV4(
       seed,
       hasFaceSwap: !!primaryFaceUrl,
       hasFemaleEnhancement: hasFemale,
-      styleLoraCount: styleLoraUrls.length,
       promptLength: enhancedPrompt.length,
     }, null, 2),
   );
@@ -234,8 +224,6 @@ export async function generateSceneImageV4(
     secondaryGender,
     isNsfw,
     aspectRatio,
-    styleLoraUrls: styleLoraUrls.length > 0 ? styleLoraUrls : undefined,
-    styleLoraScales: styleLoraScales.length > 0 ? styleLoraScales : undefined,
     seed,
   });
 
