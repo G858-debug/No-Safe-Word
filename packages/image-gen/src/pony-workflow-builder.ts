@@ -11,7 +11,7 @@
  */
 
 const PONY_CHECKPOINT = 'CyberRealistic_PonySemi_V4.5.safetensors';
-const PONY_DEFAULT_CFG = 5.5;
+const PONY_DEFAULT_CFG = 5.0;
 const PONY_DEFAULT_STEPS = 30;
 const PONY_DEFAULT_SAMPLER = 'dpmpp_2m_sde';
 const PONY_DEFAULT_SCHEDULER = 'karras';

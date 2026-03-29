@@ -132,9 +132,6 @@ function buildPonyFacePrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
-  // Semi-realistic style direction
-  tags.push("semi-realistic", "digital art", "detailed illustration");
-
   // Skin tone + ethnicity via mappers, deduplicated
   const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
   const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity, {
@@ -182,9 +179,6 @@ function buildPonyFacePrompt(charData: CharacterData): string {
 function buildPonyBodyPrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
-
-  // Semi-realistic style direction
-  tags.push("semi-realistic", "digital art", "detailed illustration");
 
   // Skin tone + ethnicity via mappers, deduplicated
   const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);

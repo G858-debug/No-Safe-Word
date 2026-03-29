@@ -16,8 +16,9 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export function buildPonyQualityPrefix(mode: 'sfw' | 'nsfw'): string {
   const quality = 'score_9, score_8_up, score_7_up';
+  const style = 'semi-realistic, digital painting, detailed illustration';
   const rating = mode === 'nsfw' ? 'rating_explicit' : 'rating_safe';
-  return `${quality}, ${rating}`;
+  return `${quality}, ${style}, ${rating}`;
 }
 
 export function buildPonyNegativePrompt(mode: 'sfw' | 'nsfw'): string {
@@ -25,7 +26,7 @@ export function buildPonyNegativePrompt(mode: 'sfw' | 'nsfw'): string {
     'score_4, score_3, score_2, score_1',
     'source_pony',
     'worst quality, low quality, normal quality',
-    'photorealistic, photograph, RAW photo, hyperrealistic',
+    'photorealistic, photograph, RAW photo, hyperrealistic, DSLR, stock photo',
     'bad anatomy, bad hands, bad feet, extra limbs, missing limbs',
     'extra fingers, fewer digits, fused fingers',
     'watermark, signature, text, username',
