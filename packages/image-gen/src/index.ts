@@ -68,6 +68,11 @@ export { buildFluxPrompt, stripSdxlSyntax, hasHeavySdxlFormatting, injectFluxFem
 //   import { runPipeline, getPipelineProgress } from '@no-safe-word/image-gen/character-lora/pipeline'
 // NOT re-exported here because trainer.ts uses Node.js-only deps (archiver, fs)
 // that break webpack client builds.
+
+// Pony V6 Character LoRA pipeline — server-only, import directly:
+//   import { ... } from '@no-safe-word/image-gen/server/pony-character-lora/training-image-evaluator'
+//   import { ... } from '@no-safe-word/image-gen/server/pony-character-lora/training-caption-builder'
+// Following the same pattern as Flux character-lora — not barrel-exported.
 export type {
   CharacterInput,
   CharacterStructured,
@@ -88,7 +93,7 @@ export type { FlorenceSam2MaskConfig, UncannyInpaintWorkflowConfig } from './wor
 export { runNb2Scene } from './replicate-nb2-scene';
 export type { Nb2SceneConfig, Nb2SceneResult } from './replicate-nb2-scene';
 
-// V4 Pipeline exports (Multi-LoRA scene generation + Easel face swap)
+// V4 Pipeline exports (Multi-LoRA scene generation + Easel face swap) — legacy flux2_pro
 export { runMultiLoraScene, runFaceSwap, submitFaceSwap, checkFaceSwapStatus, runV4Pipeline, runV4SceneGeneration } from './replicate-flux2-pro';
 export type {
   MultiLoraSceneConfig, MultiLoraSceneResult,
@@ -99,3 +104,18 @@ export type {
 // Flux 2 Pro client (kept for SFW-only workflows)
 export { runFlux2Pro, rewriteNsfwPromptForFlux2Pro } from './replicate-flux2-pro';
 export type { Flux2ProConfig, Flux2ProResult } from './replicate-flux2-pro';
+
+// V4 Pony Pipeline exports (CyberRealistic Pony on RunPod/ComfyUI)
+export { buildPonyWorkflow } from './pony-workflow-builder';
+export type { PonyWorkflowConfig } from './pony-workflow-builder';
+export { PONY_LORA_REGISTRY, getPonyLoras, selectPonyResources } from './pony-lora-registry';
+export type { PonyResourceSelection } from './pony-lora-registry';
+export {
+  buildPonyQualityPrefix,
+  buildPonyNegativePrompt,
+  buildPonyCharacterTags,
+  buildPonyPositivePrompt,
+  convertProseToBooru,
+  getPonyDimensions,
+} from './pony-prompt-builder';
+export type { PonyCharacterData } from './pony-prompt-builder';

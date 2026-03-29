@@ -253,6 +253,14 @@ except Exception as e:
     echo "[LoRA] flux-cinematic-finisher.safetensors downloaded successfully"
 fi
 
+# ---- Pony / CyberRealistic checkpoint (for V4 pony_cyberreal pipeline) ----
+# NOTE: This checkpoint is only needed on the Pony RunPod endpoint (RUNPOD_PONY_ENDPOINT_ID).
+# It is NOT used by the Flux/Kontext endpoint. If running a shared Docker image,
+# this download can be conditional on an env var.
+# CivitAI model page: https://civitai.com/models/443821/cyberrealistic-pony
+# Replace the version ID below with the actual CivitAI version ID for v17.
+# download_model "https://civitai.com/api/download/models/XXXXXXX?token=${CIVITAI_API_KEY}" "checkpoints" "cyberrealisticPony_v17.safetensors"
+
 # Kontext LoRAs — downloaded at runtime (small files, < 200MB each).
 # Larger models (Flux Kontext UNET ~8GB, CLIP encoders, VAE) live on the
 # network volume and are managed via scripts/download-kontext-models.mjs

@@ -4,7 +4,11 @@
       "Bash(*)",
       "WebSearch",
       "WebFetch(domain:comfyai.run)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:blog.comfy.org)",
+      "WebFetch(domain:stable-diffusion-art.com)",
+      "WebFetch(domain:www.cometapi.com)",
+      "WebFetch(domain:apidog.com)"
     ]
   }
 }

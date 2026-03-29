@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+## Flux Image Prompting Skill
+**MANDATORY:** Before writing or reviewing any image prompt, read `skill.md` in the project root. It contains the complete Flux prompting guide — T5 encoder rules, the Five Layers framework, prompt structure templates, platform-specific rules, and the quality checklist.
+
 ## Image Generation Best Practices
 
 ### Character Consistency Rules
@@ -269,6 +272,63 @@ conspiratorial half-smile looking sideways"
 - Face portrait and body portrait generate simultaneously (no gate)
 - Approval is editorial review only, not a pipeline blocker
 - Scene images can generate using any existing reference image
+
+## Pony V6 Character LoRA Training Skill
+
+A comprehensive character LoRA training guide for the V4 (`pony_cyberreal`) pipeline is available
+at `docs/skills/pony-lora-training/SKILL.md`.
+
+**Always read this skill before:**
+- Generating character training dataset images (the initial 40-60 candidates)
+- Writing or reviewing code that curates, evaluates, or scores training images
+- Writing or reviewing captioning/tagging logic for training datasets
+- Configuring or modifying LoRA training parameters
+- Evaluating trained LoRA quality or debugging consistency issues
+- Modifying training-related code in `packages/image-gen/src/pony-character-lora/`
+
+**Existing files:**
+- `packages/image-gen/src/pony-character-lora/training-image-evaluator.ts` — dataset curation scoring and selection
+- `packages/image-gen/src/pony-character-lora/training-caption-builder.ts` — booru tag caption preparation with identity tag stripping
+
+**Planned files (not yet created):**
+- `pony-lora-trainer.ts` — Kohya SS / Replicate training integration
+- `pony-lora-registry.ts` — Pony LoRA checkpoint and inference config registry
+
+**Key principles (quick reference):**
+- 15-20 curated training images, not 50 mediocre ones — quality over quantity
+- Training images MUST cover multiple angles, framings, expressions, lighting, and clothing states
+- Remove ALL identity tags (hair, skin, eyes, body, ethnicity) from captions — the trigger word carries identity
+- Network dim 8 for characters, noise offset 0.03 for sharp facial details
+- Save every epoch, sample every epoch — earlier epochs are often more flexible than later ones
+- Train on the SAME checkpoint you'll use for inference (CyberRealistic Pony v17)
+- Test the trained LoRA WITHOUT identity tags to verify the character is baked into the trigger word
+- SFW and NSFW images both needed in training set for dual-capability output
+- Pony V6 LoRAs are SDXL-architecture — must ONLY be used with SDXL/Pony inference, never with Flux
+
+## Pony V6 / CyberRealistic Scene Generation Skill
+
+A comprehensive scene image generation guide for the V4 (`pony_cyberreal`) pipeline is available
+at `docs/skills/pony-scene-generation/SKILL.md`.
+
+**Always read this skill before:**
+- Writing or enhancing ANY scene image prompt for the pony_cyberreal engine
+- Modifying the prompt builder, prompt enhancer, or negative prompt logic
+- Writing SFW/NSFW paired prompts (the Facebook → Website visual continuity)
+- Constructing dual-character intimate scene prompts
+- Debugging image quality: flat lighting, wrong proportions, uncanny faces, dark images
+- Adding body proportion, clothing, or pose tags to prompts
+
+**Key principles (quick reference):**
+- Tag order matters — quality tags first, then rating, then characters, then scene
+- Body proportion emphasis order: ass/hips/thighs FIRST, then breasts (matches brand)
+- SFW images use the "moment before" technique — anticipation, not nudity
+- NSFW images must specify anatomical positioning explicitly for accuracy
+- SFW/NSFW paired prompts rebuild the SAME setting independently (no "same scene" references)
+- Name specific light sources — never use generic "warm lighting"
+- CyberRealistic Pony: omit source tags or use source_anime lightly; add source_pony to NEGATIVE
+- CyberRealistic Pony: VAE is baked in — never load external VAE
+- Dual-character scenes: landscape orientation, both LoRAs at 0.65-0.75, tight AttentionCouplePPM regions
+- South African settings must be specific (Middelburg, Soweto, Sandton) not generic "African"
 
 ## Error Handling
 - Do NOT add silent fallbacks or default values that mask errors

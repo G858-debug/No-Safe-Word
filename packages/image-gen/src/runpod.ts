@@ -44,9 +44,10 @@ interface RunPodResponse {
 export async function submitRunPodJob(
   workflow: Record<string, any>,
   images?: RunPodImage[],
-  characterLoraDownloads?: CharacterLoraDownload[]
+  characterLoraDownloads?: CharacterLoraDownload[],
+  overrideEndpointId?: string,
 ): Promise<{ jobId: string }> {
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+  const endpointId = overrideEndpointId || process.env.RUNPOD_ENDPOINT_ID;
   const apiKey = process.env.RUNPOD_API_KEY;
 
   if (!endpointId || !apiKey) {
@@ -115,8 +116,8 @@ export async function submitRunPodJob(
 /**
  * Check the status of a RunPod job.
  */
-export async function getRunPodJobStatus(jobId: string): Promise<RunPodResponse> {
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+export async function getRunPodJobStatus(jobId: string, overrideEndpointId?: string): Promise<RunPodResponse> {
+  const endpointId = overrideEndpointId || process.env.RUNPOD_ENDPOINT_ID;
   const apiKey = process.env.RUNPOD_API_KEY;
 
   if (!endpointId || !apiKey) {
@@ -146,9 +147,10 @@ export async function getRunPodJobStatus(jobId: string): Promise<RunPodResponse>
 export async function submitRunPodSync(
   workflow: Record<string, any>,
   images?: RunPodImage[],
-  characterLoraDownloads?: CharacterLoraDownload[]
+  characterLoraDownloads?: CharacterLoraDownload[],
+  overrideEndpointId?: string,
 ): Promise<{ imageBase64: string; executionTime: number }> {
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+  const endpointId = overrideEndpointId || process.env.RUNPOD_ENDPOINT_ID;
   const apiKey = process.env.RUNPOD_API_KEY;
 
   if (!endpointId || !apiKey) {
@@ -231,12 +233,13 @@ export async function submitRunPodSync(
 export async function waitForRunPodResult(
   jobId: string,
   timeoutMs: number = 300000,
-  pollIntervalMs: number = 2000
+  pollIntervalMs: number = 2000,
+  overrideEndpointId?: string,
 ): Promise<{ imageBase64: string; executionTime: number }> {
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
-    const status = await getRunPodJobStatus(jobId);
+    const status = await getRunPodJobStatus(jobId, overrideEndpointId);
 
     if (status.status === 'COMPLETED') {
       if (!status.output?.images?.[0]) {

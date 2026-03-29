@@ -226,6 +226,7 @@ export default function SeriesDetailPage() {
   const allLorasDeployed =
     loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
   const noLoraEngine = data?.series.image_engine === "flux_pulid" || data?.series.image_engine === "flux2_pro";
+  // pony_cyberreal REQUIRES character LoRAs — it is NOT a noLoraEngine
   const allReadyForImages = allCharsApproved && (noLoraEngine || allLorasDeployed);
 
   // Engine update handler
@@ -454,6 +455,12 @@ export default function SeriesDetailPage() {
                               <Zap className="h-3.5 w-3.5 text-blue-500" />
                             </span>
                           </SelectItem>
+                          <SelectItem value="pony_cyberreal">
+                            <span className="flex items-center gap-1.5">
+                              Pony CyberRealistic V4
+                              <Zap className="h-3.5 w-3.5 text-pink-500" />
+                            </span>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -464,6 +471,8 @@ export default function SeriesDetailPage() {
                         ? "No LoRA training — PuLID face consistency + text body prompts"
                         : series.image_engine === "flux2_pro"
                         ? "Flux 2 Pro via Replicate — multi-reference character consistency, 4MP output, no LoRAs needed"
+                        : series.image_engine === "pony_cyberreal"
+                        ? "CyberRealistic Pony (SDXL) — semi-realistic 2.5D, booru tags, negative prompts, character LoRAs"
                         : "Better prompt adherence, native character consistency"}
                     </p>
                   </div>

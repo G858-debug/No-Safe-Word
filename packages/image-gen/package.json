@@ -10,7 +10,9 @@
     "./server/character-lora/dataset-generator": "./src/character-lora/dataset-generator.ts",
     "./server/character-lora/quality-evaluator": "./src/character-lora/quality-evaluator.ts",
     "./server/character-lora/dataset-prompts": "./src/character-lora/dataset-prompts.ts",
-    "./runpod": "./src/runpod.ts"
+    "./runpod": "./src/runpod.ts",
+    "./server/pony-character-lora/training-image-evaluator": "./src/pony-character-lora/training-image-evaluator.ts",
+    "./server/pony-character-lora/training-caption-builder": "./src/pony-character-lora/training-caption-builder.ts"
   },
   "scripts": {
     "lint": "eslint . --ext .ts,.tsx"

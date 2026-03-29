@@ -40,6 +40,11 @@ const sb = createClient(
 );
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const CHARACTER_FILTER = process.argv
+  .find((a) => a.startsWith('--character='))
+  ?.replace('--character=', '')
+  .split(',')
+  .map((n) => n.trim().toLowerCase());
 
 interface DiscoveredCharacter {
   storyCharId: string;
@@ -410,7 +415,16 @@ async function main() {
 
   const results: Array<{ name: string; totalGenerated?: number; totalPassed?: number; error?: string }> = [];
 
-  for (const char of characters) {
+  const filtered = CHARACTER_FILTER
+    ? characters.filter((c) => CHARACTER_FILTER.some((f) => c.characterName.toLowerCase().includes(f)))
+    : characters;
+
+  if (filtered.length === 0) {
+    console.log(`No characters matched filter: ${CHARACTER_FILTER?.join(', ')}`);
+    return;
+  }
+
+  for (const char of filtered) {
     try {
       const result = await processCharacter(char);
       results.push(result);

@@ -1,24 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitFaceSwap } from "@no-safe-word/image-gen";
+import { submitRunPodJob } from "@no-safe-word/image-gen";
 import {
-  generateSceneImageV4,
+  buildV4SceneGenerationPayload,
   fetchCharacterDataMap,
 } from "@/lib/server/generate-scene-image-v4";
 
-interface GeneratedImage {
+interface QueuedJob {
   promptId: string;
-  imageId: string;
-  storedUrl: string;
-  seed: number;
+  jobId: string | null;
 }
 
-interface FailedImage {
+interface FailedJob {
   promptId: string;
   error: string;
 }
 
-// POST /api/stories/[seriesId]/generate-images-v4 — Batch generate V4 scene images (Flux 2 Pro)
+// POST /api/stories/[seriesId]/generate-images-v4 — Batch generate V4 scene images (Pony CyberRealistic)
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ seriesId: string }> },
@@ -30,16 +28,16 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const { post_id, regenerate } = body as { post_id?: string; regenerate?: boolean };
 
-    // 1. Verify series uses flux2_pro engine
+    // 1. Verify series uses pony_cyberreal engine
     const { data: series } = await (supabase as any)
       .from("story_series")
       .select("image_engine")
       .eq("id", seriesId)
       .single() as { data: { image_engine: string } | null };
 
-    if (series?.image_engine !== "flux2_pro") {
+    if (series?.image_engine !== "pony_cyberreal") {
       return NextResponse.json(
-        { error: `Series engine is "${series?.image_engine}", not "flux2_pro". Use the correct batch endpoint.` },
+        { error: `Series engine is "${series?.image_engine}", not "pony_cyberreal". Use the correct batch endpoint.` },
         { status: 400 },
       );
     }
@@ -67,7 +65,7 @@ export async function POST(
     }
 
     if (postIds.length === 0) {
-      return NextResponse.json({ pipeline: "v4-flux2-pro", generated: 0, failed: 0, results: [] });
+      return NextResponse.json({ pipeline: "v4-pony-cyberreal", queued: 0, failed: 0, jobs: [] });
     }
 
     // 3. Reset generated prompts if regenerate flag
@@ -91,12 +89,23 @@ export async function POST(
     }
 
     if (!prompts || prompts.length === 0) {
-      return NextResponse.json({ pipeline: "v4-flux2-pro", generated: 0, failed: 0, results: [] });
+      return NextResponse.json({ pipeline: "v4-pony-cyberreal", queued: 0, failed: 0, jobs: [] });
     }
 
-    // 5. Generate each image sequentially (respect Replicate rate limits)
-    const generated: GeneratedImage[] = [];
-    const failed: FailedImage[] = [];
+    // 5. Pre-fetch character data
+    const characterIds = Array.from(
+      new Set(
+        prompts
+          .flatMap((p) => [p.character_id, p.secondary_character_id])
+          .filter((id): id is string => id !== null),
+      ),
+    );
+    const characterDataMap = await fetchCharacterDataMap(characterIds);
+
+    // 6. Generate each image sequentially
+    const jobs: QueuedJob[] = [];
+    const failed: FailedJob[] = [];
+    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
 
     for (let i = 0; i < prompts.length; i++) {
       const imgPrompt = prompts[i];
@@ -108,65 +117,38 @@ export async function POST(
 
         const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
-        // Generate scene (sync ~30s)
-        const result = await generateSceneImageV4({
+        const result = await buildV4SceneGenerationPayload({
           imgPrompt,
           seriesId,
+          characterDataMap,
           seed,
         });
 
-        const hasFaceSwap = !!result.faceSwapConfig;
+        // Submit to RunPod Pony endpoint
+        const { jobId: runpodJobId } = await submitRunPodJob(
+          result.workflow,
+          result.images.length > 0 ? result.images : undefined,
+          result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
+          ponyEndpointId,
+        );
 
-        // Store the scene image to Supabase (permanent URL needed for face swap)
-        const timestamp = Date.now();
-        const imageId = crypto.randomUUID();
-        const storagePath = `stories/${imageId}-${timestamp}.png`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("story-images")
-          .upload(storagePath, result.sceneImageBuffer, { contentType: "image/png", upsert: true });
-
-        if (uploadError) {
-          throw new Error(`Image storage failed: ${uploadError.message}`);
-        }
-
-        const { data: { publicUrl } } = supabase.storage
-          .from("story-images")
-          .getPublicUrl(storagePath);
-
-        // Submit face swap AFTER upload — uses permanent Supabase URL
-        let faceSwapPredictionId: string | null = null;
-        if (result.faceSwapConfig) {
-          faceSwapPredictionId = await submitFaceSwap({
-            targetImageUrl: publicUrl,
-            primaryFaceUrl: result.faceSwapConfig.primaryFaceUrl,
-            primaryGender: result.faceSwapConfig.primaryGender,
-            secondaryFaceUrl: result.faceSwapConfig.secondaryFaceUrl,
-            secondaryGender: result.faceSwapConfig.secondaryGender,
-            hairSource: "target",
-          });
-          console.log(`[V4] Face swap submitted for prompt ${imgPrompt.id}: ${faceSwapPredictionId}`);
-        }
-
-        // Create image record with scene image
+        // Create image record
         const { data: imageRow, error: imgError } = await supabase
           .from("images")
           .insert({
-            id: imageId,
             character_id: imgPrompt.character_id || null,
             prompt: result.assembledPrompt,
-            negative_prompt: "",
+            negative_prompt: result.negativePrompt,
             settings: {
+              width: result.width,
+              height: result.height,
+              steps: 30,
+              cfg: 6.5,
               seed: result.seed,
-              engine: "replicate-v4-multi-lora-faceswap",
-              mode: result.mode,
-              hasFaceSwap,
-              faceSwapPredictionId,
-              pipelineSteps: ["multi-lora-scene", hasFaceSwap ? "easel-face-swap" : "no-face-swap"],
+              engine: "runpod-v4-pony-cyberreal",
+              loraCount: (result.workflow['110'] ? result.characterLoraDownloads.length : 0),
             },
             mode: result.mode,
-            stored_url: publicUrl,
-            sfw_url: publicUrl,
           })
           .select("id")
           .single();
@@ -175,38 +157,25 @@ export async function POST(
           throw new Error(`Failed to create image record: ${imgError?.message}`);
         }
 
-        // Create generation job — pending if face swap running, completed otherwise
-        const jobId = hasFaceSwap
-          ? `replicate-faceswap-${faceSwapPredictionId}`
-          : `replicate-v4-${imageId}`;
-
         await supabase.from("generation_jobs").insert({
-          job_id: jobId,
+          job_id: `runpod-${runpodJobId}`,
           image_id: imageRow.id,
-          status: hasFaceSwap ? "pending" : "completed",
-          completed_at: hasFaceSwap ? null : new Date().toISOString(),
+          status: "pending",
           cost: 0,
         });
 
-        // Link image to prompt
         await supabase
           .from("story_image_prompts")
-          .update({
-            image_id: imageRow.id,
-            status: hasFaceSwap ? "generating" : "generated",
-          })
+          .update({ image_id: imageRow.id })
           .eq("id", imgPrompt.id);
 
-        generated.push({
+        jobs.push({
           promptId: imgPrompt.id,
-          imageId: imageRow.id,
-          storedUrl: publicUrl,
-          seed: result.seed,
+          jobId: `runpod-${runpodJobId}`,
         });
 
-        console.log(`[V4] Image ${i + 1}/${prompts.length}: ${imageRow.id} (${Math.round(result.sceneImageBuffer.length / 1024)}KB scene${hasFaceSwap ? ', face swap pending' : ''})`);
+        console.log(`[V4] Image ${i + 1}/${prompts.length}: job ${runpodJobId} submitted`);
 
-        // Brief pause between generations to respect rate limits
         if (i < prompts.length - 1) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
@@ -227,10 +196,10 @@ export async function POST(
     }
 
     return NextResponse.json({
-      pipeline: "v4-flux2-pro",
-      generated: generated.length,
+      pipeline: "v4-pony-cyberreal",
+      queued: jobs.length,
       failed: failed.length,
-      results: generated,
+      jobs,
       errors: failed.length > 0 ? failed : undefined,
     });
   } catch (err) {

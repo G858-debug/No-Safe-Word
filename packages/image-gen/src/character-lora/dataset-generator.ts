@@ -97,43 +97,43 @@ export async function generateDataset(
   const imageRecords: LoraDatasetImageRow[] = [];
   const failedPrompts: DatasetGenerationResult['failedPrompts'] = [];
 
-  // ── Phase 1: Nano Banana 2 (face/head shots) ───────────────
+  // ── Phase 1: Body shots (generated first — SDXL/RunPod doesn't share NB2 rate limits) ─────
+  const bodyCount = promptLimit ? Math.ceil(promptLimit * 0.6) : 15;
+
+  let bodyPhaseCount: number;
+
+  if (character.gender === 'female') {
+    // Female: BigASP + Feminine Body Proportions + Curvy Body → Flux img2img for curvaceous body shots
+    console.log(`[LoRA Dataset] Phase 1: Generating ${bodyCount} body images via SDXL→img2img...`);
+    const sdxlResult = await generateSdxlBodyShots(character, loraId, bodyCount, deps);
+    imageRecords.push(...sdxlResult.records);
+    failedPrompts.push(...sdxlResult.failures);
+    bodyPhaseCount = sdxlResult.records.length;
+  } else {
+    // Male: Nano Banana 2 with 3:4 portrait aspect for body shots
+    console.log(`[LoRA Dataset] Phase 1: Generating ${bodyCount} body images via Nano Banana 2 (male)...`);
+    const nbBodyResult = await generateNanoBananaMaleBodyShots(character, loraId, bodyCount, deps);
+    imageRecords.push(...nbBodyResult.records);
+    failedPrompts.push(...nbBodyResult.failures);
+    bodyPhaseCount = nbBodyResult.records.length;
+  }
+
+  // ── Phase 2: Nano Banana 2 (face/head shots) ───────────────
   const nbPrompts = getNanoBananaPrompts().map((p) => ({
     ...p,
     prompt: adaptPromptForGender(p.prompt, character.gender),
   }));
   const nbLimited = nbPrompts.slice(0, promptLimit ? Math.ceil(promptLimit * 0.4) : 10);
 
-  console.log(`[LoRA Dataset] Phase 1: Generating ${nbLimited.length} face/head images via Nano Banana 2...`);
+  console.log(`[LoRA Dataset] Phase 2: Generating ${nbLimited.length} face/head images via Nano Banana 2...`);
 
   const nbResult = await generateNanoBananaImages(character, loraId, nbLimited, deps);
   imageRecords.push(...nbResult.records);
   failedPrompts.push(...nbResult.failures);
 
-  // ── Phase 2: Body shots (10 face / 15 body default split) ─────
-  const bodyCount = promptLimit ? Math.ceil(promptLimit * 0.6) : 15;
-
-  let phase2Count: number;
-
-  if (character.gender === 'female') {
-    // Female: BigASP + Feminine Body Proportions + Curvy Body → Flux img2img for curvaceous body shots
-    console.log(`[LoRA Dataset] Phase 2: Generating ${bodyCount} body images via SDXL→img2img...`);
-    const sdxlResult = await generateSdxlBodyShots(character, loraId, bodyCount, deps);
-    imageRecords.push(...sdxlResult.records);
-    failedPrompts.push(...sdxlResult.failures);
-    phase2Count = sdxlResult.records.length;
-  } else {
-    // Male: Nano Banana 2 with 3:4 portrait aspect for body shots
-    console.log(`[LoRA Dataset] Phase 2: Generating ${bodyCount} body images via Nano Banana 2 (male)...`);
-    const nbBodyResult = await generateNanoBananaMaleBodyShots(character, loraId, bodyCount, deps);
-    imageRecords.push(...nbBodyResult.records);
-    failedPrompts.push(...nbBodyResult.failures);
-    phase2Count = nbBodyResult.records.length;
-  }
-
   console.log(
     `[LoRA Dataset] Complete: ${imageRecords.length} images ` +
-    `(${nbResult.records.length} Nano Banana + ${phase2Count} body)` +
+    `(${bodyPhaseCount} body + ${nbResult.records.length} Nano Banana)` +
     (failedPrompts.length > 0 ? `, ${failedPrompts.length} failed` : '')
   );
 
@@ -206,6 +206,16 @@ export async function generateReplacements(
         continue;
       }
 
+      // Male body shots use dynamic prompt IDs (nb_male_body_*) not in the static
+      // prompt pool — route to the dedicated male body pipeline with variant cycling
+      if (failed.promptTemplate.startsWith('nb_male_body_') && character.gender === 'male') {
+        const result = await generateNanoBananaMaleBodyShots(
+          character, loraId, 1, deps,
+        );
+        replacements.push(...result.records);
+        continue;
+      }
+
       const original = allPrompts.find((p) => p.id === failed.promptTemplate);
       if (!original) continue;
 
@@ -242,7 +252,7 @@ interface GenerationBatchResult {
   lastError?: Error;
 }
 
-async function generateNanoBananaImages(
+export async function generateNanoBananaImages(
   character: CharacterInput,
   loraId: string,
   prompts: DatasetPrompt[],
