@@ -5,10 +5,27 @@
  * Unlike Flux LoRAs (which use prose prompts), Pony LoRAs use booru-style tags.
  *
  * Character LoRAs are managed via the existing `character_loras` table and
- * `buildCharacterLoraEntry()` from lora-registry.ts (model-agnostic).
+ * Character LoRA entries are built inline where needed.
  */
 
-import type { LoraEntry, ContentMode, LoraCategory } from './lora-registry';
+export type LoraCategory = 'detail' | 'skin' | 'eyes' | 'hands' | 'lighting' | 'bodies' | 'style' | 'cinematic' | 'melanin' | 'character';
+export type ContentMode = 'sfw' | 'nsfw';
+
+export interface LoraEntry {
+  name: string;
+  filename: string;
+  category: LoraCategory;
+  defaultStrength: number;
+  clipStrength: number;
+  triggerWord?: string;
+  description: string;
+  compatibleWith: ContentMode[];
+  /** Whether this LoRA is installed on the RunPod ComfyUI instance */
+  installed: boolean;
+  /** Gender relevance: 'female' LoRAs only apply to female characters,
+   *  'male' only to male, 'neutral' applies to all. Defaults to 'neutral'. */
+  genderCategory?: 'male' | 'female' | 'neutral';
+}
 
 // ---- Pony/SDXL style LoRAs — loaded from /runpod-volume/models/loras/ ----
 export const PONY_LORA_REGISTRY: LoraEntry[] = [

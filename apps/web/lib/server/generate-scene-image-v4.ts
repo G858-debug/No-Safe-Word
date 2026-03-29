@@ -1,12 +1,12 @@
 /**
- * V4 Scene Image Generation: Pony V6 / CyberRealistic Pony via RunPod + ComfyUI
+ * V4 Scene Image Generation: Pony V6 / CyberRealistic Pony Semi-Realistic via RunPod + ComfyUI
  *
  * Single-step pipeline — character identity via trained SDXL LoRAs (no face swap):
  *
  * 1. Convert prose scene prompt → booru-style tags via Claude
  * 2. Build character identity tags from character data
  * 3. Assemble Pony positive prompt (quality + triggers + identity + scene)
- * 4. Build ComfyUI SDXL workflow (CyberRealistic Pony v17 checkpoint)
+ * 4. Build ComfyUI SDXL workflow (CyberRealistic Pony Semi-Realistic v4.5 checkpoint)
  * 5. Submit to RunPod (Pony endpoint) with character LoRA downloads
  *
  * Character consistency comes from SDXL-trained character LoRAs injected into
@@ -27,8 +27,54 @@ import {
 } from "@no-safe-word/image-gen";
 import type { CharacterLoraDownload } from "@no-safe-word/image-gen";
 
-// Re-export fetchCharacterDataMap from V1 — shared across all pipelines
-export { fetchCharacterDataMap } from "./generate-scene-image";
+/** Fetch character data from the characters table for the given IDs */
+export async function fetchCharacterDataMap(
+  characterIds: string[],
+): Promise<Map<string, CharacterData>> {
+  const characterDataMap = new Map<string, CharacterData>();
+  if (characterIds.length === 0) return characterDataMap;
+
+  const { data: characters } = await supabase
+    .from("characters")
+    .select("id, name, description")
+    .in("id", characterIds);
+
+  if (characters) {
+    for (const char of characters) {
+      const desc = char.description as Record<string, string>;
+      const resolvedGender = (
+        ["male", "female", "non-binary", "other"].includes(desc.gender)
+          ? desc.gender
+          : "female"
+      ) as CharacterData["gender"];
+      if (!desc.gender || desc.gender !== resolvedGender) {
+        console.warn(
+          `[StoryImage] Character ${char.name} (${char.id}): desc.gender=${JSON.stringify(desc.gender)}, resolved to "${resolvedGender}"`,
+        );
+      } else {
+        console.log(
+          `[StoryImage] Character ${char.name} (${char.id}): gender="${resolvedGender}"`,
+        );
+      }
+      characterDataMap.set(char.id, {
+        name: char.name,
+        gender: resolvedGender,
+        ethnicity: desc.ethnicity || "",
+        bodyType: desc.bodyType || "",
+        hairColor: desc.hairColor || "",
+        hairStyle: desc.hairStyle || "",
+        eyeColor: desc.eyeColor || "",
+        skinTone: desc.skinTone || "",
+        distinguishingFeatures: desc.distinguishingFeatures || "",
+        clothing: desc.clothing || "",
+        pose: desc.pose || "",
+        expression: desc.expression || "",
+        age: desc.age || "",
+      });
+    }
+  }
+  return characterDataMap;
+}
 
 // ── Types ──
 
@@ -112,7 +158,7 @@ async function fetchCharacterLora(
 // ── Main Pipeline ──
 
 /**
- * Build the V4 scene generation payload (Pony CyberRealistic).
+ * Build the V4 scene generation payload (Pony CyberRealistic Semi-Realistic).
  *
  * Returns a workflow + metadata ready for submitRunPodJob().
  * The caller is responsible for submitting to RunPod and storing the result.
