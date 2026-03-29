@@ -215,6 +215,7 @@ export default function CharacterApproval({
   onCharacterApproved,
 }: CharacterApprovalProps) {
   const isV3 = imageEngine === "flux_pulid";
+  const isPony = imageEngine === "pony_cyberreal";
   // Per-character state keyed by story_character id
   const [charStates, setCharStates] = useState<Record<string, CharState>>({});
   const pollTimers = useRef<Record<string, NodeJS.Timeout>>({});
@@ -1792,6 +1793,11 @@ export default function CharacterApproval({
                 </div>
 
                 {/* LoRA Training Section — hidden for V3 (no LoRA training needed) */}
+                {isPony && (
+                  <p className="text-xs text-amber-400/80 mt-2">
+                    Pony pipeline — LoRA must be trained on SDXL/Pony base model
+                  </p>
+                )}
                 {!isV3 && (
                   <LoraTrainingSection
                     storyCharId={ch.id}

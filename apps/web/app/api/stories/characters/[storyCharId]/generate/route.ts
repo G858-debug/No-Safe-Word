@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob, runNanoBanana } from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload, buildV3FaceGenerationPayload } from "@/lib/server/generate-character-image";
+import { buildPonyCharacterGenerationPayload } from "@/lib/server/pony-character-image";
 import type { Json } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
@@ -90,8 +91,66 @@ export async function POST(
     }
 
     const isV3 = seriesEngine === "flux_pulid";
+    const isPony = seriesEngine === "pony_cyberreal";
 
     console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} (engine: ${seriesEngine || 'default'})`);
+
+    // ── Pony CyberRealistic pipeline: face + body via RunPod/ComfyUI SDXL ──
+    if (isPony) {
+      const ponyPayload = buildPonyCharacterGenerationPayload({
+        character: {
+          id: character.id,
+          name: character.name,
+          description: desc,
+        },
+        imageType,
+        stage,
+        seed: customSeed,
+        customPrompt,
+      });
+
+      const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+      console.log(`[StoryPublisher] Pony ${stage} generation: ${ponyPayload.positivePrompt.substring(0, 100)}...`);
+
+      const { jobId } = await submitRunPodJob(ponyPayload.workflow, undefined, undefined, ponyEndpointId);
+
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: ponyPayload.positivePrompt,
+          negative_prompt: ponyPayload.negativePrompt,
+          settings: {
+            width: ponyPayload.width,
+            height: ponyPayload.height,
+            engine: "pony-cyberreal",
+            imageType,
+            stage,
+            seed: ponyPayload.seed,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      await supabase.from("generation_jobs").insert({
+        job_id: `runpod-${jobId}`,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+      });
+
+      console.log(`[StoryPublisher] Pony ${stage} job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
+
+      return NextResponse.json({
+        jobId: `runpod-${jobId}`,
+        imageId: imageRow.id,
+      });
+    }
 
     // V3 pipeline: face-only generation via Flux Krea text-to-image
     // Body generation is text-only in V3 — no body image generated

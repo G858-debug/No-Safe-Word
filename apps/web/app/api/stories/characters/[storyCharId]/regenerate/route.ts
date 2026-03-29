@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob, runNanoBanana } from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload } from "@/lib/server/generate-character-image";
+import { buildPonyCharacterGenerationPayload } from "@/lib/server/pony-character-image";
 import type { Json } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
@@ -52,7 +53,26 @@ export async function POST(
     const desc = character.description as Record<string, string>;
     const isMale = desc.gender === 'male';
 
-    console.log(`[StoryPublisher] Regenerating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name}`);
+    // Check series engine for Pony dispatch
+    const { data: seriesRow } = await (supabase as any)
+      .from("story_characters")
+      .select("series_id")
+      .eq("id", storyCharId)
+      .single() as { data: { series_id: string } | null };
+
+    let seriesEngine: string | null = null;
+    if (seriesRow) {
+      const { data: series } = await (supabase as any)
+        .from("story_series")
+        .select("image_engine")
+        .eq("id", seriesRow.series_id)
+        .single() as { data: { image_engine: string } | null };
+      seriesEngine = series?.image_engine || null;
+    }
+
+    const isPony = seriesEngine === "pony_cyberreal";
+
+    console.log(`[StoryPublisher] Regenerating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} (engine: ${seriesEngine || 'default'})`);
 
     // 3. Clean up old images from storage
     try {
@@ -88,7 +108,64 @@ export async function POST(
       console.warn("Failed to clean up old character images:", err);
     }
 
-    // 4. Build generation payload
+    // ── Pony CyberRealistic pipeline ──
+    if (isPony) {
+      const ponyPayload = buildPonyCharacterGenerationPayload({
+        character: {
+          id: character.id,
+          name: character.name,
+          description: desc,
+        },
+        imageType,
+        stage,
+        seed: (typeof customSeed === "number" && customSeed > 0) ? customSeed : undefined,
+        customPrompt: (typeof customPrompt === 'string' && customPrompt.trim().length > 0)
+          ? customPrompt.trim()
+          : undefined,
+      });
+
+      const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+      const { jobId } = await submitRunPodJob(ponyPayload.workflow, undefined, undefined, ponyEndpointId);
+
+      const { data: imageRow, error: imgError } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: ponyPayload.positivePrompt,
+          negative_prompt: ponyPayload.negativePrompt,
+          settings: {
+            width: ponyPayload.width,
+            height: ponyPayload.height,
+            engine: "pony-cyberreal",
+            imageType,
+            stage,
+            seed: ponyPayload.seed,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgError || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgError?.message}`);
+      }
+
+      await supabase.from("generation_jobs").insert({
+        job_id: `runpod-${jobId}`,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+      });
+
+      console.log(`[StoryPublisher] Pony ${stage} regeneration job: runpod-${jobId}, imageId: ${imageRow.id}`);
+
+      return NextResponse.json({
+        jobId: `runpod-${jobId}`,
+        imageId: imageRow.id,
+      });
+    }
+
+    // 4. Build generation payload (default pipeline)
     const payload = await buildCharacterGenerationPayload({
       character: {
         id: character.id,

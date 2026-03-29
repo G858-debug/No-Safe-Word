@@ -119,3 +119,15 @@ export {
   getPonyDimensions,
 } from './pony-prompt-builder';
 export type { PonyCharacterData } from './pony-prompt-builder';
+
+// Pony dataset generation for LoRA training
+export { buildPonyDatasetPrompts, buildPonyDatasetWorkflow } from './pony-dataset-generator';
+export type { PonyDatasetPrompt, PonyDatasetCharacter } from './pony-dataset-generator';
+
+// Pony LoRA validation
+export { validatePonyLora } from './pony-character-lora-validator';
+export type { PonyValidationResult } from './pony-character-lora-validator';
+
+// Pony LoRA training helpers
+export { getRecommendedTrainingConfig, getIdentityTagsToRemove } from './pony-lora-trainer';
+export type { PonyLoraTrainingConfig } from './pony-lora-trainer';
