@@ -105,6 +105,26 @@ def _nsw_patched_start(config):
     def _nsw_wrapped(job):
         job_input = job.get("input", {})
 
+        # File deletion mode: remove specified files from the volume
+        delete_files = job_input.get("nsw_delete_files")
+        if delete_files and isinstance(delete_files, list):
+            results = {}
+            for filepath in delete_files:
+                # Only allow deletion within /runpod-volume/models/
+                if not filepath.startswith("/runpod-volume/models/"):
+                    results[filepath] = "BLOCKED — only /runpod-volume/models/ allowed"
+                    continue
+                if _nsw_os.path.isfile(filepath):
+                    sz = _nsw_os.path.getsize(filepath) / (1024*1024)
+                    _nsw_os.remove(filepath)
+                    results[filepath] = f"DELETED ({sz:.1f} MB freed)"
+                    print(f"[NSW] Deleted: {filepath} ({sz:.1f} MB)")
+                else:
+                    results[filepath] = "NOT FOUND"
+            # If this is also a diagnostic request, fall through; otherwise return now
+            if not job_input.get("nsw_diagnostic"):
+                return results
+
         # Diagnostic mode: return file listings of model directories + ComfyUI node info
         if job_input.get("nsw_diagnostic"):
             diag = {}
