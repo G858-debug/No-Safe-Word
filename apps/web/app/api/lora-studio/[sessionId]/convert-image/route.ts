@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  buildKontextWorkflow,
+  buildPonyWorkflow,
   submitRunPodJob,
   imageUrlToBase64,
 } from '@no-safe-word/image-gen';
 import { supabase } from '@no-safe-word/story-engine';
 
 const ANIME_BUCKET = 'lora-anime-images';
-
-const CONVERSION_LORAS = [
-  { filename: 'flux_realism_lora.safetensors', strengthModel: 0.85, strengthClip: 0.85 },
-  { filename: 'flux-add-details.safetensors', strengthModel: 0.7, strengthClip: 0.7 },
-];
 
 function buildConversionPrompt(
   poseCategory: string | null,
@@ -95,16 +90,16 @@ export async function POST(
     img.angle_category,
   );
 
-  // Build the img2img ComfyUI workflow
-  const workflow = buildKontextWorkflow({
-    type: 'img2img',
+  // Build the Pony SDXL ComfyUI workflow
+  // TODO: Phase 3 — review whether LoRA Studio conversion still makes sense for Pony pipeline
+  const negativePrompt = 'score_4, score_3, score_2, score_1, lowres, bad anatomy, bad hands, text, error, missing fingers, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, source_pony';
+  const workflow = buildPonyWorkflow({
     positivePrompt: prompt,
+    negativePrompt,
     width: 768,
     height: 1152,
     seed: Math.floor(Math.random() * 2_147_483_647),
-    filenamePrefix: `lora-converted/${sessionId}/${imageId}`,
-    loras: CONVERSION_LORAS,
-    denoiseStrength: 0.72,
+    loras: [],
   });
 
   // Submit to RunPod (async)

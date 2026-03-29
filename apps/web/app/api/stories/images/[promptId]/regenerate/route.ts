@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
-import { buildSceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image";
-import { generateV2Scene, buildRefUrlMap } from "@/lib/server/generate-scene-image-v2";
-import { buildV3SceneGenerationPayload } from "@/lib/server/generate-scene-image-v3";
-import { buildV4SceneGenerationPayload } from "@/lib/server/generate-scene-image-v4";
+import { buildV4SceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image-v4";
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
@@ -69,233 +66,47 @@ export async function POST(
     }
 
     const seriesId = post.series_id;
-
-    // Check series image engine for V1/V2 dispatch
-    const { data: series } = await (supabase as any)
-      .from("story_series")
-      .select("image_engine, inpaint_prompt, sfw_inpaint_prompt")
-      .eq("id", seriesId)
-      .single() as { data: { image_engine: string; inpaint_prompt: string | null; sfw_inpaint_prompt: string | null } | null };
-
-    const isV2 = series?.image_engine === "nb2_uncanny";
-    const isV3 = series?.image_engine === "flux_pulid";
-    const isV4 = series?.image_engine === "pony_cyberreal";
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
-    if (isV4) {
-      // ── V4 Pipeline: Pony CyberRealistic via RunPod (single-step, no face swap) ──
-      const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
-        (id): id is string => id !== null,
-      );
-      const characterDataMap = await fetchCharacterDataMap(characterIds);
-
-      const result = await buildV4SceneGenerationPayload({
-        imgPrompt,
-        seriesId,
-        characterDataMap,
-        seed,
-      });
-
-      console.log(
-        `[V4][${promptId}] Regenerate: mode=${result.mode}, dims=${result.width}x${result.height}, loras=${result.characterLoraDownloads.length}`,
-      );
-
-      const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
-
-      const { jobId: runpodJobId } = await submitRunPodJob(
-        result.workflow,
-        result.images.length > 0 ? result.images : undefined,
-        result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
-        ponyEndpointId,
-      );
-
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: imgPrompt.character_id || null,
-          prompt: result.assembledPrompt,
-          negative_prompt: result.negativePrompt,
-          settings: {
-            width: result.width,
-            height: result.height,
-            steps: 30,
-            cfg: 6.5,
-            seed: result.seed,
-            engine: "runpod-v4-pony-cyberreal",
-          },
-          mode: result.mode,
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      await supabase.from("generation_jobs").insert({
-        job_id: `runpod-${runpodJobId}`,
-        image_id: imageRow.id,
-        status: "pending",
-        cost: 0,
-      });
-
-      await supabase
-        .from("story_image_prompts")
-        .update({ image_id: imageRow.id })
-        .eq("id", promptId);
-
-      return NextResponse.json({
-        jobId: `runpod-${runpodJobId}`,
-        imageId: imageRow.id,
-      });
-    }
-
-    if (isV3) {
-      // ── V3 Pipeline: Flux Krea + PuLID (no character LoRAs) ──
-      const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
-        (id): id is string => id !== null,
-      );
-      const characterDataMap = await fetchCharacterDataMap(characterIds);
-
-      const result = await buildV3SceneGenerationPayload({
-        imgPrompt,
-        seriesId,
-        characterDataMap,
-        seed,
-      });
-
-      console.log(
-        `[V3][${promptId}] Regenerate: type=${result.effectiveKontextType}, sfw=${result.mode === "sfw"}, dims=${result.width}x${result.height}, refs=${result.images.length}`,
-      );
-
-      // Submit to RunPod (no character LoRA downloads in V3)
-      const { jobId: kontextJobId } = await submitRunPodJob(
-        result.workflow,
-        result.images.length > 0 ? result.images : undefined,
-      );
-
-      const { data: imageRow, error: imgError } = await supabase
-        .from("images")
-        .insert({
-          character_id: imgPrompt.character_id || null,
-          prompt: result.assembledPrompt,
-          negative_prompt: "",
-          settings: {
-            width: result.width,
-            height: result.height,
-            steps: 20,
-            cfg: 3.5,
-            seed: result.seed,
-            engine: "runpod-v3-flux-pulid",
-            workflowType: result.effectiveKontextType,
-          },
-          mode: result.mode,
-        })
-        .select("id")
-        .single();
-
-      if (imgError || !imageRow) {
-        throw new Error(`Failed to create image record: ${imgError?.message}`);
-      }
-
-      await supabase.from("generation_jobs").insert({
-        job_id: `runpod-${kontextJobId}`,
-        image_id: imageRow.id,
-        status: "pending",
-        cost: 0,
-      });
-
-      await supabase
-        .from("story_image_prompts")
-        .update({ image_id: imageRow.id })
-        .eq("id", promptId);
-
-      return NextResponse.json({
-        jobId: `runpod-${kontextJobId}`,
-        imageId: imageRow.id,
-      });
-    }
-
-    if (isV2) {
-      // ── V2 Pipeline: NB2 → Florence-2/SAM2 → UnCanny ──
-      const refUrlMap = await buildRefUrlMap(seriesId);
-      const inpaintPrompt = series?.inpaint_prompt || "bare skin, natural body, photorealistic skin texture";
-
-      const v2Result = await generateV2Scene({
-        imgPrompt,
-        seriesId,
-        refUrlMap,
-        seed,
-        inpaintPrompt,
-      });
-
-      await (supabase as any)
-        .from("story_image_prompts")
-        .update({
-          image_id: v2Result.enhancedImageId,
-          sfw_image_id: v2Result.nb2ImageId,
-        })
-        .eq("id", promptId);
-
-      return NextResponse.json({
-        jobId: v2Result.runpodJobId,
-        imageId: v2Result.enhancedImageId,
-      });
-    }
-
-    // ── V1 Pipeline: Flux Kontext + PuLID + Character LoRAs ──
-
-    // 5. Fetch character data for identity prefix + LoRA selection
+    // 5. Build V4 Pony CyberRealistic payload
     const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
       (id): id is string => id !== null,
     );
     const characterDataMap = await fetchCharacterDataMap(characterIds);
 
-    // 6. Build full generation payload via shared pipeline
-    const body = await request.json().catch(() => ({}));
-    const diagnosticFlags = body?.diagnosticFlags ?? undefined;
-
-    if (diagnosticFlags) {
-      const disabledFlags = Object.entries(diagnosticFlags).filter(([, v]) => !v).map(([k]) => k);
-      if (disabledFlags.length > 0) {
-        console.log(`[Kontext][${promptId}] Diagnostic mode — disabled: ${disabledFlags.join(', ')}`);
-      }
-    }
-
-    const result = await buildSceneGenerationPayload({
+    const result = await buildV4SceneGenerationPayload({
       imgPrompt,
       seriesId,
       characterDataMap,
       seed,
-      diagnosticFlags,
     });
 
     console.log(
-      `[Kontext][${promptId}] Regenerate: type=${result.effectiveKontextType}, sfw=${result.mode === "sfw"}, dims=${result.width}x${result.height}, refs=${result.images.length}`,
+      `[V4][${promptId}] Regenerate: mode=${result.mode}, dims=${result.width}x${result.height}, loras=${result.characterLoraDownloads.length}`,
     );
 
-    // 7. Submit to RunPod
-    const { jobId: kontextJobId } = await submitRunPodJob(
+    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+
+    const { jobId: runpodJobId } = await submitRunPodJob(
       result.workflow,
       result.images.length > 0 ? result.images : undefined,
       result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
+      ponyEndpointId,
     );
 
-    // 8. Create image record
     const { data: imageRow, error: imgError } = await supabase
       .from("images")
       .insert({
         character_id: imgPrompt.character_id || null,
         prompt: result.assembledPrompt,
-        negative_prompt: "",
+        negative_prompt: result.negativePrompt,
         settings: {
           width: result.width,
           height: result.height,
-          steps: 20,
-          cfg: result.effectiveKontextType === "portrait" ? 1.0 : 2.5,
+          steps: 30,
+          cfg: 6.5,
           seed: result.seed,
-          engine: "runpod-kontext",
-          workflowType: result.effectiveKontextType,
+          engine: "runpod-v4-pony-cyberreal",
         },
         mode: result.mode,
       })
@@ -307,7 +118,7 @@ export async function POST(
     }
 
     await supabase.from("generation_jobs").insert({
-      job_id: `runpod-${kontextJobId}`,
+      job_id: `runpod-${runpodJobId}`,
       image_id: imageRow.id,
       status: "pending",
       cost: 0,
@@ -319,7 +130,7 @@ export async function POST(
       .eq("id", promptId);
 
     return NextResponse.json({
-      jobId: `runpod-${kontextJobId}`,
+      jobId: `runpod-${runpodJobId}`,
       imageId: imageRow.id,
     });
   } catch (err) {
