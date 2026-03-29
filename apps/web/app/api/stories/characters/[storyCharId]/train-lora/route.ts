@@ -92,7 +92,24 @@ export async function POST(
       }
     }
 
-    // 5. Get the approved image URLs
+    // 5. Check series image engine for Pony dispatch
+    const { data: seriesRow } = await (supabase as any)
+      .from("story_characters")
+      .select("series_id")
+      .eq("id", storyCharId)
+      .single() as { data: { series_id: string } | null };
+
+    let imageEngine: string | null = null;
+    if (seriesRow?.series_id) {
+      const { data: series } = await (supabase as any)
+        .from("story_series")
+        .select("image_engine")
+        .eq("id", seriesRow.series_id)
+        .single() as { data: { image_engine: string } | null };
+      imageEngine = series?.image_engine || null;
+    }
+
+    // 6. Get the approved image URLs
     const character = storyChar.characters as { id: string; name: string; description: Record<string, unknown> };
     const desc = character.description as Record<string, string>;
 
@@ -122,7 +139,7 @@ export async function POST(
         filename: "",
         storage_path: "",
         trigger_word: "tok",
-        base_model: "sdxl",
+        base_model: imageEngine === "pony_cyberreal" ? "pony_cyberreal" : "sdxl",
         training_provider: "replicate",
         training_params: {},
         dataset_size: 0,
@@ -163,6 +180,7 @@ export async function POST(
       portraitSeed: storyChar.approved_seed || 42,
       structuredData,
       pipelineType: "story_character",
+      imageEngine: imageEngine === "pony_cyberreal" ? "pony_cyberreal" : undefined,
     };
 
     // 8. Fire-and-forget — start the pipeline in the background

@@ -1,8 +1,8 @@
 /**
- * Pony V6 / CyberRealistic Pony dataset generator for character LoRA training.
+ * Pony V6 / CyberRealistic Pony Semi-Realistic dataset generator for character LoRA training.
  *
  * Unlike the Flux pipeline (which splits between Nano Banana face + SDXL body),
- * the Pony pipeline generates ALL training images with CyberRealistic Pony v17
+ * the Pony pipeline generates ALL training images with CyberRealistic Pony Semi-Realistic v4.5
  * via RunPod/ComfyUI. This ensures the training data matches the inference model.
  *
  * Produces 20-25 images across categories:
@@ -14,7 +14,14 @@
 
 import { buildPonyWorkflow } from './pony-workflow-builder';
 import { buildPonyQualityPrefix, buildPonyNegativePrompt } from './pony-prompt-builder';
-import type { ImageCategory } from './character-lora/types';
+import { submitRunPodJob, waitForRunPodResult } from './runpod';
+import type {
+  ImageCategory,
+  CharacterInput,
+  DatasetGenerationResult,
+  LoraDatasetImageRow,
+  VariationType,
+} from './character-lora/types';
 
 export interface PonyDatasetPrompt {
   id: string;
@@ -201,4 +208,138 @@ export function buildPonyDatasetWorkflow(opts: {
   });
 
   return { workflow, positivePrompt, negativePrompt };
+}
+
+// ── Orchestration ──
+
+interface PonyDatasetDeps {
+  supabase: {
+    from: (table: string) => any;
+    storage: { from: (bucket: string) => any };
+  };
+}
+
+/**
+ * Generate a full training dataset using CyberRealistic Pony Semi-Realistic.
+ * Produces 24 images across face, head-shoulders, full-body, and waist-up categories.
+ * Returns the same DatasetGenerationResult shape as the Flux generator.
+ */
+export async function generatePonyDataset(
+  character: CharacterInput,
+  loraId: string,
+  deps: PonyDatasetDeps,
+): Promise<DatasetGenerationResult> {
+  const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+  if (!ponyEndpointId) {
+    throw new Error('Missing RUNPOD_PONY_ENDPOINT_ID — required for Pony dataset generation');
+  }
+
+  const ponyChar: PonyDatasetCharacter = {
+    name: character.characterName,
+    gender: character.structuredData.gender as 'male' | 'female',
+    ethnicity: character.structuredData.ethnicity,
+    skinTone: character.structuredData.skinTone,
+    hairColor: character.structuredData.hairColor,
+    hairStyle: character.structuredData.hairStyle,
+    eyeColor: character.structuredData.eyeColor,
+    bodyType: character.structuredData.bodyType,
+    age: character.structuredData.age,
+    distinguishingFeatures: character.structuredData.distinguishingFeatures || '',
+  };
+
+  const prompts = buildPonyDatasetPrompts(ponyChar);
+  const imageRecords: LoraDatasetImageRow[] = [];
+  const failedPrompts: DatasetGenerationResult['failedPrompts'] = [];
+
+  console.log(`[Pony Dataset] Generating ${prompts.length} images for ${character.characterName}...`);
+
+  for (let i = 0; i < prompts.length; i++) {
+    const prompt = prompts[i];
+    const seed = (character.portraitSeed || 42) + i;
+
+    try {
+      console.log(`[Pony Dataset] ${i + 1}/${prompts.length}: ${prompt.description} (${prompt.category})`);
+
+      const { workflow, positivePrompt } = buildPonyDatasetWorkflow({
+        character: ponyChar,
+        prompt,
+        seed,
+      });
+
+      const { jobId } = await submitRunPodJob(workflow, undefined, undefined, ponyEndpointId);
+      const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, ponyEndpointId);
+
+      // Upload to Supabase storage
+      const imageBuffer = Buffer.from(imageBase64, 'base64');
+      const storagePath = `lora-datasets/${loraId}/${prompt.id}.png`;
+
+      const { error: uploadError } = await deps.supabase.storage
+        .from('story-images')
+        .upload(storagePath, imageBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        throw new Error(`Upload failed for ${prompt.id}: ${uploadError.message}`);
+      }
+
+      const { data: urlData } = deps.supabase.storage
+        .from('story-images')
+        .getPublicUrl(storagePath);
+
+      // Insert DB record
+      const { data: record, error: insertError } = await deps.supabase
+        .from('lora_dataset_images')
+        .insert({
+          lora_id: loraId,
+          image_url: urlData.publicUrl,
+          storage_path: storagePath,
+          prompt_template: prompt.id,
+          variation_type: inferVariationType(prompt),
+          source: 'comfyui' as const,
+          category: prompt.category,
+          eval_status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        throw new Error(`Failed to create dataset record: ${insertError.message}`);
+      }
+
+      imageRecords.push(record as LoraDatasetImageRow);
+
+      // Small delay between requests
+      if (i < prompts.length - 1) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch (err) {
+      console.error(`[Pony Dataset] Failed ${prompt.id}: ${err}`);
+      failedPrompts.push({
+        promptTemplate: prompt.id,
+        variationType: inferVariationType(prompt),
+        source: 'comfyui' as const,
+      });
+    }
+  }
+
+  console.log(
+    `[Pony Dataset] Complete: ${imageRecords.length} images generated, ${failedPrompts.length} failed`,
+  );
+
+  return {
+    totalGenerated: imageRecords.length,
+    imageRecords,
+    failedPrompts,
+  };
+}
+
+function inferVariationType(prompt: PonyDatasetPrompt): VariationType {
+  const desc = prompt.description.toLowerCase();
+  if (desc.includes('angle') || desc.includes('profile') || desc.includes('3/4')) return 'angle';
+  if (desc.includes('laugh') || desc.includes('smile') || desc.includes('confident') || desc.includes('vulnerable') || desc.includes('joy')) return 'expression';
+  if (desc.includes('blazer') || desc.includes('casual') || desc.includes('dress') || desc.includes('print')) return 'clothing';
+  if (desc.includes('studio') || desc.includes('golden') || desc.includes('dramatic') || desc.includes('outdoor')) return 'lighting';
+  return 'framing';
 }

@@ -1,6 +1,6 @@
 /**
  * Pony LoRA validation — generates test images with the trained LoRA
- * using CyberRealistic Pony and evaluates face consistency via Claude Vision.
+ * using CyberRealistic Pony Semi-Realistic and evaluates face consistency via Claude Vision.
  *
  * Mirrors the Flux validator (character-lora/validator.ts) but uses
  * buildPonyWorkflow instead of buildKontextWorkflow.
@@ -11,6 +11,7 @@ import { buildPonyWorkflow } from './pony-workflow-builder';
 import { buildPonyQualityPrefix, buildPonyNegativePrompt } from './pony-prompt-builder';
 import { submitRunPodJob, waitForRunPodResult } from './runpod';
 import { anthropicCreateWithRetry } from './anthropic-retry';
+import type { ValidationResult } from './character-lora/types';
 
 const VALIDATION_MODEL = 'claude-sonnet-4-6';
 
@@ -64,6 +65,21 @@ export interface PonyValidationResult {
     faceScore: number;
     passed: boolean;
   }>;
+}
+
+/**
+ * Adapt PonyValidationResult to the pipeline's ValidationResult shape.
+ */
+export function toPipelineValidationResult(pony: PonyValidationResult): ValidationResult {
+  return {
+    overallPass: pony.passed,
+    averageFaceScore: pony.averageFaceScore,
+    testResults: pony.testResults.map((r) => ({
+      prompt: r.tags,
+      faceScore: r.faceScore,
+      passed: r.passed,
+    })),
+  };
 }
 
 /**

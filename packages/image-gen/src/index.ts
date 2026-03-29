@@ -105,7 +105,7 @@ export type {
 export { runFlux2Pro, rewriteNsfwPromptForFlux2Pro } from './replicate-flux2-pro';
 export type { Flux2ProConfig, Flux2ProResult } from './replicate-flux2-pro';
 
-// V4 Pony Pipeline exports (CyberRealistic Pony on RunPod/ComfyUI)
+// V4 Pony Pipeline exports (CyberRealistic Pony Semi-Realistic on RunPod/ComfyUI)
 export { buildPonyWorkflow } from './pony-workflow-builder';
 export type { PonyWorkflowConfig } from './pony-workflow-builder';
 export { PONY_LORA_REGISTRY, getPonyLoras, selectPonyResources } from './pony-lora-registry';
@@ -121,11 +121,11 @@ export {
 export type { PonyCharacterData } from './pony-prompt-builder';
 
 // Pony dataset generation for LoRA training
-export { buildPonyDatasetPrompts, buildPonyDatasetWorkflow } from './pony-dataset-generator';
+export { buildPonyDatasetPrompts, buildPonyDatasetWorkflow, generatePonyDataset } from './pony-dataset-generator';
 export type { PonyDatasetPrompt, PonyDatasetCharacter } from './pony-dataset-generator';
 
 // Pony LoRA validation
-export { validatePonyLora } from './pony-character-lora-validator';
+export { validatePonyLora, toPipelineValidationResult } from './pony-character-lora-validator';
 export type { PonyValidationResult } from './pony-character-lora-validator';
 
 // Pony LoRA training helpers

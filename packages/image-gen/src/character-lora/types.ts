@@ -170,6 +170,9 @@ export interface CharacterInput {
   structuredData: CharacterStructured;
   /** Pipeline type controls dataset size: author_persona gets more images */
   pipelineType: PipelineType;
+  /** Image engine — controls dataset generation and validation routing.
+   *  undefined = default Flux/Kontext pipeline. */
+  imageEngine?: 'pony_cyberreal';
 }
 
 // ── Stage Results ───────────────────────────────────────────────

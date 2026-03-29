@@ -27,6 +27,8 @@ import { generateCaptions } from './caption-generator';
 import { trainLora, getRetryParams, getReplicateUsername, ensureReplicateModel, DatasetPreparationError } from './trainer';
 import { validateLora } from './validator';
 import { deployLora } from './deployer';
+import { generatePonyDataset } from '../pony-dataset-generator';
+import { validatePonyLora, toPipelineValidationResult } from '../pony-character-lora-validator';
 import Replicate from 'replicate';
 
 type CompletedStage = 'dataset' | 'evaluation' | 'captioning' | 'training' | 'validation';
@@ -118,7 +120,9 @@ export async function runPipeline(
     } else {
       // Fresh start — generate + evaluate
       await updateStatus(loraId, 'generating_dataset', deps);
-      const datasetResult = await generateDataset(character, loraId, deps);
+      const datasetResult = character.imageEngine === 'pony_cyberreal'
+        ? await generatePonyDataset(character, loraId, deps)
+        : await generateDataset(character, loraId, deps);
 
       if (datasetResult.totalGenerated === 0) {
         throw new Error('Dataset generation produced no images');
@@ -323,13 +327,24 @@ export async function resumePipeline(
 
           await updateStatus(loraId, 'validating', deps);
 
-          const validationResult = await validateLora(
-            character,
-            tempFilename,
-            loraUrl,
-            loraId,
-            deps,
-          );
+          const validationResult = character.imageEngine === 'pony_cyberreal'
+            ? toPipelineValidationResult(
+                await validatePonyLora(
+                  character,
+                  tempFilename,
+                  loraUrl,
+                  DEFAULT_TRAINING_PARAMS.trigger_word,
+                  loraId,
+                  deps,
+                ),
+              )
+            : await validateLora(
+                character,
+                tempFilename,
+                loraUrl,
+                loraId,
+                deps,
+              );
 
           if (validationResult.overallPass) {
             trainingSuccess = true;
