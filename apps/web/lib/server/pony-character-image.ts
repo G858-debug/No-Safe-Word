@@ -1,7 +1,7 @@
 /**
  * Character approval image generation for the Pony V4 (pony_cyberreal) pipeline.
  *
- * Generates face portraits and full-body shots using CyberRealistic Pony v17
+ * Generates face portraits and full-body shots using CyberRealistic Pony Semi-Realistic v4.5
  * via RunPod/ComfyUI. Both stages produce actual images (unlike V3 where body
  * is text-only).
  *
@@ -28,26 +28,95 @@ export interface PonyCharacterPayload {
   seed: number;
 }
 
-/** Case-insensitive check for Black/African ethnicity */
-function isBlackAfrican(ethnicity: string): boolean {
-  const lower = ethnicity.toLowerCase();
-  return lower.includes("black") || lower.includes("african") || lower.includes("dark");
-}
+// ── Skin Tone Mapper ──
 
 /**
- * Build a booru-style face portrait prompt for CyberRealistic Pony.
+ * Convert a character's described skin tone to Pony-compatible booru tags.
+ *
+ * Maps faithfully to the character's ACTUAL specified tone.
+ * A light-skinned Black character gets light-brown skin tags, not dark.
+ * African identity comes from facial features and hair texture, not just skin darkness.
+ */
+function mapSkinToneToPonyTags(skinTone: string, gender: string): string[] {
+  if (!skinTone) return [];
+  const tone = skinTone.toLowerCase();
+  const genderSuffix = gender === "male" ? "male" : "female";
+
+  if (tone.includes("ebony") || tone.includes("very dark") || tone.includes("deep dark")) {
+    return [`dark-skinned ${genderSuffix}`, "dark skin"];
+  }
+  if (tone.includes("dark chocolate") || tone.includes("dark brown") || tone.includes("deep brown")) {
+    return [`dark-skinned ${genderSuffix}`, "dark skin", "brown skin"];
+  }
+  if (tone.includes("chocolate") || tone.includes("brown") || tone.includes("warm brown") || tone.includes("medium-dark")) {
+    return [`dark-skinned ${genderSuffix}`, "brown skin"];
+  }
+  if (tone.includes("caramel") || tone.includes("tawny") || tone.includes("honey") || tone.includes("medium")) {
+    return ["brown skin", `dark-skinned ${genderSuffix}`];
+  }
+  if (tone.includes("light brown") || tone.includes("golden") || tone.includes("amber") || tone.includes("light")) {
+    return ["brown skin"];
+  }
+  if (tone.includes("olive") || tone.includes("tan")) {
+    return ["tan", "brown skin"];
+  }
+  if (tone.includes("fair") || tone.includes("pale")) {
+    return ["pale skin"];
+  }
+
+  // Default: use dark-skinned as fallback
+  return [`dark-skinned ${genderSuffix}`, "brown skin"];
+}
+
+// ── Ethnicity Mapper ──
+
+/**
+ * Convert ethnicity to booru tags representing African facial features and hair texture.
+ *
+ * These tags work ALONGSIDE skin tone (handled separately) to produce
+ * characters that are recognisably Black African across all skin tones.
+ * A light-skinned Black woman should still have African facial features.
+ */
+function mapEthnicityToPonyTags(ethnicity: string): string[] {
+  if (!ethnicity) return [];
+  const eth = ethnicity.toLowerCase();
+
+  if (
+    eth.includes("african") || eth.includes("black") ||
+    eth.includes("zulu") || eth.includes("xhosa") || eth.includes("ndebele") ||
+    eth.includes("sotho") || eth.includes("tswana") || eth.includes("venda") ||
+    eth.includes("tsonga") || eth.includes("pedi") || eth.includes("swazi")
+  ) {
+    return ["full lips", "broad nose", "afro-textured hair"];
+  }
+
+  if (eth.includes("coloured") || eth.includes("mixed") || eth.includes("cape malay")) {
+    return ["full lips"];
+  }
+
+  if (eth.includes("indian") || eth.includes("south asian")) {
+    return ["brown skin"];
+  }
+
+  return [];
+}
+
+// ── Prompt Builders ──
+
+/**
+ * Build a booru-style face portrait prompt for CyberRealistic Pony Semi-Realistic.
  */
 function buildPonyFacePrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
-  // Skin/ethnicity
-  if (charData.skinTone) tags.push(`${charData.skinTone} skin`);
-  if (charData.ethnicity && isBlackAfrican(charData.ethnicity)) {
-    tags.push("dark-skinned female", "african");
-  }
+  // Skin tone + ethnicity via mappers, deduplicated
+  const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
+  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity);
+  const identityTags = skinTags.concat(ethnicityTags.filter((t) => !skinTags.includes(t)));
+  tags.push(...identityTags);
 
-  // Hair
+  // Hair (texture comes from ethnicity mapper, style from charData)
   if (charData.hairColor) tags.push(`${charData.hairColor.toLowerCase()} hair`);
   if (charData.hairStyle) tags.push(charData.hairStyle.toLowerCase());
 
@@ -74,24 +143,23 @@ function buildPonyFacePrompt(charData: CharacterData): string {
     "soft studio lighting",
     "clean background",
     "shallow depth of field",
-    "photorealistic",
   );
 
   return tags.join(", ");
 }
 
 /**
- * Build a booru-style full-body prompt for CyberRealistic Pony.
+ * Build a booru-style full-body prompt for CyberRealistic Pony Semi-Realistic.
  */
 function buildPonyBodyPrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
-  // Skin/ethnicity
-  if (charData.skinTone) tags.push(`${charData.skinTone} skin`);
-  if (charData.ethnicity && isBlackAfrican(charData.ethnicity)) {
-    tags.push("dark-skinned female", "african");
-  }
+  // Skin tone + ethnicity via mappers, deduplicated
+  const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
+  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity);
+  const identityTags = skinTags.concat(ethnicityTags.filter((t) => !skinTags.includes(t)));
+  tags.push(...identityTags);
 
   // Hair
   if (charData.hairColor) tags.push(`${charData.hairColor.toLowerCase()} hair`);
@@ -100,16 +168,9 @@ function buildPonyBodyPrompt(charData: CharacterData): string {
   // Eyes
   if (charData.eyeColor) tags.push(`${charData.eyeColor.toLowerCase()} eyes`);
 
-  // Body type (critical for Pony — booru tags give great body control)
+  // Body type (female characters get detailed body tags)
   if (charData.gender === "female") {
-    tags.push(
-      "curvy",
-      "wide hips",
-      "large breasts",
-      "thick thighs",
-      "narrow waist",
-      "voluptuous",
-    );
+    tags.push("wide hips", "large breasts", "thick thighs", "narrow waist", "voluptuous");
     if (charData.bodyType) tags.push(charData.bodyType.toLowerCase());
   } else {
     if (charData.bodyType) tags.push(charData.bodyType.toLowerCase());
@@ -149,14 +210,13 @@ function buildPonyBodyPrompt(charData: CharacterData): string {
     "head to toe",
     "warm studio lighting",
     "clean background",
-    "photorealistic",
   );
 
   return tags.join(", ");
 }
 
 /**
- * Build the character generation payload for CyberRealistic Pony.
+ * Build the character generation payload for CyberRealistic Pony Semi-Realistic.
  */
 export function buildPonyCharacterGenerationPayload(opts: {
   character: { id: string; name: string; description: Record<string, string> };
@@ -201,10 +261,9 @@ export function buildPonyCharacterGenerationPayload(opts: {
   const positivePrompt = `${qualityPrefix}, ${sceneTags}`;
   const negativePrompt = buildPonyNegativePrompt(mode);
 
-  // Dimensions
-  const isFace = stage === "face";
-  const width = isFace ? 832 : 832;
-  const height = isFace ? 1216 : 1216; // Portrait orientation for both
+  // Dimensions — portrait orientation for both
+  const width = 832;
+  const height = 1216;
 
   const workflow = buildPonyWorkflow({
     positivePrompt,

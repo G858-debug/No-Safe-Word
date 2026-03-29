@@ -23,6 +23,7 @@ export function buildPonyQualityPrefix(mode: 'sfw' | 'nsfw'): string {
 export function buildPonyNegativePrompt(mode: 'sfw' | 'nsfw'): string {
   const base = [
     'score_4, score_3, score_2, score_1',
+    'source_pony',
     'worst quality, low quality, normal quality',
     'bad anatomy, bad hands, bad feet, extra limbs, missing limbs',
     'extra fingers, fewer digits, fused fingers',
@@ -128,7 +129,7 @@ export function buildPonyPositivePrompt(opts: {
 
 // ── Prose → Booru Tag Conversion ──
 
-const BOORU_SYSTEM_PROMPT = `You are a booru tag specialist for Stable Diffusion XL / Pony Diffusion V6 / CyberRealistic Pony.
+const BOORU_SYSTEM_PROMPT = `You are a booru tag specialist for Stable Diffusion XL / Pony Diffusion V6 / CyberRealistic Pony Semi-Realistic.
 Convert the user's scene description into comma-separated booru-style tags.
 
 Rules:
