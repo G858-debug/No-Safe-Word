@@ -7,8 +7,8 @@
 
 set -euo pipefail
 
-REGISTRY="ghcr.io/no-safe-word"
-IMAGE_NAME="kohya-trainer"
+REGISTRY="ghcr.io/g858-debug"
+IMAGE_NAME="nsw-kohya-trainer"
 TAG="${1:-latest}"
 FULL_TAG="${REGISTRY}/${IMAGE_NAME}:${TAG}"
 

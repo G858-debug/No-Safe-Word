@@ -27,7 +27,7 @@ const TRAINING_GPU_TYPES = [
 export interface TrainingPodConfig {
   /** Human-readable pod name (e.g., "kohya-train-lindiwe_nsw-1234567890") */
   name: string;
-  /** Docker image to run (e.g., "ghcr.io/no-safe-word/kohya-trainer:latest") */
+  /** Docker image to run (e.g., "ghcr.io/g858-debug/nsw-kohya-trainer:latest") */
   dockerImage: string;
   /** Environment variables passed to the container */
   env: Record<string, string>;
