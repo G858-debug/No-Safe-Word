@@ -137,7 +137,7 @@ if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
     [ -f "$ckpt_file" ] || continue
     ckpt_name=$(basename "$ckpt_file")
     case "$ckpt_name" in
-      realvisxlV50_v50Bakedvae.safetensors|bigasp_v20.safetensors)
+      realvisxlV50_v50Bakedvae.safetensors|bigasp_v20.safetensors|cyberrealisticPony_v160.safetensors)
         ;; # keep
       *)
         echo "[NSW] Removing old checkpoint: $ckpt_name"
@@ -254,12 +254,40 @@ except Exception as e:
 fi
 
 # ---- Pony / CyberRealistic checkpoint (for V4 pony_cyberreal pipeline) ----
-# NOTE: This checkpoint is only needed on the Pony RunPod endpoint (RUNPOD_PONY_ENDPOINT_ID).
-# It is NOT used by the Flux/Kontext endpoint. If running a shared Docker image,
-# this download can be conditional on an env var.
-# CivitAI model page: https://civitai.com/models/443821/cyberrealistic-pony
-# Replace the version ID below with the actual CivitAI version ID for v17.
-# download_model "https://civitai.com/api/download/models/XXXXXXX?token=${CIVITAI_API_KEY}" "checkpoints" "cyberrealisticPony_v17.safetensors"
+# CivitAI model 443821, version 2581228 (v17.0)
+# https://civitai.com/models/443821/cyberrealistic-pony
+PONY_CKPT_DEST="${VOLUME_MODELS}/checkpoints/cyberrealisticPony_v160.safetensors"
+if [ -f "$PONY_CKPT_DEST" ]; then
+    echo "[NSW] ✓ cyberrealisticPony_v160.safetensors (exists)"
+elif [ -d "${VOLUME_MODELS}/checkpoints" ]; then
+    PONY_URL="https://civitai.com/api/download/models/2581228"
+    [ -n "${CIVITAI_API_KEY:-}" ] && PONY_URL="${PONY_URL}?token=${CIVITAI_API_KEY}"
+    echo "[NSW] Downloading cyberrealisticPony_v160.safetensors (~6GB)..."
+    python3 -c "
+import urllib.request, sys, shutil
+try:
+    req = urllib.request.Request('${PONY_URL}')
+    req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
+    resp = urllib.request.urlopen(req, timeout=900)
+    with open('${PONY_CKPT_DEST}.tmp', 'wb') as f:
+        shutil.copyfileobj(resp, f)
+    resp.close()
+except Exception as e:
+    print(f'Error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 && mv "${PONY_CKPT_DEST}.tmp" "${PONY_CKPT_DEST}" || \
+    { rm -f "${PONY_CKPT_DEST}.tmp"; echo "[NSW] ERROR: cyberrealisticPony_v17 download failed"; }
+    # Sanity check: SDXL checkpoints are typically 6-7GB
+    if [ -f "$PONY_CKPT_DEST" ]; then
+        PONY_SIZE=$(stat -c%s "${PONY_CKPT_DEST}" 2>/dev/null || stat -f%z "${PONY_CKPT_DEST}" 2>/dev/null || echo 0)
+        if [ "$PONY_SIZE" -lt 2000000000 ]; then
+            echo "[NSW] ERROR: cyberrealisticPony_v17 file too small (${PONY_SIZE} bytes) — likely a redirect/error page"
+            rm -f "${PONY_CKPT_DEST}"
+        else
+            echo "[NSW] ✓ cyberrealisticPony_v160.safetensors downloaded ($(( PONY_SIZE / 1024 / 1024 ))MB)"
+        fi
+    fi
+fi
 
 # Kontext LoRAs — downloaded at runtime (small files, < 200MB each).
 # Larger models (Flux Kontext UNET ~8GB, CLIP encoders, VAE) live on the

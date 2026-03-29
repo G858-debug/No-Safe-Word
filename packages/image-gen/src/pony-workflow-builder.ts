@@ -10,7 +10,7 @@
  *   → EmptyLatentImage → KSampler → VAEDecode → SaveImage
  */
 
-const PONY_CHECKPOINT = 'cyberrealisticPony_v17.safetensors';
+const PONY_CHECKPOINT = 'cyberrealisticPony_v160.safetensors';
 const PONY_DEFAULT_CFG = 6.5;
 const PONY_DEFAULT_STEPS = 30;
 const PONY_DEFAULT_SAMPLER = 'dpmpp_2m_sde';
