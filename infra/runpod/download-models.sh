@@ -182,11 +182,12 @@ KEEP_LORAS=(
   "nsw-curves-body.safetensors"
   "refcontrol_pose.safetensors"
   "flux-cinematic-finisher.safetensors"
-  "melanin-XL.safetensors"
-  "curvy-body-sdxl.safetensors"
-  "sdxl-skin-tone-xl.safetensors"
-  "sdxl-skin-realism.safetensors"
-  "skin-realism-sdxl.safetensors"
+  "pony-ebony-skin.safetensors"
+  "pony-skin-tone-slider.safetensors"
+  "pony-hourglass-body.safetensors"
+  "perfect-breasts-v2.safetensors"
+  "pony-realism-stable-yogi.safetensors"
+  "pony-detail-slider.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
@@ -301,37 +302,35 @@ fi
 # BodyLicious FLUX — exaggerated feminine curves (CivitAI model 238105, version 979680)
 download_to_volume "979680" "bodylicious-flux.safetensors"
 
-# Melanin Girlfriend mix — SDXL dark skin enhancement for character face generation
-# CivitAI model 390634, version 435833. Trigger word: melanin
-download_to_volume "435833" "melanin-XL.safetensors"
+# ---- Retired SDXL LoRAs (replaced by Pony-native alternatives below) ----
+# melanin-XL.safetensors, curvy-body-sdxl.safetensors, feminine-body-proportions-sdxl.safetensors,
+# sdxl-skin-tone-xl.safetensors, sdxl-skin-realism.safetensors — all removed.
 
-# Perfect Breasts v2 — SDXL LoRA for breast shape/fullness in body portraits
-# CivitAI model 1621732, version 1987668. Strength: 0.70 | No trigger word.
+# ---- Pony Scene Generation LoRAs ----
+
+# Ebony Pony (dark skin) — CivitAI model 513296, version 595483
+# Trigger: aiebonyskin | Strength: 0.6 | Pony-native
+download_to_volume "595483" "pony-ebony-skin.safetensors"
+
+# Skin Tone Slider PonyXL v1.2 BETA — CivitAI model 421744, version 1106176
+# Trigger: none (slider LoRA) | Strength: 3.0 | Pony-native
+download_to_volume "1106176" "pony-skin-tone-slider.safetensors"
+
+# Hourglass Body Shape v2 Pony — CivitAI model 129130, version 928762
+# Trigger: hourglass body shape | Strength: 0.85 | Pony-native
+download_to_volume "928762" "pony-hourglass-body.safetensors"
+
+# Perfect Breasts v2 — CivitAI model 1621732, version 1987668
+# Already on volume; re-download only if missing.
 download_to_volume "1987668" "perfect-breasts-v2.safetensors"
 
-# Feminine Body Proportions — Pony v1.1 (SDXL-compatible) wider hips, narrow shoulders, hourglass shape
-# CivitAI model 494824, version 659091. Strength: 0.80 | No trigger word.
-download_to_volume "659091" "feminine-body-proportions-sdxl.safetensors"
+# Realism LoRA Stable Yogi v3.0_lite — CivitAI model 1098033, version 2074888
+# Trigger: none | Strength: 0.7 | Pony-native
+download_to_volume "2074888" "pony-realism-stable-yogi.safetensors"
 
-# Curvy Body SDXL — curvaceous body shape for character body generation
-# Already present on volume as curvy-body-sdxl.safetensors (pre-installed).
-# Replaces venus-body-xl which was removed from CivitAI.
-
-# Skin Tone Style XL — CivitAI model 562884 v627184
-# Trigger: dark chocolate skin tone style | Strength: 0.6 | Size: ~435MB
-# Use for Black/African characters in SDXL face + body generation
-download_to_volume "627184" "sdxl-skin-tone-xl.safetensors"
-
-# Skin Realism SDXL — CivitAI model 248951 v340833
-# Trigger: Detailed natural skin and blemishes without-makeup and acne
-# Strength: 0.4 (keep below 0.5 — higher weights skew younger) | Size: ~218MB
-# Use for all characters in SDXL face + body generation
-# Clean up old filename variant if it exists on the volume
-if [ -f "${VOLUME_LORAS_DIR}/skin-realism-sdxl.safetensors" ] && [ ! -f "${VOLUME_LORAS_DIR}/sdxl-skin-realism.safetensors" ]; then
-    mv "${VOLUME_LORAS_DIR}/skin-realism-sdxl.safetensors" "${VOLUME_LORAS_DIR}/sdxl-skin-realism.safetensors"
-    echo "[NSW] Renamed skin-realism-sdxl.safetensors → sdxl-skin-realism.safetensors"
-fi
-download_to_volume "340833" "sdxl-skin-realism.safetensors"
+# Detail Slider PonyXL v1.4 — CivitAI model 402462, version 712947
+# Trigger: none (slider LoRA) | Strength: 3.0 | Pony-native
+download_to_volume "712947" "pony-detail-slider.safetensors"
 
 # NSW Curves — custom-trained body LoRA (Replicate tar → safetensors extraction)
 NSW_CURVES_DEST="${VOLUME_LORAS_DIR}/nsw-curves-body.safetensors"
