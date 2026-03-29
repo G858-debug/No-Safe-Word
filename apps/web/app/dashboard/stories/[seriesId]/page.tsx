@@ -522,7 +522,6 @@ export default function SeriesDetailPage() {
             posts={posts}
             imageUrls={data.image_urls}
             allCharactersApproved={allReadyForImages}
-            imageEngine={series.image_engine}
           />
           {allCharsApproved && !allLorasDeployed && loraCheckDone && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">

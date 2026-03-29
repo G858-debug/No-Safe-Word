@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
@@ -38,26 +37,16 @@ import {
 
 interface DiagnosticFlags {
   characterLora: boolean;
-  pulid: boolean;
-  identityPrefix: boolean;
   promptEnhancement: boolean;
-  femaleEnhancement: boolean;
-  realismLora: boolean;
   styleLoras: boolean;
   bodyShapeLora: boolean;
-  pulidMask: boolean;
 }
 
 const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
   characterLora: true,
-  pulid: true,
-  identityPrefix: true,
   promptEnhancement: true,
-  femaleEnhancement: true,
-  realismLora: true,
   styleLoras: true,
   bodyShapeLora: true,
-  pulidMask: true,
 };
 
 const DIAGNOSTIC_TOGGLE_CONFIG: Array<{
@@ -66,14 +55,9 @@ const DIAGNOSTIC_TOGGLE_CONFIG: Array<{
   group: string;
 }> = [
   { key: "characterLora", label: "Character LoRA", group: "Character Identity" },
-  { key: "pulid", label: "PuLID Face", group: "Character Identity" },
-  { key: "identityPrefix", label: "Identity Prefix", group: "Character Identity" },
   { key: "promptEnhancement", label: "AI Enhancement", group: "Prompt Processing" },
-  { key: "femaleEnhancement", label: "Female Enhancement", group: "Prompt Processing" },
-  { key: "realismLora", label: "Realism LoRA", group: "LoRA Stack" },
   { key: "styleLoras", label: "Style LoRAs", group: "LoRA Stack" },
   { key: "bodyShapeLora", label: "Body Shape LoRA", group: "LoRA Stack" },
-  { key: "pulidMask", label: "PuLID Face Mask", group: "Character Identity" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -105,7 +89,6 @@ interface ImageGenerationProps {
   posts: PostWithPrompts[];
   imageUrls: Record<string, string>;
   allCharactersApproved: boolean;
-  imageEngine?: string;
 }
 
 interface PromptState {
@@ -178,7 +161,6 @@ export default function ImageGeneration({
   posts,
   imageUrls,
   allCharactersApproved,
-  imageEngine,
 }: ImageGenerationProps) {
   // ---- State ----
   const [promptStates, setPromptStates] = useState<
@@ -402,13 +384,8 @@ export default function ImageGeneration({
         if (postId) body.post_id = postId;
         if (regenerate) body.regenerate = true;
 
-        const batchEndpoint = imageEngine === "flux_pulid"
-          ? `/api/stories/${seriesId}/generate-images-v3`
-          : imageEngine === "flux2_pro"
-          ? `/api/stories/${seriesId}/generate-images-v4`
-          : `/api/stories/${seriesId}/generate-images`;
         const res = await fetch(
-          batchEndpoint,
+          `/api/stories/${seriesId}/generate-images-v4`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -423,27 +400,16 @@ export default function ImageGeneration({
 
         const data = await res.json();
 
-        if (data.results) {
-          // V4 (Flux 2 Pro): images already generated and stored — no polling
-          for (const result of data.results) {
-            updatePrompt(result.promptId, {
-              status: "generated",
-              imageUrl: result.storedUrl || null,
-              error: null,
-            });
+        // Async RunPod jobs — poll for completion
+        for (const job of data.jobs || []) {
+          if (job.jobId) {
+            promptToJobIdRef.current.set(job.promptId, job.jobId);
           }
-        } else {
-          // V1/V2/V3: async RunPod jobs — poll for completion
-          for (const job of data.jobs || []) {
-            if (job.jobId) {
-              promptToJobIdRef.current.set(job.promptId, job.jobId);
-            }
-            updatePrompt(job.promptId, {
-              status: "generating",
-              error: null,
-            });
-            pollingIdsRef.current.add(job.promptId);
-          }
+          updatePrompt(job.promptId, {
+            status: "generating",
+            error: null,
+          });
+          pollingIdsRef.current.add(job.promptId);
         }
 
         // Mark any failures
@@ -463,7 +429,7 @@ export default function ImageGeneration({
         setBatchGenerating(false);
       }
     },
-    [seriesId, imageEngine, updatePrompt]
+    [seriesId, updatePrompt]
   );
 
   const handleRegenerate = useCallback(
@@ -510,21 +476,11 @@ export default function ImageGeneration({
 
         const data = await res.json();
 
-        if (data.completed) {
-          // V4 (Flux 2 Pro): image already generated and stored — no polling needed
-          updatePrompt(promptId, {
-            status: "generated",
-            imageUrl: data.imageUrl || null,
-            error: null,
-          });
-        } else {
-          // V1/V2/V3: async RunPod job — poll for completion
-          if (data.jobId) {
-            promptToJobIdRef.current.set(promptId, data.jobId);
-          }
-          pollingIdsRef.current.add(promptId);
-          setIsPolling(true);
+        if (data.jobId) {
+          promptToJobIdRef.current.set(promptId, data.jobId);
         }
+        pollingIdsRef.current.add(promptId);
+        setIsPolling(true);
       } catch (err) {
         updatePrompt(promptId, {
           status: "failed",
