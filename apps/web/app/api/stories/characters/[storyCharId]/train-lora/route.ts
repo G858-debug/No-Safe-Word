@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-// TODO: Phase 3 — implement Pony LoRA training pipeline orchestrator
-// import { runPipeline, getPipelineProgress } from "@no-safe-word/image-gen/server/pony-character-lora";
+import { runPonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/train-lora
@@ -194,10 +193,10 @@ export async function POST(
     };
 
     // 8. Fire-and-forget — start the pipeline in the background
-    // TODO: Phase 3 — implement Pony LoRA training pipeline and call it here
-    console.log(`[LoRA API] Triggering LoRA pipeline for ${character.name} (loraId: ${loraRecord.id})`);
-    console.warn(`[LoRA API] Pipeline orchestrator not yet implemented for Pony — record created but training not started`);
-    void characterInput; // suppress unused warning
+    console.log(`[LoRA API] Triggering Pony LoRA pipeline for ${character.name} (loraId: ${loraRecord.id})`);
+    void runPonyPipeline(characterInput, loraRecord.id, { supabase }).catch((err) => {
+      console.error(`[LoRA API] Pony pipeline background error:`, err);
+    });
 
     // 9. Update story_characters to link the LoRA
     await supabase

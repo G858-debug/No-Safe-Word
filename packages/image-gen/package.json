@@ -6,11 +6,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./server/character-lora": "./src/character-lora/pipeline.ts",
-    "./server/character-lora/dataset-generator": "./src/character-lora/dataset-generator.ts",
-    "./server/character-lora/quality-evaluator": "./src/character-lora/quality-evaluator.ts",
-    "./server/character-lora/dataset-prompts": "./src/character-lora/dataset-prompts.ts",
     "./runpod": "./src/runpod.ts",
+    "./runpod-pods": "./src/runpod-pods.ts",
+    "./server/pony-lora-trainer": "./src/pony-lora-trainer.ts",
     "./server/pony-character-lora/training-image-evaluator": "./src/pony-character-lora/training-image-evaluator.ts",
     "./server/pony-character-lora/training-caption-builder": "./src/pony-character-lora/training-caption-builder.ts"
   },

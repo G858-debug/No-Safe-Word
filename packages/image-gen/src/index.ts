@@ -65,6 +65,12 @@ export type { PonyDatasetPrompt, PonyDatasetCharacter } from './pony-dataset-gen
 export { validatePonyLora, toPipelineValidationResult } from './pony-character-lora-validator';
 export type { PonyValidationResult } from './pony-character-lora-validator';
 
-// Pony LoRA training helpers
+// Pony LoRA training pipeline + helpers
 export { getRecommendedTrainingConfig, getIdentityTagsToRemove } from './pony-lora-trainer';
 export type { PonyLoraTrainingConfig } from './pony-lora-trainer';
+// Pipeline orchestrator is server-only (uses archiver, streams) — import directly:
+//   import { runPonyPipeline, resumePonyPipeline, completePonyPipeline } from '@no-safe-word/image-gen/server/pony-lora-trainer'
+
+// RunPod Pod API (batch GPU jobs — LoRA training)
+export { createTrainingPod, getTrainingPodStatus, terminateTrainingPod } from './runpod-pods';
+export type { TrainingPodConfig, PodStatus, PodDesiredStatus } from './runpod-pods';
