@@ -27,6 +27,80 @@ interface LoraProgress {
   };
 }
 
+// ── Default prompt builder (mirrors server-side pony-character-image.ts) ──
+
+function buildDefaultPrompt(desc: Record<string, string>, stage: "face" | "body"): string {
+  const gender = desc.gender || "female";
+  const genderTag = gender === "male" ? "1boy" : "1girl";
+  const tags: string[] = [genderTag];
+
+  // Skin tone
+  if (desc.skinTone) {
+    const genderSuffix = gender === "male" ? "male" : "female";
+    tags.push(`dark-skinned ${genderSuffix}`, "brown skin");
+  }
+
+  // Ethnicity features
+  const eth = (desc.ethnicity || "").toLowerCase();
+  if (eth.includes("african") || eth.includes("black")) {
+    tags.push("full lips", "broad nose");
+    const shortMale = gender === "male" && desc.hairStyle &&
+      ["fade", "buzz", "crew", "shaved", "close crop", "taper", "waves"].some(s => desc.hairStyle.toLowerCase().includes(s));
+    if (!shortMale) tags.push("afro-textured hair");
+  }
+
+  // Hair
+  if (desc.hairColor) tags.push(`${desc.hairColor.toLowerCase()} hair`);
+  if (desc.hairStyle) tags.push(desc.hairStyle.toLowerCase());
+
+  // Eyes
+  if (desc.eyeColor) tags.push(`${desc.eyeColor.toLowerCase()} eyes`);
+
+  // Body (full-body only)
+  if (stage === "body") {
+    if (gender === "female") {
+      tags.push("wide hips", "large breasts", "thick thighs", "narrow waist", "voluptuous");
+    }
+    if (desc.bodyType) tags.push(desc.bodyType.toLowerCase());
+  }
+
+  // Age
+  if (desc.age) tags.push(`${desc.age} years old`);
+
+  // Distinguishing features
+  if (desc.distinguishingFeatures) tags.push(desc.distinguishingFeatures.toLowerCase());
+
+  // Composition
+  if (stage === "face") {
+    if (gender === "male") {
+      tags.push("solo male", "male focus", "masculine", "handsome", "sharp jawline",
+        "looking at viewer", "portrait", "head and shoulders", "face focus",
+        "soft studio lighting", "clean background", "shallow depth of field");
+    } else {
+      tags.push("solo female", "looking at viewer", "slight smile",
+        "beautiful face", "detailed eyes", "portrait", "head and shoulders", "face focus",
+        "soft studio lighting", "clean background", "shallow depth of field");
+    }
+  } else {
+    // Clothing
+    if (gender === "female") {
+      tags.push("fitted mini skirt", "strappy crop top", "high heels", "fully clothed");
+    } else {
+      tags.push("fitted henley shirt", "jeans", "casual clothing", "fully clothed");
+    }
+    if (gender === "male") {
+      tags.push("solo male", "male focus", "masculine",
+        "standing", "confident pose", "looking at viewer",
+        "full body", "head to toe", "warm studio lighting", "clean background");
+    } else {
+      tags.push("solo female", "standing", "confident pose", "looking at viewer",
+        "full body", "head to toe", "warm studio lighting", "clean background");
+    }
+  }
+
+  return tags.join(", ");
+}
+
 // ── Stage determination ──
 
 function getStage(char: CharacterFromAPI, lora: LoraProgress | null): Stage {
@@ -76,6 +150,15 @@ export function CharacterCard({ character, onUpdate }: Props) {
 
   const desc = character.characters.description as Record<string, string>;
   const name = character.characters.name;
+
+  // Pre-fill prompt with default for the current stage
+  const currentPortraitStage: "face" | "body" = character.approved ? "body" : "face";
+  useEffect(() => {
+    if (!prompt) {
+      setPrompt(buildDefaultPrompt(desc, currentPortraitStage));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPortraitStage]);
 
   // Fetch LoRA progress on mount
   useEffect(() => {
@@ -363,18 +446,16 @@ function PortraitStage({
       {/* Generation area */}
       {(needsPortrait || needsBody) && (
         <>
-          <p className="text-sm text-muted-foreground">
-            {needsPortrait
-              ? "Generate a face portrait to establish the character's identity."
-              : "Generate a full-body image to establish build and proportions."}
-          </p>
-
-          <Textarea
-            placeholder="Optional: custom prompt override (min 20 chars)"
-            value={prompt}
-            onChange={(e) => onPromptChange(e.target.value)}
-            className="min-h-[60px] text-sm"
-          />
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">
+              {needsPortrait ? "Face portrait prompt" : "Full-body prompt"} — edit before generating
+            </label>
+            <Textarea
+              value={prompt}
+              onChange={(e) => onPromptChange(e.target.value)}
+              className="min-h-[100px] text-xs font-mono leading-relaxed"
+            />
+          </div>
 
           {isGenerating ? (
             <div className="space-y-2">
