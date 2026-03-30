@@ -82,6 +82,7 @@ export default function CharacterApproval({ seriesId, onAllReady }: Props) {
         <CharacterCard
           key={char.id}
           character={char}
+          seriesId={seriesId}
           onUpdate={fetchCharacters}
         />
       ))}

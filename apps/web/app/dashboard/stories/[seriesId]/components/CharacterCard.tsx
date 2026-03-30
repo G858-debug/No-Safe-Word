@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -134,10 +135,11 @@ const STAGE_LABELS: Record<Stage, string> = {
 
 interface Props {
   character: CharacterFromAPI;
+  seriesId: string;
   onUpdate: () => void;
 }
 
-export function CharacterCard({ character, onUpdate }: Props) {
+export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [loraProgress, setLoraProgress] = useState<LoraProgress | null>(null);
   const [genJobId, setGenJobId] = useState<string | null>(null);
   const [genImageUrl, setGenImageUrl] = useState<string | null>(null);
@@ -373,6 +375,7 @@ export function CharacterCard({ character, onUpdate }: Props) {
         {currentStage === "dataset" && (
           <DatasetStage
             character={character}
+            seriesId={seriesId}
             loraProgress={loraProgress}
             onTrain={handleTrainLora}
             onResume={handleResumeTraining}
@@ -486,9 +489,10 @@ function PortraitStage({
 }
 
 function DatasetStage({
-  character, loraProgress, onTrain, onResume, isTraining, error,
+  character, seriesId, loraProgress, onTrain, onResume, isTraining, error,
 }: {
   character: CharacterFromAPI;
+  seriesId: string;
   loraProgress: LoraProgress | null;
   onTrain: () => void;
   onResume: () => void;
@@ -529,7 +533,7 @@ function DatasetStage({
         <div className="flex items-center gap-3">
           <p className="text-xs text-muted-foreground">This may take a few minutes.</p>
           <Button variant="ghost" size="sm" className="h-6 text-xs" asChild>
-            <a href={`dataset-approval/${character.id}`}>View images so far</a>
+            <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>View images so far</Link>
           </Button>
         </div>
       </div>
@@ -546,7 +550,7 @@ function DatasetStage({
         </p>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" asChild>
-            <a href={`dataset-approval/${character.id}`}>Review Dataset</a>
+            <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>Review Dataset</Link>
           </Button>
           <Button size="sm" onClick={onResume}>
             Continue Training
@@ -565,7 +569,7 @@ function DatasetStage({
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" asChild>
-            <a href={`dataset-approval/${character.id}`}>View Dataset Images</a>
+            <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>View Dataset Images</Link>
           </Button>
           <Button onClick={onTrain} variant="outline" size="sm">
             Retry Training
