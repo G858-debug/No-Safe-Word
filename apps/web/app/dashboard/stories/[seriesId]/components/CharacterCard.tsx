@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { CharacterFromAPI } from "./CharacterApproval";
@@ -150,14 +151,27 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [isTraining, setIsTraining] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const desc = character.characters.description as Record<string, string>;
+  const initialDesc = character.characters.description as Record<string, string>;
   const name = character.characters.name;
+
+  // Editable structured fields — initialized from DB, user can modify
+  const [editableDesc, setEditableDesc] = useState<Record<string, string>>({ ...initialDesc });
+
+  function updateField(key: string, value: string) {
+    setEditableDesc(prev => {
+      const updated = { ...prev, [key]: value };
+      // Auto-regenerate prompt from updated fields
+      const stage: "face" | "body" = character.approved ? "body" : "face";
+      setPrompt(buildDefaultPrompt(updated, stage));
+      return updated;
+    });
+  }
 
   // Pre-fill prompt with default for the current stage
   const currentPortraitStage: "face" | "body" = character.approved ? "body" : "face";
   useEffect(() => {
     if (!prompt) {
-      setPrompt(buildDefaultPrompt(desc, currentPortraitStage));
+      setPrompt(buildDefaultPrompt(editableDesc, currentPortraitStage));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPortraitStage]);
@@ -258,6 +272,20 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     if (!genImageId) return;
     setError(null);
     try {
+      // Save edited structured data back to the characters table
+      // so dataset generation uses the correct description
+      const descChanged = JSON.stringify(editableDesc) !== JSON.stringify(initialDesc);
+      if (descChanged) {
+        const charRes = await fetch(`/api/characters`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: character.characters.id, description: editableDesc }),
+        });
+        if (!charRes.ok) {
+          console.warn("Failed to save character description, continuing with approval");
+        }
+      }
+
       const res = await fetch(`/api/stories/characters/${character.id}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -322,8 +350,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          {desc.gender}, {desc.age}, {desc.ethnicity}
-          {desc.distinguishingFeatures ? ` — ${desc.distinguishingFeatures}` : ""}
+          {editableDesc.gender}, {editableDesc.age}, {editableDesc.ethnicity}
+          {editableDesc.distinguishingFeatures ? ` — ${editableDesc.distinguishingFeatures}` : ""}
         </p>
       </CardHeader>
       <CardContent>
@@ -360,6 +388,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         {currentStage === "portrait" && (
           <PortraitStage
             character={character}
+            editableDesc={editableDesc}
+            onFieldChange={updateField}
             imageUrl={genImageUrl || character.pending_image_url}
             imageId={genImageId || character.pending_image_id}
             isGenerating={isGenerating}
@@ -408,11 +438,24 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
 
 // ── Stage sub-components ──
 
+const EDITABLE_FIELDS: Array<{ key: string; label: string; face: boolean; body: boolean }> = [
+  { key: "hairStyle", label: "Hair Style", face: true, body: true },
+  { key: "hairColor", label: "Hair Color", face: true, body: true },
+  { key: "skinTone", label: "Skin Tone", face: true, body: true },
+  { key: "eyeColor", label: "Eye Color", face: true, body: false },
+  { key: "ethnicity", label: "Ethnicity", face: true, body: true },
+  { key: "bodyType", label: "Body Type", face: false, body: true },
+  { key: "age", label: "Age", face: true, body: true },
+  { key: "distinguishingFeatures", label: "Distinguishing Features", face: true, body: true },
+];
+
 function PortraitStage({
-  character, imageUrl, imageId, isGenerating, prompt, onPromptChange,
+  character, editableDesc, onFieldChange, imageUrl, imageId, isGenerating, prompt, onPromptChange,
   onGenerate, onApprove, approvedPortraitUrl, approvedBodyUrl,
 }: {
   character: CharacterFromAPI;
+  editableDesc: Record<string, string>;
+  onFieldChange: (key: string, value: string) => void;
   imageUrl: string | null;
   imageId: string | null;
   isGenerating: boolean;
@@ -427,6 +470,9 @@ function PortraitStage({
   const needsBody = character.approved && !character.approved_fullbody;
   const stageLabel = needsPortrait ? "face" : "body";
   const approveLabel = needsPortrait ? "portrait" : "fullBody";
+  const [showPrompt, setShowPrompt] = useState(false);
+
+  const relevantFields = EDITABLE_FIELDS.filter(f => needsPortrait ? f.face : f.body);
 
   return (
     <div className="space-y-4">
@@ -449,15 +495,37 @@ function PortraitStage({
       {/* Generation area */}
       {(needsPortrait || needsBody) && (
         <>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">
-              {needsPortrait ? "Face portrait prompt" : "Full-body prompt"} — edit before generating
-            </label>
-            <Textarea
-              value={prompt}
-              onChange={(e) => onPromptChange(e.target.value)}
-              className="min-h-[100px] text-xs font-mono leading-relaxed"
-            />
+          {/* Editable character fields */}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+            {relevantFields.map(({ key, label }) => (
+              <div key={key} className={key === "distinguishingFeatures" ? "col-span-2" : ""}>
+                <label className="text-[11px] text-muted-foreground mb-0.5 block">{label}</label>
+                <Input
+                  value={editableDesc[key] || ""}
+                  onChange={(e) => onFieldChange(key, e.target.value)}
+                  className="h-7 text-xs"
+                  disabled={isGenerating}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Collapsible prompt preview */}
+          <div>
+            <button
+              onClick={() => setShowPrompt(!showPrompt)}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {showPrompt ? "Hide generated prompt" : "Show generated prompt"}
+            </button>
+            {showPrompt && (
+              <Textarea
+                value={prompt}
+                onChange={(e) => onPromptChange(e.target.value)}
+                className="mt-1 min-h-[80px] text-[11px] font-mono leading-relaxed bg-muted/30"
+                disabled={isGenerating}
+              />
+            )}
           </div>
 
           {isGenerating ? (
