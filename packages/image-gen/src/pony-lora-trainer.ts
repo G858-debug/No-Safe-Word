@@ -12,8 +12,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import archiver from 'archiver';
 import { PassThrough } from 'stream';
 
-import { generatePonyDataset, buildPonyDatasetWorkflow } from './pony-dataset-generator';
-import type { PonyDatasetCharacter, PonyDatasetPrompt } from './pony-dataset-generator';
+import { generatePonyDataset } from './pony-dataset-generator';
+import type { PonyDatasetCharacter } from './pony-dataset-generator';
 import { buildPonyQualityPrefix, buildPonyNegativePrompt } from './pony-prompt-builder';
 import { buildPonyWorkflow } from './pony-workflow-builder';
 import { selectTrainingSet, type TrainingImageEvaluation } from './pony-character-lora/training-image-evaluator';
@@ -21,7 +21,7 @@ import { buildTrainingCaption, type CharacterIdentity } from './pony-character-l
 import { validatePonyLora, toPipelineValidationResult } from './pony-character-lora-validator';
 import { createTrainingPod, terminateTrainingPod } from './runpod-pods';
 import { anthropicCreateWithRetry } from './anthropic-retry';
-import { imageUrlToBase64 } from './runpod';
+import { imageUrlToBase64, submitRunPodJob, waitForRunPodResult } from './runpod';
 import type { CharacterInput, PipelineStatus, LoraDatasetImageRow } from './character-lora/types';
 import { PIPELINE_CONFIG } from './character-lora/types';
 
