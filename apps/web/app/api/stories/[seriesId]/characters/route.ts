@@ -17,7 +17,7 @@ export async function GET(
       `
       id, role, prose_description, approved, approved_image_id, approved_seed,
       approved_fullbody, approved_fullbody_image_id, approved_fullbody_seed,
-      face_url, body_prompt, body_prompt_status,
+      face_url, active_lora_id,
       characters:character_id (id, name, description)
 `
     )
