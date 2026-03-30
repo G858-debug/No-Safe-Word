@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import {
-  ALL_PROMPTS,
-  interpolateComfyUIPrompt,
-  adaptPromptForGender,
-} from "@no-safe-word/image-gen/server/character-lora/dataset-prompts";
-
 const MIN_PASSED_IMAGES = 20;
 
 // GET /api/stories/characters/[storyCharId]/dataset-images
@@ -22,8 +16,7 @@ export async function GET(
     const { data: storyChar, error: scError } = await (supabase as any)
       .from("story_characters")
       .select(`
-        character_id, active_lora_id,
-        characters ( description )
+        character_id, active_lora_id
       `)
       .eq("id", storyCharId)
       .single() as { data: any; error: any };
@@ -79,29 +72,7 @@ export async function GET(
       );
     }
 
-    // Resolve full prompt text from template IDs
-    const desc = (storyChar.characters as any)?.description as Record<string, string> | undefined;
-    const gender = desc?.gender || "female";
-    const promptMap = new Map<string, string>();
-    for (const p of ALL_PROMPTS) {
-      let resolved = p.prompt;
-      if (p.source === "comfyui" && desc) {
-        resolved = interpolateComfyUIPrompt(resolved, {
-          ethnicity: desc.ethnicity || "",
-          bodyType: desc.bodyType || "",
-          skinTone: desc.skinTone || "",
-          hairStyle: desc.hairStyle || "",
-          hairColor: desc.hairColor || "",
-        });
-      }
-      resolved = adaptPromptForGender(resolved, gender);
-      promptMap.set(p.id, resolved);
-    }
-
-    const allImages = (images || []).map((img: any) => ({
-      ...img,
-      resolvedPrompt: img.source === "sdxl-img2img" ? null : (promptMap.get(img.prompt_template) ?? null),
-    }));
+    const allImages = images || [];
 
     const stats = {
       total: allImages.length,

@@ -100,6 +100,7 @@ export async function POST(
     height: 1152,
     seed: Math.floor(Math.random() * 2_147_483_647),
     loras: [],
+    filenamePrefix: 'lora-studio-convert',
   });
 
   // Submit to RunPod (async)
