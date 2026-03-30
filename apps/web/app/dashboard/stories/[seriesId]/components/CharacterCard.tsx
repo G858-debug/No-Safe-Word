@@ -526,7 +526,12 @@ function DatasetStage({
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: status === "generating_dataset" ? "40%" : "70%" }} />
         </div>
-        <p className="text-xs text-muted-foreground">This may take a few minutes.</p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-muted-foreground">This may take a few minutes.</p>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" asChild>
+            <a href={`dataset-approval/${character.id}`}>View images so far</a>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -551,16 +556,21 @@ function DatasetStage({
     );
   }
 
-  // Failed — show error with retry
+  // Failed — show error with retry + view dataset
   if (status === "failed") {
     return (
       <div className="space-y-3">
         <div className="rounded-md bg-red-500/10 border border-red-500/30 p-3">
           <p className="text-sm text-red-400">{loraProgress?.progress?.error || "Training failed"}</p>
         </div>
-        <Button onClick={onTrain} variant="outline" size="sm">
-          Retry Training
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <a href={`dataset-approval/${character.id}`}>View Dataset Images</a>
+          </Button>
+          <Button onClick={onTrain} variant="outline" size="sm">
+            Retry Training
+          </Button>
+        </div>
       </div>
     );
   }
