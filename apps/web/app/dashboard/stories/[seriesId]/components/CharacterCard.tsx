@@ -628,18 +628,50 @@ function DatasetStage({
     );
   }
 
-  // Failed — show error with retry + view dataset
+  // Failed — show detailed status with actionable options
   if (status === "failed") {
+    const errMsg = loraProgress?.progress?.error || "Training failed";
+    // Parse "Only X images passed" from error message
+    const passedMatch = errMsg.match(/(\d+) images? passed/);
+    const neededMatch = errMsg.match(/need (\d+)/);
+    const passed = passedMatch ? parseInt(passedMatch[1]) : null;
+    const needed = neededMatch ? parseInt(neededMatch[1]) : 20;
+
     return (
       <div className="space-y-3">
-        <div className="rounded-md bg-red-500/10 border border-red-500/30 p-3">
-          <p className="text-sm text-red-400">{loraProgress?.progress?.error || "Training failed"}</p>
+        <div className="rounded-md bg-red-500/10 border border-red-500/30 p-3 space-y-2">
+          <p className="text-sm font-medium text-red-400">Dataset evaluation incomplete</p>
+          {passed !== null ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="h-2 flex-1 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-red-500 rounded-full"
+                    style={{ width: `${Math.min(100, (passed / needed) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs text-red-400 shrink-0">{passed}/{needed} passed</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {passed >= 15
+                  ? "Close to the target — review the dataset and approve good images manually, or retry to generate fresh ones."
+                  : "Most images failed quality checks. Try editing the character description (hair, features) and retry."}
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-red-400">{errMsg}</p>
+          )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>View Dataset Images</Link>
+            <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>
+              View Dataset ({passed ?? "?"} passed)
+            </Link>
           </Button>
-          <Button onClick={onTrain} variant="outline" size="sm">
+          <Button onClick={onResume} variant="outline" size="sm">
+            Continue with {passed ?? "?"} images
+          </Button>
+          <Button onClick={onTrain} size="sm">
             Retry Training
           </Button>
         </div>
