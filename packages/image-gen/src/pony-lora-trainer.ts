@@ -12,8 +12,10 @@ import Anthropic from '@anthropic-ai/sdk';
 import archiver from 'archiver';
 import { PassThrough } from 'stream';
 
-import { generatePonyDataset } from './pony-dataset-generator';
-import type { PonyDatasetCharacter } from './pony-dataset-generator';
+import { generatePonyDataset, buildPonyDatasetWorkflow } from './pony-dataset-generator';
+import type { PonyDatasetCharacter, PonyDatasetPrompt } from './pony-dataset-generator';
+import { buildPonyQualityPrefix, buildPonyNegativePrompt } from './pony-prompt-builder';
+import { buildPonyWorkflow } from './pony-workflow-builder';
 import { selectTrainingSet, type TrainingImageEvaluation } from './pony-character-lora/training-image-evaluator';
 import { buildTrainingCaption, type CharacterIdentity } from './pony-character-lora/training-caption-builder';
 import { validatePonyLora, toPipelineValidationResult } from './pony-character-lora-validator';
@@ -143,10 +145,33 @@ export async function runPonyPipeline(
     await setLoraStatus(loraId, 'evaluating', {}, deps);
     console.log(`[PonyPipeline] Stage 2: Evaluating dataset images...`);
 
-    const evaluations = await evaluateDatasetImages(loraId, character, deps);
-    const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(evaluations);
+    let evaluations = await evaluateDatasetImages(loraId, character, deps);
 
-    console.log(`[PonyPipeline] Evaluation: ${selected.length} selected, ${rejected.length} rejected`);
+    // Initial pass — mark passed/failed in DB
+    for (const eval_ of evaluations) {
+      const score = calculateSimpleScore(eval_);
+      const passed = score >= PIPELINE_CONFIG.minEvalScore;
+      await deps.supabase
+        .from('lora_dataset_images')
+        .update({ eval_status: passed ? 'passed' : 'failed' })
+        .eq('id', eval_.imageId);
+    }
+
+    const initialPassed = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+    console.log(`[PonyPipeline] Initial evaluation: ${initialPassed}/${evaluations.length} passed`);
+
+    // Retry failed images with improved prompts (up to 3 rounds)
+    if (initialPassed < PIPELINE_CONFIG.targetPassedImages) {
+      console.log(`[PonyPipeline] Need ${PIPELINE_CONFIG.targetPassedImages}, have ${initialPassed}. Retrying failed images with improved prompts...`);
+      const retryEvals = await retryFailedImages(loraId, character, deps);
+      evaluations = evaluations.concat(retryEvals);
+    }
+
+    // Final curation
+    const allPassingEvals = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore);
+    const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
+
+    console.log(`[PonyPipeline] Final: ${selected.length} selected, ${rejected.length} rejected (after retries)`);
     if (warnings.length > 0) {
       console.warn(`[PonyPipeline] Warnings: ${warnings.join('; ')}`);
     }
@@ -154,7 +179,7 @@ export async function runPonyPipeline(
       console.warn(`[PonyPipeline] Missing diversity: ${diversityCoverage.missing.join(', ')}`);
     }
 
-    // Update eval_status in the database for selected/rejected images
+    // Update eval_status for final selection
     const selectedIds = new Set(selected.map(e => e.imageId));
     const { data: allImages } = await deps.supabase
       .from('lora_dataset_images')
@@ -173,8 +198,8 @@ export async function runPonyPipeline(
 
     if (selected.length < PIPELINE_CONFIG.minPassedImages) {
       throw new Error(
-        `Only ${selected.length} images passed evaluation (need ${PIPELINE_CONFIG.minPassedImages}). ` +
-        `Generate more dataset images and retry.`
+        `Only ${selected.length} images passed evaluation after ${MAX_RETRY_ROUNDS} retry rounds (need ${PIPELINE_CONFIG.minPassedImages}). ` +
+        `Review the dataset and adjust character description, then retry.`
       );
     }
 
@@ -366,6 +391,7 @@ async function evaluateDatasetImages(
 
         // Update the DB record with eval results
         const score = calculateSimpleScore(evaluation);
+        const issues = (evaluation as any).issues || [];
         await deps.supabase
           .from('lora_dataset_images')
           .update({
@@ -375,7 +401,7 @@ async function evaluateDatasetImages(
               body_score: evaluation.quality.poseNatural,
               quality_score: score,
               verdict: score >= PIPELINE_CONFIG.minEvalScore ? 'PASS' : 'FAIL',
-              issues: [],
+              issues,
               proportions_realistic: evaluation.requirements.correctBodyProportions,
             },
           })
@@ -395,6 +421,216 @@ async function evaluateDatasetImages(
   }
 
   return evaluations;
+}
+
+// ── Retry failed images with improved prompts ──
+
+const MAX_RETRY_ROUNDS = 3;
+
+/**
+ * Retry failed dataset images by asking Claude to improve the prompt based on
+ * the evaluation feedback, then regenerating and re-evaluating. Up to 3 rounds.
+ */
+async function retryFailedImages(
+  loraId: string,
+  character: CharacterInput,
+  deps: PipelineDeps,
+): Promise<TrainingImageEvaluation[]> {
+  const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+  if (!ponyEndpointId) return [];
+
+  const anthropic = new Anthropic();
+  let referenceBase64: string | null = null;
+  try {
+    referenceBase64 = await imageUrlToBase64(character.approvedImageUrl);
+  } catch { /* ignore */ }
+
+  const newEvaluations: TrainingImageEvaluation[] = [];
+
+  for (let round = 1; round <= MAX_RETRY_ROUNDS; round++) {
+    // Fetch images that failed evaluation
+    const { data: failedImages } = await deps.supabase
+      .from('lora_dataset_images')
+      .select('*')
+      .eq('lora_id', loraId)
+      .eq('eval_status', 'failed');
+
+    if (!failedImages || failedImages.length === 0) {
+      console.log(`[PonyPipeline] Retry round ${round}: no failed images left`);
+      break;
+    }
+
+    // Check if we already have enough passing images
+    const { count: passedCount } = await deps.supabase
+      .from('lora_dataset_images')
+      .select('*', { count: 'exact', head: true })
+      .eq('lora_id', loraId)
+      .eq('eval_status', 'passed');
+
+    if ((passedCount || 0) >= PIPELINE_CONFIG.targetPassedImages) {
+      console.log(`[PonyPipeline] Retry round ${round}: already have ${passedCount} passed images, stopping`);
+      break;
+    }
+
+    console.log(`[PonyPipeline] Retry round ${round}/${MAX_RETRY_ROUNDS}: ${failedImages.length} failed images to retry`);
+
+    for (const failedImg of failedImages) {
+      const evalDetails = failedImg.eval_details as {
+        issues?: string[];
+        face_score?: number;
+        body_score?: number;
+        quality_score?: number;
+      } | null;
+
+      const issues = evalDetails?.issues || [];
+      if (issues.length === 0) continue; // No feedback to improve from
+
+      const originalPrompt = failedImg.prompt_template || '';
+
+      // Ask Claude to improve the prompt based on failure feedback
+      try {
+        const improvedPrompt = await improvePromptFromFeedback(
+          anthropic,
+          originalPrompt,
+          issues,
+          failedImg.category,
+          character,
+        );
+
+        if (!improvedPrompt || improvedPrompt === originalPrompt) continue;
+
+        console.log(`[PonyPipeline] Retry ${failedImg.id}: improved prompt for ${failedImg.category}`);
+
+        // Regenerate with improved prompt
+        const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+        const qualityPrefix = buildPonyQualityPrefix('sfw');
+        const negativePrompt = buildPonyNegativePrompt('sfw');
+        const positivePrompt = `${qualityPrefix}, ${improvedPrompt}`;
+
+        // Dimensions based on category
+        const dims = failedImg.category === 'face-closeup'
+          ? { width: 1024, height: 1024 }
+          : { width: 832, height: 1216 };
+
+        const workflow = buildPonyWorkflow({
+          positivePrompt,
+          negativePrompt,
+          ...dims,
+          seed,
+          filenamePrefix: `dataset_retry_${failedImg.id}`,
+        });
+
+        const { jobId } = await submitRunPodJob(workflow, undefined, undefined, ponyEndpointId);
+        const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, ponyEndpointId);
+
+        // Upload replacement image
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+        const storagePath = `lora-datasets/${loraId}/retry_${round}_${failedImg.id}.png`;
+
+        const { error: uploadError } = await deps.supabase.storage
+          .from('story-images')
+          .upload(storagePath, imageBuffer, { contentType: 'image/png', upsert: true });
+
+        if (uploadError) {
+          console.warn(`[PonyPipeline] Upload failed for retry: ${uploadError.message}`);
+          continue;
+        }
+
+        const { data: urlData } = deps.supabase.storage
+          .from('story-images')
+          .getPublicUrl(storagePath);
+
+        // Update the existing record with new image
+        await deps.supabase
+          .from('lora_dataset_images')
+          .update({
+            image_url: urlData.publicUrl,
+            storage_path: storagePath,
+            eval_status: 'pending',
+            eval_score: null,
+            eval_details: null,
+          })
+          .eq('id', failedImg.id);
+
+        // Re-evaluate the new image
+        const updatedImg = { ...failedImg, image_url: urlData.publicUrl };
+        const evaluation = await evaluateSingleImage(anthropic, updatedImg, referenceBase64, character);
+        const score = calculateSimpleScore(evaluation);
+        const newIssues = (evaluation as any).issues || [];
+
+        const passed = score >= PIPELINE_CONFIG.minEvalScore;
+        await deps.supabase
+          .from('lora_dataset_images')
+          .update({
+            eval_status: passed ? 'passed' : 'failed',
+            eval_score: score,
+            eval_details: {
+              face_score: evaluation.quality.expressionNatural,
+              body_score: evaluation.quality.poseNatural,
+              quality_score: score,
+              verdict: passed ? 'PASS' : 'FAIL',
+              issues: newIssues,
+              proportions_realistic: evaluation.requirements.correctBodyProportions,
+              reason: `Retry round ${round}: ${passed ? 'improved and passed' : 'still failing'}`,
+            },
+          })
+          .eq('id', failedImg.id);
+
+        if (passed) {
+          newEvaluations.push(evaluation);
+          console.log(`[PonyPipeline] Retry SUCCESS: ${failedImg.id} now scores ${score} (was ${failedImg.eval_score})`);
+        } else {
+          console.log(`[PonyPipeline] Retry round ${round}: ${failedImg.id} still failing (score ${score}, issues: ${newIssues.join(', ')})`);
+        }
+
+        // Small delay between retries
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (err) {
+        console.warn(`[PonyPipeline] Retry failed for ${failedImg.id}: ${err}`);
+      }
+    }
+  }
+
+  return newEvaluations;
+}
+
+/**
+ * Ask Claude to improve a booru-tag prompt based on evaluation feedback.
+ */
+async function improvePromptFromFeedback(
+  anthropic: Anthropic,
+  originalPrompt: string,
+  issues: string[],
+  category: string,
+  character: CharacterInput,
+): Promise<string | null> {
+  try {
+    const response = await anthropicCreateWithRetry(anthropic, {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 400,
+      messages: [{
+        role: 'user',
+        content: `You are improving a booru-style image generation prompt for a character LoRA training dataset.
+
+Character: ${character.structuredData.gender}, ${character.structuredData.ethnicity}, ${character.structuredData.age} years old, ${character.structuredData.skinTone} skin, ${character.structuredData.hairStyle} ${character.structuredData.hairColor} hair.
+Image category: ${category}
+
+Original prompt tags: ${originalPrompt}
+
+The generated image FAILED evaluation with these issues:
+${issues.map(i => `- ${i}`).join('\n')}
+
+Rewrite the prompt as improved comma-separated booru tags that fix these specific issues. Keep the same character identity and category (${category}). Add or modify tags to address each issue. Remove tags that may have caused problems.
+
+Output ONLY the improved comma-separated tags, nothing else.`,
+      }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    return text || null;
+  } catch {
+    return null;
+  }
 }
 
 function calculateSimpleScore(eval_: TrainingImageEvaluation): number {
@@ -463,7 +699,8 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     "expression": "neutral"|"smiling"|"serious"|"suggestive"|"other",
     "lighting": "daylight"|"warm-indoor"|"dramatic-side"|"low-light",
     "clothingState": "formal"|"casual"|"revealing"|"intimate"
-  }
+  },
+  "issues": ["list of specific problems, e.g. 'face not visible', 'wrong skin tone', 'extra limb on left side', 'blurry image', 'hair color wrong - shows brown instead of black'"]
 }`,
   });
 
