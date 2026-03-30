@@ -1,5 +1,5 @@
 /**
- * Download CyberRealistic Pony v17 checkpoint to the RunPod network volume.
+ * Download CyberRealistic Pony Semi-Realistic v4.5 checkpoint to the RunPod network volume.
  *
  * Creates a short-lived GPU pod with the network volume attached,
  * downloads the checkpoint, verifies it, then terminates the pod.
@@ -161,9 +161,9 @@ async function waitForPod(podId, timeoutMs = 300_000) {
   throw new Error(`Pod ${podId} did not start within ${timeoutMs / 1000}s`);
 }
 
-// CyberRealistic Pony v17 — CivitAI model 443821, version 2727742
-const PONY_VERSION_ID = "2727742";
-const PONY_FILENAME = "cyberrealisticPony_v17.safetensors";
+// CyberRealistic Pony Semi-Realistic v4.5 — CivitAI model 709404, version 2601141
+const PONY_VERSION_ID = "2601141";
+const PONY_FILENAME = "CyberRealistic_PonySemi_V4.5.safetensors";
 
 function buildDownloadScript() {
   return `#!/bin/bash
@@ -200,7 +200,7 @@ ls -la /workspace/models/checkpoints/
 }
 
 async function main() {
-  console.log("=== CyberRealistic Pony v17 Checkpoint Downloader ===\n");
+  console.log("=== CyberRealistic Pony Semi-Realistic v4.5 Checkpoint Downloader ===\n");
   console.log(`Target: ${PONY_FILENAME}`);
   console.log(`CivitAI version: ${PONY_VERSION_ID}`);
   console.log(`Volume: ${VOLUME_ID}\n`);

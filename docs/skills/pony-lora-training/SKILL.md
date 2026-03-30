@@ -1,403 +1,312 @@
-# Pony V6 / CyberRealistic Pony — Character LoRA Training Guide
+# Pony CyberRealistic Character LoRA Training — Best Practices
 
-> **When to read this skill:** Before generating training datasets, curating training images,
-> preparing captions, configuring training parameters, evaluating LoRA output, or debugging
-> character consistency issues in the `pony_cyberreal` (V4) image pipeline.
+## Purpose
 
----
+This document is the authoritative reference for training character identity LoRAs on the Pony V6 / CyberRealistic Pony SDXL pipeline. Every training parameter, dataset decision, and captioning rule documented here reflects tested community best practices adapted for our specific use case: **original fictional Black South African characters in a semi-realistic aesthetic**.
 
-## 1. Overview
-
-Character LoRAs are small model files (~50-150MB) that teach the base model to recognise a specific
-character's identity — face shape, skin tone, hair, body proportions, distinguishing features —
-via a trigger word. When the trigger word appears in a prompt, the LoRA activates and produces
-that character consistently.
-
-For No Safe Word, each story character gets their own LoRA trained on CyberRealistic Pony v17
-(Pony V6 SDXL variant). The LoRA is then loaded at inference time alongside the checkpoint.
-
-**Pipeline position:** Character design → Dataset generation → Curation → Captioning → Training → Approval → Scene generation.
+Claude Code MUST read this file before modifying any training-related code. If a parameter in the code contradicts this document, this document wins unless the user explicitly overrides.
 
 ---
 
-## 2. Training Dataset Generation
+## Our Use Case — What Makes It Different
 
-### 2.1 Quantity and Quality Rules
+Most LoRA training guides assume you're training on an existing character with readily available reference images (anime screenshots, celebrity photos). Our situation is different:
 
-- Generate **40-60 candidate images** per character using CyberRealistic Pony with detailed booru tags
-- Curate down to **15-20 final training images**
-- **Quality over quantity** — 15 excellent images outperform 50 mediocre ones
-- Using more than ~25 images can decrease reproducibility and introduce unwanted variation
-- All training images should be **stylistically consistent** — same checkpoint, same general quality level
-- Do NOT mix photorealistic and anime-style images in one training set
+1. **Original characters** — no reference images exist. We generate the training dataset with the same model we'll later use the LoRA on. This creates a chicken-and-egg dynamic: the dataset must be internally consistent enough to teach a clear identity, generated solely from text descriptions.
 
-### 2.2 Required Diversity
+2. **Characters with specific skin tones** — Our characters span a range of skin tones (light-brown, medium-brown, dark-brown, deep ebony). Pony V6 will drift toward its training data average if the LoRA doesn't firmly anchor the character's specific skin tone. This matters for any skin tone — a light-skinned character can drift lighter just as a dark-skinned character can drift lighter. The LoRA must lock in exactly what's in the training images.
 
-The training set MUST include variety across these dimensions:
+3. **Semi-realistic aesthetic** — CyberRealistic Pony sits between photorealism and anime. Training images must match this aesthetic. Photorealistic training images will push the LoRA toward realism; anime training images will pull it toward stylisation. Consistency matters.
 
-**Angles (minimum 4 of these):**
-- Front-facing (looking at viewer)
-- Three-quarter view (turned ~45°)
-- Side profile
-- Looking over shoulder
-- Slight high angle (looking up at viewer)
-- Slight low angle (looking down)
+4. **Body identity matters** — unlike typical face-only LoRAs, our characters have specific body types (curvaceous, full breasts, defined waist, round hips). The LoRA must capture body proportions alongside facial identity.
 
-**Framing (minimum 3 of these):**
-- Close-up / portrait (head and shoulders)
-- Upper body / bust shot
-- Medium shot (waist up)
-- Full body
+5. **Both SFW and NSFW usage** — the trained LoRA will be used for SFW Facebook images and NSFW website images. It must be flexible enough for both, without baking in clothing or nudity.
 
-**Expressions (minimum 3 of these):**
-- Neutral / resting face
-- Smiling / warm
-- Serious / intense
-- Suggestive / seductive (for NSFW capability)
+---
 
-**Lighting (minimum 2 of these):**
-- Well-lit / daylight
-- Warm indoor lighting
-- Dramatic side-lighting
-- Low light / evening
+## Dataset Preparation
 
-**Clothing states (minimum 2 of these):**
-- Dressed / casual
-- Dressed / formal or work attire
-- Revealing but clothed (for SFW boundary)
-- Intimate / minimal clothing (for NSFW capability)
+### Image Count
 
-### 2.3 What NOT to Include
+- **Target: 15–20 curated images** for the final training set
+- Generate 40–60 candidates, then curate down
+- More images is NOT better — 20 high-quality, consistent images outperform 50 inconsistent ones
+- Quality and consistency always beat quantity
 
-- Images with anatomical errors (extra fingers, distorted limbs)
-- Images where the face is obscured, heavily shadowed, or at extreme angles (back of head)
-- Images where skin tone is inconsistent with the character design
-- Images with busy, distracting backgrounds that compete with the character
-- Images where body proportions deviate significantly from the character spec
-- Images that are blurry, artifacted, or low quality
-- Multiple characters in one image (training images should be solo)
+### Image Requirements
 
-### 2.4 Generation Prompt Template
+**Resolution:**
+- Minimum 1024×1024 (SDXL native)
+- Kohya's bucketing handles mixed aspect ratios, but keeping images at consistent resolutions reduces training noise
+- Recommended: generate all training images at 1024×1024 square for simplicity
 
-When generating candidate training images, use this tag structure:
+**Content variety — what to include:**
+- 4–5 face close-ups (different angles: front, 3/4 left, 3/4 right, slight up, slight down)
+- 3–4 upper body shots (different poses, different clothing)
+- 3–4 full body shots (standing, sitting, different outfits)
+- 2–3 expression variations (smiling, serious, laughing, contemplative)
+- 2–3 lighting variations (warm indoor, cool outdoor, dramatic shadow)
+
+**Content variety — what to AVOID:**
+- No other people in the frame (even partially visible — cropped hands, background faces)
+- No text, watermarks, or UI elements
+- No extreme poses that distort proportions
+- No images where the character looks significantly different from others (consistency is king)
+- No very dark or very bright images where features are hard to distinguish
+- No images with heavy stylistic filters that differ from the base CyberRealistic look
+
+**Background handling:**
+- Mixed backgrounds are fine (Kohya learns to separate subject from background)
+- Avoid pure white or pure black backgrounds — they can create artifacts
+- Natural, varied backgrounds (indoor, outdoor, neutral) work best
+- Do NOT remove backgrounds to transparency — this is SDXL, not SD 1.5
+
+### Quality Evaluation (Claude Vision Auto-Review)
+
+When the pipeline's Claude Vision evaluator reviews generated training images, it should score on these criteria (1–10 each):
+
+1. **Face consistency** (weight: 3x) — Does the face match the character description? Consistent bone structure, eye shape, nose, lips across images?
+2. **Skin tone accuracy** (weight: 2x) — Is the skin tone correct and consistent? Not lighter or darker than specified?
+3. **Body proportion accuracy** (weight: 2x) — Does the body match the description? Correct build, proportions?
+4. **Image quality** (weight: 1x) — Sharp, well-composed, no artifacts, no extra limbs?
+5. **Aesthetic consistency** (weight: 1x) — Does it match the semi-realistic CyberRealistic style? Not too photorealistic, not too anime?
+6. **Pose uniqueness** (weight: 1x) — Is this pose sufficiently different from already-approved images?
+
+**Thresholds:**
+- Score 8+ → auto-approve
+- Score 5–7 → flag for review (include in dataset if needed for variety)
+- Score below 5 → auto-reject
+
+**Target after evaluation:** 15–20 approved images with good variety in pose, angle, expression, and lighting, but strong consistency in face, skin, and body.
+
+---
+
+## Captioning / Tagging
+
+### Format
+
+Pony V6 uses **booru-style comma-separated tags**, not natural language captions. Every training image must have a matching `.txt` file with the same filename.
+
+### Trigger Word
+
+Every caption MUST start with the character's trigger word. Use a unique, non-dictionary string:
 
 ```
-score_9, score_8_up, score_7_up, rating_[safe|questionable],
-1girl, solo, [ethnicity tags], [skin tone] skin,
-[hair color] hair, [hair style], [eye color] eyes,
-[body type tags: curvy, wide hips, thick thighs, large breasts, defined waist],
-[face shape], [distinguishing features],
-[clothing for this image],
-[expression for this image],
-[pose for this image],
-[background: simple, not distracting],
-[lighting for this image],
-[framing: close-up | upper body | full body],
-depth of field
+Format: {firstname}_{identifier}
+Example: lindiwe_nsw, sibusiso_nsw, zanele_nsw
 ```
 
-**Key principle:** Include ALL character-identifying features in every generation prompt.
-These same features will later be REMOVED from training captions so the LoRA learns to
-associate them with the trigger word.
+The `_nsw` suffix (No Safe Word) ensures the trigger word doesn't collide with any existing concept in the model's training data.
 
----
+### What to INCLUDE in captions
 
-## 3. Training Image Curation
+- Trigger word (always first)
+- Character count: `1girl`, `1boy`, `solo`
+- Pose: `standing`, `sitting`, `leaning`, `looking at viewer`, `looking away`
+- Expression: `smile`, `serious`, `parted lips`, `closed eyes`
+- Framing: `portrait`, `upper body`, `full body`, `close-up`
+- Clothing (describe what's visible): `fitted blazer`, `white t-shirt`, `gold earrings`
+- Setting/lighting: `indoor`, `outdoor`, `warm lighting`, `dramatic shadow`
 
-### 3.1 Selection Criteria
+### What to EXCLUDE from captions (CRITICAL)
 
-When curating from 40-60 candidates down to 15-20 finals, evaluate each image against:
+These are the features the LoRA should LEARN to associate with the trigger word. If you tag them, the model learns them as separate concepts rather than as part of the character's identity:
 
-**MUST HAVE (reject if any fail):**
-- [ ] Face is clearly visible and well-defined
-- [ ] Skin tone matches character spec
-- [ ] No anatomical errors (hands, fingers, limbs)
-- [ ] Body proportions match character spec
-- [ ] Image is sharp, not blurry or artifacted
+- **Skin tone** — never tag `dark skin`, `light skin`, `brown skin`, `pale`, `tan` or any skin shade descriptor
+- **Hair color** — never tag `black hair`
+- **Hair style** — never tag `braids`, `dreadlocks`, `afro` (unless the character changes hairstyles and you want style flexibility)
+- **Eye color** — never tag `brown eyes`, `dark eyes`
+- **Body type** — never tag `curvy`, `thick thighs`, `wide hips`, `large breasts`
+- **Ethnicity** — never tag `african`, `black woman`
+- **Age indicators** — never tag `young`, `mature`
 
-**SHOULD HAVE (prefer images that meet these):**
-- [ ] Expression is natural, not frozen or uncanny
-- [ ] Pose feels natural and relaxed
-- [ ] Lighting is flattering and consistent
-- [ ] Background is clean, not distracting
-- [ ] Hair style and color are correct
+**Why this matters:** If you tag skin tone in captions (e.g., `dark skin` or `light skin`), the model learns that skin tone is a separate attribute from the trigger word. When you later use the LoRA without that tag, the model may drift toward its default rather than the character's actual skin tone. By excluding skin/body/face tags, all these features get baked into the trigger word itself.
 
-**DIVERSITY CHECK (the final 15-20 must collectively cover):**
-- [ ] At least 4 different angles
-- [ ] At least 3 different framings
-- [ ] At least 3 different expressions
-- [ ] At least 2 different lighting conditions
-- [ ] At least 2 different clothing states
+### Example caption
 
-### 3.2 The "Same Person" Test
-
-Look at all 15-20 selected images together. Ask: do these all look like the same person?
-If any image looks like it could be a different character, remove it — even if it's otherwise
-high quality. Consistency across the training set is more important than any individual image.
-
-### 3.3 Resolution and Cropping
-
-- Crop all images to **1024x1024** for Pony/SDXL training
-- SDXL supports bucketing (mixed aspect ratios), but consistent 1024x1024 is simplest
-- If using varied aspect ratios, keep within SDXL supported ratios: 1024x1024, 832x1216, 1216x832
-- The character should fill most of the frame — avoid large empty backgrounds
-- For close-up shots, ensure the face is at least 30% of the image area
-
----
-
-## 4. Captioning / Tagging
-
-### 4.1 Tagging Method
-
-For Pony V6, use **booru-style tags** (comma-separated), NOT natural language captions.
-Use WD Tagger 1.4 for automatic tagging, then manually edit.
-
-### 4.2 The Trigger Word
-
-Every training image caption MUST start with the character's trigger word.
-
-**Trigger word format:** `charactername_nsw` (lowercase, underscored, suffixed with _nsw for No Safe Word)
-
-Examples: `lindiwe_nsw`, `sibusiso_nsw`, `zanele_nsw`
-
-### 4.3 Tags to REMOVE from Captions
-
-After auto-tagging, REMOVE all character-identifying features. The LoRA must learn these
-from the images themselves, associated with the trigger word — not from the text.
-
-**Remove these categories:**
-
-- **Hair:** `black hair`, `braids`, `low bun`, `long hair`, `short hair`, etc.
-- **Eyes:** `brown eyes`, `dark eyes`, etc.
-- **Skin:** `dark skin`, `dark-skinned female`, `medium-brown skin`, etc.
-- **Body:** `curvy`, `wide hips`, `thick thighs`, `large breasts`, `voluptuous`, `slim`, etc.
-- **Face:** `oval face`, `high cheekbones`, `round face`, etc.
-- **Ethnicity:** `african`, `black`, `ndebele`, etc.
-
-**Keep these categories:**
-
-- **Pose:** `standing`, `sitting`, `leaning`, `arms crossed`, etc.
-- **Expression:** `smile`, `serious`, `looking at viewer`, `half-lidded eyes`, etc.
-- **Clothing:** `fitted blazer`, `jeans`, `off-shoulder top`, `gold earrings`, etc.
-- **Scene elements:** `indoor`, `outdoor`, `simple background`, etc.
-- **Composition:** `close-up`, `upper body`, `full body`, etc.
-- **Lighting:** `warm lighting`, `dramatic shadows`, etc.
-
-### 4.4 Pony Score Tags in Training
-
-- Include `score_9` ONLY on your genuinely best training images (top ~30%)
-- Include `score_8_up` on good images
-- Include `score_7_up` on acceptable images
-- Do NOT use `score_9` on low-quality images — this confuses the aesthetic classifier
-- Alternatively, omit score tags entirely from training captions to avoid biasing the LoRA
-
-### 4.5 Example Caption (BEFORE and AFTER editing)
-
-**Auto-tagged (before):**
 ```
-1girl, solo, dark skin, dark-skinned female, black hair, braids, brown eyes,
-curvy, wide hips, large breasts, fitted blazer, gold earrings,
-smile, looking at viewer, upper body, indoor, warm lighting
+lindiwe_nsw, 1girl, solo, smile, looking at viewer, upper body,
+fitted blazer, gold earrings, indoor, warm lighting, office background
 ```
 
-**Edited for training (after):**
-```
-lindiwe_nsw, 1girl, solo, fitted blazer, gold earrings,
-smile, looking at viewer, upper body, indoor, warm lighting
-```
+Notice: no skin color, no hair description, no body type, no ethnicity. Just the trigger word + what's happening in the image.
 
-Notice: all identity tags removed. Only pose, clothing, expression, and scene tags remain.
+### Pony Score Tags in Training Captions
+
+**Do NOT add `score_9` or quality tags to training captions.** These are inference-time tags that tell the model what quality level to target. Adding them to training data creates a dependency — the LoRA may only activate properly when quality tags are present.
+
+Let the training images speak for themselves through their actual quality.
 
 ---
 
-## 5. Training Parameters
+## Training Parameters
 
-### 5.1 Recommended Settings for Pony V6 Character LoRAs
+### Recommended Defaults (Pony V6 Character LoRA)
 
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| **Base model** | CyberRealisticPony_v17.safetensors or ponyDiffusionV6XL | Train on the model you'll use for inference |
-| **Network type** | LoRA | Not LyCORIS, not full fine-tune |
-| **Network dim (rank)** | 8 | Characters are simpler than styles; 8 is sufficient |
-| **Network alpha** | 8 | Equal to dim for characters |
-| **Optimizer** | Prodigy or AdaFactor | With cosine with restarts scheduler |
-| **Learning rate** | 1e-4 (if AdaFactor) | Prodigy is adaptive, auto-adjusts |
-| **Text encoder LR** | 5e-5 | 1/2 of the network LR |
-| **Batch size** | 1-2 (12GB VRAM), 3-5 (16GB+) | Higher batch = more stable training |
-| **Epochs** | 10-15 | Save every epoch to pick the best one |
-| **Resolution** | 1024x1024 | SDXL native; bucketing handles mixed sizes |
-| **Clip skip** | 2 | Pony V6 standard |
-| **Noise offset** | 0.03 | Better for small details like eyes; 0.1 can blur fine features |
-| **Shuffle tags** | Yes | Teaches the LoRA that tag order is variable |
-| **Keep tokens** | 1 | Keeps trigger word first, shuffles the rest |
-| **Flip augmentation** | No | Only for symmetrical subjects; can confuse asymmetric features |
-| **Sampler for samples** | DPM++ SDE Karras | Pony standard |
-| **CFG for samples** | 5 | Pony standard |
-
-### 5.2 Calculating Repeats
-
-Total training images = dataset_size × repeats × epochs.
-
-For a 20-image dataset with 15 epochs, you want total steps around 1500-3000:
-- 20 images × 5 repeats = 100 images per epoch
-- 100 × 15 epochs = 1500 total steps (lower bound, good starting point)
-
-Adjust repeats so that: `dataset_size × repeats × epochs ≈ 1500-3000`
-
-### 5.3 Sample Prompts During Training
-
-Set `Sample every n epochs: 1` and `Save model every n epochs: 1`.
-
-Use this sample prompt to monitor training progress:
 ```
-score_9, score_8_up, score_7_up, rating_safe,
-[trigger_word], 1girl, solo, looking at viewer, smile,
-standing, upper body, simple background,
-warm lighting, depth of field
+Checkpoint:        ponyDiffusionV6XL (base) or CyberRealisticPony v17
+Network module:    networks.lora
+Network dim:       8
+Network alpha:     8
+Optimizer:         prodigy
+LR scheduler:      cosine_with_restarts
+LR scheduler cycles: 3
+Learning rate:     1.0 (Prodigy auto-adjusts; this is the starting point)
+Noise offset:      0.03
+Epochs:            12
+Batch size:        2 (increase to 3–4 if GPU has 24GB+ VRAM)
+Resolution:        1024,1024
+Clip skip:         2 (mandatory for Pony V6)
+Mixed precision:   bf16 (use fp16 only if GPU doesn't support bf16)
+Caption extension: .txt
+Max token length:  225
+Seed:              42
+Save every N epochs: 3
+Cache latents:     true
+Cache latents to disk: true
+Gradient checkpointing: true
+xFormers:          true
 ```
 
-This generates a standard portrait at each epoch so you can visually compare progression
-and identify the optimal epoch (before overtraining sets in).
+### Parameter Explanations
+
+**Network dim: 8** — This is the LoRA rank. For character identity (face + body), 8 is sufficient. Styles and complex concepts need 16–32. Higher dim = larger file size and more risk of overfitting. Character LoRAs at dim 8 typically produce 50–100MB files.
+
+**Network alpha: 8** — Equal to dim for character LoRAs. The community consensus for Pony character training is dim:alpha ratio of 1:1. Style LoRAs sometimes use 2:1 (e.g., dim 16, alpha 8). Don't set alpha higher than dim.
+
+**Optimizer: Prodigy** — Self-adapting learning rate optimizer. Best choice for character LoRAs because it automatically finds the right learning rate. Set initial LR to 1.0 and let Prodigy handle the rest. Arguments: `decouple=True, weight_decay=0.01, d_coef=2, use_bias_correction=True, safeguard_warmup=True`.
+
+**Alternative optimizer: AdaFactor** — Good alternative if Prodigy isn't available. Use with LR 1e-4 and cosine scheduler.
+
+**Noise offset: 0.03** — Improves detail consistency, especially for facial features. Higher values (0.05+) can cause color shifts. 0.03 is the sweet spot for character LoRAs on Pony.
+
+**Clip skip: 2** — MANDATORY for Pony V6. The model was trained with clip skip 2. Using clip skip 1 will produce noticeably worse results. This is not optional.
+
+**Epochs: 12** — With 15–20 images and appropriate repeats, 12 epochs is a good balance. Save checkpoints every 3 epochs (epochs 3, 6, 9, 12) and test each. Often epoch 9 or 10 produces the best results — the final epoch is not always the best.
+
+**Batch size: 2** — Safe for RTX 4090 (24GB VRAM) with gradient checkpointing. Increase to 3–4 on higher-VRAM GPUs. Batch size 1 works but trains slower with potentially noisier gradients.
+
+### Repeats Calculation
+
+Kohya uses repeats to control how many times each image is seen per epoch. The formula:
+
+```
+total_steps_per_epoch = (num_images × repeats) / batch_size
+total_training_steps = total_steps_per_epoch × num_epochs
+```
+
+**Target: 1500–3000 total training steps** for character LoRAs.
+
+Calculation guide:
+- 15 images × 14 repeats / 2 batch = 105 steps/epoch × 12 epochs = 1260 steps
+- 20 images × 10 repeats / 2 batch = 100 steps/epoch × 12 epochs = 1200 steps
+- 15 images × 20 repeats / 2 batch = 150 steps/epoch × 12 epochs = 1800 steps
+
+**Rule of thumb:** `repeats = max(1, 500 / num_images)`, capped at 50.
+
+### What NOT to Do
+
+- **Don't train the text encoder** for character LoRAs on Pony. UNet-only training is more stable and produces more flexible LoRAs. Text encoder training is for style LoRAs only, and even then it's risky on SDXL.
+- **Don't use regularization images** for character LoRAs. Regularization helps prevent style bleed for style LoRAs, but for character identity LoRAs it can dilute the identity signal.
+- **Don't use flip augmentation** unless the character is perfectly symmetrical. For characters with asymmetric features (parted hair, moles, scars), flipping creates conflicting signals.
+- **Don't set noise offset above 0.05** — causes color/brightness shifts.
+- **Don't use learning rate warmup with Prodigy** — Prodigy has its own warmup via `safeguard_warmup`.
+- **Don't overtrain** — more epochs is not better. Check the saved checkpoints. Signs of overtraining: rigid poses, color saturation increase, loss of detail, "deep-fried" look.
 
 ---
 
-## 6. Evaluating Trained LoRAs
+## Training Base Model Selection
 
-### 6.1 Signs of a Good LoRA
+**For training: use Pony Diffusion V6 XL** (the base model), NOT CyberRealistic Pony.
 
-- Character is recognisable across different poses and angles
-- Face shape, skin tone, and body proportions are consistent
-- The LoRA activates reliably with the trigger word
-- Expressions look natural, not frozen
-- Works well at strength 0.7-0.9 without artifacts
-- Doesn't force a specific pose (character should be posable)
+CyberRealistic Pony is a fine-tune of Pony V6. Training a LoRA on a fine-tune of a fine-tune compounds any quirks. Training on the base Pony V6 XL produces LoRAs that work well across ALL Pony V6 fine-tunes, including CyberRealistic.
 
-### 6.2 Signs of Overtraining
+**For inference: use CyberRealistic Pony** (your production checkpoint).
 
-- Character always appears in the same pose regardless of prompt
-- Background elements from training images bleed into new generations
-- Face looks "waxy" or overly smooth
-- Expressions are limited to what was in the training set
-- Reducing LoRA strength below 0.7 causes the character to disappear
-- Colors become oversaturated or washed out
+The LoRA trained on base Pony V6 will load into CyberRealistic Pony without issues — SDXL LoRAs are architecturally compatible across fine-tunes of the same base.
 
-### 6.3 Signs of Undertraining
-
-- Character is vaguely similar but not consistently recognisable
-- Face shape drifts between generations
-- Skin tone varies significantly
-- Trigger word has weak effect — character only appears sometimes
-- Need strength > 1.0 to get any resemblance
-
-### 6.4 The Epoch Selection Process
-
-- Generate the same test prompt across all saved epochs (e.g., epochs 1-15)
-- Compare side by side
-- Earlier epochs are often more flexible (easier to pose)
-- Later epochs are more consistent but may be rigid
-- The sweet spot is usually epochs 8-12 for a 15-epoch run
-- Pick the epoch where the character is recognisable AND still flexible
-
-### 6.5 Inference Strength Guidelines
-
-| Use case | Recommended strength | Notes |
-|----------|---------------------|-------|
-| Standard scene | 0.75-0.85 | Good balance of identity and flexibility |
-| Close-up portrait | 0.85-0.95 | Higher strength for face accuracy |
-| Full body action | 0.65-0.75 | Lower strength for better pose freedom |
-| NSFW/explicit | 0.70-0.80 | Slightly lower to prevent pose rigidity |
-| Dual character scene | 0.65-0.75 each | Lower per-character to prevent conflicts |
+Download: `https://huggingface.co/AstraliteHeart/pony-diffusion-v6/resolve/main/v6.safetensors`
 
 ---
 
-## 7. Troubleshooting
+## LoRA Inference Parameters
 
-### Problem: "All generations look the same / character won't change pose"
-**Cause:** Overtrained LoRA or training set lacked pose diversity.
-**Fix:** Use an earlier epoch. If all epochs are rigid, retrain with more pose variety in the dataset.
+When USING the trained LoRA during image generation:
 
-### Problem: "Face looks different in every generation"
-**Cause:** Undertrained, or training images had inconsistent faces.
-**Fix:** Use a later epoch. If still inconsistent, curate the training set more strictly — ensure all images look like the same person.
+**LoRA strength: 0.75–0.85** — Start at 0.8. If the character looks stiff or over-stylised, reduce to 0.7. If identity isn't coming through strongly enough, increase to 0.9. Never go above 1.0.
 
-### Problem: "Skin tone keeps changing"
-**Cause:** Identity tags (skin tone descriptors) were left in the training captions, so the LoRA didn't learn to associate skin tone with the trigger word.
-**Fix:** Remove all skin/ethnicity tags from captions and retrain.
+**Strength adjustment by scene type:**
+- Character portrait: 0.85 (identity is the focus)
+- Scene with character: 0.75–0.80 (let the scene breathe)
+- Explicit/NSFW scene: 0.70–0.75 (higher strength can cause pose rigidity)
+- Dual-character scene: 0.70 each (two LoRAs at full strength compete)
 
-### Problem: "Character has artifacts at high LoRA strength"
-**Cause:** Overtraining or network dim too high for the character's complexity.
-**Fix:** Reduce strength to 0.7-0.8. If still bad, retrain with dim 4 instead of 8.
-
-### Problem: "Eyes look blurry or inconsistent"
-**Cause:** Noise offset too high (0.1 blurs fine details).
-**Fix:** Retrain with noise offset 0.03.
-
-### Problem: "LoRA works on base Pony but not on CyberRealistic Pony"
-**Cause:** Training on a different base model than inference.
-**Fix:** Train on the same checkpoint you'll use for generation. If you train on base Pony V6, test on base Pony V6. If you generate with CyberRealistic Pony v17, train on CyberRealistic Pony v17.
+**Trigger word is mandatory** — always include the trigger word in the prompt when the LoRA is loaded. Without it, the LoRA's effect is unpredictable.
 
 ---
 
-## 8. No Safe Word Specific Guidelines
+## Troubleshooting
 
-### 8.1 Character Body Requirements
+### Identity isn't consistent
 
-All female characters must be curvaceous with emphasis on:
-- **Hips/ass first** — this is the primary body emphasis
-- **Breasts second** — large but secondary to hips
-- **Defined waist** — creates the hourglass silhouette
+- **Check dataset consistency** — if training images have high face variance, the LoRA learns a blurry average. Curate more aggressively.
+- **Increase network dim** to 12 or 16 — the identity may be too complex for dim 8 (rare for single characters, more common for characters with elaborate tattoos, scars, or unusual features).
+- **Check caption quality** — if identity features leaked into captions, the LoRA isn't learning them as part of the trigger word.
 
-In training dataset prompts, include these body tags to get the right proportions.
-Then REMOVE them from training captions so the LoRA learns the body shape from images.
+### Skin tone doesn't match the character
 
-### 8.2 SFW/NSFW Dual Capability
+- **Caption audit** — ensure NO skin-related tags in captions. Not `dark skin`, not `light skin`, not `brown skin` — none. The trigger word must carry all skin tone information.
+- **Dataset check** — ensure ALL training images have the correct, consistent skin tone. Even one or two outliers with a different shade will pull the average. This is the most common cause of skin tone drift.
+- **Increase LoRA strength** at inference to 0.85–0.90 to reinforce the trained identity.
+- **Add skin tone tags at inference time** — as a fallback, include the character's specific skin tone tag (e.g., `dark skin` or `light brown skin`) in the inference prompt alongside the trigger word. This shouldn't be necessary if the LoRA is well-trained, but it's a valid reinforcement.
 
-The training set should include BOTH clothed and revealing images so the LoRA works
-for both Facebook SFW content and website NSFW content. Include:
-- 10-12 SFW images (dressed, various outfits)
-- 5-8 NSFW-adjacent images (revealing clothing, intimate poses, partial undress)
+### Character looks "deep-fried" or over-saturated
 
-This ensures the LoRA doesn't collapse to either "always dressed" or "always undressed."
+- **Overtrained** — use an earlier epoch checkpoint. Check epochs 6–9 instead of 12.
+- **Reduce noise offset** to 0.02.
+- **Reduce LoRA strength** at inference to 0.65–0.70.
 
-### 8.3 Ethnicity and Skin Tone
+### Poses are rigid or repetitive
 
-Our characters are predominantly Black South African women. Training images must:
-- Use consistent, accurate skin tone descriptors during generation
-- Remove ALL ethnicity/skin tags from training captions
-- Ensure the final LoRA reliably produces the correct skin tone without prompting
-- Test the trained LoRA WITHOUT any skin/ethnicity tags to verify the identity is baked in
+- **Dataset variety issue** — add more pose variety to training images.
+- **Overtrained** — use an earlier epoch.
+- **Reduce LoRA strength** at inference — high strength locks in trained poses.
 
----
+### LoRA works for portraits but not full-body
 
-## 9. Training Platform Options
+- **Dataset needs more full-body images** — ensure at least 4–5 full-body shots in the training set.
+- **Body proportions may not have been captured** — if all training images are face close-ups, the LoRA only learns the face. Include variety.
 
-### Option A: Civitai On-Site Trainer (Simplest)
-- Upload dataset, select Pony V6 XL as base model
-- ~500 Buzz cost
-- Limited parameter control but good defaults
-- Tag-based captioning supported
+### LoRA conflicts with scene composition
 
-### Option B: Kohya SS on RunPod GPU Pod (Most Control)
-- Spin up a RunPod GPU pod (NOT serverless), run Kohya SS
-- Full parameter control
-- 12GB+ VRAM recommended
-- Install: https://github.com/bmaltais/kohya_ss
-
-### Option C: Replicate (if SDXL trainer available)
-- Check for `ostris/sdxl-lora-trainer` or equivalent
-- Familiar workflow from existing Flux LoRA training
-- May have limited parameter control
+- **Reduce LoRA strength** — identity LoRAs at high strength can override scene-level composition tags.
+- **Use later clip layers** — if using attention-couple for dual-character scenes, the LoRA may need to be scoped to specific regions.
 
 ---
 
-## 10. Reference Links
+## File Naming Conventions
 
-- [LoRA Training Guide: SDXL | Pony | Illustrious (Civitai)](https://civitai.com/articles/24648)
-- [SDXL Pony Fast Training Guide (Civitai)](https://civitai.com/models/351583)
-- [On-Site LoRA Training Settings Guide by Diamond (Civitai)](https://civitai.com/articles/8737)
-- [Opinionated Guide to All LoRA Training, 2025 Update (Civitai)](https://civitai.com/articles/1716)
-- [PonyV6 Character Training (DigitalCreativeAI)](https://www.digitalcreativeai.net/en/post/original-character-lora-pony-character-training)
-- [Detailed LoRA Training Guide (ViewComfy)](https://www.viewcomfy.com/blog/detailed-LoRA-training-guide-for-Stable-Diffusion)
-- [AI Consistent Character Generator Guide 2026 (Apatero)](https://www.apatero.com/blog/ai-consistent-character-generator-multiple-images-2026)
-- [Holostrawberry's LoRA Training Guide](https://arcenciel.io/articles/1)
-- [Kohya SS GitHub](https://github.com/bmaltais/kohya_ss)
+```
+Training dataset:   datasets/{character_id}/{trigger_word}/
+Individual images:  {trigger_word}_{001..020}.png
+Caption files:      {trigger_word}_{001..020}.txt  (same name, .txt extension)
+Packaged dataset:   datasets/{character_id}/{trigger_word}_dataset.tar.gz
+Trained LoRA:       loras/lora_{trigger_word}_{timestamp}.safetensors
+Validation images:  validation/{character_id}/{trigger_word}_val_{001..005}.png
+```
+
+---
+
+## Pipeline Integration Notes
+
+- The dataset generator (`pony-dataset-generator.ts`) generates candidates via RunPod serverless (inference endpoint)
+- The evaluator (`training-image-evaluator.ts`) uses Claude Vision to auto-approve/reject
+- The caption builder (`training-caption-builder.ts`) generates booru tags, strips identity tags
+- The trainer (`pony-lora-trainer.ts`) orchestrates the full pipeline via RunPod pods (batch GPU)
+- The validator (`pony-character-lora-validator.ts`) generates test images with the new LoRA
+- All stages persist state to `story_characters.lora_training_progress` (JSONB)
+- The pipeline is resumable from any failed stage
+
+**Training runs on RunPod PODS (not serverless)** — training is a 30–60 minute batch job, not a quick inference call. The pod runs the Kohya Docker image, trains, uploads the result, and self-terminates.
+
+**Estimated cost per character LoRA:** $0.30–0.70 (RTX 4090 at ~$0.50/hr × 30–60 min training time, plus ~$0.10 for dataset generation inference).

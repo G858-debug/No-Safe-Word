@@ -1,4 +1,4 @@
-# Pony V6 / CyberRealistic Pony — Scene Generation Guide
+# Pony V6 / CyberRealistic Pony Semi-Realistic — Scene Generation Guide
 
 > **When to read this skill:** Before writing or enhancing ANY scene image prompt for the
 > `pony_cyberreal` (V4) pipeline, before modifying the prompt builder or enhance endpoint,
@@ -64,9 +64,9 @@ Controls the visual style:
 | `source_anime` | Anime/illustration style |
 | `source_cartoon` | Western cartoon style |
 | `source_pony` | MLP-adjacent style (avoid for our use case) |
-| *(no source tag)* | Model defaults — often semi-realistic with CyberRealistic Pony |
+| *(no source tag)* | Model defaults — often semi-realistic with CyberRealistic Pony Semi-Realistic |
 
-**For No Safe Word:** With CyberRealistic Pony checkpoint, **omit source tags entirely** or
+**For No Safe Word:** With CyberRealistic Pony Semi-Realistic checkpoint, **omit source tags entirely** or
 use `source_anime` lightly. The checkpoint already pushes toward semi-realism. Adding
 `source_pony` will pull output toward the MLP aesthetic, which is wrong for our brand.
 
@@ -435,7 +435,7 @@ Never use generic "warm lighting." Always name the source:
 
 ---
 
-## 9. CyberRealistic Pony Specific Settings
+## 9. CyberRealistic Pony Semi-Realistic Specific Settings
 
 ### 9.1 Recommended Generation Settings
 
@@ -448,7 +448,7 @@ Never use generic "warm lighting." Always name the source:
 | Resolution | 832×1216 (portrait) or 1216×832 (landscape) | SDXL native ratios |
 | VAE | Integrated (baked into checkpoint) | Do NOT load external VAE |
 
-### 9.2 CyberRealistic-Specific Negative Prompt
+### 9.2 CyberRealistic Semi-Realistic Negative Prompt
 
 ```
 score_6, score_5, score_4, source_pony,
@@ -462,7 +462,7 @@ Note: `source_pony` in NEGATIVE prevents MLP-style output.
 
 ### 9.3 Style Notes
 
-- CyberRealistic Pony naturally produces semi-realistic output
+- CyberRealistic Pony Semi-Realistic naturally produces stylized semi-realistic output
 - For MORE realism: add `photo (medium), realistic` to positive; add `anime, cartoon, 3d, cgi` to negative
 - For MORE stylised: add `source_anime` to positive; reduce realism tags
 - The checkpoint has an integrated VAE — do NOT use an external VAE, it will cause color issues
@@ -518,7 +518,7 @@ For dual-character scenes using AttentionCouplePPM (region-based conditioning):
 **Fix:** Replace generic lighting tags with specific sources. Add `rim light`, `volumetric lighting`, `light rays` for drama.
 
 ### Uncanny valley faces (too smooth, waxy)
-**Fix:** Add `skin detail, pores, skin texture` to positive. This pushes CyberRealistic toward more textured rendering.
+**Fix:** Add `skin detail, pores, skin texture` to positive. This pushes CyberRealistic Semi-Realistic toward more textured rendering.
 
 ### Wrong body proportions (too thin/too thick)
 **Fix:** Check tag order — body tags must be near the front of the prompt for stronger effect. Use specific tags like `wide hips` rather than vague `curvy`.
@@ -530,7 +530,7 @@ For dual-character scenes using AttentionCouplePPM (region-based conditioning):
 **Fix:** Add explicit visibility guarantee: `well-lit, clearly visible subject, light illuminating face`. Name a bright light source.
 
 ### NSFW content not generating despite rating_explicit
-**Fix:** Ensure `nsfw, nude` is NOT in negative prompt. Add explicit action tags. Check that the checkpoint supports NSFW (CyberRealistic Pony does natively).
+**Fix:** Ensure `nsfw, nude` is NOT in negative prompt. Add explicit action tags. Check that the checkpoint supports NSFW (CyberRealistic Pony Semi-Realistic does natively).
 
 ---
 

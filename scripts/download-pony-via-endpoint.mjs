@@ -1,5 +1,5 @@
 /**
- * Download CyberRealistic Pony v17 checkpoint via the existing RunPod serverless endpoint.
+ * Download CyberRealistic Pony Semi-Realistic v4.5 checkpoint via the existing RunPod serverless endpoint.
  *
  * Uses the character_lora_downloads mechanism with a relative path (../checkpoints/)
  * to place the file in the checkpoints directory instead of loras/.
@@ -81,11 +81,11 @@ async function runDiagnostic() {
 
 // Step 2: Submit download job using character_lora_downloads with relative path
 async function submitDownload() {
-  const civitaiUrl = `https://civitai.com/api/download/models/2581228?token=${CIVITAI_TOKEN}`;
+  const civitaiUrl = `https://civitai.com/api/download/models/2601141?token=${CIVITAI_TOKEN}`;
 
   console.log("Submitting checkpoint download job...");
-  console.log(`  URL: https://civitai.com/api/download/models/2727742`);
-  console.log(`  Dest: ../checkpoints/cyberrealisticPony_v160.safetensors (relative to loras/)\n`);
+  console.log(`  URL: https://civitai.com/api/download/models/2601141`);
+  console.log(`  Dest: ../checkpoints/CyberRealistic_PonySemi_V4.5.safetensors (relative to loras/)\n`);
 
   // We need a minimal valid workflow so the handler doesn't crash before processing downloads.
   // Use a simple checkpoint loader that will fail AFTER the download completes.
@@ -94,7 +94,7 @@ async function submitDownload() {
     "100": {
       class_type: "CheckpointLoaderSimple",
       inputs: {
-        ckpt_name: "cyberrealisticPony_v160.safetensors",
+        ckpt_name: "CyberRealistic_PonySemi_V4.5.safetensors",
       },
     },
     "101": {
@@ -151,7 +151,7 @@ async function submitDownload() {
         workflow: minimalWorkflow,
         character_lora_downloads: [
           {
-            filename: "../checkpoints/cyberrealisticPony_v160.safetensors",
+            filename: "../checkpoints/CyberRealistic_PonySemi_V4.5.safetensors",
             url: civitaiUrl,
           },
         ],
@@ -210,7 +210,7 @@ async function pollJob(jobId) {
 }
 
 async function main() {
-  console.log("=== Download CyberRealistic Pony v17 via Serverless Endpoint ===\n");
+  console.log("=== Download CyberRealistic Pony Semi-Realistic v4.5 via Serverless Endpoint ===\n");
 
   // Check existing checkpoints
   try {
@@ -228,8 +228,8 @@ async function main() {
 
     // Check if already downloaded
     const allFiles = checkpointKeys.flatMap((k) => diag[k] || []);
-    if (allFiles.some((f) => f.includes("cyberrealisticPony"))) {
-      console.log("\ncyberrealisticPony_v160.safetensors already exists on the volume!");
+    if (allFiles.some((f) => f.includes("CyberRealistic_PonySemi"))) {
+      console.log("\nCyberRealistic_PonySemi_V4.5.safetensors already exists on the volume!");
       console.log("You may need to restart workers for ComfyUI to discover it.");
       return;
     }
