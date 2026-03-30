@@ -48,12 +48,9 @@ export default function CharacterApproval({ seriesId, onAllReady }: Props) {
     fetchCharacters();
   }, [fetchCharacters]);
 
-  // Check if all characters are ready (deployed LoRA)
-  useEffect(() => {
-    if (characters.length === 0) return;
-    const allReady = characters.every(c => c.approved && c.approved_fullbody && c.active_lora_id);
-    if (allReady && onAllReady) onAllReady();
-  }, [characters, onAllReady]);
+  // Note: onAllReady is intentionally NOT called automatically.
+  // The user should navigate to Images manually when ready.
+  // Auto-switching tabs caused a bug where users couldn't navigate back.
 
   if (loading) {
     return (
