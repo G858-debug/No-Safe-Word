@@ -26,7 +26,17 @@ interface LoraProgress {
     loraUrl?: string;
     filename?: string;
     deployed?: boolean;
+    updatedAt?: string;
   };
+}
+
+function formatElapsed(updatedAt?: string): string | null {
+  if (!updatedAt) return null;
+  const mins = Math.round((Date.now() - new Date(updatedAt).getTime()) / 60_000);
+  if (mins < 2) return null; // Don't show for very recent updates
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
 }
 
 // ── Default prompt builder (mirrors server-side pony-character-image.ts) ──
@@ -590,6 +600,7 @@ function DatasetStage({
 
   // Dataset generation / evaluation in progress
   if (status === "generating_dataset" || status === "evaluating") {
+    const elapsed = formatElapsed(loraProgress?.progress?.updatedAt);
     return (
       <div className="space-y-2">
         <p className="text-sm font-medium">
@@ -599,7 +610,9 @@ function DatasetStage({
           <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: status === "generating_dataset" ? "40%" : "70%" }} />
         </div>
         <div className="flex items-center gap-3">
-          <p className="text-xs text-muted-foreground">This may take a few minutes.</p>
+          <p className="text-xs text-muted-foreground">
+            This may take a few minutes.{elapsed ? ` Running for ${elapsed}.` : ""}
+          </p>
           <Button variant="ghost" size="sm" className="h-6 text-xs" asChild>
             <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>View images so far</Link>
           </Button>
@@ -631,6 +644,8 @@ function DatasetStage({
   // Failed — show detailed status with actionable options
   if (status === "failed") {
     const errMsg = loraProgress?.progress?.error || "Training failed";
+    const isStale = errMsg.includes("stalled");
+
     // Parse "Only X images passed" from error message
     const passedMatch = errMsg.match(/(\d+) images? passed/);
     const neededMatch = errMsg.match(/need (\d+)/);
@@ -639,8 +654,10 @@ function DatasetStage({
 
     return (
       <div className="space-y-3">
-        <div className="rounded-md bg-red-500/10 border border-red-500/30 p-3 space-y-2">
-          <p className="text-sm font-medium text-red-400">Dataset evaluation incomplete</p>
+        <div className={`rounded-md p-3 space-y-2 ${isStale ? "bg-yellow-500/10 border border-yellow-500/30" : "bg-red-500/10 border border-red-500/30"}`}>
+          <p className={`text-sm font-medium ${isStale ? "text-yellow-400" : "text-red-400"}`}>
+            {isStale ? "Pipeline stalled — automatic recovery" : passed !== null ? "Dataset evaluation incomplete" : "Training failed"}
+          </p>
           {passed !== null ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -659,18 +676,22 @@ function DatasetStage({
               </p>
             </div>
           ) : (
-            <p className="text-xs text-red-400">{errMsg}</p>
+            <p className={`text-xs ${isStale ? "text-yellow-400" : "text-red-400"}`}>{errMsg}</p>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>
-              View Dataset ({passed ?? "?"} passed)
-            </Link>
-          </Button>
-          <Button onClick={onResume} variant="outline" size="sm">
-            Continue with {passed ?? "?"} images
-          </Button>
+          {passed !== null && (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>
+                  View Dataset ({passed} passed)
+                </Link>
+              </Button>
+              <Button onClick={onResume} variant="outline" size="sm">
+                Continue with {passed} images
+              </Button>
+            </>
+          )}
           <Button onClick={onTrain} size="sm">
             Retry Training
           </Button>
@@ -685,6 +706,7 @@ function DatasetStage({
 function TrainingStage({ loraProgress }: { loraProgress: LoraProgress | null }) {
   const status = loraProgress?.status || "training";
   const podId = loraProgress?.progress?.podId;
+  const elapsed = formatElapsed(loraProgress?.progress?.updatedAt);
 
   const statusLabel: Record<string, string> = {
     captioning: "Captioning images...",
@@ -703,7 +725,9 @@ function TrainingStage({ loraProgress }: { loraProgress: LoraProgress | null }) 
       {podId && (
         <p className="text-xs text-muted-foreground font-mono">Pod: {podId.substring(0, 16)}...</p>
       )}
-      <p className="text-xs text-muted-foreground">Polling every 10 seconds. No action needed.</p>
+      <p className="text-xs text-muted-foreground">
+        Polling every 10 seconds.{elapsed ? ` Running for ${elapsed}.` : ""}
+      </p>
     </div>
   );
 }

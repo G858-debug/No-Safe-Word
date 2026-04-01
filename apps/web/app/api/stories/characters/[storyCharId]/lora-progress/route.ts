@@ -1,6 +1,78 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
+// Stale thresholds — if updated_at is older than this, the pipeline is stuck
+const STALE_THRESHOLDS: Record<string, number> = {
+  generating_dataset: 30 * 60_000,  // 30 min — dataset gen takes ~10 min
+  evaluating: 30 * 60_000,          // 30 min — evaluation takes ~5-10 min
+  captioning: 20 * 60_000,          // 20 min — captioning is fast
+  packaging_dataset: 10 * 60_000,   // 10 min — packaging is fast
+  training: 90 * 60_000,            // 90 min — training takes 30-60 min
+  validating: 30 * 60_000,          // 30 min — validation takes ~10 min
+};
+
+/**
+ * Check if a LoRA pipeline stage is stale and auto-recover if so.
+ * For `training` status, also checks if the RunPod pod is still alive.
+ * Returns true if the record was marked as failed (caller should re-fetch).
+ */
+async function detectAndRecoverStale(lora: any): Promise<boolean> {
+  const threshold = STALE_THRESHOLDS[lora.status];
+  if (!threshold) return false;
+
+  const updatedAt = new Date(lora.updated_at).getTime();
+  const age = Date.now() - updatedAt;
+
+  if (age < threshold) return false;
+
+  const ageMin = Math.round(age / 60_000);
+  console.warn(`[LoRA Stale] ${lora.id} stuck in "${lora.status}" for ${ageMin}min (threshold: ${threshold / 60_000}min)`);
+
+  // For training status, check if pod is still alive before marking failed
+  if (lora.status === "training" && lora.training_id) {
+    try {
+      const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
+      const podStatus = await getTrainingPodStatus(lora.training_id);
+      if (podStatus.desiredStatus === "RUNNING") {
+        // Pod is still running — extend grace period (don't mark failed yet)
+        // But if it's been > 3 hours even with a running pod, something is very wrong
+        if (age < 180 * 60_000) {
+          console.log(`[LoRA Stale] Pod ${lora.training_id} still RUNNING — extending grace period`);
+          return false;
+        }
+      }
+      console.warn(`[LoRA Stale] Pod ${lora.training_id} status: ${podStatus.desiredStatus}`);
+
+      // Terminate the dead/stuck pod
+      if (podStatus.desiredStatus !== "TERMINATED") {
+        const { terminateTrainingPod } = await import("@no-safe-word/image-gen/runpod-pods");
+        terminateTrainingPod(lora.training_id).catch(err => {
+          console.warn(`[LoRA Stale] Failed to terminate pod: ${err}`);
+        });
+      }
+    } catch (err) {
+      // Pod might already be gone (404) — that's fine, proceed with marking failed
+      console.warn(`[LoRA Stale] Could not check pod status: ${err}`);
+    }
+  }
+
+  // Mark as failed with a clear error message
+  const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes without progress. ` +
+    `This usually means the background process crashed or timed out. Click "Retry Training" to try again.`;
+
+  await (supabase as any)
+    .from("character_loras")
+    .update({
+      status: "failed",
+      error: errorMsg,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", lora.id);
+
+  console.log(`[LoRA Stale] Marked ${lora.id} as failed (was "${lora.status}" for ${ageMin}min)`);
+  return true;
+}
+
 // GET /api/stories/characters/[storyCharId]/lora-progress
 // Poll the LoRA training pipeline progress for a character.
 export async function GET(
@@ -26,7 +98,7 @@ export async function GET(
     }
 
     // Find the most relevant LoRA record
-    const { data: lora } = await (supabase as any)
+    let { data: lora } = await (supabase as any)
       .from("character_loras")
       .select("id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
       .eq("character_id", storyChar.character_id)
@@ -37,6 +109,18 @@ export async function GET(
 
     if (!lora) {
       return NextResponse.json({ status: "no_lora", progress: null });
+    }
+
+    // Check for stale pipelines and auto-recover
+    const wasStale = await detectAndRecoverStale(lora);
+    if (wasStale) {
+      // Re-fetch the now-failed record
+      const { data: refreshed } = await (supabase as any)
+        .from("character_loras")
+        .select("id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
+        .eq("id", lora.id)
+        .single() as { data: any };
+      if (refreshed) lora = refreshed;
     }
 
     return NextResponse.json({
@@ -53,6 +137,7 @@ export async function GET(
         filename: lora.filename,
         deployed: lora.status === "deployed",
         deployedAt: lora.deployed_at,
+        updatedAt: lora.updated_at,
       },
     });
   } catch (err) {
