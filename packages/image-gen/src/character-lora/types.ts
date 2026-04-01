@@ -115,9 +115,9 @@ export const PIPELINE_CONFIG = {
   /** Max images to generate per run */
   datasetSize: 30,
   /** Minimum passed images to proceed with training */
-  minPassedImages: 20,
+  minPassedImages: 15,
   /** Target passed images before proceeding */
-  targetPassedImages: 25,
+  targetPassedImages: 20,
   /** Max rounds of replacement generation for failed images */
   maxReplacementRounds: 3,
   /** Max training attempts before failing */
@@ -130,8 +130,10 @@ export const PIPELINE_CONFIG = {
   evaluationConcurrency: 3,
   /** Replicate polling interval (ms) */
   replicatePollingInterval: 15_000,
-  /** Minimum eval score to pass (each category) */
-  minEvalScore: 7,
+  /** Minimum eval score to pass — lowered from 7 to 6 because training data
+   *  benefits more from diversity than perfection, and the old threshold
+   *  was rejecting usable images with minor quality variations. */
+  minEvalScore: 6,
   /** Minimum face score on validation test images to pass */
   minValidationFaceScore: 7,
   /** Minimum test images that must pass validation (out of 6) */

@@ -635,11 +635,26 @@ Output ONLY the improved comma-separated tags, nothing else.`,
 
 function calculateSimpleScore(eval_: TrainingImageEvaluation): number {
   const q = eval_.quality;
-  return Math.round(
-    (q.expressionNatural * 1.5 + q.poseNatural * 1.2 + q.lightingQuality * 1.0 +
-      q.backgroundClean * 0.8 + q.hairAccurate * 1.0 + q.overallAesthetic * 1.5) /
-    (1.5 + 1.2 + 1.0 + 0.8 + 1.0 + 1.5) * 10
-  ) / 10;
+  const r = eval_.requirements;
+
+  // Soft penalties for former hard requirements (small deductions, not kills)
+  const skinTonePenalty = r.correctSkinTone ? 0 : -0.5;
+  const proportionsPenalty = r.correctBodyProportions ? 0 : -0.3;
+
+  // skinToneConsistency is new — fall back to 7 for older evals that don't have it
+  const skinToneScore = (q as any).skinToneConsistency ?? 7;
+
+  const baseScore = (
+    q.expressionNatural * 1.5 +
+    q.poseNatural * 1.2 +
+    q.lightingQuality * 1.0 +
+    q.backgroundClean * 0.8 +
+    q.hairAccurate * 1.0 +
+    skinToneScore * 0.6 +
+    q.overallAesthetic * 1.5
+  ) / (1.5 + 1.2 + 1.0 + 0.8 + 1.0 + 0.6 + 1.5) + skinTonePenalty + proportionsPenalty;
+
+  return Math.round(baseScore * 10) / 10;
 }
 
 async function evaluateSingleImage(
@@ -672,9 +687,17 @@ async function evaluateSingleImage(
     source: { type: 'base64', media_type: 'image/png', data: imageBase64 },
   });
 
+  const bodyStyleNote = character.structuredData.gender === 'female'
+    ? `IMPORTANT: This character is intentionally designed with exaggerated curvy proportions (very large breasts, very wide hips, narrow waist, full thighs). This is the intended art style — do NOT flag these as anatomy errors or incorrect proportions.`
+    : `IMPORTANT: This character's body proportions are intentionally stylized for the art style — do NOT flag muscular or exaggerated builds as anatomy errors.`;
+
   content.push({
     type: 'text',
-    text: `Evaluate this training image for a character LoRA dataset. The character is a ${character.structuredData.gender}, ${character.structuredData.ethnicity}, ${character.structuredData.age} years old.
+    text: `Evaluate this training image for a character LoRA dataset. The character is a ${character.structuredData.gender}, ${character.structuredData.ethnicity}, ${character.structuredData.age} years old, ${character.structuredData.skinTone} skin.
+
+${bodyStyleNote}
+
+Note on skin tone: AI-generated images shift skin tone significantly under different lighting (warm golden hour, cool blue, dramatic side-light). Only flag "correctSkinTone" as false if the skin tone is COMPLETELY wrong (e.g. light skin when it should be dark), not for minor shifts caused by lighting.
 
 Respond with ONLY a JSON object (no markdown, no explanation):
 {
@@ -691,6 +714,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     "lightingQuality": 0-10,
     "backgroundClean": 0-10,
     "hairAccurate": 0-10,
+    "skinToneConsistency": 0-10,
     "overallAesthetic": 0-10
   },
   "diversityTags": {
@@ -700,7 +724,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     "lighting": "daylight"|"warm-indoor"|"dramatic-side"|"low-light",
     "clothingState": "formal"|"casual"|"revealing"|"intimate"
   },
-  "issues": ["list of specific problems, e.g. 'face not visible', 'wrong skin tone', 'extra limb on left side', 'blurry image', 'hair color wrong - shows brown instead of black'"]
+  "issues": ["list of specific problems, e.g. 'face not visible', 'extra limb on left side', 'blurry image', 'hair color wrong - shows brown instead of black'. Do NOT list intentional body proportions as issues."]
 }`,
   });
 

@@ -56,34 +56,47 @@ export const MINIMUM_SFW_IMAGES = 10;
 export const MINIMUM_NSFW_ADJACENT_IMAGES = 5;
 
 /**
- * Check if a single image passes all hard requirements.
+ * Check if a single image passes hard requirements.
+ *
+ * Only faceVisible, noAnatomyErrors, and imageSharp are hard kills.
+ * correctSkinTone and correctBodyProportions are now soft factors that
+ * feed into the quality score instead — skin tone shifts with lighting
+ * and body proportions are intentionally exaggerated for the art style.
  */
 export function passesRequirements(evaluation: TrainingImageEvaluation): boolean {
-  return Object.values(evaluation.requirements).every(Boolean);
+  const r = evaluation.requirements;
+  return r.faceVisible && r.noAnatomyErrors && r.imageSharp;
 }
 
 /**
  * Calculate an overall quality score for sorting candidates.
  */
 export function calculateQualityScore(evaluation: TrainingImageEvaluation): number {
-  const weights = {
-    expressionNatural: 1.5,   // Expression matters most
-    poseNatural: 1.2,
-    lightingQuality: 1.0,
-    backgroundClean: 0.8,
-    hairAccurate: 1.3,
-    overallAesthetic: 1.0,
-  };
+  const q = evaluation.quality;
+  const r = evaluation.requirements;
+
+  const weights: [number, number][] = [
+    [q.expressionNatural, 1.5],   // Expression matters most
+    [q.poseNatural, 1.2],
+    [q.lightingQuality, 1.0],
+    [q.backgroundClean, 0.8],
+    [q.hairAccurate, 1.3],
+    [(q as any).skinToneConsistency ?? 7, 0.6],
+    [q.overallAesthetic, 1.0],
+  ];
 
   let weightedSum = 0;
   let totalWeight = 0;
-
-  for (const [key, weight] of Object.entries(weights)) {
-    weightedSum += evaluation.quality[key as keyof typeof evaluation.quality] * weight;
+  for (const [score, weight] of weights) {
+    weightedSum += score * weight;
     totalWeight += weight;
   }
 
-  return weightedSum / totalWeight;
+  // Soft penalties for former hard requirements
+  const skinTonePenalty = r.correctSkinTone ? 0 : -0.5;
+  const proportionsPenalty = r.correctBodyProportions ? 0 : -0.3;
+
+  return (weightedSum / totalWeight) + skinTonePenalty + proportionsPenalty;
 }
 
 /**
