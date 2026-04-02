@@ -190,15 +190,6 @@ async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<bo
       }
     }
 
-    // Archive existing failed records to avoid unique constraint
-    if (lora.character_id) {
-      await (supabase as any)
-        .from("character_loras")
-        .update({ status: "archived", updated_at: new Date().toISOString() })
-        .eq("character_id", lora.character_id)
-        .eq("status", "failed");
-    }
-
     const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes. Click "Regenerate Dataset" to try again.`;
     const { error: updateErr } = await (supabase as any)
       .from("character_loras")
@@ -340,15 +331,6 @@ export async function POST(
       return NextResponse.json({ error: `LoRA is not stuck (status: ${lora.status})` }, { status: 400 });
     }
 
-    // Archive any existing "failed" records for this character to avoid
-    // unique constraint violation on (character_id, status)
-    await (supabase as any)
-      .from("character_loras")
-      .update({ status: "archived", updated_at: new Date().toISOString() })
-      .eq("character_id", storyChar.character_id)
-      .eq("status", "failed");
-
-    // Now safe to set the stuck record to "failed"
     const { error: updateErr } = await (supabase as any)
       .from("character_loras")
       .update({

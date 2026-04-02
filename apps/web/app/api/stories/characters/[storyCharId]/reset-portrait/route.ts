@@ -34,11 +34,16 @@ export async function POST(
 
     // Archive any non-archived LoRA records for this character
     if (storyChar.character_id) {
-      await (supabase as any)
+      const { error: archiveErr } = await (supabase as any)
         .from("character_loras")
         .update({ status: "archived", updated_at: new Date().toISOString() })
         .eq("character_id", storyChar.character_id)
         .not("status", "eq", "archived");
+
+      if (archiveErr) {
+        console.error(`[ResetPortrait] Failed to archive LoRAs:`, archiveErr);
+        return NextResponse.json({ error: `Failed to archive existing LoRAs: ${archiveErr.message}` }, { status: 500 });
+      }
     }
 
     // Build the update — always clear full-body + LoRA link
