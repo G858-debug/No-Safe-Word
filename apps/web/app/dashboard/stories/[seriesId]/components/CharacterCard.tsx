@@ -348,6 +348,29 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     }
   }
 
+  async function handleResetToPortrait(resetFace: boolean) {
+    if (!confirm(resetFace
+      ? "This will clear the approved portrait and full-body, archive any LoRA, and start over. Continue?"
+      : "This will clear the approved full-body, archive any LoRA, and let you regenerate the body. Continue?"
+    )) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/characters/${character.id}/reset-portrait`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resetFace }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Reset failed");
+      }
+      setLoraProgress(null);
+      onUpdate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    }
+  }
+
   async function handleForceReset() {
     try {
       const res = await fetch(`/api/stories/characters/${character.id}/lora-progress`, {
@@ -458,6 +481,22 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             character={character}
             loraProgress={loraProgress}
           />
+        )}
+
+        {/* Reset to portrait — available from any stage past portrait */}
+        {currentStage !== "portrait" && (
+          <div className="mt-4 pt-3 border-t border-muted">
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => handleResetToPortrait(true)}>
+                Redo Portrait
+              </Button>
+              {character.approved && (
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => handleResetToPortrait(false)}>
+                  Redo Full Body
+                </Button>
+              )}
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>
