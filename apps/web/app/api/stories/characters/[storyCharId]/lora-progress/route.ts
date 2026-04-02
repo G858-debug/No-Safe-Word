@@ -224,6 +224,41 @@ export async function GET(
       return NextResponse.json({ status: "no_lora", progress: null });
     }
 
+    // Quick pod liveness check — if the pod is gone, mark as failed immediately
+    // (don't wait for the 90 min stale threshold)
+    if (lora.status === "training" && lora.training_id) {
+      try {
+        const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
+        const podStatus = await getTrainingPodStatus(lora.training_id);
+        if (podStatus.desiredStatus === "EXITED" || podStatus.desiredStatus === "TERMINATED") {
+          console.log(`[LoRA Progress] Pod ${lora.training_id} is ${podStatus.desiredStatus} — marking as failed`);
+          await (supabase as any)
+            .from("character_loras")
+            .update({ status: "failed", error: `Training pod ${podStatus.desiredStatus.toLowerCase()}. Click "Retry Training" to try again.`, updated_at: new Date().toISOString() })
+            .eq("id", lora.id);
+          const { data: refreshed } = await (supabase as any)
+            .from("character_loras")
+            .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+            .eq("id", lora.id)
+            .single() as { data: any };
+          if (refreshed) lora = refreshed;
+        }
+      } catch {
+        // Pod not found (already deleted) — mark as failed
+        console.log(`[LoRA Progress] Pod ${lora.training_id} not found — marking as failed`);
+        await (supabase as any)
+          .from("character_loras")
+          .update({ status: "failed", error: `Training pod no longer exists. Click "Retry Training" to try again.`, updated_at: new Date().toISOString() })
+          .eq("id", lora.id);
+        const { data: refreshed } = await (supabase as any)
+          .from("character_loras")
+          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+          .eq("id", lora.id)
+          .single() as { data: any };
+        if (refreshed) lora = refreshed;
+      }
+    }
+
     // Check for stale pipelines and auto-recover (only for active stages)
     if (ACTIVE_STATUSES.has(lora.status)) {
       const wasStale = await detectAndRecoverStale(lora, storyCharId);
