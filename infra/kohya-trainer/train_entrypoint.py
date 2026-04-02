@@ -293,12 +293,19 @@ def main():
         # 1. Dataset
         img_dir, num_images = download_and_extract_dataset()
 
-        # 2. Verify checkpoint
+        # 2. Verify / download checkpoint
         if not os.path.exists(CHECKPOINT_PATH):
-            raise FileNotFoundError(
-                f"Base model not found at {CHECKPOINT_PATH}. "
-                "Ensure the network volume is mounted with the checkpoint."
+            os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+            print(f"[Kohya] Base model not found locally. Downloading from CivitAI...")
+            civitai_token = os.environ.get("CIVITAI_API_KEY", "")
+            url = "https://civitai.com/api/download/models/2601141"
+            if civitai_token:
+                url += f"?token={civitai_token}"
+            subprocess.run(
+                ["wget", "--progress=dot:mega", "-O", CHECKPOINT_PATH, url],
+                check=True,
             )
+            print(f"[Kohya] Checkpoint downloaded successfully.")
         ckpt_size_mb = os.path.getsize(CHECKPOINT_PATH) / 1024 / 1024
         print(f"Checkpoint: {CHECKPOINT_PATH} ({ckpt_size_mb:.0f}MB)")
 

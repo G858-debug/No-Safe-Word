@@ -159,7 +159,7 @@ async function getAvailableGpusSortedByPrice(minVramGb: number = MIN_TRAINING_VR
  * Dynamically queries RunPod for available GPUs sorted by price each round.
  */
 export async function createTrainingPod(config: TrainingPodConfig): Promise<{ podId: string }> {
-  const volumeKey = config.volumeKey || process.env.RUNPOD_NETWORK_VOLUME_ID;
+  const volumeKey = config.volumeKey;
   const maxRetries = 5;
   const retryDelayMs = 3 * 60_000; // 3 minutes between retry rounds
 
@@ -184,45 +184,48 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
       console.warn(`[RunPod Pods] No GPUs with >= ${MIN_TRAINING_VRAM_GB}GB VRAM listed`);
     }
 
-    for (const gpu of gpus) {
-      try {
-        console.log(`[RunPod Pods] Trying ${gpu.displayName} ($${gpu.price}/hr)...`);
+    const cloudTypes = ['SECURE', 'COMMUNITY'] as const;
+    for (const cloudType of cloudTypes) {
+      for (const gpu of gpus) {
+        try {
+          console.log(`[RunPod Pods] Trying ${gpu.displayName} on ${cloudType}${gpu.price ? ` ($${gpu.price}/hr)` : ''}...`);
 
-        const volumeClause = volumeKey
-          ? `volumeKey: "${volumeKey}", volumeMountPath: "${config.volumeMountPath || '/workspace'}",`
-          : '';
+          const volumeClause = volumeKey
+            ? `volumeKey: "${volumeKey}", volumeMountPath: "${config.volumeMountPath || '/workspace'}",`
+            : '';
 
-        const data = await runpodGql(`
-          mutation {
-            podFindAndDeployOnDemand(input: {
-              name: "${config.name}"
-              imageName: "${config.dockerImage}"
-              gpuTypeId: "${gpu.id}"
-              cloudType: COMMUNITY
-              ${volumeClause}
-              startJupyter: false
-              startSsh: false
-              minMemoryInGb: 16
-              minVcpuCount: 4
-              containerDiskInGb: 30
-              volumeInGb: ${volumeKey ? 0 : 50}
-              env: [${envEntries}]
-            }) {
-              id
-              desiredStatus
+          const data = await runpodGql(`
+            mutation {
+              podFindAndDeployOnDemand(input: {
+                name: "${config.name}"
+                imageName: "${config.dockerImage}"
+                gpuTypeId: "${gpu.id}"
+                cloudType: ${cloudType}
+                ${volumeClause}
+                startJupyter: false
+                startSsh: false
+                minMemoryInGb: 16
+                minVcpuCount: 4
+                containerDiskInGb: 30
+                volumeInGb: ${volumeKey ? 0 : 50}
+                env: [${envEntries}]
+              }) {
+                id
+                desiredStatus
+              }
             }
-          }
-        `);
+          `);
 
-        const pod = (data as Record<string, unknown>).podFindAndDeployOnDemand as { id: string; desiredStatus: string };
-        console.log(`[RunPod Pods] Created pod ${pod.id} on ${gpu.displayName}${gpu.price ? ` at $${gpu.price}/hr` : ''} (attempt ${attempt})`);
-        return { podId: pod.id };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('SUPPLY_CONSTRAINT') || msg.includes('no available')) {
-          continue; // Try next GPU type
+          const pod = (data as Record<string, unknown>).podFindAndDeployOnDemand as { id: string; desiredStatus: string };
+          console.log(`[RunPod Pods] Created pod ${pod.id} on ${gpu.displayName} ${cloudType}${gpu.price ? ` at $${gpu.price}/hr` : ''} (attempt ${attempt})`);
+          return { podId: pod.id };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('SUPPLY_CONSTRAINT') || msg.includes('no available')) {
+            continue; // Try next GPU type
+          }
+          throw err; // Unexpected error — don't swallow it
         }
-        throw err; // Unexpected error — don't swallow it
       }
     }
 
@@ -233,7 +236,7 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
     }
   }
 
-  throw new Error(`No GPU available for training pod after ${maxRetries} attempts (~${maxRetries * 3} min)`);
+  throw new Error(`No GPU available for training pod after ${maxRetries} attempts (~${maxRetries * 3} min) on SECURE + COMMUNITY clouds`);
 }
 
 /**

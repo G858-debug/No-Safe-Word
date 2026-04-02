@@ -982,11 +982,10 @@ async function createTrainingPodForLora(
   const { podId } = await createTrainingPod({
     name: `kohya-${config.triggerWord}-${Date.now()}`,
     dockerImage: KOHYA_DOCKER_IMAGE,
-    volumeKey: process.env.RUNPOD_NETWORK_VOLUME_ID,
-    volumeMountPath: '/workspace',
     env: {
       DATASET_URL: datasetUrl,
-      CHECKPOINT_PATH: '/workspace/models/checkpoints/CyberRealistic_PonySemi_V4.5.safetensors',
+      CHECKPOINT_PATH: '/tmp/models/CyberRealistic_PonySemi_V4.5.safetensors',
+      CIVITAI_API_KEY: process.env.CIVITAI_API_KEY || '',
       TRIGGER_WORD: config.triggerWord,
       LORA_ID: loraId,
       OUTPUT_UPLOAD_URL: uploadData.signedUrl,
