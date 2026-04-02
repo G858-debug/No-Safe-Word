@@ -7,15 +7,13 @@ import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-ge
 // Triggers the LoRA training pipeline after BOTH portrait and full-body are approved.
 // Runs in the background (fire-and-forget).
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
   const params = await props.params;
   const { storyCharId } = params;
 
   try {
-    // Read body early (stream can only be consumed once)
-    const body = await request.json().catch(() => ({}));
 
     // 1. Fetch the story character with its character data
     // Note: active_lora_id not in generated types yet, so use 'as any'
@@ -69,36 +67,19 @@ export async function POST(
       : null;
 
     if (existingProgress) {
-      if (existingProgress.status === 'deployed') {
-        if (!body.retrain) {
-          return NextResponse.json(
-            { error: "LoRA already deployed for this character. Send { retrain: true } to retrain.", loraId: existingProgress.loraId },
-            { status: 409 }
-          );
-        }
+      // Archive the existing LoRA so a fresh training can start.
+      // The user explicitly clicked "Train" or "Regenerate Dataset" — they want to start over.
+      console.log(`[LoRA Train] Archiving existing LoRA ${existingProgress.loraId} (status: ${existingProgress.status})`);
+      await (supabase as any)
+        .from('character_loras')
+        .update({ status: 'archived', updated_at: new Date().toISOString() })
+        .eq('id', existingProgress.loraId);
 
-        // Archive the existing deployed LoRA so a new one can be trained
-        console.log(`[LoRA Train] Retrain requested, archiving existing LoRA ${existingProgress.loraId}`);
-        await supabase
-          .from('character_loras')
-          .update({ status: 'archived' })
-          .eq('id', existingProgress.loraId);
-
-        // Clear the active_lora_id so it doesn't reference the archived one
-        await supabase
-          .from('story_characters')
-          .update({ active_lora_id: null } as any)
-          .eq('id', storyCharId);
-      } else if (!['failed', 'archived'].includes(existingProgress.status)) {
-        return NextResponse.json(
-          {
-            error: "LoRA training already in progress",
-            loraId: existingProgress.loraId,
-            status: existingProgress.status,
-          },
-          { status: 409 }
-        );
-      }
+      // Clear the active_lora_id so it doesn't reference the archived one
+      await (supabase as any)
+        .from('story_characters')
+        .update({ active_lora_id: null })
+        .eq('id', storyCharId);
     }
 
     // 5. Check series image engine for Pony dispatch
