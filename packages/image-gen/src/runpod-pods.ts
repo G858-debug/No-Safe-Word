@@ -74,15 +74,16 @@ interface GpuOption {
 }
 
 // Fallback GPU list in case the dynamic query fails
+// Ordered by price (cheapest first) and availability (common GPUs first)
 const FALLBACK_GPU_TYPES: GpuOption[] = [
-  { id: 'NVIDIA GeForce RTX 3090', displayName: 'RTX 3090', price: 0 },
-  { id: 'NVIDIA RTX A4500', displayName: 'RTX A4500', price: 0 },
-  { id: 'NVIDIA GeForce RTX 4090', displayName: 'RTX 4090', price: 0 },
-  { id: 'NVIDIA L4', displayName: 'L4', price: 0 },
-  { id: 'NVIDIA RTX 4000 Ada Generation', displayName: 'RTX 4000 Ada', price: 0 },
-  { id: 'NVIDIA L40', displayName: 'L40', price: 0 },
-  { id: 'NVIDIA L40S', displayName: 'L40S', price: 0 },
-  { id: 'NVIDIA RTX A6000', displayName: 'RTX A6000', price: 0 },
+  { id: 'NVIDIA GeForce RTX 3090', displayName: 'RTX 3090', price: 0.46 },
+  { id: 'NVIDIA RTX A5000', displayName: 'RTX A5000', price: 0.27 },
+  { id: 'NVIDIA L4', displayName: 'L4', price: 0.39 },
+  { id: 'NVIDIA GeForce RTX 4090', displayName: 'RTX 4090', price: 0.59 },
+  { id: 'NVIDIA RTX A6000', displayName: 'RTX A6000', price: 0.49 },
+  { id: 'NVIDIA A40', displayName: 'A40', price: 0.54 },
+  { id: 'NVIDIA L40', displayName: 'L40', price: 0.99 },
+  { id: 'NVIDIA L40S', displayName: 'L40S', price: 0.86 },
 ];
 
 /**
@@ -206,7 +207,7 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
                 startJupyter: false
                 startSsh: false
                 containerDiskInGb: 20
-                volumeInGb: ${volumeKey ? 0 : 20}
+                volumeInGb: 0
                 env: [${envEntries}]
               }) {
                 id
