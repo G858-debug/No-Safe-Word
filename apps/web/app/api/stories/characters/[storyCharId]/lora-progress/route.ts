@@ -85,27 +85,6 @@ async function detectAndRecoverStale(lora: any): Promise<boolean> {
   }
 }
 
-/**
- * Force-reset a stuck LoRA to failed status. Manual fallback when auto-detection
- * doesn't work (e.g. import issues in serverless environment).
- */
-async function forceResetStale(loraId: string, currentStatus: string): Promise<boolean> {
-  const { error } = await (supabase as any)
-    .from("character_loras")
-    .update({
-      status: "failed",
-      error: `Manually reset from stuck "${currentStatus}" status. Click "Retry Training" to try again.`,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", loraId);
-
-  if (error) {
-    console.error(`[LoRA Reset] DB update failed:`, error);
-    return false;
-  }
-  console.log(`[LoRA Reset] Force-reset ${loraId} from "${currentStatus}" to "failed"`);
-  return true;
-}
 
 // GET /api/stories/characters/[storyCharId]/lora-progress
 // Poll the LoRA training pipeline progress for a character.
@@ -191,47 +170,66 @@ export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
-  const params = await props.params;
-  const { storyCharId } = params;
-  const body = await request.json();
-  const { action } = body as { action?: string };
+  try {
+    const params = await props.params;
+    const { storyCharId } = params;
+    const body = await request.json();
+    const { action } = body as { action?: string };
 
-  if (action !== "force-reset") {
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+    if (action !== "force-reset") {
+      return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+    }
+
+    // Find the character's active LoRA
+    const { data: storyChar, error: scErr } = await (supabase as any)
+      .from("story_characters")
+      .select("character_id")
+      .eq("id", storyCharId)
+      .single();
+
+    if (scErr || !storyChar) {
+      return NextResponse.json({ error: `Story character not found: ${scErr?.message || "no data"}` }, { status: 404 });
+    }
+
+    const { data: lora, error: loraErr } = await (supabase as any)
+      .from("character_loras")
+      .select("id, status")
+      .eq("character_id", storyChar.character_id)
+      .not("status", "eq", "archived")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (loraErr || !lora) {
+      return NextResponse.json({ error: `No LoRA found: ${loraErr?.message || "no data"}` }, { status: 404 });
+    }
+
+    if (!ACTIVE_STATUSES.has(lora.status)) {
+      return NextResponse.json({ error: `LoRA is not stuck (status: ${lora.status})` }, { status: 400 });
+    }
+
+    // Direct update — no separate function, no dynamic imports, just write to DB
+    const { error: updateErr } = await (supabase as any)
+      .from("character_loras")
+      .update({
+        status: "failed",
+        error: `Manually reset from stuck "${lora.status}" status. Click "Retry Training" to try again.`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lora.id);
+
+    if (updateErr) {
+      console.error(`[LoRA Reset] DB update failed:`, updateErr);
+      return NextResponse.json({ error: `DB update failed: ${updateErr.message}` }, { status: 500 });
+    }
+
+    console.log(`[LoRA Reset] Force-reset ${lora.id} from "${lora.status}" to "failed"`);
+    return NextResponse.json({ ok: true, previousStatus: lora.status });
+  } catch (err) {
+    console.error("[LoRA Reset] Unexpected error:", err);
+    return NextResponse.json(
+      { error: `Unexpected error: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
+    );
   }
-
-  // Find the character's active LoRA
-  const { data: storyChar } = await (supabase as any)
-    .from("story_characters")
-    .select("character_id")
-    .eq("id", storyCharId)
-    .single() as { data: { character_id: string } | null };
-
-  if (!storyChar) {
-    return NextResponse.json({ error: "Story character not found" }, { status: 404 });
-  }
-
-  const { data: lora } = await (supabase as any)
-    .from("character_loras")
-    .select("id, status")
-    .eq("character_id", storyChar.character_id)
-    .not("status", "eq", "archived")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single() as { data: { id: string; status: string } | null };
-
-  if (!lora) {
-    return NextResponse.json({ error: "No LoRA found" }, { status: 404 });
-  }
-
-  if (!ACTIVE_STATUSES.has(lora.status)) {
-    return NextResponse.json({ error: `LoRA is not stuck (status: ${lora.status})` }, { status: 400 });
-  }
-
-  const ok = await forceResetStale(lora.id, lora.status);
-  if (!ok) {
-    return NextResponse.json({ error: "Failed to reset LoRA status" }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true, previousStatus: lora.status });
 }
