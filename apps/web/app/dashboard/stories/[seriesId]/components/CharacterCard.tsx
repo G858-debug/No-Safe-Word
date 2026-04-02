@@ -708,12 +708,15 @@ function DatasetStage({
         <p className="text-sm text-muted-foreground">
           Images have been auto-curated. Review the dataset on the approval page, then continue.
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" asChild>
             <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>Review Dataset</Link>
           </Button>
           <Button size="sm" onClick={onResume}>
             Continue Training
+          </Button>
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={onTrain}>
+            Regenerate Dataset
           </Button>
         </div>
       </div>
