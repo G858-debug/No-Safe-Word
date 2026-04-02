@@ -73,17 +73,36 @@ interface GpuOption {
   price: number;
 }
 
-// Fallback GPU list in case the dynamic query fails
-// Ordered by price (cheapest first) and availability (common GPUs first)
+// Allowlist of GPU IDs we're willing to use for training — prevents landing
+// on expensive datacenter GPUs (MI300X, H100, etc.) when the pricing API is broken.
+const ALLOWED_GPU_IDS = new Set([
+  'NVIDIA A40',                       // 48GB — preferred, cheap, high availability
+  'NVIDIA GeForce RTX 4090',          // 24GB
+  'NVIDIA GeForce RTX 3090',          // 24GB
+  'NVIDIA RTX A4500',                 // 20GB
+  'NVIDIA RTX A4000',                 // 16GB — tight but works for dim-8
+  'NVIDIA L4',                        // 24GB
+  'NVIDIA L40',                       // 48GB
+  'NVIDIA L40S',                      // 48GB
+  'NVIDIA RTX A5000',                 // 24GB
+  'NVIDIA RTX A6000',                 // 48GB
+]);
+
+// Max price per hour — reject anything above this
+const MAX_GPU_PRICE_PER_HR = 1.00;
+
+// Fallback GPU list in case the dynamic query fails — preferred order
 const FALLBACK_GPU_TYPES: GpuOption[] = [
-  { id: 'NVIDIA GeForce RTX 3090', displayName: 'RTX 3090', price: 0.46 },
-  { id: 'NVIDIA RTX A5000', displayName: 'RTX A5000', price: 0.27 },
-  { id: 'NVIDIA L4', displayName: 'L4', price: 0.39 },
-  { id: 'NVIDIA GeForce RTX 4090', displayName: 'RTX 4090', price: 0.59 },
-  { id: 'NVIDIA RTX A6000', displayName: 'RTX A6000', price: 0.49 },
   { id: 'NVIDIA A40', displayName: 'A40', price: 0.54 },
+  { id: 'NVIDIA GeForce RTX 4090', displayName: 'RTX 4090', price: 0.59 },
+  { id: 'NVIDIA GeForce RTX 3090', displayName: 'RTX 3090', price: 0.46 },
+  { id: 'NVIDIA RTX A4500', displayName: 'RTX A4500', price: 0.25 },
+  { id: 'NVIDIA RTX A4000', displayName: 'RTX A4000', price: 0.25 },
+  { id: 'NVIDIA L4', displayName: 'L4', price: 0.39 },
   { id: 'NVIDIA L40', displayName: 'L40', price: 0.99 },
   { id: 'NVIDIA L40S', displayName: 'L40S', price: 0.86 },
+  { id: 'NVIDIA RTX A5000', displayName: 'RTX A5000', price: 0.27 },
+  { id: 'NVIDIA RTX A6000', displayName: 'RTX A6000', price: 0.49 },
 ];
 
 /**
@@ -107,10 +126,10 @@ async function getAvailableGpusSortedByPrice(minVramGb: number = MIN_TRAINING_VR
 
     const gpus = ((data.gpuTypes || []) as any[])
       .filter(gpu =>
-        gpu.memoryInGb >= minVramGb &&
-        (gpu.secureCloud || gpu.communityCloud) &&
+        ALLOWED_GPU_IDS.has(gpu.id) &&
         gpu.lowestPrice?.uninterruptablePrice != null &&
-        gpu.lowestPrice.uninterruptablePrice > 0
+        gpu.lowestPrice.uninterruptablePrice > 0 &&
+        gpu.lowestPrice.uninterruptablePrice <= MAX_GPU_PRICE_PER_HR
       )
       .sort((a, b) =>
         a.lowestPrice.uninterruptablePrice - b.lowestPrice.uninterruptablePrice
@@ -138,7 +157,7 @@ async function getAvailableGpusSortedByPrice(minVramGb: number = MIN_TRAINING_VR
     }`);
 
     const gpus = ((data.gpuTypes || []) as any[])
-      .filter(gpu => gpu.memoryInGb >= minVramGb && gpu.secureCloud)
+      .filter(gpu => ALLOWED_GPU_IDS.has(gpu.id))
       .map(gpu => ({
         id: gpu.id,
         displayName: gpu.displayName,
