@@ -59,6 +59,16 @@ async function detectAndRecoverStale(lora: any): Promise<boolean> {
       }
     }
 
+    // Archive any existing "failed" records for this character to avoid
+    // unique constraint violation on (character_id, status)
+    if (lora.character_id) {
+      await (supabase as any)
+        .from("character_loras")
+        .update({ status: "archived", updated_at: new Date().toISOString() })
+        .eq("character_id", lora.character_id)
+        .eq("status", "failed");
+    }
+
     // Mark as failed with a clear error message
     const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes without progress. ` +
       `This usually means the background process crashed or timed out. Click "Retry Training" to try again.`;
@@ -113,7 +123,7 @@ export async function GET(
     // Find the most relevant LoRA record
     let { data: lora } = await (supabase as any)
       .from("character_loras")
-      .select("id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
+      .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
       .eq("character_id", storyChar.character_id)
       .not("status", "eq", "archived")
       .order("created_at", { ascending: false })
@@ -131,7 +141,7 @@ export async function GET(
         // Re-fetch the now-failed record
         const { data: refreshed } = await (supabase as any)
           .from("character_loras")
-          .select("id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
+          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
           .eq("id", lora.id)
           .single() as { data: any };
         if (refreshed) lora = refreshed;
@@ -208,7 +218,15 @@ export async function POST(
       return NextResponse.json({ error: `LoRA is not stuck (status: ${lora.status})` }, { status: 400 });
     }
 
-    // Direct update — no separate function, no dynamic imports, just write to DB
+    // Archive any existing "failed" records for this character to avoid
+    // unique constraint violation on (character_id, status)
+    await (supabase as any)
+      .from("character_loras")
+      .update({ status: "archived", updated_at: new Date().toISOString() })
+      .eq("character_id", storyChar.character_id)
+      .eq("status", "failed");
+
+    // Now safe to set the stuck record to "failed"
     const { error: updateErr } = await (supabase as any)
       .from("character_loras")
       .update({
