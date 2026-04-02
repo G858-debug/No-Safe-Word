@@ -965,7 +965,7 @@ export default function DatasetApprovalPage() {
       }
 
       // Navigate back to the character approval page
-      router.push(`/dashboard/stories/${seriesId}`);
+      router.push(`/dashboard/stories/${seriesId}?tab=characters`);
     } catch {
       setResumeError("Network error");
       setResuming(false);
@@ -991,7 +991,7 @@ export default function DatasetApprovalPage() {
         return;
       }
 
-      router.push(`/dashboard/stories/${seriesId}`);
+      router.push(`/dashboard/stories/${seriesId}?tab=characters`);
     } catch {
       setResumeError("Network error");
       setResuming(false);
@@ -1127,7 +1127,7 @@ export default function DatasetApprovalPage() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <Link
-            href={`/dashboard/stories/${seriesId}`}
+            href={`/dashboard/stories/${seriesId}?tab=characters`}
             className="mb-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
           >
             <ArrowLeft className="h-3 w-3" />

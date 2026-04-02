@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -141,13 +141,14 @@ const POST_STATUS_CONFIG: Record<
 export default function SeriesDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const seriesId = params.seriesId as string;
 
   const [data, setData] = useState<SeriesData | null>(null);
   const [characters, setCharacters] = useState<CharacterFromAPI[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "overview");
 
   // Fetch series data + characters
   useEffect(() => {
