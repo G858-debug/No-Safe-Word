@@ -3,7 +3,7 @@ import { supabase } from "@no-safe-word/story-engine";
 import { resumePonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
-const MIN_PASSED_IMAGES = 20;
+const MIN_PASSED_IMAGES = 15;
 
 // POST /api/stories/characters/[storyCharId]/resume-training
 // Resume the LoRA pipeline after human dataset approval.

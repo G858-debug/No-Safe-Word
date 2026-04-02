@@ -127,85 +127,102 @@ export async function runPonyPipeline(
   const config = getRecommendedTrainingConfig(character.characterName);
   config.characterId = character.characterId;
 
-  console.log(`[PonyPipeline] Starting for ${character.characterName} (loraId: ${loraId}, trigger: ${config.triggerWord})`);
+  // Check current status for resumability — skip completed stages
+  const { data: currentLora } = await deps.supabase
+    .from('character_loras')
+    .select('status')
+    .eq('id', loraId)
+    .single();
+  const currentStatus = (currentLora as any)?.status || 'pending';
+
+  const isResume = currentStatus !== 'pending';
+  console.log(`[PonyPipeline] ${isResume ? 'Resuming' : 'Starting'} for ${character.characterName} (loraId: ${loraId}, status: ${currentStatus}, trigger: ${config.triggerWord})`);
 
   try {
-    // ── Stage 1: Generate dataset ──
-    await setLoraStatus(loraId, 'generating_dataset', {}, deps);
-    console.log(`[PonyPipeline] Stage 1: Generating dataset...`);
+    // ── Stage 1: Generate dataset (resumable — skips existing images) ──
+    if (['pending', 'generating_dataset'].includes(currentStatus)) {
+      await setLoraStatus(loraId, 'generating_dataset', {}, deps);
+      console.log(`[PonyPipeline] Stage 1: Generating dataset...`);
 
-    const datasetResult = await generatePonyDataset(character, loraId, deps);
-    console.log(`[PonyPipeline] Generated ${datasetResult.totalGenerated} images, ${datasetResult.failedPrompts.length} failed`);
+      const datasetResult = await generatePonyDataset(character, loraId, deps);
+      console.log(`[PonyPipeline] Generated ${datasetResult.totalGenerated} images, ${datasetResult.failedPrompts.length} failed`);
 
-    await setLoraStatus(loraId, 'generating_dataset', {
-      dataset_size: datasetResult.totalGenerated,
-    }, deps);
-
-    // ── Stage 2: Evaluate images ──
-    await setLoraStatus(loraId, 'evaluating', {}, deps);
-    console.log(`[PonyPipeline] Stage 2: Evaluating dataset images...`);
-
-    let evaluations = await evaluateDatasetImages(loraId, character, deps);
-
-    // Initial pass — mark passed/failed in DB
-    for (const eval_ of evaluations) {
-      const score = calculateSimpleScore(eval_);
-      const passed = score >= PIPELINE_CONFIG.minEvalScore;
-      await deps.supabase
-        .from('lora_dataset_images')
-        .update({ eval_status: passed ? 'passed' : 'failed' })
-        .eq('id', eval_.imageId);
+      await setLoraStatus(loraId, 'generating_dataset', {
+        dataset_size: datasetResult.totalGenerated,
+      }, deps);
+    } else {
+      console.log(`[PonyPipeline] Skipping Stage 1 (already at ${currentStatus})`);
     }
 
-    const initialPassed = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
-    console.log(`[PonyPipeline] Initial evaluation: ${initialPassed}/${evaluations.length} passed`);
+    // ── Stage 2: Evaluate images (resumable — only evaluates pending images) ──
+    if (['pending', 'generating_dataset', 'evaluating'].includes(currentStatus)) {
+      await setLoraStatus(loraId, 'evaluating', {}, deps);
+      console.log(`[PonyPipeline] Stage 2: Evaluating dataset images...`);
 
-    // Retry failed images with improved prompts (up to 3 rounds)
-    if (initialPassed < PIPELINE_CONFIG.targetPassedImages) {
-      console.log(`[PonyPipeline] Need ${PIPELINE_CONFIG.targetPassedImages}, have ${initialPassed}. Retrying failed images with improved prompts...`);
-      const retryEvals = await retryFailedImages(loraId, character, deps);
-      evaluations = evaluations.concat(retryEvals);
-    }
+      let evaluations = await evaluateDatasetImages(loraId, character, deps);
 
-    // Final curation
-    const allPassingEvals = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore);
-    const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
-
-    console.log(`[PonyPipeline] Final: ${selected.length} selected, ${rejected.length} rejected (after retries)`);
-    if (warnings.length > 0) {
-      console.warn(`[PonyPipeline] Warnings: ${warnings.join('; ')}`);
-    }
-    if (!diversityCoverage.met) {
-      console.warn(`[PonyPipeline] Missing diversity: ${diversityCoverage.missing.join(', ')}`);
-    }
-
-    // Update eval_status for final selection
-    const selectedIds = new Set(selected.map(e => e.imageId));
-    const { data: allImages } = await deps.supabase
-      .from('lora_dataset_images')
-      .select('id')
-      .eq('lora_id', loraId);
-
-    if (allImages) {
-      for (const img of allImages) {
-        const evalStatus = selectedIds.has(img.id) ? 'passed' : 'failed';
+      // Initial pass — mark passed/failed in DB
+      for (const eval_ of evaluations) {
+        const score = calculateSimpleScore(eval_);
+        const passed = score >= PIPELINE_CONFIG.minEvalScore;
         await deps.supabase
           .from('lora_dataset_images')
-          .update({ eval_status: evalStatus })
-          .eq('id', img.id);
+          .update({ eval_status: passed ? 'passed' : 'failed' })
+          .eq('id', eval_.imageId);
       }
-    }
 
-    if (selected.length < PIPELINE_CONFIG.minPassedImages) {
-      throw new Error(
-        `Only ${selected.length} images passed evaluation after ${MAX_RETRY_ROUNDS} retry rounds (need ${PIPELINE_CONFIG.minPassedImages}). ` +
-        `Review the dataset and adjust character description, then retry.`
-      );
-    }
+      const initialPassed = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+      console.log(`[PonyPipeline] Initial evaluation: ${initialPassed}/${evaluations.length} passed`);
 
-    // ── Stage 3: Await human approval ──
-    await setLoraStatus(loraId, 'awaiting_dataset_approval', {}, deps);
-    console.log(`[PonyPipeline] Stage 3: Pausing for human dataset approval. ${selected.length} images ready for review.`);
+      // Retry failed images with improved prompts (up to 3 rounds)
+      if (initialPassed < PIPELINE_CONFIG.targetPassedImages) {
+        console.log(`[PonyPipeline] Need ${PIPELINE_CONFIG.targetPassedImages}, have ${initialPassed}. Retrying failed images with improved prompts...`);
+        const retryEvals = await retryFailedImages(loraId, character, deps);
+        evaluations = evaluations.concat(retryEvals);
+      }
+
+      // Final curation
+      const allPassingEvals = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore);
+      const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
+
+      console.log(`[PonyPipeline] Final: ${selected.length} selected, ${rejected.length} rejected (after retries)`);
+      if (warnings.length > 0) {
+        console.warn(`[PonyPipeline] Warnings: ${warnings.join('; ')}`);
+      }
+      if (!diversityCoverage.met) {
+        console.warn(`[PonyPipeline] Missing diversity: ${diversityCoverage.missing.join(', ')}`);
+      }
+
+      // Update eval_status for final selection
+      const selectedIds = new Set(selected.map(e => e.imageId));
+      const { data: allImages } = await deps.supabase
+        .from('lora_dataset_images')
+        .select('id')
+        .eq('lora_id', loraId);
+
+      if (allImages) {
+        for (const img of allImages) {
+          const evalStatus = selectedIds.has(img.id) ? 'passed' : 'failed';
+          await deps.supabase
+            .from('lora_dataset_images')
+            .update({ eval_status: evalStatus })
+            .eq('id', img.id);
+        }
+      }
+
+      if (selected.length < PIPELINE_CONFIG.minPassedImages) {
+        throw new Error(
+          `Only ${selected.length} images passed evaluation after ${MAX_RETRY_ROUNDS} retry rounds (need ${PIPELINE_CONFIG.minPassedImages}). ` +
+          `Review the dataset and adjust character description, then retry.`
+        );
+      }
+
+      // ── Stage 3: Await human approval ──
+      await setLoraStatus(loraId, 'awaiting_dataset_approval', {}, deps);
+      console.log(`[PonyPipeline] Stage 3: Pausing for human dataset approval. ${selected.length} images ready for review.`);
+    } else {
+      console.log(`[PonyPipeline] Skipping Stages 2-3 (already at ${currentStatus})`);
+    }
     // Pipeline STOPS here. Human uses the approve-dataset route, then
     // calls resume-training to continue from stage 4.
   } catch (err) {

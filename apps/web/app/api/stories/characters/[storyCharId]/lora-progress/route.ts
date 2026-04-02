@@ -1,28 +1,94 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
+import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
-// Stale thresholds — if updated_at is older than this, the pipeline is stuck
+// Stale thresholds — if updated_at is older than this, the pipeline process is dead.
+// Stages with heartbeats (generating_dataset, evaluating) use a short threshold
+// since heartbeats fire every ~2-3 min. No heartbeat for 5 min = dead process.
 const STALE_THRESHOLDS: Record<string, number> = {
-  generating_dataset: 30 * 60_000,  // 30 min — dataset gen takes ~10 min
-  evaluating: 30 * 60_000,          // 30 min — evaluation takes ~5-10 min
-  captioning: 20 * 60_000,          // 20 min — captioning is fast
-  packaging_dataset: 10 * 60_000,   // 10 min — packaging is fast
-  training: 90 * 60_000,            // 90 min — training takes 30-60 min
-  validating: 30 * 60_000,          // 30 min — validation takes ~10 min
+  generating_dataset: 5 * 60_000,   // 5 min — heartbeats every ~2-3 min
+  evaluating: 5 * 60_000,           // 5 min — heartbeats every batch
+  captioning: 10 * 60_000,          // 10 min — no heartbeats yet, but fast stage
+  packaging_dataset: 10 * 60_000,   // 10 min
+  training: 90 * 60_000,            // 90 min — pod-based, webhook expected
+  validating: 30 * 60_000,          // 30 min
 };
+
+// Stages where we can auto-resume (pipeline is resumable)
+const AUTO_RESUMABLE_STAGES = new Set(["generating_dataset", "evaluating"]);
 
 // Statuses that are active pipeline stages (not terminal states)
 const ACTIVE_STATUSES = new Set(Object.keys(STALE_THRESHOLDS));
 
+// In-memory guard: prevent concurrent auto-resumes for the same LoRA
+const resumingLoras = new Set<string>();
+
 /**
- * Check if a LoRA pipeline stage is stale and auto-recover if so.
- * For `training` status, also tries to check if the RunPod pod is still alive.
- * Returns true if the record was marked as failed (caller should re-fetch).
- *
- * This function MUST NOT throw — errors are caught and logged so the
- * main GET handler can still return the current status to the UI.
+ * Build CharacterInput from a storyCharId for pipeline re-invocation.
  */
-async function detectAndRecoverStale(lora: any): Promise<boolean> {
+async function buildCharacterInput(storyCharId: string): Promise<CharacterInput | null> {
+  const { data: sc } = await (supabase as any)
+    .from("story_characters")
+    .select(`
+      id, character_id, approved_seed, approved_prompt,
+      approved_fullbody_seed, approved_image_id, approved_fullbody_image_id,
+      characters ( id, name, description )
+    `)
+    .eq("id", storyCharId)
+    .single();
+  if (!sc) return null;
+
+  const char = sc.characters as { id: string; name: string; description: Record<string, string> };
+  const desc = char.description;
+
+  const [portrait, fullBody] = await Promise.all([
+    (supabase as any).from("images").select("stored_url, sfw_url").eq("id", sc.approved_image_id).single(),
+    (supabase as any).from("images").select("stored_url, sfw_url").eq("id", sc.approved_fullbody_image_id).single(),
+  ]);
+
+  const portraitUrl = portrait.data?.sfw_url || portrait.data?.stored_url;
+  const fullBodyUrl = fullBody.data?.sfw_url || fullBody.data?.stored_url;
+  if (!portraitUrl || !fullBodyUrl) return null;
+
+  const structuredData: CharacterStructured = {
+    gender: desc.gender || "female",
+    ethnicity: desc.ethnicity || "",
+    bodyType: desc.bodyType || "",
+    skinTone: desc.skinTone || "",
+    hairColor: desc.hairColor || "",
+    hairStyle: desc.hairStyle || "",
+    eyeColor: desc.eyeColor || "",
+    age: desc.age || "",
+    distinguishingFeatures: desc.distinguishingFeatures,
+  };
+
+  return {
+    characterId: char.id,
+    characterName: char.name,
+    gender: desc.gender || "female",
+    approvedImageUrl: portraitUrl,
+    approvedPrompt: sc.approved_prompt || "",
+    fullBodyImageUrl: fullBodyUrl,
+    fullBodySeed: sc.approved_fullbody_seed || 42,
+    portraitSeed: sc.approved_seed || 42,
+    structuredData,
+    pipelineType: "story_character",
+    imageEngine: "pony_cyberreal",
+  };
+}
+
+/**
+ * Check if a LoRA pipeline stage is stale and auto-recover.
+ *
+ * For resumable stages (generating_dataset, evaluating): re-fires the pipeline
+ * in the background. The pipeline is resumable — it skips already-done work.
+ *
+ * For non-resumable stages: marks as failed so the user can retry.
+ *
+ * Returns true if the status changed (caller should re-fetch).
+ * This function MUST NOT throw.
+ */
+async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<boolean> {
   try {
     const threshold = STALE_THRESHOLDS[lora.status];
     if (!threshold) return false;
@@ -33,9 +99,46 @@ async function detectAndRecoverStale(lora: any): Promise<boolean> {
     if (age < threshold) return false;
 
     const ageMin = Math.round(age / 60_000);
-    console.warn(`[LoRA Stale] ${lora.id} stuck in "${lora.status}" for ${ageMin}min (threshold: ${threshold / 60_000}min)`);
+    console.warn(`[LoRA Stale] ${lora.id} stuck in "${lora.status}" for ${ageMin}min`);
 
-    // For training status, try to check if pod is still alive
+    // ── Auto-resume for resumable stages ──
+    if (AUTO_RESUMABLE_STAGES.has(lora.status)) {
+      if (resumingLoras.has(lora.id)) {
+        console.log(`[LoRA Stale] ${lora.id} already being resumed, skipping`);
+        return false;
+      }
+
+      const charInput = await buildCharacterInput(storyCharId);
+      if (!charInput) {
+        console.error(`[LoRA Stale] Could not build CharacterInput for ${storyCharId}`);
+        return false; // Can't resume without character data
+      }
+
+      // Bump updated_at so the next poll doesn't re-trigger immediately
+      await (supabase as any)
+        .from("character_loras")
+        .update({ updated_at: new Date().toISOString(), error: null })
+        .eq("id", lora.id);
+
+      // Fire-and-forget: re-invoke the resumable pipeline
+      resumingLoras.add(lora.id);
+      console.log(`[LoRA Stale] Auto-resuming pipeline for ${lora.id} (was "${lora.status}" for ${ageMin}min)`);
+
+      import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ runPonyPipeline }) => {
+        runPonyPipeline(charInput, lora.id, { supabase })
+          .catch(err => console.error(`[LoRA Stale] Auto-resume failed:`, err))
+          .finally(() => resumingLoras.delete(lora.id));
+      }).catch(err => {
+        console.error(`[LoRA Stale] Failed to import pipeline:`, err);
+        resumingLoras.delete(lora.id);
+      });
+
+      return false; // Status hasn't changed yet, pipeline is resuming in background
+    }
+
+    // ── Non-resumable stages: mark as failed ──
+
+    // For training status, check if pod is still alive
     if (lora.status === "training" && lora.training_id) {
       try {
         const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
@@ -46,21 +149,16 @@ async function detectAndRecoverStale(lora: any): Promise<boolean> {
             return false;
           }
         }
-        console.warn(`[LoRA Stale] Pod ${lora.training_id} status: ${podStatus.desiredStatus}`);
-
         if (podStatus.desiredStatus !== "TERMINATED") {
           const { terminateTrainingPod } = await import("@no-safe-word/image-gen/runpod-pods");
-          terminateTrainingPod(lora.training_id).catch(err => {
-            console.warn(`[LoRA Stale] Failed to terminate pod: ${err}`);
-          });
+          terminateTrainingPod(lora.training_id).catch(() => {});
         }
-      } catch (err) {
-        console.warn(`[LoRA Stale] Could not check pod status (proceeding with reset): ${err}`);
+      } catch {
+        // Pod might be gone already
       }
     }
 
-    // Archive any existing "failed" records for this character to avoid
-    // unique constraint violation on (character_id, status)
+    // Archive existing failed records to avoid unique constraint
     if (lora.character_id) {
       await (supabase as any)
         .from("character_loras")
@@ -69,28 +167,19 @@ async function detectAndRecoverStale(lora: any): Promise<boolean> {
         .eq("status", "failed");
     }
 
-    // Mark as failed with a clear error message
-    const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes without progress. ` +
-      `This usually means the background process crashed or timed out. Click "Retry Training" to try again.`;
-
+    const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes. Click "Regenerate Dataset" to try again.`;
     const { error: updateErr } = await (supabase as any)
       .from("character_loras")
-      .update({
-        status: "failed",
-        error: errorMsg,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ status: "failed", error: errorMsg, updated_at: new Date().toISOString() })
       .eq("id", lora.id);
 
     if (updateErr) {
-      console.error(`[LoRA Stale] DB update failed for ${lora.id}:`, updateErr);
+      console.error(`[LoRA Stale] DB update failed:`, updateErr);
       return false;
     }
-
-    console.log(`[LoRA Stale] Marked ${lora.id} as failed (was "${lora.status}" for ${ageMin}min)`);
     return true;
   } catch (err) {
-    console.error(`[LoRA Stale] detectAndRecoverStale crashed for ${lora.id}:`, err);
+    console.error(`[LoRA Stale] detectAndRecoverStale crashed:`, err);
     return false;
   }
 }
@@ -136,7 +225,7 @@ export async function GET(
 
     // Check for stale pipelines and auto-recover (only for active stages)
     if (ACTIVE_STATUSES.has(lora.status)) {
-      const wasStale = await detectAndRecoverStale(lora);
+      const wasStale = await detectAndRecoverStale(lora, storyCharId);
       if (wasStale) {
         // Re-fetch the now-failed record
         const { data: refreshed } = await (supabase as any)

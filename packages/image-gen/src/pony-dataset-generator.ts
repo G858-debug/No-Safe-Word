@@ -251,14 +251,23 @@ export async function generatePonyDataset(
   const imageRecords: LoraDatasetImageRow[] = [];
   const failedPrompts: DatasetGenerationResult['failedPrompts'] = [];
 
-  console.log(`[Pony Dataset] Generating ${prompts.length} images for ${character.characterName}...`);
+  // Resumability: check which prompts already have images in the DB
+  const { data: existingImages } = await deps.supabase
+    .from('lora_dataset_images')
+    .select('prompt_template')
+    .eq('lora_id', loraId);
+  const existingPromptIds = new Set((existingImages || []).map((r: any) => r.prompt_template));
 
-  for (let i = 0; i < prompts.length; i++) {
-    const prompt = prompts[i];
-    const seed = (character.portraitSeed || 42) + i;
+  const remaining = prompts.filter(p => !existingPromptIds.has(p.id));
+  console.log(`[Pony Dataset] ${prompts.length} total prompts, ${existingPromptIds.size} already generated, ${remaining.length} remaining for ${character.characterName}`);
+
+  for (let i = 0; i < remaining.length; i++) {
+    const prompt = remaining[i];
+    const originalIndex = prompts.indexOf(prompt);
+    const seed = (character.portraitSeed || 42) + originalIndex;
 
     try {
-      console.log(`[Pony Dataset] ${i + 1}/${prompts.length}: ${prompt.description} (${prompt.category})`);
+      console.log(`[Pony Dataset] ${existingPromptIds.size + i + 1}/${prompts.length}: ${prompt.description} (${prompt.category})`);
 
       const { workflow, positivePrompt } = buildPonyDatasetWorkflow({
         character: ponyChar,
@@ -312,7 +321,7 @@ export async function generatePonyDataset(
 
       // Heartbeat: update the LoRA record so stale detection knows we're alive
       // Also stores progress so the UI can show "X/Y images generated"
-      if (i % 3 === 2 || i === prompts.length - 1) {
+      if (i % 3 === 2 || i === remaining.length - 1) {
         await deps.supabase
           .from('character_loras')
           .update({
@@ -323,7 +332,7 @@ export async function generatePonyDataset(
       }
 
       // Small delay between requests
-      if (i < prompts.length - 1) {
+      if (i < remaining.length - 1) {
         await new Promise((r) => setTimeout(r, 1000));
       }
     } catch (err) {
@@ -336,12 +345,13 @@ export async function generatePonyDataset(
     }
   }
 
+  const totalGenerated = existingPromptIds.size + imageRecords.length;
   console.log(
-    `[Pony Dataset] Complete: ${imageRecords.length} images generated, ${failedPrompts.length} failed`,
+    `[Pony Dataset] Complete: ${totalGenerated} total images (${existingPromptIds.size} existing + ${imageRecords.length} new), ${failedPrompts.length} failed`,
   );
 
   return {
-    totalGenerated: imageRecords.length,
+    totalGenerated,
     imageRecords,
     failedPrompts,
   };
