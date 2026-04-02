@@ -153,9 +153,9 @@ async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<bo
       try {
         const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
         const podStatus = await getTrainingPodStatus(lora.training_id);
-        if (podStatus.desiredStatus === "RUNNING") {
+        if (podStatus.desiredStatus === "RUNNING" || podStatus.desiredStatus === "CREATED") {
           if (age < 180 * 60_000) {
-            console.log(`[LoRA Stale] Pod ${lora.training_id} still RUNNING — extending grace period`);
+            console.log(`[LoRA Stale] Pod ${lora.training_id} is ${podStatus.desiredStatus} — extending grace period`);
             return false;
           }
         }
