@@ -73,39 +73,83 @@ interface GpuOption {
   price: number;
 }
 
+// Fallback GPU list in case the dynamic query fails
+const FALLBACK_GPU_TYPES: GpuOption[] = [
+  { id: 'NVIDIA GeForce RTX 3090', displayName: 'RTX 3090', price: 0 },
+  { id: 'NVIDIA RTX A4500', displayName: 'RTX A4500', price: 0 },
+  { id: 'NVIDIA GeForce RTX 4090', displayName: 'RTX 4090', price: 0 },
+  { id: 'NVIDIA L4', displayName: 'L4', price: 0 },
+  { id: 'NVIDIA RTX 4000 Ada Generation', displayName: 'RTX 4000 Ada', price: 0 },
+  { id: 'NVIDIA L40', displayName: 'L40', price: 0 },
+  { id: 'NVIDIA L40S', displayName: 'L40S', price: 0 },
+  { id: 'NVIDIA RTX A6000', displayName: 'RTX A6000', price: 0 },
+];
+
 /**
  * Query RunPod for available GPUs sorted by price (cheapest first).
- * Re-queried each retry round since availability and pricing change frequently.
+ * Falls back to a hardcoded list if the API query fails (e.g. lowestPrice errors).
  */
 async function getAvailableGpusSortedByPrice(minVramGb: number = MIN_TRAINING_VRAM_GB): Promise<GpuOption[]> {
-  const data = await runpodGql(`{
-    gpuTypes {
-      id
-      displayName
-      memoryInGb
-      secureCloud
-      communityCloud
-      lowestPrice {
-        uninterruptablePrice
+  try {
+    const data = await runpodGql(`{
+      gpuTypes {
+        id
+        displayName
+        memoryInGb
+        secureCloud
+        communityCloud
+        lowestPrice {
+          uninterruptablePrice
+        }
       }
-    }
-  }`);
+    }`);
 
-  return ((data.gpuTypes || []) as any[])
-    .filter(gpu =>
-      gpu.memoryInGb >= minVramGb &&
-      (gpu.secureCloud || gpu.communityCloud) &&
-      gpu.lowestPrice?.uninterruptablePrice != null &&
-      gpu.lowestPrice.uninterruptablePrice > 0
-    )
-    .sort((a, b) =>
-      a.lowestPrice.uninterruptablePrice - b.lowestPrice.uninterruptablePrice
-    )
-    .map(gpu => ({
-      id: gpu.id,
-      displayName: gpu.displayName,
-      price: gpu.lowestPrice.uninterruptablePrice,
-    }));
+    const gpus = ((data.gpuTypes || []) as any[])
+      .filter(gpu =>
+        gpu.memoryInGb >= minVramGb &&
+        (gpu.secureCloud || gpu.communityCloud) &&
+        gpu.lowestPrice?.uninterruptablePrice != null &&
+        gpu.lowestPrice.uninterruptablePrice > 0
+      )
+      .sort((a, b) =>
+        a.lowestPrice.uninterruptablePrice - b.lowestPrice.uninterruptablePrice
+      )
+      .map(gpu => ({
+        id: gpu.id,
+        displayName: gpu.displayName,
+        price: gpu.lowestPrice.uninterruptablePrice,
+      }));
+
+    if (gpus.length > 0) return gpus;
+  } catch (err) {
+    console.warn(`[RunPod Pods] Dynamic GPU query failed, using fallback list:`, err instanceof Error ? err.message : err);
+  }
+
+  // Fallback: try without lowestPrice (just filter by VRAM)
+  try {
+    const data = await runpodGql(`{
+      gpuTypes {
+        id
+        displayName
+        memoryInGb
+        secureCloud
+      }
+    }`);
+
+    const gpus = ((data.gpuTypes || []) as any[])
+      .filter(gpu => gpu.memoryInGb >= minVramGb && gpu.secureCloud)
+      .map(gpu => ({
+        id: gpu.id,
+        displayName: gpu.displayName,
+        price: 0,
+      }));
+
+    if (gpus.length > 0) return gpus;
+  } catch {
+    console.warn(`[RunPod Pods] Fallback GPU query also failed, using hardcoded list`);
+  }
+
+  return FALLBACK_GPU_TYPES;
 }
 
 // ── Pod Operations ──
@@ -129,7 +173,8 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
     let gpus: GpuOption[];
     try {
       gpus = await getAvailableGpusSortedByPrice();
-      console.log(`[RunPod Pods] Attempt ${attempt}/${maxRetries}: found ${gpus.length} GPU types (cheapest: ${gpus[0]?.displayName} at $${gpus[0]?.price}/hr)`);
+      const cheapest = gpus[0];
+      console.log(`[RunPod Pods] Attempt ${attempt}/${maxRetries}: found ${gpus.length} GPU types (first: ${cheapest?.displayName}${cheapest?.price ? ` at $${cheapest.price}/hr` : ''})`);
     } catch (err) {
       console.error(`[RunPod Pods] Failed to query GPU types:`, err);
       gpus = [];
@@ -170,7 +215,7 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
         `);
 
         const pod = (data as Record<string, unknown>).podFindAndDeployOnDemand as { id: string; desiredStatus: string };
-        console.log(`[RunPod Pods] Created pod ${pod.id} on ${gpu.displayName} at $${gpu.price}/hr (attempt ${attempt})`);
+        console.log(`[RunPod Pods] Created pod ${pod.id} on ${gpu.displayName}${gpu.price ? ` at $${gpu.price}/hr` : ''} (attempt ${attempt})`);
         return { podId: pod.id };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
