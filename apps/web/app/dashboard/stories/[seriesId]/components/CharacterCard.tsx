@@ -774,7 +774,12 @@ function DatasetStage({
               </Button>
             </>
           )}
-          <Button onClick={onTrain} size="sm">
+          {passed === null && (
+            <Button onClick={onResume} size="sm">
+              Retry Training
+            </Button>
+          )}
+          <Button onClick={onTrain} variant="ghost" size="sm" className="text-xs text-muted-foreground">
             Regenerate Dataset
           </Button>
         </div>
