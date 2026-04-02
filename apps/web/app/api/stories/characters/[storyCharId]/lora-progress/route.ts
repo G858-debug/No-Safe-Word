@@ -273,6 +273,43 @@ export async function GET(
       }
     }
 
+    // Auto-retry transient failures (RunPod API errors, SUPPLY_CONSTRAINT, etc.)
+    // Wait 3 min before retrying to avoid hammering a broken API
+    if (lora.status === "failed" && lora.error && !resumingLoras.has(lora.id)) {
+      const isTransient = /INTERNAL_SERVER_ERROR|SUPPLY_CONSTRAINT|No GPU available|training pod.*exited|training pod.*terminated|Training pod no longer exists/i.test(lora.error);
+      const failedAge = Date.now() - new Date(lora.updated_at).getTime();
+      if (isTransient && failedAge > 3 * 60_000) {
+        const charInput = await buildCharacterInput(storyCharId);
+        if (charInput) {
+          resumingLoras.add(lora.id);
+          console.log(`[LoRA AutoRetry] Retrying ${lora.id} after transient failure (${Math.round(failedAge / 60_000)}min ago): ${lora.error.substring(0, 80)}`);
+
+          // Set back to captioning so resumePonyPipeline picks it up
+          await (supabase as any)
+            .from("character_loras")
+            .update({ status: "captioning", error: null, training_id: null, updated_at: new Date().toISOString() })
+            .eq("id", lora.id);
+
+          import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ resumePonyPipeline }) => {
+            resumePonyPipeline(charInput, lora.id, { supabase })
+              .catch(err => console.error(`[LoRA AutoRetry] Failed:`, err))
+              .finally(() => resumingLoras.delete(lora.id));
+          }).catch(err => {
+            console.error(`[LoRA AutoRetry] Import failed:`, err);
+            resumingLoras.delete(lora.id);
+          });
+
+          // Re-fetch for updated status in response
+          const { data: refreshed } = await (supabase as any)
+            .from("character_loras")
+            .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+            .eq("id", lora.id)
+            .single() as { data: any };
+          if (refreshed) lora = refreshed;
+        }
+      }
+    }
+
     return NextResponse.json({
       loraId: lora.id,
       status: lora.status,
