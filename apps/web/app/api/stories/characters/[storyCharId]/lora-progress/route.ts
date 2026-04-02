@@ -8,14 +8,16 @@ import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-ge
 const STALE_THRESHOLDS: Record<string, number> = {
   generating_dataset: 5 * 60_000,   // 5 min — heartbeats every ~2-3 min
   evaluating: 5 * 60_000,           // 5 min — heartbeats every batch
-  captioning: 10 * 60_000,          // 10 min — no heartbeats yet, but fast stage
+  captioning: 5 * 60_000,            // 5 min — heartbeats every 3 images
   packaging_dataset: 10 * 60_000,   // 10 min
   training: 90 * 60_000,            // 90 min — pod-based, webhook expected
   validating: 30 * 60_000,          // 30 min
 };
 
-// Stages where we can auto-resume (pipeline is resumable)
-const AUTO_RESUMABLE_STAGES = new Set(["generating_dataset", "evaluating"]);
+// Stages where we can auto-resume (pipeline functions are resumable)
+// generating_dataset + evaluating → runPonyPipeline (skips done images)
+// captioning → resumePonyPipeline (skips already-captioned images)
+const AUTO_RESUMABLE_STAGES = new Set(["generating_dataset", "evaluating", "captioning"]);
 
 // Statuses that are active pipeline stages (not terminal states)
 const ACTIVE_STATUSES = new Set(Object.keys(STALE_THRESHOLDS));
@@ -120,12 +122,14 @@ async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<bo
         .update({ updated_at: new Date().toISOString(), error: null })
         .eq("id", lora.id);
 
-      // Fire-and-forget: re-invoke the resumable pipeline
+      // Fire-and-forget: re-invoke the appropriate resumable pipeline function
       resumingLoras.add(lora.id);
-      console.log(`[LoRA Stale] Auto-resuming pipeline for ${lora.id} (was "${lora.status}" for ${ageMin}min)`);
+      const useResumePipeline = lora.status === "captioning";
+      console.log(`[LoRA Stale] Auto-resuming ${lora.id} via ${useResumePipeline ? "resumePonyPipeline" : "runPonyPipeline"} (was "${lora.status}" for ${ageMin}min)`);
 
-      import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ runPonyPipeline }) => {
-        runPonyPipeline(charInput, lora.id, { supabase })
+      import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ runPonyPipeline, resumePonyPipeline }) => {
+        const fn = useResumePipeline ? resumePonyPipeline : runPonyPipeline;
+        fn(charInput, lora.id, { supabase })
           .catch(err => console.error(`[LoRA Stale] Auto-resume failed:`, err))
           .finally(() => resumingLoras.delete(lora.id));
       }).catch(err => {

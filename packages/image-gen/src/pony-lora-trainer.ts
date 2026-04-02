@@ -244,14 +244,25 @@ export async function resumePonyPipeline(
   const config = getRecommendedTrainingConfig(character.characterName);
   config.characterId = character.characterId;
 
-  console.log(`[PonyPipeline] Resuming from captioning for ${character.characterName}`);
+  // Check current status for resumability
+  const { data: currentLora } = await deps.supabase
+    .from('character_loras')
+    .select('status')
+    .eq('id', loraId)
+    .single();
+  const currentStatus = (currentLora as any)?.status || 'captioning';
+
+  console.log(`[PonyPipeline] Resuming for ${character.characterName} (status: ${currentStatus})`);
 
   try {
-    // ── Stage 4: Caption images ──
-    await setLoraStatus(loraId, 'captioning', {}, deps);
-    console.log(`[PonyPipeline] Stage 4: Captioning approved images...`);
-
-    await captionApprovedImages(loraId, character, config, deps);
+    // ── Stage 4: Caption images (resumable — only captions images with null caption) ──
+    if (['awaiting_dataset_approval', 'captioning', 'failed'].includes(currentStatus)) {
+      await setLoraStatus(loraId, 'captioning', {}, deps);
+      console.log(`[PonyPipeline] Stage 4: Captioning approved images...`);
+      await captionApprovedImages(loraId, character, config, deps);
+    } else {
+      console.log(`[PonyPipeline] Skipping Stage 4 (already at ${currentStatus})`);
+    }
 
     // ── Stage 5: Package dataset ──
     console.log(`[PonyPipeline] Stage 5: Packaging dataset...`);
@@ -848,6 +859,15 @@ async function captionApprovedImages(
         .eq('id', img.id);
 
       console.log(`[PonyPipeline] Captioned ${img.id}: ${caption.substring(0, 60)}...`);
+
+      // Heartbeat every 3 images
+      const idx = images.indexOf(img);
+      if (idx % 3 === 2 || idx === images.length - 1) {
+        await deps.supabase
+          .from('character_loras')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', loraId);
+      }
     } catch (err) {
       console.warn(`[PonyPipeline] Caption failed for ${img.id}: ${err}`);
     }
