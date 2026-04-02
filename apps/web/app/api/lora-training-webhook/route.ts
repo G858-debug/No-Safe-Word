@@ -61,14 +61,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'LoRA record not found' }, { status: 404 });
   }
 
-  // Terminate the training pod (always, regardless of success/failure)
-  if (lora.training_id) {
-    terminateTrainingPod(lora.training_id).catch(err => {
-      console.warn(`[TrainingWebhook] Failed to terminate pod ${lora.training_id}: ${err}`);
-    });
-  }
-
   if (status === 'completed') {
+    // Terminate the training pod after successful completion
+    if (lora.training_id) {
+      terminateTrainingPod(lora.training_id).catch(err => {
+        console.warn(`[TrainingWebhook] Failed to terminate pod ${lora.training_id}: ${err}`);
+      });
+    }
     // Get the public URL for the uploaded LoRA
     let storageUrl = loraUrl;
     if (!storageUrl && lora.storage_path) {
@@ -104,6 +103,13 @@ export async function POST(request: NextRequest) {
   }
 
   if (status === 'failed') {
+    // Terminate the training pod after failure
+    if (lora.training_id) {
+      terminateTrainingPod(lora.training_id).catch(err => {
+        console.warn(`[TrainingWebhook] Failed to terminate pod ${lora.training_id}: ${err}`);
+      });
+    }
+
     const attempts = (lora.training_attempts || 0) + 1;
     const maxAttempts = 3;
     const errorMsg = message || 'Training pod reported failure';
@@ -123,5 +129,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, stage: 'failed', attempts });
   }
 
-  return NextResponse.json({ error: `Unknown status: ${status}` }, { status: 400 });
+  // Progress updates (e.g. "training", "uploading") — acknowledge without terminating
+  console.log(`[TrainingWebhook] Progress update: ${status} — ${message || 'no message'}`);
+  return NextResponse.json({ ok: true, stage: status });
 }
