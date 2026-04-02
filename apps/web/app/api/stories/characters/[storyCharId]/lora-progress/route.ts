@@ -104,61 +104,39 @@ async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<bo
     console.warn(`[LoRA Stale] ${lora.id} stuck in "${lora.status}" for ${ageMin}min`);
 
     // ── Auto-resume for resumable stages ──
-    if (AUTO_RESUMABLE_STAGES.has(lora.status)) {
+    // Also handles "training + no pod" (process killed before pod was created)
+    const isResumable = AUTO_RESUMABLE_STAGES.has(lora.status)
+      || (lora.status === "training" && !lora.training_id);
+
+    if (isResumable) {
+      // In-memory guard: prevents duplicate fires within the same process.
+      // After a deploy/restart, the guard is cleared — that's intentional,
+      // so the next poll immediately re-fires the resume.
       if (resumingLoras.has(lora.id)) {
-        console.log(`[LoRA Stale] ${lora.id} already being resumed, skipping`);
         return false;
       }
 
       const charInput = await buildCharacterInput(storyCharId);
       if (!charInput) {
         console.error(`[LoRA Stale] Could not build CharacterInput for ${storyCharId}`);
-        return false; // Can't resume without character data
+        return false;
       }
 
-      // Bump updated_at so the next poll doesn't re-trigger immediately
-      await (supabase as any)
-        .from("character_loras")
-        .update({ updated_at: new Date().toISOString(), error: null })
-        .eq("id", lora.id);
+      // DON'T bump updated_at here. The pipeline's own heartbeats will update it.
+      // If the pipeline dies (deploy/crash), updated_at stays stale, and the
+      // very next poll (10s later) will detect staleness and re-fire immediately.
+      // This is the key fix: previously we bumped updated_at, which meant after
+      // a deploy kill, we'd wait the full threshold (5 min) before retrying.
 
-      // Fire-and-forget: re-invoke the appropriate resumable pipeline function
       resumingLoras.add(lora.id);
-      const useResumePipeline = lora.status === "captioning";
+      const useResumePipeline = lora.status === "captioning"
+        || (lora.status === "training" && !lora.training_id);
       console.log(`[LoRA Stale] Auto-resuming ${lora.id} via ${useResumePipeline ? "resumePonyPipeline" : "runPonyPipeline"} (was "${lora.status}" for ${ageMin}min)`);
 
       import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ runPonyPipeline, resumePonyPipeline }) => {
         const fn = useResumePipeline ? resumePonyPipeline : runPonyPipeline;
         fn(charInput, lora.id, { supabase })
           .catch(err => console.error(`[LoRA Stale] Auto-resume failed:`, err))
-          .finally(() => resumingLoras.delete(lora.id));
-      }).catch(err => {
-        console.error(`[LoRA Stale] Failed to import pipeline:`, err);
-        resumingLoras.delete(lora.id);
-      });
-
-      return false; // Status hasn't changed yet, pipeline is resuming in background
-    }
-
-    // ── Training with no pod: process was killed before pod creation ──
-    // Use a short threshold (5 min) since no work is happening without a pod
-    if (lora.status === "training" && !lora.training_id && age > 5 * 60_000) {
-      if (resumingLoras.has(lora.id)) return false;
-
-      const charInput = await buildCharacterInput(storyCharId);
-      if (!charInput) return false;
-
-      await (supabase as any)
-        .from("character_loras")
-        .update({ updated_at: new Date().toISOString(), error: null })
-        .eq("id", lora.id);
-
-      resumingLoras.add(lora.id);
-      console.log(`[LoRA Stale] Auto-resuming ${lora.id} — training status but no pod (killed before pod creation)`);
-
-      import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ resumePonyPipeline }) => {
-        resumePonyPipeline(charInput, lora.id, { supabase })
-          .catch(err => console.error(`[LoRA Stale] Auto-resume (no pod) failed:`, err))
           .finally(() => resumingLoras.delete(lora.id));
       }).catch(err => {
         console.error(`[LoRA Stale] Failed to import pipeline:`, err);

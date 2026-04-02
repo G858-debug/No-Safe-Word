@@ -792,7 +792,12 @@ function TrainingStage({ loraProgress, onForceReset }: { loraProgress: LoraProgr
   const elapsedMin = loraProgress?.progress?.updatedAt
     ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
     : 0;
-  const isLikelyStuck = status === "training" ? elapsedMin > 90 : elapsedMin > 15;
+  // No pod ID means the process died before creating the RunPod pod — definitely stuck.
+  // With a pod, allow 90 min (training takes 30-60 min). Without, show stuck immediately.
+  const noPod = status === "training" && !podId;
+  const isLikelyStuck = noPod
+    ? elapsedMin > 5
+    : status === "training" ? elapsedMin > 90 : elapsedMin > 15;
 
   const statusLabel: Record<string, string> = {
     captioning: "Captioning images...",
