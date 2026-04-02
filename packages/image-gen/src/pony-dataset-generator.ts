@@ -66,6 +66,7 @@ function buildIdentityTags(char: PonyDatasetCharacter): string {
     tags.push('curvy', 'wide hips', 'large breasts', 'thick thighs', 'narrow waist');
     if (char.bodyType) tags.push(char.bodyType.toLowerCase());
   } else {
+    tags.push('male focus', 'masculine', 'broad shoulders');
     if (char.bodyType) tags.push(char.bodyType.toLowerCase());
   }
 
@@ -171,7 +172,14 @@ export function buildPonyDatasetWorkflow(opts: {
   const identityTags = buildIdentityTags(opts.character);
   const qualityPrefix = buildPonyQualityPrefix('sfw');
   const positivePrompt = `${qualityPrefix}, ${identityTags}, ${opts.prompt.tags}`;
-  const negativePrompt = buildPonyNegativePrompt('sfw');
+  let negativePrompt = buildPonyNegativePrompt('sfw');
+
+  // Add gender-specific negative tags to prevent gender confusion
+  if (opts.character.gender === 'male') {
+    negativePrompt += ', 1girl, female, feminine, breasts, lipstick, long eyelashes';
+  } else {
+    negativePrompt += ', 1boy, masculine, beard, stubble, flat chest';
+  }
 
   // Dimensions based on category
   let width: number;
