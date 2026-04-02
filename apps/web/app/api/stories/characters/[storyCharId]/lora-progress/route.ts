@@ -16,7 +16,7 @@ const STALE_THRESHOLDS: Record<string, number> = {
 
 // Stages where we can auto-resume (pipeline functions are resumable)
 // generating_dataset + evaluating → runPonyPipeline (skips done images)
-// captioning → resumePonyPipeline (skips already-captioned images)
+// captioning + training (no pod) → resumePonyPipeline (re-packages + creates pod)
 const AUTO_RESUMABLE_STAGES = new Set(["generating_dataset", "evaluating", "captioning"]);
 
 // Statuses that are active pipeline stages (not terminal states)
@@ -140,9 +140,37 @@ async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<bo
       return false; // Status hasn't changed yet, pipeline is resuming in background
     }
 
+    // ── Training with no pod: process was killed before pod creation ──
+    // Use a short threshold (5 min) since no work is happening without a pod
+    if (lora.status === "training" && !lora.training_id && age > 5 * 60_000) {
+      if (resumingLoras.has(lora.id)) return false;
+
+      const charInput = await buildCharacterInput(storyCharId);
+      if (!charInput) return false;
+
+      await (supabase as any)
+        .from("character_loras")
+        .update({ updated_at: new Date().toISOString(), error: null })
+        .eq("id", lora.id);
+
+      resumingLoras.add(lora.id);
+      console.log(`[LoRA Stale] Auto-resuming ${lora.id} — training status but no pod (killed before pod creation)`);
+
+      import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ resumePonyPipeline }) => {
+        resumePonyPipeline(charInput, lora.id, { supabase })
+          .catch(err => console.error(`[LoRA Stale] Auto-resume (no pod) failed:`, err))
+          .finally(() => resumingLoras.delete(lora.id));
+      }).catch(err => {
+        console.error(`[LoRA Stale] Failed to import pipeline:`, err);
+        resumingLoras.delete(lora.id);
+      });
+
+      return false;
+    }
+
     // ── Non-resumable stages: mark as failed ──
 
-    // For training status, check if pod is still alive
+    // For training status with a pod, check if pod is still alive
     if (lora.status === "training" && lora.training_id) {
       try {
         const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
