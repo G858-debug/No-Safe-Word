@@ -123,7 +123,7 @@ export async function GET(
     // Find the most relevant LoRA record
     let { data: lora } = await (supabase as any)
       .from("character_loras")
-      .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
+      .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
       .eq("character_id", storyChar.character_id)
       .not("status", "eq", "archived")
       .order("created_at", { ascending: false })
@@ -141,7 +141,7 @@ export async function GET(
         // Re-fetch the now-failed record
         const { data: refreshed } = await (supabase as any)
           .from("character_loras")
-          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
+          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
           .eq("id", lora.id)
           .single() as { data: any };
         if (refreshed) lora = refreshed;
@@ -163,6 +163,7 @@ export async function GET(
         deployed: lora.status === "deployed",
         deployedAt: lora.deployed_at,
         updatedAt: lora.updated_at,
+        datasetSize: lora.dataset_size,
       },
     });
   } catch (err) {

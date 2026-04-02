@@ -418,6 +418,12 @@ async function evaluateDatasetImages(
     }
 
     console.log(`[PonyPipeline] Evaluated ${Math.min(i + concurrency, images.length)}/${images.length}`);
+
+    // Heartbeat: update timestamp so stale detection knows we're alive
+    await deps.supabase
+      .from('character_loras')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', loraId);
   }
 
   return evaluations;

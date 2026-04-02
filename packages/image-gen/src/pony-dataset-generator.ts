@@ -310,6 +310,18 @@ export async function generatePonyDataset(
 
       imageRecords.push(record as LoraDatasetImageRow);
 
+      // Heartbeat: update the LoRA record so stale detection knows we're alive
+      // Also stores progress so the UI can show "X/Y images generated"
+      if (i % 3 === 2 || i === prompts.length - 1) {
+        await deps.supabase
+          .from('character_loras')
+          .update({
+            updated_at: new Date().toISOString(),
+            dataset_size: imageRecords.length,
+          })
+          .eq('id', loraId);
+      }
+
       // Small delay between requests
       if (i < prompts.length - 1) {
         await new Promise((r) => setTimeout(r, 1000));

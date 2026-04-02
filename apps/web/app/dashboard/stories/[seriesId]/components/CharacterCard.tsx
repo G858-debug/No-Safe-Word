@@ -27,6 +27,7 @@ interface LoraProgress {
     filename?: string;
     deployed?: boolean;
     updatedAt?: string;
+    datasetSize?: number;
   };
 }
 
@@ -662,14 +663,23 @@ function DatasetStage({
     const elapsedMin = loraProgress?.progress?.updatedAt
       ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
       : 0;
-    const isLikelyStuck = elapsedMin > 10;
+    // generating_dataset takes 15-25 min (24 images); evaluating takes 5-10 min
+    const stuckThreshold = status === "generating_dataset" ? 25 : 15;
+    const isLikelyStuck = elapsedMin > stuckThreshold;
+    const datasetSize = loraProgress?.progress?.datasetSize || 0;
+    const targetImages = 24;
+    const progressPct = status === "generating_dataset" && datasetSize > 0
+      ? Math.min(95, Math.round((datasetSize / targetImages) * 100))
+      : status === "generating_dataset" ? 5 : 70;
     return (
       <div className="space-y-2">
         <p className="text-sm font-medium">
-          {status === "generating_dataset" ? "Generating training images..." : "Auto-reviewing images with Claude Vision..."}
+          {status === "generating_dataset"
+            ? `Generating training images...${datasetSize > 0 ? ` (${datasetSize}/${targetImages})` : ""}`
+            : "Auto-reviewing images with Claude Vision..."}
         </p>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
-          <div className={`h-full rounded-full ${isLikelyStuck ? "bg-yellow-500" : "bg-blue-600 animate-pulse"}`} style={{ width: status === "generating_dataset" ? "40%" : "70%" }} />
+          <div className={`h-full rounded-full ${isLikelyStuck ? "bg-yellow-500" : "bg-blue-600 animate-pulse"}`} style={{ width: `${progressPct}%` }} />
         </div>
         <div className="flex items-center gap-3">
           <p className="text-xs text-muted-foreground">
