@@ -348,6 +348,23 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     }
   }
 
+  async function handleForceReset() {
+    try {
+      const res = await fetch(`/api/stories/characters/${character.id}/lora-progress`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "force-reset" }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Reset failed");
+      }
+      await fetchLoraProgress();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    }
+  }
+
   // ── Render ──
 
   return (
@@ -419,13 +436,14 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             loraProgress={loraProgress}
             onTrain={handleTrainLora}
             onResume={handleResumeTraining}
+            onForceReset={handleForceReset}
             isTraining={isTraining}
             error={loraProgress?.progress?.error || null}
           />
         )}
 
         {currentStage === "training" && (
-          <TrainingStage loraProgress={loraProgress} />
+          <TrainingStage loraProgress={loraProgress} onForceReset={handleForceReset} />
         )}
 
         {currentStage === "validation" && (
@@ -567,13 +585,14 @@ function PortraitStage({
 }
 
 function DatasetStage({
-  character, seriesId, loraProgress, onTrain, onResume, isTraining, error,
+  character, seriesId, loraProgress, onTrain, onResume, onForceReset, isTraining, error,
 }: {
   character: CharacterFromAPI;
   seriesId: string;
   loraProgress: LoraProgress | null;
   onTrain: () => void;
   onResume: () => void;
+  onForceReset: () => void;
   isTraining: boolean;
   error: string | null;
 }) {
@@ -601,22 +620,33 @@ function DatasetStage({
   // Dataset generation / evaluation in progress
   if (status === "generating_dataset" || status === "evaluating") {
     const elapsed = formatElapsed(loraProgress?.progress?.updatedAt);
+    const elapsedMin = loraProgress?.progress?.updatedAt
+      ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
+      : 0;
+    const isLikelyStuck = elapsedMin > 10;
     return (
       <div className="space-y-2">
         <p className="text-sm font-medium">
           {status === "generating_dataset" ? "Generating training images..." : "Auto-reviewing images with Claude Vision..."}
         </p>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
-          <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: status === "generating_dataset" ? "40%" : "70%" }} />
+          <div className={`h-full rounded-full ${isLikelyStuck ? "bg-yellow-500" : "bg-blue-600 animate-pulse"}`} style={{ width: status === "generating_dataset" ? "40%" : "70%" }} />
         </div>
         <div className="flex items-center gap-3">
           <p className="text-xs text-muted-foreground">
-            This may take a few minutes.{elapsed ? ` Running for ${elapsed}.` : ""}
+            {isLikelyStuck
+              ? `Appears stuck — running for ${elapsed}. Reset to retry.`
+              : `This may take a few minutes.${elapsed ? ` Running for ${elapsed}.` : ""}`}
           </p>
           <Button variant="ghost" size="sm" className="h-6 text-xs" asChild>
             <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>View images so far</Link>
           </Button>
         </div>
+        {isLikelyStuck && (
+          <Button variant="destructive" size="sm" onClick={onForceReset}>
+            Force Reset
+          </Button>
+        )}
       </div>
     );
   }
@@ -703,10 +733,14 @@ function DatasetStage({
   return null;
 }
 
-function TrainingStage({ loraProgress }: { loraProgress: LoraProgress | null }) {
+function TrainingStage({ loraProgress, onForceReset }: { loraProgress: LoraProgress | null; onForceReset: () => void }) {
   const status = loraProgress?.status || "training";
   const podId = loraProgress?.progress?.podId;
   const elapsed = formatElapsed(loraProgress?.progress?.updatedAt);
+  const elapsedMin = loraProgress?.progress?.updatedAt
+    ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
+    : 0;
+  const isLikelyStuck = status === "training" ? elapsedMin > 90 : elapsedMin > 15;
 
   const statusLabel: Record<string, string> = {
     captioning: "Captioning images...",
@@ -718,7 +752,7 @@ function TrainingStage({ loraProgress }: { loraProgress: LoraProgress | null }) 
     <div className="space-y-2">
       <p className="text-sm font-medium">{statusLabel[status] || "Training in progress..."}</p>
       <div className="h-2 bg-muted rounded-full overflow-hidden">
-        <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{
+        <div className={`h-full rounded-full ${isLikelyStuck ? "bg-yellow-500" : "bg-blue-600 animate-pulse"}`} style={{
           width: status === "captioning" ? "20%" : status === "packaging_dataset" ? "35%" : "60%",
         }} />
       </div>
@@ -726,8 +760,15 @@ function TrainingStage({ loraProgress }: { loraProgress: LoraProgress | null }) 
         <p className="text-xs text-muted-foreground font-mono">Pod: {podId.substring(0, 16)}...</p>
       )}
       <p className="text-xs text-muted-foreground">
-        Polling every 10 seconds.{elapsed ? ` Running for ${elapsed}.` : ""}
+        {isLikelyStuck
+          ? `Appears stuck — running for ${elapsed}. Reset to retry.`
+          : `Polling every 10 seconds.${elapsed ? ` Running for ${elapsed}.` : ""}`}
       </p>
+      {isLikelyStuck && (
+        <Button variant="destructive" size="sm" onClick={onForceReset}>
+          Force Reset
+        </Button>
+      )}
     </div>
   );
 }

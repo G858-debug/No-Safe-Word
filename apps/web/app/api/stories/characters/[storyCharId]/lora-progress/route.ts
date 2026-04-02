@@ -11,65 +11,99 @@ const STALE_THRESHOLDS: Record<string, number> = {
   validating: 30 * 60_000,          // 30 min — validation takes ~10 min
 };
 
+// Statuses that are active pipeline stages (not terminal states)
+const ACTIVE_STATUSES = new Set(Object.keys(STALE_THRESHOLDS));
+
 /**
  * Check if a LoRA pipeline stage is stale and auto-recover if so.
- * For `training` status, also checks if the RunPod pod is still alive.
+ * For `training` status, also tries to check if the RunPod pod is still alive.
  * Returns true if the record was marked as failed (caller should re-fetch).
+ *
+ * This function MUST NOT throw — errors are caught and logged so the
+ * main GET handler can still return the current status to the UI.
  */
 async function detectAndRecoverStale(lora: any): Promise<boolean> {
-  const threshold = STALE_THRESHOLDS[lora.status];
-  if (!threshold) return false;
+  try {
+    const threshold = STALE_THRESHOLDS[lora.status];
+    if (!threshold) return false;
 
-  const updatedAt = new Date(lora.updated_at).getTime();
-  const age = Date.now() - updatedAt;
+    const updatedAt = new Date(lora.updated_at).getTime();
+    const age = Date.now() - updatedAt;
 
-  if (age < threshold) return false;
+    if (age < threshold) return false;
 
-  const ageMin = Math.round(age / 60_000);
-  console.warn(`[LoRA Stale] ${lora.id} stuck in "${lora.status}" for ${ageMin}min (threshold: ${threshold / 60_000}min)`);
+    const ageMin = Math.round(age / 60_000);
+    console.warn(`[LoRA Stale] ${lora.id} stuck in "${lora.status}" for ${ageMin}min (threshold: ${threshold / 60_000}min)`);
 
-  // For training status, check if pod is still alive before marking failed
-  if (lora.status === "training" && lora.training_id) {
-    try {
-      const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
-      const podStatus = await getTrainingPodStatus(lora.training_id);
-      if (podStatus.desiredStatus === "RUNNING") {
-        // Pod is still running — extend grace period (don't mark failed yet)
-        // But if it's been > 3 hours even with a running pod, something is very wrong
-        if (age < 180 * 60_000) {
-          console.log(`[LoRA Stale] Pod ${lora.training_id} still RUNNING — extending grace period`);
-          return false;
+    // For training status, try to check if pod is still alive
+    if (lora.status === "training" && lora.training_id) {
+      try {
+        const { getTrainingPodStatus } = await import("@no-safe-word/image-gen/runpod-pods");
+        const podStatus = await getTrainingPodStatus(lora.training_id);
+        if (podStatus.desiredStatus === "RUNNING") {
+          if (age < 180 * 60_000) {
+            console.log(`[LoRA Stale] Pod ${lora.training_id} still RUNNING — extending grace period`);
+            return false;
+          }
         }
-      }
-      console.warn(`[LoRA Stale] Pod ${lora.training_id} status: ${podStatus.desiredStatus}`);
+        console.warn(`[LoRA Stale] Pod ${lora.training_id} status: ${podStatus.desiredStatus}`);
 
-      // Terminate the dead/stuck pod
-      if (podStatus.desiredStatus !== "TERMINATED") {
-        const { terminateTrainingPod } = await import("@no-safe-word/image-gen/runpod-pods");
-        terminateTrainingPod(lora.training_id).catch(err => {
-          console.warn(`[LoRA Stale] Failed to terminate pod: ${err}`);
-        });
+        if (podStatus.desiredStatus !== "TERMINATED") {
+          const { terminateTrainingPod } = await import("@no-safe-word/image-gen/runpod-pods");
+          terminateTrainingPod(lora.training_id).catch(err => {
+            console.warn(`[LoRA Stale] Failed to terminate pod: ${err}`);
+          });
+        }
+      } catch (err) {
+        console.warn(`[LoRA Stale] Could not check pod status (proceeding with reset): ${err}`);
       }
-    } catch (err) {
-      // Pod might already be gone (404) — that's fine, proceed with marking failed
-      console.warn(`[LoRA Stale] Could not check pod status: ${err}`);
     }
+
+    // Mark as failed with a clear error message
+    const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes without progress. ` +
+      `This usually means the background process crashed or timed out. Click "Retry Training" to try again.`;
+
+    const { error: updateErr } = await (supabase as any)
+      .from("character_loras")
+      .update({
+        status: "failed",
+        error: errorMsg,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lora.id);
+
+    if (updateErr) {
+      console.error(`[LoRA Stale] DB update failed for ${lora.id}:`, updateErr);
+      return false;
+    }
+
+    console.log(`[LoRA Stale] Marked ${lora.id} as failed (was "${lora.status}" for ${ageMin}min)`);
+    return true;
+  } catch (err) {
+    console.error(`[LoRA Stale] detectAndRecoverStale crashed for ${lora.id}:`, err);
+    return false;
   }
+}
 
-  // Mark as failed with a clear error message
-  const errorMsg = `Pipeline stalled in "${lora.status}" for ${ageMin} minutes without progress. ` +
-    `This usually means the background process crashed or timed out. Click "Retry Training" to try again.`;
-
-  await (supabase as any)
+/**
+ * Force-reset a stuck LoRA to failed status. Manual fallback when auto-detection
+ * doesn't work (e.g. import issues in serverless environment).
+ */
+async function forceResetStale(loraId: string, currentStatus: string): Promise<boolean> {
+  const { error } = await (supabase as any)
     .from("character_loras")
     .update({
       status: "failed",
-      error: errorMsg,
+      error: `Manually reset from stuck "${currentStatus}" status. Click "Retry Training" to try again.`,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", lora.id);
+    .eq("id", loraId);
 
-  console.log(`[LoRA Stale] Marked ${lora.id} as failed (was "${lora.status}" for ${ageMin}min)`);
+  if (error) {
+    console.error(`[LoRA Reset] DB update failed:`, error);
+    return false;
+  }
+  console.log(`[LoRA Reset] Force-reset ${loraId} from "${currentStatus}" to "failed"`);
   return true;
 }
 
@@ -111,16 +145,18 @@ export async function GET(
       return NextResponse.json({ status: "no_lora", progress: null });
     }
 
-    // Check for stale pipelines and auto-recover
-    const wasStale = await detectAndRecoverStale(lora);
-    if (wasStale) {
-      // Re-fetch the now-failed record
-      const { data: refreshed } = await (supabase as any)
-        .from("character_loras")
-        .select("id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
-        .eq("id", lora.id)
-        .single() as { data: any };
-      if (refreshed) lora = refreshed;
+    // Check for stale pipelines and auto-recover (only for active stages)
+    if (ACTIVE_STATUSES.has(lora.status)) {
+      const wasStale = await detectAndRecoverStale(lora);
+      if (wasStale) {
+        // Re-fetch the now-failed record
+        const { data: refreshed } = await (supabase as any)
+          .from("character_loras")
+          .select("id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, created_at, updated_at, deployed_at")
+          .eq("id", lora.id)
+          .single() as { data: any };
+        if (refreshed) lora = refreshed;
+      }
     }
 
     return NextResponse.json({
@@ -147,4 +183,55 @@ export async function GET(
       { status: 500 }
     );
   }
+}
+
+// POST /api/stories/characters/[storyCharId]/lora-progress
+// Force-reset a stuck LoRA pipeline to "failed" so the user can retry.
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ storyCharId: string }> }
+) {
+  const params = await props.params;
+  const { storyCharId } = params;
+  const body = await request.json();
+  const { action } = body as { action?: string };
+
+  if (action !== "force-reset") {
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  }
+
+  // Find the character's active LoRA
+  const { data: storyChar } = await (supabase as any)
+    .from("story_characters")
+    .select("character_id")
+    .eq("id", storyCharId)
+    .single() as { data: { character_id: string } | null };
+
+  if (!storyChar) {
+    return NextResponse.json({ error: "Story character not found" }, { status: 404 });
+  }
+
+  const { data: lora } = await (supabase as any)
+    .from("character_loras")
+    .select("id, status")
+    .eq("character_id", storyChar.character_id)
+    .not("status", "eq", "archived")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single() as { data: { id: string; status: string } | null };
+
+  if (!lora) {
+    return NextResponse.json({ error: "No LoRA found" }, { status: 404 });
+  }
+
+  if (!ACTIVE_STATUSES.has(lora.status)) {
+    return NextResponse.json({ error: `LoRA is not stuck (status: ${lora.status})` }, { status: 400 });
+  }
+
+  const ok = await forceResetStale(lora.id, lora.status);
+  if (!ok) {
+    return NextResponse.json({ error: "Failed to reset LoRA status" }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, previousStatus: lora.status });
 }
