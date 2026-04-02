@@ -663,8 +663,8 @@ function DatasetStage({
     const elapsedMin = loraProgress?.progress?.updatedAt
       ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
       : 0;
-    // generating_dataset takes 15-25 min (24 images); evaluating takes 5-10 min
-    const stuckThreshold = status === "generating_dataset" ? 25 : 15;
+    // With heartbeats every 3 images (~2-3 min), no heartbeat for 10 min means dead
+    const stuckThreshold = 10;
     const isLikelyStuck = elapsedMin > stuckThreshold;
     const datasetSize = loraProgress?.progress?.datasetSize || 0;
     const targetImages = 24;
