@@ -91,57 +91,61 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
     .map(([key, value]) => `{ key: "${key}", value: ${JSON.stringify(value)} }`)
     .join(', ');
 
+  const cloudTypes = ['COMMUNITY', 'SECURE'] as const;
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    for (const gpuType of gpuTypes) {
-      try {
-        console.log(`[RunPod Pods] Attempt ${attempt}/${maxRetries}: trying ${gpuType}...`);
+    for (const cloudType of cloudTypes) {
+      for (const gpuType of gpuTypes) {
+        try {
+          console.log(`[RunPod Pods] Attempt ${attempt}/${maxRetries}: trying ${gpuType} on ${cloudType}...`);
 
-        const volumeClause = volumeKey
-          ? `volumeKey: "${volumeKey}", volumeMountPath: "${config.volumeMountPath || '/workspace'}",`
-          : '';
+          const volumeClause = volumeKey
+            ? `volumeKey: "${volumeKey}", volumeMountPath: "${config.volumeMountPath || '/workspace'}",`
+            : '';
 
-        const data = await runpodGql(`
-          mutation {
-            podFindAndDeployOnDemand(input: {
-              name: "${config.name}"
-              imageName: "${config.dockerImage}"
-              gpuTypeId: "${gpuType}"
-              cloudType: SECURE
-              ${volumeClause}
-              startJupyter: false
-              startSsh: false
-              minMemoryInGb: 16
-              minVcpuCount: 4
-              containerDiskInGb: 30
-              volumeInGb: ${volumeKey ? 0 : 50}
-              env: [${envEntries}]
-            }) {
-              id
-              desiredStatus
+          const data = await runpodGql(`
+            mutation {
+              podFindAndDeployOnDemand(input: {
+                name: "${config.name}"
+                imageName: "${config.dockerImage}"
+                gpuTypeId: "${gpuType}"
+                cloudType: ${cloudType}
+                ${volumeClause}
+                startJupyter: false
+                startSsh: false
+                minMemoryInGb: 16
+                minVcpuCount: 4
+                containerDiskInGb: 30
+                volumeInGb: ${volumeKey ? 0 : 50}
+                env: [${envEntries}]
+              }) {
+                id
+                desiredStatus
+              }
             }
-          }
-        `);
+          `);
 
-        const pod = (data as Record<string, unknown>).podFindAndDeployOnDemand as { id: string; desiredStatus: string };
-        console.log(`[RunPod Pods] Created pod ${pod.id} on ${gpuType} (attempt ${attempt})`);
-        return { podId: pod.id };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('SUPPLY_CONSTRAINT') || msg.includes('no available')) {
-          continue; // Try next GPU type
+          const pod = (data as Record<string, unknown>).podFindAndDeployOnDemand as { id: string; desiredStatus: string };
+          console.log(`[RunPod Pods] Created pod ${pod.id} on ${gpuType} ${cloudType} (attempt ${attempt})`);
+          return { podId: pod.id };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('SUPPLY_CONSTRAINT') || msg.includes('no available')) {
+            continue; // Try next GPU type
+          }
+          throw err; // Unexpected error — don't swallow it
         }
-        throw err; // Unexpected error — don't swallow it
       }
     }
 
-    // All GPU types exhausted for this attempt — wait and retry
+    // All GPU types on both clouds exhausted for this attempt — wait and retry
     if (attempt < maxRetries) {
-      console.log(`[RunPod Pods] No GPUs available (attempt ${attempt}/${maxRetries}). Retrying in ${retryDelayMs / 60_000} minutes...`);
+      console.log(`[RunPod Pods] No GPUs available on any cloud (attempt ${attempt}/${maxRetries}). Retrying in ${retryDelayMs / 60_000} minutes...`);
       await new Promise(r => setTimeout(r, retryDelayMs));
     }
   }
 
-  throw new Error(`No GPU available for training pod after ${maxRetries} attempts (~${maxRetries * 3} min). Tried: ${gpuTypes.join(', ')}`);
+  throw new Error(`No GPU available for training pod after ${maxRetries} attempts (~${maxRetries * 3} min). Tried: ${gpuTypes.join(', ')} on COMMUNITY + SECURE`);
 }
 
 /**
