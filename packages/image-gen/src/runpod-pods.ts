@@ -198,7 +198,7 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
               name: "${config.name}"
               imageName: "${config.dockerImage}"
               gpuTypeId: "${gpu.id}"
-              cloudType: SECURE
+              cloudType: COMMUNITY
               ${volumeClause}
               startJupyter: false
               startSsh: false
