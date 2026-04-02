@@ -723,7 +723,7 @@ function DatasetStage({
             </>
           )}
           <Button onClick={onTrain} size="sm">
-            Retry Training
+            Regenerate Dataset
           </Button>
         </div>
       </div>
