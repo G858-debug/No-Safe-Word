@@ -200,14 +200,13 @@ export async function createTrainingPod(config: TrainingPodConfig): Promise<{ po
                 name: "${config.name}"
                 imageName: "${config.dockerImage}"
                 gpuTypeId: "${gpu.id}"
+                gpuCount: 1
                 cloudType: ${cloudType}
                 ${volumeClause}
                 startJupyter: false
                 startSsh: false
-                minMemoryInGb: 16
-                minVcpuCount: 4
-                containerDiskInGb: 30
-                volumeInGb: ${volumeKey ? 0 : 50}
+                containerDiskInGb: 20
+                volumeInGb: ${volumeKey ? 0 : 20}
                 env: [${envEntries}]
               }) {
                 id
