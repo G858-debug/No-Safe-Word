@@ -29,11 +29,13 @@ const supabase = createClient(
 const BUCKET = 'lora-training-datasets';
 const TEST_PATH = `trained/characters/test_upload_smoke_${Date.now()}.safetensors`;
 
-// Minimal valid-looking safetensors header (8 bytes length prefix + empty JSON header)
+// Simulate a real LoRA file: safetensors header + 100MB of zeros
+// SDXL dim-8 LoRAs are typically 50-150MB — previous test used 1KB which
+// wouldn't trigger a bucket file-size limit. This exposes that failure mode.
 const DUMMY_SAFETENSORS = Buffer.concat([
   Buffer.from([0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), // header_size = 2 (little-endian u64)
   Buffer.from('{}'),                                                // empty metadata
-  Buffer.alloc(1024, 0x00),                                        // 1KB padding
+  Buffer.alloc(100 * 1024 * 1024, 0x00),                          // 100MB padding
 ]);
 
 async function run() {
