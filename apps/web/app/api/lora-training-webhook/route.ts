@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     let storageUrl = loraUrl;
     if (!storageUrl && lora.storage_path) {
       const { data: urlData } = (supabase as any).storage
-        .from('story-images')
+        .from('lora-training-datasets')
         .getPublicUrl(lora.storage_path);
       storageUrl = urlData?.publicUrl;
     }

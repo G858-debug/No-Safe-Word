@@ -968,8 +968,8 @@ async function createTrainingPodForLora(
   const loraFilename = `lora_${config.triggerWord}_${Date.now()}.safetensors`;
   const loraStoragePath = `characters/${loraFilename}`;
   const { data: uploadData, error: uploadErr } = await deps.supabase.storage
-    .from(IMAGES_BUCKET)
-    .createSignedUploadUrl(`lora-datasets/${loraStoragePath}`);
+    .from(DATASET_BUCKET)
+    .createSignedUploadUrl(`trained/${loraStoragePath}`);
 
   if (uploadErr || !uploadData) {
     throw new Error(`Failed to create upload URL: ${uploadErr?.message}`);
@@ -1009,7 +1009,7 @@ async function createTrainingPodForLora(
       training_id: podId,
       training_provider: 'runpod-kohya',
       filename: loraFilename,
-      storage_path: `lora-datasets/${loraStoragePath}`,
+      storage_path: `trained/${loraStoragePath}`,
       training_params: {
         trigger_word: config.triggerWord,
         steps: 0, // Unknown until training completes
