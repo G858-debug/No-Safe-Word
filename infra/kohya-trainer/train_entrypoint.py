@@ -274,7 +274,8 @@ def upload_lora(lora_path: Path) -> str | None:
     )
 
     print(f"Upload response ({resp.status_code}): {resp.text}")
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"Upload failed HTTP {resp.status_code}: {resp.text}")
     print(f"Upload complete: HTTP {resp.status_code}")
 
     try:

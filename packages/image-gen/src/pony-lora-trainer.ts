@@ -87,7 +87,7 @@ export interface PipelineDeps {
   supabase: any;
 }
 
-const KOHYA_DOCKER_IMAGE = process.env.KOHYA_TRAINER_IMAGE || 'ghcr.io/g858-debug/nsw-kohya-trainer:v3';
+const KOHYA_DOCKER_IMAGE = process.env.KOHYA_TRAINER_IMAGE || 'ghcr.io/g858-debug/nsw-kohya-trainer:v4';
 const DATASET_BUCKET = 'lora-training-datasets';
 const IMAGES_BUCKET = 'story-images';
 
@@ -967,13 +967,27 @@ async function createTrainingPodForLora(
   // Generate a signed upload URL for the trained LoRA output
   const loraFilename = `lora_${config.triggerWord}_${Date.now()}.safetensors`;
   const loraStoragePath = `characters/${loraFilename}`;
-  const { data: uploadData, error: uploadErr } = await deps.supabase.storage
-    .from(DATASET_BUCKET)
-    .createSignedUploadUrl(`trained/${loraStoragePath}`);
-
-  if (uploadErr || !uploadData) {
-    throw new Error(`Failed to create upload URL: ${uploadErr?.message}`);
+  // Use the REST API directly — the JS SDK hardcodes a 2-hour expiry which
+  // can expire before training + checkpoint download completes. Set 6 hours.
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const signRes = await fetch(
+    `${supabaseUrl}/storage/v1/object/upload/sign/${DATASET_BUCKET}/trained/${loraStoragePath}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ expiresIn: 21600 }), // 6 hours
+    },
+  );
+  if (!signRes.ok) {
+    const errText = await signRes.text();
+    throw new Error(`Failed to create upload URL: ${signRes.status} ${errText}`);
   }
+  const signJson = (await signRes.json()) as { url: string };
+  const uploadData = { signedUrl: `${supabaseUrl}/storage/v1${signJson.url}` };
 
   const appUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://nosafeword.co.za';
   const webhookUrl = `${appUrl}/api/lora-training-webhook`;
