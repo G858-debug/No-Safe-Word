@@ -68,14 +68,17 @@ export async function POST(request: NextRequest) {
         console.warn(`[TrainingWebhook] Failed to terminate pod ${lora.training_id}: ${err}`);
       });
     }
-    // Get the public URL for the uploaded LoRA
-    let storageUrl = loraUrl;
+    // Get the public URL for the uploaded LoRA.
+    // The pod returns the Supabase upload response "Key" (e.g. "lora-training-datasets/trained/...")
+    // which is a storage path, not a URL. Normalize it to a proper public URL.
+    let storageUrl = loraUrl && loraUrl.startsWith('https://') ? loraUrl : null;
     if (!storageUrl && lora.storage_path) {
       const { data: urlData } = (supabase as any).storage
         .from('lora-training-datasets')
         .getPublicUrl(lora.storage_path);
-      storageUrl = urlData?.publicUrl;
+      storageUrl = urlData?.publicUrl || null;
     }
+    console.log(`[TrainingWebhook] Resolved storage URL: ${storageUrl}`);
 
     // Update the LoRA record with the trained file details
     await (supabase as any)

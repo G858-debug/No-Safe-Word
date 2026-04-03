@@ -342,6 +342,18 @@ export async function completePonyPipeline(
       );
     }
 
+    // Normalize storage_url — the pod may have stored a bucket path instead of a URL.
+    // Example bad value: "lora-training-datasets/trained/characters/lora_xxx.safetensors"
+    let loraStorageUrl: string = lora.storage_url || '';
+    if (loraStorageUrl && !loraStorageUrl.startsWith('https://')) {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      loraStorageUrl = `${supabaseUrl}/storage/v1/object/public/lora-training-datasets/${lora.storage_path}`;
+      console.log(`[PonyPipeline] Normalized storage URL from path: ${loraStorageUrl}`);
+    }
+    if (!loraStorageUrl) {
+      throw new Error(`LoRA "${lora.filename}" has no download URL. Re-upload the trained file.`);
+    }
+
     // ── Stage 7: Validate ──
     await setLoraStatus(loraId, 'validating', {}, deps);
     console.log(`[PonyPipeline] Stage 7: Validating trained LoRA...`);
@@ -350,7 +362,7 @@ export async function completePonyPipeline(
     const validationResult = await validatePonyLora(
       { gender: desc.gender || 'female', approvedImageUrl: approvedUrl },
       lora.filename,
-      lora.storage_url,
+      loraStorageUrl,
       lora.trigger_word,
       loraId,
       deps,
