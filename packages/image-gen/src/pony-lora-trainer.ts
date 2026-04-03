@@ -308,7 +308,7 @@ export async function completePonyPipeline(
     // Fetch the character for validation
     const { data: charRows } = await deps.supabase
       .from('story_characters')
-      .select('id, character_id, characters(id, name, description)')
+      .select('id, character_id, approved_image_id, characters(id, name, description)')
       .eq('character_id', lora.character_id)
       .limit(1);
 
@@ -318,6 +318,15 @@ export async function completePonyPipeline(
     }
 
     // Get an approved portrait URL for face comparison
+    const charName = (storyChar.characters as any)?.name || lora.character_id;
+
+    if (!storyChar.approved_image_id) {
+      throw new Error(
+        `No approved_image_id for "${charName}". ` +
+        `Approve a portrait image before running validation.`
+      );
+    }
+
     const { data: portraitImg } = await deps.supabase
       .from('images')
       .select('stored_url, sfw_url')
@@ -327,10 +336,9 @@ export async function completePonyPipeline(
     const approvedUrl = portraitImg?.sfw_url || portraitImg?.stored_url;
 
     if (!approvedUrl) {
-      const charName = (storyChar.characters as any)?.name || lora.character_id;
       throw new Error(
         `No approved portrait URL for "${charName}". ` +
-        `Check that the approved image exists in the images table (approved_image_id: ${storyChar.approved_image_id}).`
+        `Image record exists but has no stored_url or sfw_url (approved_image_id: ${storyChar.approved_image_id}).`
       );
     }
 
