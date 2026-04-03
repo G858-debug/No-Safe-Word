@@ -326,13 +326,21 @@ export async function completePonyPipeline(
 
     const approvedUrl = portraitImg?.sfw_url || portraitImg?.stored_url;
 
+    if (!approvedUrl) {
+      const charName = (storyChar.characters as any)?.name || lora.character_id;
+      throw new Error(
+        `No approved portrait URL for "${charName}". ` +
+        `Check that the approved image exists in the images table (approved_image_id: ${storyChar.approved_image_id}).`
+      );
+    }
+
     // ── Stage 7: Validate ──
     await setLoraStatus(loraId, 'validating', {}, deps);
     console.log(`[PonyPipeline] Stage 7: Validating trained LoRA...`);
 
     const desc = storyChar.characters?.description as Record<string, string> || {};
     const validationResult = await validatePonyLora(
-      { gender: desc.gender || 'female', approvedImageUrl: approvedUrl || '' },
+      { gender: desc.gender || 'female', approvedImageUrl: approvedUrl },
       lora.filename,
       lora.storage_url,
       lora.trigger_word,

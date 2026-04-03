@@ -727,6 +727,7 @@ function DatasetStage({
   if (status === "failed") {
     const errMsg = loraProgress?.progress?.error || "Training failed";
     const isStale = errMsg.includes("stalled");
+    const alreadyTrained = !!(loraProgress?.progress?.loraUrl && loraProgress?.progress?.filename);
 
     // Parse "Only X images passed" from error message
     const passedMatch = errMsg.match(/(\d+) images? passed/);
@@ -734,11 +735,19 @@ function DatasetStage({
     const passed = passedMatch ? parseInt(passedMatch[1]) : null;
     const needed = neededMatch ? parseInt(neededMatch[1]) : 20;
 
+    const failureTitle = isStale
+      ? "Pipeline stalled — automatic recovery"
+      : passed !== null
+        ? "Dataset evaluation incomplete"
+        : alreadyTrained
+          ? "Validation failed"
+          : "Training failed";
+
     return (
       <div className="space-y-3">
         <div className={`rounded-md p-3 space-y-2 ${isStale ? "bg-yellow-500/10 border border-yellow-500/30" : "bg-red-500/10 border border-red-500/30"}`}>
           <p className={`text-sm font-medium ${isStale ? "text-yellow-400" : "text-red-400"}`}>
-            {isStale ? "Pipeline stalled — automatic recovery" : passed !== null ? "Dataset evaluation incomplete" : "Training failed"}
+            {failureTitle}
           </p>
           {passed !== null ? (
             <div className="space-y-1">
@@ -776,7 +785,7 @@ function DatasetStage({
           )}
           {passed === null && (
             <Button onClick={onResume} size="sm">
-              Retry Training
+              {alreadyTrained ? "Retry Validation" : "Retry Training"}
             </Button>
           )}
           <Button onClick={onTrain} variant="ghost" size="sm" className="text-xs text-muted-foreground">

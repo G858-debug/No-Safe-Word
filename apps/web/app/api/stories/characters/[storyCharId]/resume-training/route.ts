@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { resumePonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
+import { resumePonyPipeline, completePonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 const MIN_PASSED_IMAGES = 15;
@@ -38,7 +38,7 @@ export async function POST(
     // 2. Find the LoRA — accept awaiting_dataset_approval or failed (retry with existing dataset)
     const { data: lora, error: loraError } = await supabase
       .from("character_loras")
-      .select("id, status")
+      .select("id, status, storage_url, filename")
       .eq("character_id", storyChar.character_id)
       .in("status", ["awaiting_dataset_approval", "failed", "training", "validating", "captioning"])
       .order("created_at", { ascending: false })
@@ -50,6 +50,21 @@ export async function POST(
         { error: "No LoRA ready to resume for this character" },
         { status: 400 }
       );
+    }
+
+    // 2b. Smart retry: if training already completed (file uploaded), skip to validation
+    if (lora.status === "failed" && lora.storage_url && lora.filename) {
+      console.log(`[LoRA API] LoRA ${lora.id} already trained (${lora.filename}). Skipping to validation.`);
+
+      completePonyPipeline(lora.id, { supabase }).catch((err) => {
+        console.error(`[LoRA API] Validation-only retry error:`, err);
+      });
+
+      return NextResponse.json({
+        success: true,
+        loraId: lora.id,
+        message: `Re-running validation for already-trained LoRA (${lora.filename}).`,
+      });
     }
 
     // 3. Count human-approved images
