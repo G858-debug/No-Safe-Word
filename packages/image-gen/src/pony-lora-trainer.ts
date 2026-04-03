@@ -87,7 +87,7 @@ export interface PipelineDeps {
   supabase: any;
 }
 
-const KOHYA_DOCKER_IMAGE = process.env.KOHYA_TRAINER_IMAGE || 'ghcr.io/g858-debug/nsw-kohya-trainer:v2';
+const KOHYA_DOCKER_IMAGE = process.env.KOHYA_TRAINER_IMAGE || 'ghcr.io/g858-debug/nsw-kohya-trainer:v3';
 const DATASET_BUCKET = 'lora-training-datasets';
 const IMAGES_BUCKET = 'story-images';
 

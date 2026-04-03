@@ -259,17 +259,21 @@ def upload_lora(lora_path: Path) -> str | None:
         return None
 
     post_webhook("uploading", "Uploading trained LoRA...")
-    size_mb = lora_path.stat().st_size / 1024 / 1024
+    file_bytes = lora_path.read_bytes()
+    size_mb = len(file_bytes) / 1024 / 1024
     print(f"Uploading {lora_path.name} ({size_mb:.1f}MB)...")
 
-    with open(lora_path, "rb") as f:
-        resp = requests.put(
-            OUTPUT_UPLOAD_URL,
-            data=f,
-            headers={"Content-Type": "application/octet-stream"},
-            timeout=600,
-        )
+    resp = requests.put(
+        OUTPUT_UPLOAD_URL,
+        data=file_bytes,
+        headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(len(file_bytes)),
+        },
+        timeout=600,
+    )
 
+    print(f"Upload response ({resp.status_code}): {resp.text}")
     resp.raise_for_status()
     print(f"Upload complete: HTTP {resp.status_code}")
 
