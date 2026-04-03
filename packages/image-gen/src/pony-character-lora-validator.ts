@@ -13,7 +13,7 @@ import { submitRunPodJob, waitForRunPodResult } from './runpod';
 import { anthropicCreateWithRetry } from './anthropic-retry';
 import type { ValidationResult } from './character-lora/types';
 
-const VALIDATION_MODEL = 'claude-sonnet-4-6';
+const VALIDATION_MODEL = 'claude-haiku-4-5-20251001';
 
 /**
  * 6 test prompts in booru tag format for Pony validation.
