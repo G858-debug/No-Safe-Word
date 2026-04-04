@@ -22,7 +22,8 @@ export type FailureCategory =
   | 'wrong_pose'
   | 'wrong_lighting'
   | 'wrong_composition'
-  | 'characters_identical';
+  | 'characters_identical'
+  | 'evaluation_error';
 
 export interface EvaluationScores {
   personCount: { expected: number; detected: number; passed: boolean };
@@ -163,13 +164,16 @@ export async function validatePersonCount(
 
     const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
     const detected = parseInt(text, 10);
-    if (isNaN(detected)) return { detected: -1, passed: true };
+    if (isNaN(detected)) {
+      console.error(`[SceneEvaluator] Tier 1: could not parse person count from response: "${text}"`);
+      return { detected: -1, passed: false };
+    }
 
     console.log(`[SceneEvaluator] Tier 1: detected ${detected} person(s), expected ${expectedCount}`);
     return { detected, passed: detected >= expectedCount };
   } catch (err) {
     console.error('[SceneEvaluator] Person count failed:', err instanceof Error ? err.message : err);
-    return { detected: -1, passed: true };
+    return { detected: -1, passed: false };
   }
 }
 
@@ -244,7 +248,10 @@ export async function evaluateSceneFull(
       }],
     });
 
-    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '{}';
+    const rawText = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    if (!rawText) throw new Error('Empty response from evaluator model');
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    const text = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const parsed = JSON.parse(text);
 
     const scores: EvaluationScores = {
@@ -278,8 +285,9 @@ export async function evaluateSceneFull(
 
     return result;
   } catch (err) {
-    console.error('[SceneEvaluator] Full evaluation failed:', err instanceof Error ? err.message : err);
-    return buildPassResult(ctx, 'evaluation failed — passing by default');
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[SceneEvaluator] Full evaluation failed:', message);
+    throw err;
   }
 }
 

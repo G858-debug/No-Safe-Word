@@ -109,18 +109,40 @@ export async function GET(
 
         const booruTags = imageRow?.prompt || '';
 
-        evalResult = await evaluateSceneFull({
-          imageBase64: base64Data,
-          originalProse: promptResult.prompt,
-          booruTags,
-          compositionType,
-          contentMode,
-          expectedPersonCount,
-          characterNames,
-        });
+        try {
+          evalResult = await evaluateSceneFull({
+            imageBase64: base64Data,
+            originalProse: promptResult.prompt,
+            booruTags,
+            compositionType,
+            contentMode,
+            expectedPersonCount,
+            characterNames,
+          });
+        } catch (evalErr) {
+          console.error(`[Evaluator][${promptId}] evaluateSceneFull threw — storing error, skipping retry:`, evalErr instanceof Error ? evalErr.message : evalErr);
+          await (supabase as any).from("generation_evaluations").insert({
+            image_id: imageId,
+            prompt_id: promptId,
+            attempt_number: attemptNumber,
+            composition_type: compositionType,
+            content_mode: contentMode,
+            original_prose: promptResult.prompt,
+            booru_tags: booruTags,
+            generation_params: settings as Json,
+            person_count_expected: expectedPersonCount,
+            person_count_detected: null,
+            overall_score: null,
+            passed: false,
+            failure_categories: ['evaluation_error'],
+            eval_model: 'claude-haiku-4-5-20251001',
+            raw_eval_response: { error: evalErr instanceof Error ? evalErr.message : String(evalErr) } as Json,
+          });
+          // Fall through — store the image without triggering a retry
+        }
 
-        // Store evaluation result
-        await (supabase as any).from("generation_evaluations").insert({
+        // Store full evaluation result (when evaluation succeeded)
+        if (evalResult) await (supabase as any).from("generation_evaluations").insert({
           image_id: imageId,
           prompt_id: promptId,
           attempt_number: attemptNumber,
@@ -144,14 +166,14 @@ export async function GET(
           raw_eval_response: evalResult.rawResponse as Json,
         });
 
-        console.log(
+        if (evalResult) console.log(
           `[Evaluator][${promptId}] Attempt ${attemptNumber}/${MAX_EVAL_RETRY_ATTEMPTS}: ` +
           `overall=${evalResult.overallScore.toFixed(2)}, passed=${evalResult.passed}, ` +
           `failures=[${evalResult.failureCategories.join(', ')}]`,
         );
 
         // ── Retry Logic ──
-        if (!evalResult.passed && canRetry(attemptNumber) && promptId) {
+        if (evalResult && !evalResult.passed && canRetry(attemptNumber) && promptId) {
           // Fetch failure history from previous evaluations
           const { data: prevEvals } = await (supabase as any)
             .from("generation_evaluations")
@@ -271,12 +293,12 @@ export async function GET(
           } catch (retryErr) {
             console.error("[Evaluator] Retry request failed:", retryErr);
           }
-        } else if (!evalResult.passed) {
+        } else if (evalResult && !evalResult.passed) {
           console.warn(
             `[Evaluator][${promptId}] FAILED after ${attemptNumber} attempts. ` +
             `Best score: ${evalResult.overallScore.toFixed(2)}. Storing result.`,
           );
-        } else {
+        } else if (evalResult) {
           console.log(`[Evaluator][${promptId}] PASSED on attempt ${attemptNumber}`);
         }
       }
