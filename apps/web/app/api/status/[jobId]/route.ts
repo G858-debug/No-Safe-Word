@@ -100,7 +100,20 @@ export async function GET(
       // ── Scene Evaluation ──
       let evalResult: EvaluationResult | undefined;
 
-      if (promptResult) {
+      // Idempotency guard — skip evaluation if this image was already evaluated.
+      // Prevents duplicate records when the client polls the same completed job twice.
+      const { data: existingEval } = await (supabase as any)
+        .from("generation_evaluations")
+        .select("id")
+        .eq("image_id", imageId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingEval) {
+        console.log(`[Evaluator] Image ${imageId} already evaluated — skipping duplicate poll`);
+      }
+
+      if (promptResult && !existingEval) {
         // Derive composition type and content mode from prompt metadata
         const characterNames = [
           promptResult.character_name,
