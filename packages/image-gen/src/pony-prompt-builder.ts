@@ -69,7 +69,7 @@ export function buildPonyCharacterTags(
   if (charData.ethnicity) {
     const eth = charData.ethnicity.toLowerCase();
     if (eth.includes('african') || eth.includes('black')) {
-      tags.push('dark-skinned female', 'african');
+      tags.push(charData.gender === 'female' ? 'dark-skinned female' : 'dark-skinned male', 'african');
     }
   }
 
@@ -80,9 +80,12 @@ export function buildPonyCharacterTags(
   // Eyes
   if (charData.eyeColor) tags.push(`${charData.eyeColor.toLowerCase()} eyes`);
 
-  // Body type (female characters get detailed body tags for Pony)
+  // Body type
   if (charData.gender === 'female') {
     tags.push('curvy', 'wide hips', 'large breasts', 'thick thighs', 'narrow waist');
+    if (charData.bodyType) tags.push(charData.bodyType.toLowerCase());
+  } else {
+    tags.push('muscular', 'broad shoulders', 'tall', 'masculine');
     if (charData.bodyType) tags.push(charData.bodyType.toLowerCase());
   }
 
