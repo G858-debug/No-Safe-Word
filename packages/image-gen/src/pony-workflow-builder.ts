@@ -36,6 +36,13 @@ export interface PonyWorkflowConfig {
     strengthModel: number;
     strengthClip: number;
   }>;
+  /** Regional conditioning for dual-character scenes.
+   *  When set, positivePrompt is used as the shared/global prompt (quality + scene),
+   *  and each character gets area-constrained conditioning (left/right regions). */
+  dualCharacterPrompts?: {
+    char1Prompt: string;
+    char2Prompt: string;
+  };
 }
 
 /**
@@ -80,15 +87,6 @@ export function buildPonyWorkflow(config: PonyWorkflowConfig): Record<string, an
     }
   }
 
-  // Node 101: CLIPTextEncode (positive)
-  workflow['101'] = {
-    class_type: 'CLIPTextEncode',
-    inputs: {
-      text: config.positivePrompt,
-      clip: clipRef,
-    },
-  };
-
   // Node 102: CLIPTextEncode (negative)
   workflow['102'] = {
     class_type: 'CLIPTextEncode',
@@ -97,6 +95,90 @@ export function buildPonyWorkflow(config: PonyWorkflowConfig): Record<string, an
       clip: clipRef,
     },
   };
+
+  // ── Positive conditioning: single vs dual-character ──
+  let positiveRef: [string, number];
+
+  if (config.dualCharacterPrompts) {
+    // Regional conditioning: separate each character into left/right regions
+    // with shared quality+scene prompt applied globally.
+    const overlap = 64; // ~5% of 1216 for smooth blending
+    const regionWidth = Math.ceil(config.width / 2) + overlap;
+    // Round to nearest 8 (ComfyUI requirement)
+    const regionW = Math.ceil(regionWidth / 8) * 8;
+    const rightX = Math.floor((config.width - regionW) / 8) * 8;
+
+    // Node 101: Shared prompt (quality + scene — applies globally)
+    workflow['101'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: config.positivePrompt, clip: clipRef },
+    };
+
+    // Node 201: Character 1 text encoding
+    workflow['201'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: config.dualCharacterPrompts.char1Prompt, clip: clipRef },
+    };
+
+    // Node 202: Character 1 → left region
+    workflow['202'] = {
+      class_type: 'ConditioningSetArea',
+      inputs: {
+        conditioning: ['201', 0],
+        width: regionW,
+        height: config.height,
+        x: 0,
+        y: 0,
+        strength: 1.0,
+      },
+    };
+
+    // Node 203: Character 2 text encoding
+    workflow['203'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: config.dualCharacterPrompts.char2Prompt, clip: clipRef },
+    };
+
+    // Node 204: Character 2 → right region
+    workflow['204'] = {
+      class_type: 'ConditioningSetArea',
+      inputs: {
+        conditioning: ['203', 0],
+        width: regionW,
+        height: config.height,
+        x: rightX,
+        y: 0,
+        strength: 1.0,
+      },
+    };
+
+    // Node 210: Combine both character regions
+    workflow['210'] = {
+      class_type: 'ConditioningCombine',
+      inputs: {
+        conditioning_1: ['202', 0],
+        conditioning_2: ['204', 0],
+      },
+    };
+
+    // Node 211: Combine shared global + character regions
+    workflow['211'] = {
+      class_type: 'ConditioningCombine',
+      inputs: {
+        conditioning_1: ['101', 0],
+        conditioning_2: ['210', 0],
+      },
+    };
+
+    positiveRef = ['211', 0];
+  } else {
+    // Single-character: one positive prompt for the whole image
+    workflow['101'] = {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: config.positivePrompt, clip: clipRef },
+    };
+    positiveRef = ['101', 0];
+  }
 
   // Node 103: EmptyLatentImage
   workflow['103'] = {
@@ -113,7 +195,7 @@ export function buildPonyWorkflow(config: PonyWorkflowConfig): Record<string, an
     class_type: 'KSampler',
     inputs: {
       model: modelRef,
-      positive: ['101', 0],
+      positive: positiveRef,
       negative: ['102', 0],
       latent_image: ['103', 0],
       seed: config.seed,

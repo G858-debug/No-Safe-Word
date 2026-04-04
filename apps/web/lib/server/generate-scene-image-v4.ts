@@ -274,24 +274,52 @@ export async function buildV4SceneGenerationPayload(
   for (const lora of resources.loras) {
     loraStack.push(lora);
   }
-  triggerWords.push(...resources.triggerWords);
 
-  // Assemble full prompt
+  // Assemble prompts
   const qualityPrefix = buildPonyQualityPrefix(mode);
-  const positivePrompt = buildPonyPositivePrompt({
-    qualityPrefix,
-    characterTags,
-    secondaryCharacterTags,
-    sceneTags,
-    triggerWords,
-    mode,
-  });
   const negativePrompt = buildPonyNegativePrompt(mode);
 
   // ── Dimensions ──
   const { width, height } = getPonyDimensions("portrait", isDualCharacter);
 
   // ── Build workflow ──
+  let positivePrompt: string;
+  let dualCharacterPrompts: { char1Prompt: string; char2Prompt: string } | undefined;
+
+  if (isDualCharacter && secondaryCharacterTags) {
+    // Regional conditioning: split character prompts into separate regions.
+    // Shared prompt gets quality + style LoRA triggers + scene tags (global).
+    // Each character gets their own trigger word + identity tags (regional).
+    const styleTriggers = resources.triggerWords;
+    const sharedParts = [qualityPrefix, ...styleTriggers, sceneTags].filter(Boolean);
+    positivePrompt = sharedParts.join(', ');
+
+    // Character 1 (left region): trigger word + identity tags
+    const char1Parts = [triggerWords[0], characterTags].filter(Boolean);
+    // Character 2 (right region): trigger word + identity tags
+    const char2Parts = [triggerWords[1], secondaryCharacterTags].filter(Boolean);
+
+    dualCharacterPrompts = {
+      char1Prompt: char1Parts.join(', '),
+      char2Prompt: char2Parts.join(', '),
+    };
+
+    console.log(`[V4][${promptId}] DUAL-CHARACTER regional prompting enabled`);
+    console.log(`[V4][${promptId}] Shared: ${positivePrompt}`);
+    console.log(`[V4][${promptId}] Char1 (left): ${dualCharacterPrompts.char1Prompt}`);
+    console.log(`[V4][${promptId}] Char2 (right): ${dualCharacterPrompts.char2Prompt}`);
+  } else {
+    // Single character: all in one prompt
+    positivePrompt = buildPonyPositivePrompt({
+      qualityPrefix,
+      characterTags,
+      secondaryCharacterTags,
+      sceneTags,
+      triggerWords: [...triggerWords, ...resources.triggerWords],
+      mode,
+    });
+  }
+
   const workflow = buildPonyWorkflow({
     positivePrompt,
     negativePrompt,
@@ -300,7 +328,13 @@ export async function buildV4SceneGenerationPayload(
     seed,
     filenamePrefix: `v4_${promptId}`,
     loras: loraStack.length > 0 ? loraStack : undefined,
+    dualCharacterPrompts,
   });
+
+  // ── Assembled prompt for storage (includes all parts) ──
+  const assembledPrompt = dualCharacterPrompts
+    ? `${positivePrompt} | CHAR1: ${dualCharacterPrompts.char1Prompt} | CHAR2: ${dualCharacterPrompts.char2Prompt}`
+    : positivePrompt;
 
   // ── Log summary ──
   console.log(
@@ -317,9 +351,10 @@ export async function buildV4SceneGenerationPayload(
       mode,
       seed,
       isDualCharacter,
+      dualCharacterRegional: !!dualCharacterPrompts,
       loraCount: loraStack.length,
       characterLoraCount: characterLoraDownloads.length,
-      promptLength: positivePrompt.length,
+      promptLength: assembledPrompt.length,
       dimensions: `${width}x${height}`,
     }, null, 2),
   );
@@ -328,7 +363,7 @@ export async function buildV4SceneGenerationPayload(
     workflow,
     images: [], // No reference images needed — identity from LoRAs
     characterLoraDownloads,
-    assembledPrompt: positivePrompt,
+    assembledPrompt,
     negativePrompt,
     mode,
     seed,
