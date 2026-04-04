@@ -120,7 +120,7 @@ export async function GET(
         });
 
         // Store evaluation result
-        await supabase.from("generation_evaluations").insert({
+        await (supabase as any).from("generation_evaluations").insert({
           image_id: imageId,
           prompt_id: promptId,
           attempt_number: attemptNumber,
@@ -153,14 +153,14 @@ export async function GET(
         // ── Retry Logic ──
         if (!evalResult.passed && canRetry(attemptNumber) && promptId) {
           // Fetch failure history from previous evaluations
-          const { data: prevEvals } = await supabase
+          const { data: prevEvals } = await (supabase as any)
             .from("generation_evaluations")
             .select("failure_categories, raw_eval_response")
             .eq("prompt_id", promptId)
             .order("attempt_number", { ascending: true });
 
           const failureHistory: FailureCategory[][] = (prevEvals || []).map(
-            (e) => (e.failure_categories || []) as FailureCategory[],
+            (e: any) => (e.failure_categories || []) as FailureCategory[],
           );
 
           // Build the current profile from settings (best effort reconstruction)
@@ -183,7 +183,7 @@ export async function GET(
           );
 
           // Update evaluation record with the correction plan
-          await supabase
+          await (supabase as any)
             .from("generation_evaluations")
             .update({ corrections_applied: correction as unknown as Json })
             .eq("prompt_id", promptId)
@@ -192,7 +192,7 @@ export async function GET(
           // If structural failure detected on final attempts, request Sonnet diagnosis
           if (correction.structuralFailure && attemptNumber >= MAX_EVAL_RETRY_ATTEMPTS - 1) {
             const evalDiagnoses = (prevEvals || []).map(
-              (e) => ((e.raw_eval_response as any)?.diagnosis as string) || '',
+              (e: any) => ((e.raw_eval_response as any)?.diagnosis as string) || '',
             );
             const structuralDiagnosis = await requestStructuralDiagnosis(
               failureHistory,
@@ -201,7 +201,7 @@ export async function GET(
               contentMode,
             );
             console.log(`[Evaluator] STRUCTURAL FAILURE DETECTED — Sonnet diagnosis stored`);
-            await supabase
+            await (supabase as any)
               .from("generation_evaluations")
               .update({
                 raw_eval_response: {
