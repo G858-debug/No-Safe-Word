@@ -24,8 +24,11 @@ import {
   getPonyDimensions,
   selectPonyResources,
   buildPonyWorkflow,
+  getDefaultProfile,
+  deriveCompositionType,
+  deriveContentMode,
 } from "@no-safe-word/image-gen";
-import type { CharacterLoraDownload } from "@no-safe-word/image-gen";
+import type { CharacterLoraDownload, SceneProfile } from "@no-safe-word/image-gen";
 
 /** Fetch character data from the characters table for the given IDs */
 export async function fetchCharacterDataMap(
@@ -100,6 +103,8 @@ export interface V4SceneResult {
   width: number;
   height: number;
   engine: "pony_cyberreal";
+  /** The scene profile used for this generation (for evaluation storage) */
+  profile: SceneProfile;
 }
 
 interface V4GenerateSceneParams {
@@ -107,6 +112,10 @@ interface V4GenerateSceneParams {
   seriesId: string;
   characterDataMap: Map<string, CharacterData>;
   seed: number;
+  /** Override scene profile (used by retry strategy to adjust parameters) */
+  profileOverrides?: Partial<SceneProfile>;
+  /** Pre-rewritten booru tags (bypasses convertProseToBooru on retries) */
+  overrideTags?: string;
 }
 
 // ── Character LoRA Fetching ──
@@ -166,7 +175,7 @@ async function fetchCharacterLora(
 export async function buildV4SceneGenerationPayload(
   params: V4GenerateSceneParams,
 ): Promise<V4SceneResult> {
-  const { imgPrompt, seriesId, characterDataMap, seed } = params;
+  const { imgPrompt, seriesId, characterDataMap, seed, profileOverrides, overrideTags } = params;
   const promptId = imgPrompt.id;
 
   // ── Mode ──
@@ -220,9 +229,29 @@ export async function buildV4SceneGenerationPayload(
   const hasFemale =
     primaryCharData?.gender === "female" || secondaryCharData?.gender === "female";
 
+  // ── Scene profile ──
+  const primaryGender = primaryCharData?.gender === "male" ? "male" as const : "female" as const;
+  const secondaryGenderVal = secondaryCharData
+    ? (secondaryCharData.gender === "male" ? "male" as const : "female" as const)
+    : undefined;
+  const compositionType = deriveCompositionType(primaryGender, secondaryGenderVal);
+  const contentMode = deriveContentMode(imgPrompt.image_type);
+  const baseProfile = getDefaultProfile(compositionType, contentMode);
+  const profile: SceneProfile = profileOverrides
+    ? { ...baseProfile, ...profileOverrides, loraOverrides: { ...baseProfile.loraOverrides, ...profileOverrides.loraOverrides } }
+    : baseProfile;
+
+  console.log(`[V4][${promptId}] Profile: ${profile.compositionType}/${profile.contentMode} (charLora=${profile.charLoraStrength}, cfg=${profile.cfg}, steps=${profile.steps})`);
+
+  // Apply profile-driven LoRA strengths to character LoRAs already in the stack
+  for (const lora of loraStack) {
+    lora.strengthModel = profile.charLoraStrength;
+    lora.strengthClip = profile.charLoraStrength;
+  }
+
   // ── Prompt building ──
-  // Convert prose scene prompt to booru tags
-  const sceneTags = await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
+  // Convert prose scene prompt to booru tags (or use pre-rewritten tags from retry)
+  const sceneTags = overrideTags || await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
   console.log(`[V4][${promptId}] Scene tags: ${sceneTags}`);
 
   // Build character identity tags
@@ -257,12 +286,9 @@ export async function buildV4SceneGenerationPayload(
   }
 
   // Select style LoRAs
-  const primaryGender = primaryCharData?.gender === "male" ? "male" as const : "female" as const;
   const resources = selectPonyResources({
     gender: primaryGender,
-    secondaryGender: secondaryCharData
-      ? (secondaryCharData.gender === "male" ? "male" : "female")
-      : undefined,
+    secondaryGender: secondaryGenderVal,
     isSfw: !isNsfw,
     imageType: imgPrompt.image_type,
     prompt: imgPrompt.prompt,
@@ -270,9 +296,14 @@ export async function buildV4SceneGenerationPayload(
     primaryEthnicity: primaryCharData?.ethnicity,
   });
 
-  // Add style LoRAs after character LoRAs
+  // Add style LoRAs after character LoRAs, applying profile-driven strength overrides
   for (const lora of resources.loras) {
-    loraStack.push(lora);
+    const overrideStrength = profile.loraOverrides[lora.filename];
+    if (overrideStrength !== undefined) {
+      loraStack.push({ ...lora, strengthModel: overrideStrength, strengthClip: Math.min(overrideStrength, 1.0) });
+    } else {
+      loraStack.push(lora);
+    }
   }
 
   // Assemble prompts
@@ -326,6 +357,8 @@ export async function buildV4SceneGenerationPayload(
     width,
     height,
     seed,
+    cfg: profile.cfg,
+    steps: profile.steps,
     filenamePrefix: `v4_${promptId}`,
     loras: loraStack.length > 0 ? loraStack : undefined,
     dualCharacterPrompts,
@@ -356,6 +389,7 @@ export async function buildV4SceneGenerationPayload(
       characterLoraCount: characterLoraDownloads.length,
       promptLength: assembledPrompt.length,
       dimensions: `${width}x${height}`,
+      profile: `${profile.compositionType}/${profile.contentMode}`,
     }, null, 2),
   );
 
@@ -370,5 +404,6 @@ export async function buildV4SceneGenerationPayload(
     width,
     height,
     engine: "pony_cyberreal",
+    profile,
   };
 }

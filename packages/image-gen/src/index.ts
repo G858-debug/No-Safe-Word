@@ -42,6 +42,25 @@ export type {
   VariationType,
 } from './character-lora/types';
 
+// Scene profiles — composition-aware generation parameter profiles
+export { getDefaultProfile, deriveCompositionType, deriveContentMode, applyProfileOverrides } from './scene-profiles';
+export type { SceneProfile, CompositionType } from './scene-profiles';
+
+// Scene evaluator — tiered image evaluation pipeline
+export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull } from './scene-evaluator';
+export type { EvaluationResult, EvaluationContext, EvaluationScores, FailureCategory, PreflightResult } from './scene-evaluator';
+
+// Retry strategy — correction logic and escalation
+export { computeCorrectionPlan, canRetry, generateRetrySeed as generateRetrySeedV2, selectBestAttempt, MAX_EVAL_RETRY_ATTEMPTS } from './retry-strategy';
+export type { CorrectionPlan } from './retry-strategy';
+
+// Tag rewriter — failure-aware booru tag rewriting
+export { rewriteTagsForFailure } from './tag-rewriter';
+
+// Architectural lessons — known structural solutions
+export { ARCHITECTURAL_LESSONS, checkArchitecturalLessons, requestStructuralDiagnosis } from './architectural-lessons';
+export type { ArchitecturalLesson } from './architectural-lessons';
+
 // Pony V6 CyberRealistic Pipeline
 export { buildPonyWorkflow } from './pony-workflow-builder';
 export type { PonyWorkflowConfig } from './pony-workflow-builder';
