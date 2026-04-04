@@ -84,8 +84,18 @@ export async function GET(
       const seed = settings.seed != null ? Number(settings.seed) : null;
       const isDualCharacter = !!promptResult?.secondary_character_id;
       const promptId = promptResult?.id;
-      const attemptNumber = ((settings as any).attemptNumber as number) || 1;
       const expectedPersonCount = isDualCharacter ? 2 : 1;
+
+      // Derive attempt number from existing evaluations — more reliable than image settings
+      // (image settings.attemptNumber can be stale if the retry endpoint skips the update)
+      let attemptNumber = 1;
+      if (promptId) {
+        const { count } = await (supabase as any)
+          .from("generation_evaluations")
+          .select("id", { count: "exact", head: true })
+          .eq("prompt_id", promptId);
+        attemptNumber = (count ?? 0) + 1;
+      }
 
       // ── Scene Evaluation ──
       let evalResult: EvaluationResult | undefined;
