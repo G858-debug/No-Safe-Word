@@ -160,9 +160,11 @@ export function selectPonyResources(opts: {
     }
   }
 
-  // --- Body shape LoRAs: female characters only ---
+  // --- Body shape LoRAs: female-only scenes (skip when a male character is present,
+  //     because these LoRAs operate at model level and reshape ALL bodies) ---
+  const hasMaleCharacter = opts.gender === 'male' || opts.secondaryGender === 'male';
   const hasFemaleCharacter = opts.gender === 'female' || opts.secondaryGender === 'female';
-  if (hasFemaleCharacter) {
+  if (hasFemaleCharacter && !hasMaleCharacter) {
     const hourglass = findLora('pony-hourglass-body.safetensors');
     if (hourglass?.installed) {
       loras.push({ filename: hourglass.filename, strengthModel: hourglass.defaultStrength, strengthClip: hourglass.clipStrength });
