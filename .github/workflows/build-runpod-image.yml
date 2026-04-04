@@ -84,3 +84,12 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=min
           build-args: |
             BASE_IMAGE=${{ steps.base.outputs.image }}
+
+      - name: Update RunPod endpoint template
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          CIVITAI_API_KEY: ${{ secrets.CIVITAI_API_KEY }}
+          RUNPOD_ENDPOINT_ID: vj6jc0gd61l9ov
+          RUNPOD_TEMPLATE_ID: b31bthjn1k
+          DOCKER_IMAGE: ghcr.io/${{ env.IMAGE_NAME }}:latest
+        run: bash infra/runpod/update-endpoint.sh

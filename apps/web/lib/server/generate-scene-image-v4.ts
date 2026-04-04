@@ -187,7 +187,7 @@ export async function buildV4SceneGenerationPayload(
     }
 
     const lora = await fetchCharacterLora(imgPrompt.character_id, primaryCharData.name);
-    characterLoraDownloads.push({ filename: lora.filename, url: lora.storageUrl });
+    characterLoraDownloads.push({ filename: `characters/${lora.filename}`, url: lora.storageUrl });
     triggerWords.push(lora.triggerWord);
     loraStack.push({
       filename: `characters/${lora.filename}`,
@@ -206,7 +206,7 @@ export async function buildV4SceneGenerationPayload(
     }
 
     const lora = await fetchCharacterLora(imgPrompt.secondary_character_id, secondaryCharData.name);
-    characterLoraDownloads.push({ filename: lora.filename, url: lora.storageUrl });
+    characterLoraDownloads.push({ filename: `characters/${lora.filename}`, url: lora.storageUrl });
     triggerWords.push(lora.triggerWord);
     loraStack.push({
       filename: `characters/${lora.filename}`,
