@@ -120,7 +120,7 @@ export async function GET(
           promptResult.secondary_character_name,
         ].filter((n): n is string => n !== null);
 
-        const contentMode = promptResult.image_type === 'website_nsfw_paired' ? 'nsfw' : 'sfw';
+        const contentMode = promptResult.image_type === 'facebook_sfw' ? 'sfw' : 'nsfw';
         const compositionType = isDualCharacter ? '1boy_1girl' : 'solo'; // simplified; full derivation needs gender data
 
         // Fetch the booru tags from the assembled prompt

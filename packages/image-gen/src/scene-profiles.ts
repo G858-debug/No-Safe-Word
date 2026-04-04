@@ -80,7 +80,8 @@ export function deriveCompositionType(
  * Derive content mode from the image_type field in story_image_prompts.
  */
 export function deriveContentMode(imageType: string): 'sfw' | 'nsfw' {
-  return imageType === 'website_nsfw_paired' ? 'nsfw' : 'sfw';
+  // facebook_sfw is the only SFW type — all website content is NSFW
+  return imageType === 'facebook_sfw' ? 'sfw' : 'nsfw';
 }
 
 /**

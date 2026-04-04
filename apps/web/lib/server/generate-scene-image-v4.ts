@@ -179,7 +179,7 @@ export async function buildV4SceneGenerationPayload(
   const promptId = imgPrompt.id;
 
   // ── Mode ──
-  const isNsfw = imgPrompt.image_type === "website_nsfw_paired";
+  const isNsfw = imgPrompt.image_type !== "facebook_sfw";
   const mode: "sfw" | "nsfw" = isNsfw ? "nsfw" : "sfw";
 
   // ── Character data + LoRAs ──
