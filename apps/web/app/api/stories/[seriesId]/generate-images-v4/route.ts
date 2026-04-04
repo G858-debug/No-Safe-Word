@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob } from "@no-safe-word/image-gen";
+import { submitRunPodJob, validateTagsPreflight, convertProseToBooru } from "@no-safe-word/image-gen";
 import {
   buildV4SceneGenerationPayload,
   fetchCharacterDataMap,
@@ -117,6 +117,17 @@ export async function POST(
 
         const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
+        // Tier 0: Pre-flight tag validation (before spending GPU credits)
+        const isNsfw = imgPrompt.image_type === "website_nsfw_paired";
+        const preflightTags = await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
+        const preflight = await validateTagsPreflight(imgPrompt.prompt, preflightTags);
+        if (!preflight.passed) {
+          console.warn(
+            `[V4][${imgPrompt.id}] Tier 0 PRE-FLIGHT WARNING: missing [${preflight.missingElements.join(', ')}]. ` +
+            `${preflight.diagnosis}. Proceeding with generation anyway.`,
+          );
+        }
+
         const result = await buildV4SceneGenerationPayload({
           imgPrompt,
           seriesId,
@@ -142,11 +153,13 @@ export async function POST(
             settings: {
               width: result.width,
               height: result.height,
-              steps: 30,
-              cfg: 6.5,
+              steps: result.profile.steps,
+              cfg: result.profile.cfg,
               seed: result.seed,
               engine: "runpod-v4-pony-cyberreal",
-              loraCount: (result.workflow['110'] ? result.characterLoraDownloads.length : 0),
+              attemptNumber: 1,
+              compositionType: result.profile.compositionType,
+              contentMode: result.profile.contentMode,
             },
             mode: result.mode,
           })

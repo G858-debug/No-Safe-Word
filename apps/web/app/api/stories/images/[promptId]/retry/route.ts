@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
+import type { SceneProfile } from "@no-safe-word/image-gen";
 import { buildV4SceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image-v4";
 
-// POST /api/stories/images/[promptId]/retry — Internal retry for failed person validation
-// Called by the status route when dual-character validation detects wrong person count.
-// Rebuilds the workflow with a new seed and resubmits to RunPod.
+// POST /api/stories/images/[promptId]/retry — Internal retry for evaluation failures.
+// Called by the status route when scene evaluation detects issues.
+// Rebuilds the workflow with a new seed, optional parameter overrides, and optional rewritten tags.
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ promptId: string }> }
@@ -15,7 +16,19 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { newSeed, jobId: oldJobId } = body as { newSeed: number; jobId: string };
+    const {
+      newSeed,
+      jobId: oldJobId,
+      profileOverrides,
+      overrideTags,
+      attemptNumber,
+    } = body as {
+      newSeed: number;
+      jobId: string;
+      profileOverrides?: Partial<SceneProfile>;
+      overrideTags?: string;
+      attemptNumber?: number;
+    };
 
     if (!newSeed || !oldJobId) {
       return NextResponse.json(
@@ -55,12 +68,14 @@ export async function POST(
     );
     const characterDataMap = await fetchCharacterDataMap(characterIds);
 
-    // 4. Build V4 Pony generation payload with new seed
+    // 4. Build V4 Pony generation payload with new seed + optional overrides
     const result = await buildV4SceneGenerationPayload({
       imgPrompt,
       seriesId: post.series_id,
       characterDataMap,
       seed: newSeed,
+      profileOverrides,
+      overrideTags,
     });
 
     // 5. Submit to RunPod (Pony endpoint)
@@ -74,12 +89,37 @@ export async function POST(
 
     const newJobId = `runpod-${runpodJobId}`;
 
+    // Update the generation job with the new job ID
     await supabase
       .from("generation_jobs")
       .update({ job_id: newJobId, status: "pending", completed_at: null })
       .eq("job_id", oldJobId);
 
-    console.log(`[Retry/Pony][${promptId}] Resubmitted with seed ${newSeed}, new job: ${newJobId}`);
+    // Update image record with new settings (seed, profile params)
+    if (imgPrompt.image_id) {
+      await supabase
+        .from("images")
+        .update({
+          prompt: result.assembledPrompt,
+          settings: {
+            width: result.width,
+            height: result.height,
+            steps: result.profile.steps,
+            cfg: result.profile.cfg,
+            seed: newSeed,
+            engine: "runpod-v4-pony-cyberreal",
+            attemptNumber: attemptNumber || 1,
+          },
+        })
+        .eq("id", imgPrompt.image_id);
+    }
+
+    console.log(
+      `[Retry/Pony][${promptId}] Attempt ${attemptNumber || '?'}: ` +
+      `seed=${newSeed}, job=${newJobId}` +
+      (profileOverrides ? `, overrides=${JSON.stringify(profileOverrides)}` : '') +
+      (overrideTags ? ', tags=rewritten' : ''),
+    );
 
     return NextResponse.json({ jobId: newJobId, seed: newSeed });
   } catch (err) {
