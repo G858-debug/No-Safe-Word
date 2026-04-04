@@ -274,6 +274,7 @@ export async function GET(
               imageForTags?.prompt || '',
               correction.tagRewriteInstructions,
               correction.tagRewriteModel,
+              contentMode,
             );
           }
 

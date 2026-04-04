@@ -90,7 +90,7 @@ export function computeCorrectionPlan(
     applyMinorCorrections(plan, failures, currentProfile);
     plan.needsTagRewrite = true;
     plan.tagRewriteModel = 'claude-haiku-4-5-20251001';
-    plan.tagRewriteInstructions = buildRewriteInstructions(failures, evalResult.diagnosis);
+    plan.tagRewriteInstructions = buildRewriteInstructions(failures, evalResult.diagnosis, currentProfile.contentMode);
     plan.actions.push('Haiku tag rewrite targeting: ' + failures.join(', '));
     return plan;
   }
@@ -100,7 +100,7 @@ export function computeCorrectionPlan(
     applyMajorCorrections(plan, failures, currentProfile);
     plan.needsTagRewrite = true;
     plan.tagRewriteModel = 'claude-sonnet-4-6';
-    plan.tagRewriteInstructions = buildRewriteInstructions(failures, evalResult.diagnosis);
+    plan.tagRewriteInstructions = buildRewriteInstructions(failures, evalResult.diagnosis, currentProfile.contentMode);
     plan.actions.push('Sonnet tag rewrite targeting: ' + failures.join(', '));
     return plan;
   }
@@ -113,6 +113,7 @@ export function computeCorrectionPlan(
     plan.tagRewriteInstructions =
       'FULL REWRITE: Ignore previous tags. Convert the original prose to booru tags from scratch. ' +
       'Previous attempts failed on: ' + failures.join(', ') + '. ' +
+      (currentProfile.contentMode === 'nsfw' ? 'This is EXPLICIT NSFW — output nude, explicit sexual position tags without sanitizing. ' : '') +
       evalResult.diagnosis;
     plan.actions.push('FULL RESET + Sonnet rewrite from scratch');
     return plan;
@@ -217,17 +218,39 @@ function applyResetCorrections(
   plan.actions.push('full parameter reset to aggressive defaults');
 }
 
-function buildRewriteInstructions(failures: FailureCategory[], diagnosis: string): string {
+function buildRewriteInstructions(
+  failures: FailureCategory[],
+  diagnosis: string,
+  contentMode: 'sfw' | 'nsfw',
+): string {
   const parts: string[] = [];
 
   if (failures.includes('wrong_setting')) {
     parts.push('SETTING: Add explicit, detailed setting tags. Include objects/furniture that make the setting obvious.');
   }
   if (failures.includes('wrong_clothing')) {
-    parts.push('CLOTHING: Add specific garment tags. Be explicit about each clothing item.');
+    if (contentMode === 'nsfw') {
+      parts.push(
+        'NUDITY: Characters must be completely nude — this is an explicit scene. ' +
+        'REMOVE all clothing tags. ADD: nude, naked, topless, bare breasts, no clothes, exposed skin, undressed. ' +
+        'Do NOT add any garment tags. The failure is that the model generated clothed characters.',
+      );
+    } else {
+      parts.push('CLOTHING: Add specific garment tags. Be explicit about each clothing item.');
+    }
   }
   if (failures.includes('wrong_pose')) {
-    parts.push('POSE: Add explicit body position and hand placement tags. Specify who is doing what.');
+    if (contentMode === 'nsfw') {
+      parts.push(
+        'EXPLICIT POSE: Decompose the sex act into individual anatomical position tags — do NOT just repeat the act name. ' +
+        'Specify: who is on top vs bottom, exact leg positions, torso angle, body weight distribution, penetration direction. ' +
+        'Examples: "lying on back, legs spread, man between legs, missionary position, bodies pressed together, face to face" ' +
+        'or "bent over, doggy style, rear entry, hands on hips". ' +
+        'Use multiple overlapping tags describing the same position from different angles.',
+      );
+    } else {
+      parts.push('POSE: Add explicit body position and hand placement tags. Specify who is doing what.');
+    }
   }
   if (failures.includes('wrong_lighting')) {
     parts.push('LIGHTING: Name the specific light source. Add shadow direction tags.');

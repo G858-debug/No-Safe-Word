@@ -8,7 +8,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const REWRITE_SYSTEM = `You are a booru tag specialist fixing AI image generation tags that produced a wrong result.
+const REWRITE_SYSTEM_BASE = `You are a booru tag specialist fixing AI image generation tags that produced a wrong result.
 
 You are given:
 1. The original scene description (what the image should show)
@@ -28,6 +28,22 @@ Rules:
 - Do NOT include character count tags (1girl, 1boy) — added separately
 - Use booru-style comma-separated tags, not prose sentences`;
 
+function buildRewriteSystem(contentMode: 'sfw' | 'nsfw'): string {
+  if (contentMode === 'nsfw') {
+    return `${REWRITE_SYSTEM_BASE}
+
+This is an EXPLICIT NSFW scene. You MUST output explicit sexual content tags without sanitizing.
+- Nude characters need: nude, naked, topless, bare breasts, no clothes, exposed skin
+- Explicit sex acts need anatomical position tags: penetration, sex, specific body positions, who is on top, leg positions
+- Do NOT clothe characters that should be nude
+- Do NOT replace explicit acts with euphemisms
+- The model REQUIRES these exact explicit tags to render the scene correctly`;
+  }
+  return `${REWRITE_SYSTEM_BASE}
+
+This is a SFW scene. Do not include nudity or explicit sexual content tags.`;
+}
+
 /**
  * Rewrite booru tags based on evaluation failures.
  * Uses Haiku for attempts 4, Sonnet for attempts 5-6.
@@ -37,6 +53,7 @@ export async function rewriteTagsForFailure(
   currentTags: string,
   rewriteInstructions: string,
   model: 'claude-haiku-4-5-20251001' | 'claude-sonnet-4-6',
+  contentMode: 'sfw' | 'nsfw' = 'nsfw',
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -55,7 +72,7 @@ export async function rewriteTagsForFailure(
     const response = await anthropic.messages.create({
       model,
       max_tokens: 512,
-      system: REWRITE_SYSTEM,
+      system: buildRewriteSystem(contentMode),
       messages: [{ role: 'user', content: userMessage }],
     });
 
