@@ -118,7 +118,7 @@ export async function POST(
         const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
         // Tier 0: Pre-flight tag validation (before spending GPU credits)
-        const isNsfw = imgPrompt.image_type === "website_nsfw_paired";
+        const isNsfw = imgPrompt.image_type !== "facebook_sfw";
         const preflightTags = await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
         const preflight = await validateTagsPreflight(imgPrompt.prompt, preflightTags);
         if (!preflight.passed) {

@@ -134,7 +134,8 @@ export function buildPonyPositivePrompt(opts: {
 
 // ── Prose → Booru Tag Conversion ──
 
-const BOORU_SYSTEM_PROMPT = `You are a booru tag specialist for Stable Diffusion XL / Pony Diffusion V6 / CyberRealistic Pony Semi-Realistic.
+function buildBooruSystemPrompt(nsfw: boolean): string {
+  const base = `You are a booru tag specialist for Stable Diffusion XL / Pony Diffusion V6 / CyberRealistic Pony Semi-Realistic.
 Convert the user's scene description into comma-separated booru-style tags.
 
 Rules:
@@ -155,6 +156,17 @@ Rules:
 Output tags in this order:
 [pose/action], [expression/gaze], [clothing], [setting details], [lighting], [composition tags]`;
 
+  if (nsfw) {
+    return `${base}
+
+FOR NSFW IMAGES: Be anatomically specific about positioning and body parts. Specify exactly who is where: "missionary position, woman lying on back, man on top" not vague euphemisms. Include hand placement, leg positioning, expressions of pleasure. Use explicit tags as appropriate: nude, topless, sex, penetration, missionary position, etc. Do NOT sanitize or euphemize explicit sexual content — the model requires these exact tags to render the scene correctly.`;
+  }
+
+  return `${base}
+
+FOR SFW IMAGES: Focus on clothing, environment, mood, and anticipation. Do not include nudity or explicit sexual content tags. Use revealing-but-covered clothing tags where appropriate.`;
+}
+
 /**
  * Convert a prose scene prompt to booru-style tags using Claude.
  * Returns the original prompt if conversion fails.
@@ -172,7 +184,7 @@ export async function convertProseToBooru(
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
-      system: BOORU_SYSTEM_PROMPT,
+      system: buildBooruSystemPrompt(opts.nsfw),
       messages: [{ role: 'user', content: trimmed }],
     });
 

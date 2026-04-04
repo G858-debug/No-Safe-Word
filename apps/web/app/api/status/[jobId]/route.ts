@@ -314,9 +314,21 @@ export async function GET(
               });
             } else {
               console.error(`[Evaluator] Retry endpoint failed: ${retryRes.status}`);
+              return NextResponse.json({
+                jobId,
+                completed: false,
+                status: "RETRY_FAILED",
+                error: `Retry endpoint returned ${retryRes.status}`,
+              });
             }
           } catch (retryErr) {
             console.error("[Evaluator] Retry request failed:", retryErr);
+            return NextResponse.json({
+              jobId,
+              completed: false,
+              status: "RETRY_FAILED",
+              error: "Exception while submitting retry",
+            });
           }
         } else if (evalResult && !evalResult.passed) {
           console.warn(
