@@ -137,7 +137,7 @@ export async function validateTagsPreflight(
 
 /**
  * Tier 1: Validate person count in the generated image.
- * Uses Sonnet for accuracy on this critical gate (~$0.001).
+ * Uses Haiku — counting people is a simple vision task (~$0.0003).
  * Fast-fail: if person count is wrong, skip Tier 2.
  */
 export async function validatePersonCount(
@@ -150,7 +150,7 @@ export async function validatePersonCount(
   try {
     const anthropic = new Anthropic({ apiKey });
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 16,
       messages: [{
         role: 'user',

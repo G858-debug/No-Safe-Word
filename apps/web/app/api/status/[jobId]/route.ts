@@ -140,7 +140,7 @@ export async function GET(
           overall_score: evalResult.overallScore,
           passed: evalResult.passed,
           failure_categories: evalResult.failureCategories,
-          eval_model: evalResult.tier === 1 ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
+          eval_model: 'claude-haiku-4-5-20251001',
           raw_eval_response: evalResult.rawResponse as Json,
         });
 
