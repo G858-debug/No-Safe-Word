@@ -22,6 +22,14 @@ export async function GET(
 
     const job = result.jobs[0];
 
+    console.log("[CivitAI status] job:", JSON.stringify({
+      jobId: job.jobId,
+      scheduled: job.scheduled,
+      cost: job.cost,
+      result: job.result,
+      lastEvent: job.lastEvent,
+    }, null, 2));
+
     // Job has a completed image
     if (job.result && (job.result as any).blobUrl) {
       const blobUrl = (job.result as any).blobUrl as string;
@@ -36,7 +44,12 @@ export async function GET(
 
     // Job is no longer scheduled and has no result — it failed
     if (job.scheduled === false) {
-      return NextResponse.json({ status: "failed", error: "Job ended without producing an image" });
+      const eventType = job.lastEvent?.type ?? "unknown";
+      const context = job.lastEvent?.context ? JSON.stringify(job.lastEvent.context) : "";
+      return NextResponse.json({
+        status: "failed",
+        error: `Job ended without an image (event: ${eventType}${context ? `, context: ${context}` : ""})`,
+      });
     }
 
     // Still in progress
