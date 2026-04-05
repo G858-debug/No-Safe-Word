@@ -254,35 +254,50 @@ export async function buildV4SceneGenerationPayload(
   const sceneTags = overrideTags || await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
   console.log(`[V4][${promptId}] Scene tags: ${sceneTags}`);
 
-  // Build character identity tags
+  // Build character identity tags.
+  // Characters with deployed LoRAs carry their identity via the trigger word — adding
+  // inline physical descriptions (skin, hair, body type) competes with the LoRA and
+  // can override explicit content tags. Only include the character count tag (1girl/1boy).
+  const hasLoraForPrimary = imgPrompt.character_id !== null;
+  const hasLoraForSecondary = imgPrompt.secondary_character_id !== null;
+
   let characterTags = "";
   if (primaryCharData) {
-    characterTags = buildPonyCharacterTags({
-      gender: primaryCharData.gender === "male" ? "male" : "female",
-      ethnicity: primaryCharData.ethnicity,
-      skinTone: primaryCharData.skinTone,
-      hairColor: primaryCharData.hairColor,
-      hairStyle: primaryCharData.hairStyle,
-      eyeColor: primaryCharData.eyeColor,
-      bodyType: primaryCharData.bodyType,
-      age: primaryCharData.age,
-      distinguishingFeatures: primaryCharData.distinguishingFeatures,
-    }, { mode });
+    if (hasLoraForPrimary) {
+      // LoRA carries identity — only inject the character count tag
+      characterTags = primaryCharData.gender === "male" ? "1boy" : "1girl";
+    } else {
+      characterTags = buildPonyCharacterTags({
+        gender: primaryCharData.gender === "male" ? "male" : "female",
+        ethnicity: primaryCharData.ethnicity,
+        skinTone: primaryCharData.skinTone,
+        hairColor: primaryCharData.hairColor,
+        hairStyle: primaryCharData.hairStyle,
+        eyeColor: primaryCharData.eyeColor,
+        bodyType: primaryCharData.bodyType,
+        age: primaryCharData.age,
+        distinguishingFeatures: primaryCharData.distinguishingFeatures,
+      }, { mode });
+    }
   }
 
   let secondaryCharacterTags: string | undefined;
   if (secondaryCharData) {
-    secondaryCharacterTags = buildPonyCharacterTags({
-      gender: secondaryCharData.gender === "male" ? "male" : "female",
-      ethnicity: secondaryCharData.ethnicity,
-      skinTone: secondaryCharData.skinTone,
-      hairColor: secondaryCharData.hairColor,
-      hairStyle: secondaryCharData.hairStyle,
-      eyeColor: secondaryCharData.eyeColor,
-      bodyType: secondaryCharData.bodyType,
-      age: secondaryCharData.age,
-      distinguishingFeatures: secondaryCharData.distinguishingFeatures,
-    }, { mode });
+    if (hasLoraForSecondary) {
+      secondaryCharacterTags = secondaryCharData.gender === "male" ? "1boy" : "1girl";
+    } else {
+      secondaryCharacterTags = buildPonyCharacterTags({
+        gender: secondaryCharData.gender === "male" ? "male" : "female",
+        ethnicity: secondaryCharData.ethnicity,
+        skinTone: secondaryCharData.skinTone,
+        hairColor: secondaryCharData.hairColor,
+        hairStyle: secondaryCharData.hairStyle,
+        eyeColor: secondaryCharData.eyeColor,
+        bodyType: secondaryCharData.bodyType,
+        age: secondaryCharData.age,
+        distinguishingFeatures: secondaryCharData.distinguishingFeatures,
+      }, { mode });
+    }
   }
 
   // Select style LoRAs
@@ -317,10 +332,11 @@ export async function buildV4SceneGenerationPayload(
   let positivePrompt: string;
   let dualCharacterPrompts: { char1Prompt: string; char2Prompt: string } | undefined;
 
-  if (isDualCharacter && secondaryCharacterTags) {
+  if (isDualCharacter && secondaryCharacterTags && mode === "sfw") {
     // Regional conditioning: split character prompts into separate regions.
-    // Shared prompt gets quality + style LoRA triggers + scene tags (global).
-    // Each character gets their own trigger word + identity tags (regional).
+    // ONLY used for SFW dual-character scenes (e.g. two characters side-by-side).
+    // NSFW scenes use a single combined prompt — regional left/right splitting
+    // produces two separate people rather than interacting/overlapping bodies.
     const styleTriggers = resources.triggerWords;
     const sharedParts = [qualityPrefix, ...styleTriggers, sceneTags].filter(Boolean);
     positivePrompt = sharedParts.join(', ');
@@ -335,7 +351,7 @@ export async function buildV4SceneGenerationPayload(
       char2Prompt: char2Parts.join(', '),
     };
 
-    console.log(`[V4][${promptId}] DUAL-CHARACTER regional prompting enabled`);
+    console.log(`[V4][${promptId}] DUAL-CHARACTER regional prompting enabled (SFW)`);
     console.log(`[V4][${promptId}] Shared: ${positivePrompt}`);
     console.log(`[V4][${promptId}] Char1 (left): ${dualCharacterPrompts.char1Prompt}`);
     console.log(`[V4][${promptId}] Char2 (right): ${dualCharacterPrompts.char2Prompt}`);
