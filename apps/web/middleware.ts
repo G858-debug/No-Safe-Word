@@ -16,6 +16,7 @@ const DASHBOARD_API_PREFIXES = [
   "/api/webhook/story-import",
   "/api/lora-studio",
   "/api/admin/lora-studio",
+  "/api/image-generator",
 ];
 
 function isAccessSubdomain(host: string): boolean {
