@@ -176,6 +176,9 @@ export function ResourceEditor({
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm truncate">{lora.name}</p>
+                    {(lora as any).reason && (
+                      <p className="text-xs text-muted-foreground truncate">{(lora as any).reason}</p>
+                    )}
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-muted-foreground w-8">
                         {lora.strength.toFixed(2)}
