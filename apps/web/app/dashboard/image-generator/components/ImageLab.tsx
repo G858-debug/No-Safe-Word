@@ -117,10 +117,10 @@ export function ImageLab() {
     setError(null);
 
     try {
-      // Build additionalNetworks from LoRAs
-      const additionalNetworks: Record<string, { type: "Lora"; strength: number }> = {};
+      // Build additionalNetworks from LoRAs — schema only accepts { strength } not type
+      const additionalNetworks: Record<string, { strength: number }> = {};
       for (const lora of config.loras) {
-        additionalNetworks[lora.urn] = { type: "Lora", strength: lora.strength };
+        additionalNetworks[lora.urn] = { strength: lora.strength };
       }
 
       const resp = await fetch("/api/image-generator/generate", {

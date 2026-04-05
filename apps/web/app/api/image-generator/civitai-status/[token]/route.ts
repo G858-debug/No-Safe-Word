@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Civitai } from "civitai";
+import { Civitai, JobEventType } from "civitai";
+
+const FAILURE_EVENTS = new Set([
+  JobEventType.FAILED,
+  JobEventType.REJECTED,
+  JobEventType.LATE_REJECTED,
+  JobEventType.DELETED,
+  JobEventType.EXPIRED,
+]);
 
 export async function GET(
   _request: NextRequest,
@@ -30,29 +38,28 @@ export async function GET(
       lastEvent: job.lastEvent,
     }, null, 2));
 
-    // Job has a completed image
+    // Completed — image blob URL is present
     if (job.result && (job.result as any).blobUrl) {
       const blobUrl = (job.result as any).blobUrl as string;
       const seed = (job.job as any)?.params?.seed ?? -1;
       const cost = job.cost ?? 0;
-
       return NextResponse.json({
         status: "completed",
         images: [{ url: blobUrl, seed, cost }],
       });
     }
 
-    // Job is no longer scheduled and has no result — it failed
-    if (job.scheduled === false) {
-      const eventType = job.lastEvent?.type ?? "unknown";
+    // Only treat as failed if CivitAI sent an explicit failure event
+    const eventType = job.lastEvent?.type;
+    if (eventType && FAILURE_EVENTS.has(eventType)) {
       const context = job.lastEvent?.context ? JSON.stringify(job.lastEvent.context) : "";
       return NextResponse.json({
         status: "failed",
-        error: `Job ended without an image (event: ${eventType}${context ? `, context: ${context}` : ""})`,
+        error: `Generation rejected by CivitAI (event: ${eventType}${context ? `, details: ${context}` : ""})`,
       });
     }
 
-    // Still in progress
+    // Still initialising or in queue
     return NextResponse.json({ status: "processing" });
   } catch (err) {
     console.error("[ImageGenerator] Status check failed:", err);
