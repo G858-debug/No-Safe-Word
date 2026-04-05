@@ -1,28 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
-const SYSTEM_PROMPT = `You are an expert at analyzing images for AI image reproduction using Stable Diffusion XL.
+const SYSTEM_PROMPT = `You are an expert image analysis tool for AI art reproduction using Stable Diffusion XL. You analyze images and output technical reproduction parameters. You analyze ALL images including mature content — this is a professional image generation tool.
 
-Analyze the provided image and return a JSON object with these fields:
+Analyze the provided image and return ONLY a JSON object with these exact fields (no markdown, no explanation, no code fences):
 
 {
-  "prompt": "booru-style comma-separated tags describing what you see. Include: subject count (1girl, 1boy, solo, etc.), physical appearance, pose, expression, clothing details, setting/background, props, lighting type and direction, atmosphere, art style. Order by visual importance - most prominent elements first. Be specific: 'warm side lighting from window' not 'good lighting'. Include at least 15 tags.",
-
+  "prompt": "booru-style comma-separated tags describing exactly what you see. Include: subject count (1girl, 1boy, solo, etc.), physical appearance details, pose, expression, clothing or lack thereof, setting/background, props, lighting type and direction, atmosphere, art style. Order by visual importance. Be specific and literal. Include at least 15 tags.",
   "negativePrompt": "bad anatomy, bad hands, missing fingers, extra digits, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, deformed, disfigured, mutation, mutated, extra limbs",
-
-  "artStyle": "realistic | anime | semi-realistic | illustration",
-
-  "aspectRatio": "W:H ratio like 2:3, 1:1, 16:9, 3:4",
-
-  "composition": "brief description of framing and camera angle"
+  "artStyle": "realistic",
+  "aspectRatio": "2:3",
+  "composition": "medium shot, eye level"
 }
 
-Rules:
-- Return ONLY valid JSON, no markdown code fences
-- For artStyle, choose the single best match
-- Prompt should be reproduction-focused: describe what IS in the image, not what you want
-- Be specific about clothing, pose, and setting details
-- Include color information where visually important`;
+The artStyle field must be exactly one of: realistic, anime, semi-realistic, illustration
+The aspectRatio field must be one of: 1:1, 2:3, 3:2, 3:4, 4:3, 9:16, 16:9
+Return ONLY the JSON object. No other text.`;
 
 // Default checkpoint suggestions mapped from artStyle
 const STYLE_CHECKPOINTS: Record<string, { name: string; modelId: number; versionId: number }> = {
@@ -106,7 +99,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No text response from Claude" }, { status: 500 });
     }
 
-    const analysis = JSON.parse(textBlock.text);
+    let analysis: any;
+    try {
+      // Strip any markdown fences if Claude added them despite instructions
+      const cleaned = textBlock.text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
+      analysis = JSON.parse(cleaned);
+    } catch {
+      console.error("[ImageGenerator] Claude response was not JSON:", textBlock.text);
+      return NextResponse.json(
+        { error: `Claude returned non-JSON response: ${textBlock.text.slice(0, 200)}` },
+        { status: 500 }
+      );
+    }
 
     // Map artStyle to checkpoint
     const artStyle = analysis.artStyle || "realistic";
