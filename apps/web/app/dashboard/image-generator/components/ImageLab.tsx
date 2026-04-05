@@ -142,8 +142,20 @@ export function ImageLab() {
 
       const { token } = await resp.json();
 
+      const pollStart = Date.now();
+      const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
       // Start polling
       pollingRef.current = setInterval(async () => {
+        // Hard timeout — stop polling after 5 minutes
+        if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          setError("Generation timed out after 5 minutes. CivitAI may be busy — try again.");
+          setPhase("editing");
+          return;
+        }
+
         try {
           const statusResp = await fetch(`/api/image-generator/civitai-status/${encodeURIComponent(token)}`);
           const statusData = await statusResp.json();
@@ -152,7 +164,6 @@ export function ImageLab() {
             if (pollingRef.current) clearInterval(pollingRef.current);
             pollingRef.current = null;
 
-            // Fetch actual images via proxy
             const images: GeneratedImage[] = (statusData.images || []).map((img: any) => ({
               url: img.url,
               seed: img.seed,

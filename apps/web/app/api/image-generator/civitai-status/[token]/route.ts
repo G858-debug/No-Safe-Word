@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Civitai, JobEventType } from "civitai";
+import { Civitai } from "civitai";
 
 export async function GET(
   _request: NextRequest,
@@ -20,43 +20,27 @@ export async function GET(
       return NextResponse.json({ status: "pending" });
     }
 
-    // Check if any job is still processing
-    const allDone = result.jobs.every((job) => {
-      const event = job.lastEvent;
-      if (!event) return false;
-      return event.type === JobEventType.SUCCEEDED || event.type === JobEventType.FAILED || event.type === JobEventType.DELETED;
-    });
+    const job = result.jobs[0];
 
-    if (!allDone) {
-      return NextResponse.json({ status: "processing" });
-    }
+    // Job has a completed image
+    if (job.result && (job.result as any).blobUrl) {
+      const blobUrl = (job.result as any).blobUrl as string;
+      const seed = (job.job as any)?.params?.seed ?? -1;
+      const cost = job.cost ?? 0;
 
-    // Check for failures
-    const failed = result.jobs.some((job) => job.lastEvent?.type === JobEventType.FAILED || job.lastEvent?.type === JobEventType.DELETED);
-    if (failed) {
-      return NextResponse.json({ status: "failed", error: "CivitAI generation failed" });
-    }
-
-    // Extract image URLs from completed jobs
-    const images = result.jobs
-      .filter((job) => job.result)
-      .flatMap((job) => {
-        const jobResult = job.result as { blobKey?: string; available?: boolean } | undefined;
-        if (jobResult?.blobKey) {
-          return [{
-            url: `https://orchestration.civitai.com/v1/consumer/jobs/${job.jobId}/result`,
-            seed: (job.job as any)?.params?.seed || -1,
-            cost: job.cost || 0,
-          }];
-        }
-        return [];
+      return NextResponse.json({
+        status: "completed",
+        images: [{ url: blobUrl, seed, cost }],
       });
+    }
 
-    return NextResponse.json({
-      status: "completed",
-      images,
-      token: civitaiToken, // needed for auth header on blob download
-    });
+    // Job is no longer scheduled and has no result — it failed
+    if (job.scheduled === false) {
+      return NextResponse.json({ status: "failed", error: "Job ended without producing an image" });
+    }
+
+    // Still in progress
+    return NextResponse.json({ status: "processing" });
   } catch (err) {
     console.error("[ImageGenerator] Status check failed:", err);
     return NextResponse.json(
