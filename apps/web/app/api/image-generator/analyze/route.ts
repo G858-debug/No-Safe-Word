@@ -90,10 +90,12 @@ async function searchCivitaiLoras(
     const url = new URL("https://civitai.com/api/v1/models");
     url.searchParams.set("query", query);
     url.searchParams.set("types", "LORA");
-    url.searchParams.set("limit", "5");
+    url.searchParams.set("limit", "6");
     url.searchParams.set("sort", "Highest Rated");
     url.searchParams.set("nsfw", "true");
-    url.searchParams.set("baseModels", "SDXL 1.0,Pony");
+    // Pass baseModels as repeated params — comma-separated breaks the filter
+    url.searchParams.append("baseModels", "SDXL 1.0");
+    url.searchParams.append("baseModels", "Pony");
 
     const resp = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${civitaiKey}` },
