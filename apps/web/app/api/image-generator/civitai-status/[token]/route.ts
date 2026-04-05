@@ -38,14 +38,23 @@ export async function GET(
       lastEvent: job.lastEvent,
     }, null, 2));
 
-    // Completed — image blob URL is present
-    if (job.result && (job.result as any).blobUrl) {
-      const blobUrl = (job.result as any).blobUrl as string;
-      const seed = (job.job as any)?.params?.seed ?? -1;
+    // result is an array of blob objects: [{ blobUrl, blobKey, available, seed }]
+    const resultItems: any[] = Array.isArray(job.result)
+      ? job.result
+      : job.result
+        ? [(job.result as any)]
+        : [];
+
+    const completedItems = resultItems.filter((r) => r?.blobUrl);
+    if (completedItems.length > 0) {
       const cost = job.cost ?? 0;
       return NextResponse.json({
         status: "completed",
-        images: [{ url: blobUrl, seed, cost }],
+        images: completedItems.map((r) => ({
+          url: r.blobUrl as string,
+          seed: r.seed ?? -1,
+          cost,
+        })),
       });
     }
 
