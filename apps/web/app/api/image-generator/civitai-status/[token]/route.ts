@@ -5,9 +5,9 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
-  const civitaiToken = process.env.CIVITAI_TOKEN;
+  const civitaiToken = process.env.CIVITAI_API_KEY;
   if (!civitaiToken) {
-    return NextResponse.json({ error: "CIVITAI_TOKEN not configured" }, { status: 500 });
+    return NextResponse.json({ error: "CIVITAI_API_KEY not configured" }, { status: 500 });
   }
 
   try {

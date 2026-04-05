@@ -3,9 +3,9 @@ import { Civitai } from "civitai";
 import type { Scheduler } from "civitai";
 
 export async function POST(request: NextRequest) {
-  const token = process.env.CIVITAI_TOKEN;
+  const token = process.env.CIVITAI_API_KEY;
   if (!token) {
-    return NextResponse.json({ error: "CIVITAI_TOKEN not configured" }, { status: 500 });
+    return NextResponse.json({ error: "CIVITAI_API_KEY not configured" }, { status: 500 });
   }
 
   try {
