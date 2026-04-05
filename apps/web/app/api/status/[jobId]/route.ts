@@ -15,7 +15,7 @@ import { supabase } from "@no-safe-word/story-engine";
 import type { Json } from "@no-safe-word/shared";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   props: { params: Promise<{ jobId: string }> }
 ) {
   try {
@@ -289,7 +289,10 @@ export async function GET(
             const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
             const retryRes = await fetch(`${siteUrl}/api/stories/images/${promptId}/retry`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "Cookie": request.headers.get("cookie") || "",
+              },
               body: JSON.stringify({
                 newSeed,
                 jobId,
