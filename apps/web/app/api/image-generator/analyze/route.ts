@@ -187,6 +187,8 @@ export async function POST(request: NextRequest) {
       ? analysis.loraSearchTerms.slice(0, 4)
       : [];
 
+    console.log("[ImageGenerator] LoRA search terms:", searchTerms);
+
     let suggestedLoras: any[] = [];
 
     if (searchTerms.length > 0) {
@@ -201,6 +203,8 @@ export async function POST(request: NextRequest) {
         seen.add(l.urn);
         return true;
       });
+
+      console.log("[ImageGenerator] LoRA candidates found:", candidates.length, candidates.map(c => c.name));
 
       // Step 3: Have Claude pick the most useful LoRAs from the candidates
       if (candidates.length > 0) {
@@ -233,8 +237,9 @@ export async function POST(request: NextRequest) {
             });
           } catch {
             // LoRA selection failed — proceed with no LoRAs rather than failing the whole request
-            console.error("[ImageGenerator] LoRA selection parse failed:", selectionBlock.text);
+            console.error("[ImageGenerator] LoRA selection parse failed:", selectionBlock?.text);
           }
+          console.log("[ImageGenerator] LoRAs selected:", suggestedLoras.map(l => l.name));
         }
       }
     }
