@@ -157,6 +157,16 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [loraBreastSize, setLoraBreastSize] = useState(parseFloat(descInit.loraBreastSize || "0"));
   const [lastSeed, setLastSeed] = useState<number | null>(null);
   const [lockSeed, setLockSeed] = useState(false);
+
+  // Load seed from pending image on mount (survives page refresh)
+  useEffect(() => {
+    const imgId = character.pending_image_id || character.pending_fullbody_image_id;
+    if (imgId && !lastSeed) {
+      fetch(`/api/images/${imgId}/seed`).then(r => r.json()).then(d => {
+        if (d.seed) setLastSeed(Number(d.seed));
+      }).catch(() => {});
+    }
+  }, [character.pending_image_id, character.pending_fullbody_image_id, lastSeed]);
   const [error, setError] = useState<string | null>(null);
   const [isTraining, setIsTraining] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
