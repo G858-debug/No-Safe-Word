@@ -185,8 +185,8 @@ export function buildCharacterGenerationPayload(opts: {
   // 0 = disabled. Values are passed from the dashboard UI or read from character description.
   const bodyStrengths = loraStrengths || {
     bodyWeight: parseFloat(desc.loraBodyWeight || "0"),
-    bubbleButt: parseFloat(desc.loraBubbleButt || "1.4"),
-    breastSize: parseFloat(desc.loraBreastSize || "1.2"),
+    bubbleButt: parseFloat(desc.loraBubbleButt || "0"),
+    breastSize: parseFloat(desc.loraBreastSize || "0"),
   };
   const bodyLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   if (charData.gender === "female") {

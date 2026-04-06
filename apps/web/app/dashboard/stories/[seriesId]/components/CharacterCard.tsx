@@ -153,8 +153,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const descInit = character.characters.description as Record<string, string>;
   const isFemale = (descInit.gender || "female") === "female";
   const [loraBodyWeight, setLoraBodyWeight] = useState(parseFloat(descInit.loraBodyWeight || "0"));
-  const [loraBubbleButt, setLoraBubbleButt] = useState(parseFloat(descInit.loraBubbleButt || "1.4"));
-  const [loraBreastSize, setLoraBreastSize] = useState(parseFloat(descInit.loraBreastSize || "1.2"));
+  const [loraBubbleButt, setLoraBubbleButt] = useState(parseFloat(descInit.loraBubbleButt || "0"));
+  const [loraBreastSize, setLoraBreastSize] = useState(parseFloat(descInit.loraBreastSize || "0"));
   const [lastSeed, setLastSeed] = useState<number | null>(null);
   const [lockSeed, setLockSeed] = useState(false);
   const [error, setError] = useState<string | null>(null);

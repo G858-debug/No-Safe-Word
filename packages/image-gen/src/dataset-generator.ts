@@ -217,8 +217,8 @@ export function buildDatasetWorkflow(opts: {
   const bodyLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
   if (needsBodyLoRA) {
     const bw = parseFloat(opts.character.loraBodyWeight || '0');
-    const bb = parseFloat(opts.character.loraBubbleButt || '1.4');
-    const bs = parseFloat(opts.character.loraBreastSize || '1.2');
+    const bb = parseFloat(opts.character.loraBubbleButt || '0');
+    const bs = parseFloat(opts.character.loraBreastSize || '0');
     if (bw > 0) bodyLoras.push({ filename: 'Body_weight_slider_ILXL.safetensors', strengthModel: bw, strengthClip: 1.0 });
     if (bb > 0) bodyLoras.push({ filename: 'Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: bb, strengthClip: 1.0 });
     if (bs > 0) bodyLoras.push({ filename: 'Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: bs, strengthClip: 1.0 });
