@@ -174,7 +174,7 @@ export function buildDatasetWorkflow(opts: {
   // Add hourglass trigger word for female body/waist shots to activate the LoRA
   const needsBodyLoRA = opts.character.gender === 'female' &&
     (opts.prompt.category === 'full-body' || opts.prompt.category === 'waist-up');
-  const bodyTrigger = needsBodyLoRA ? 'hourglass body shape, ' : '';
+  const bodyTrigger = '';
   const positivePrompt = `${qualityPrefix}, ${identityDesc}, ${bodyTrigger}${opts.prompt.tags}`;
   let negativePrompt = buildNegativePrompt('sfw');
 
