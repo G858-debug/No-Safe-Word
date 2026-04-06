@@ -227,15 +227,15 @@ download_to_volume \
     "4x_NMKD-Siax_200k.pth" \
     "${UPSCALE_DIR}"
 
-# ---- Thick & Fit Female Wellness Body LoRA (female body proportions) ----
-# CivitAI model 1823593, version 2063646
+# ---- Body Weight Slider LoRA (female body proportions) ----
+# CivitAI model 1348692, version 1523317
+# Slider LoRA: positive strength = curvier, negative = leaner. No trigger word.
 # Used during portrait and dataset generation for female characters only.
-# NOT used at scene inference time — the trained character LoRA carries the proportions.
-THICKFIT_URL="https://civitai.com/api/download/models/2063646"
-[ -n "${CIVITAI_API_KEY:-}" ] && THICKFIT_URL="${THICKFIT_URL}?token=${CIVITAI_API_KEY}"
+BODYSLIDER_URL="https://civitai.com/api/download/models/1523317"
+[ -n "${CIVITAI_API_KEY:-}" ] && BODYSLIDER_URL="${BODYSLIDER_URL}?token=${CIVITAI_API_KEY}"
 download_to_volume \
-    "${THICKFIT_URL}" \
-    "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors" \
+    "${BODYSLIDER_URL}" \
+    "Body_weight_slider_ILXL.safetensors" \
     "${VOLUME_LORAS_DIR}"
 
 # Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).

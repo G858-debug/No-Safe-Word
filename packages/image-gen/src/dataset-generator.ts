@@ -210,13 +210,13 @@ export function buildDatasetWorkflow(opts: {
       height = 1024;
   }
 
-  // Thick & Fit Female Wellness Body LoRA — disabled.
-  // const loras = needsBodyLoRA ? [{
-  //   filename: 'Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors',
-  //   strengthModel: 0.8,
-  //   strengthClip: 0.8,
-  // }] : undefined;
-  const loras = undefined;
+  // Body Weight Slider LoRA — positive strength = curvier/fuller figure.
+  // CivitAI model 1348692, version 1523317. No trigger word.
+  const loras = needsBodyLoRA ? [{
+    filename: 'Body_weight_slider_ILXL.safetensors',
+    strengthModel: 1.5,
+    strengthClip: 1.0,
+  }] : undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,

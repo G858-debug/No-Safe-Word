@@ -86,14 +86,14 @@ MODELS.push({
   sizeApprox: "67MB",
 });
 
-// Thick & Fit Female Wellness Body LoRA — female body proportions for portrait/dataset generation
+// Body Weight Slider LoRA — female body proportions for portrait/dataset generation
 const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN || process.env.CIVITAI_API_KEY || "";
-const thickFitUrl = `https://civitai.com/api/download/models/2063646${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`;
+const bodySliderUrl = `https://civitai.com/api/download/models/1523317${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`;
 MODELS.push({
-  name: "Thick & Fit Female Wellness Body",
-  filename: "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors",
-  url: thickFitUrl,
-  sizeApprox: "435MB",
+  name: "Body Weight Slider ILXL",
+  filename: "Body_weight_slider_ILXL.safetensors",
+  url: bodySliderUrl,
+  sizeApprox: "8MB",
 });
 
 // Minimal workflow that uses the checkpoint — even if it fails, the download happens first
