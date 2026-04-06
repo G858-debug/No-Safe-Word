@@ -252,12 +252,12 @@ export async function runTrainingPipeline(
         }
 
         if (categoryWarnings.length > 0) {
-          console.warn(`[LoRAPipeline] Category balance gaps: ${categoryWarnings.join('; ')}`);
-          // Don't fail — warn and proceed. The diversity system covers angles/framing.
-          // This log helps diagnose if the trained LoRA has weak full-body identity.
-        } else {
-          console.log(`[LoRAPipeline] Category balance OK: ${JSON.stringify(categoryCounts)}`);
+          throw new Error(
+            `Category balance failed: ${categoryWarnings.join('; ')}. ` +
+            `Review the dataset and adjust character description, then retry.`
+          );
         }
+        console.log(`[LoRAPipeline] Category balance OK: ${JSON.stringify(categoryCounts)}`);
       }
 
       // ── Stage 3: Await human approval ──
@@ -629,10 +629,12 @@ async function runPass2Pipeline(
         .filter(([cat, min]) => (categoryCounts[cat] || 0) < min)
         .map(([cat, min]) => `${cat}: need ${min}, have ${categoryCounts[cat] || 0}`);
       if (gaps.length > 0) {
-        console.warn(`[LoRAPipeline] Pass 2 category gaps: ${gaps.join('; ')}`);
-      } else {
-        console.log(`[LoRAPipeline] Pass 2 category balance OK: ${JSON.stringify(categoryCounts)}`);
+        throw new Error(
+          `Pass 2 category balance failed: ${gaps.join('; ')}. ` +
+          `Review the dataset and adjust character description, then retry.`
+        );
       }
+      console.log(`[LoRAPipeline] Pass 2 category balance OK: ${JSON.stringify(categoryCounts)}`);
     }
 
     // ── Stage 10: Await human approval ──
