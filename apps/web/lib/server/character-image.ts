@@ -1,8 +1,8 @@
 /**
  * Character approval image generation using Juggernaut Ragnarok via RunPod/ComfyUI.
  *
- * TODO: Refactor prompt builders for natural language (Prompt 3).
- * Currently still uses booru-style tags — will be updated when prompt-builder stubs are implemented.
+ * Uses natural language prompts with explicit ethnicity + skin tone for strong
+ * CLIP signal. See docs/skills/juggernaut-ragnarok/SKILL.md for prompt rules.
  */
 
 import {
