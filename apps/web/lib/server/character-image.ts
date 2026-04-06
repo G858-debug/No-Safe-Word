@@ -98,9 +98,9 @@ function buildBodyPrompt(charData: CharacterData): string {
     parts.push(charData.hairStyle.toLowerCase());
   }
 
-  // Body type
+  // Body type — hourglass trigger word activates the LoRA
   if (charData.gender === "female") {
-    parts.push("curvaceous figure, wide hips, large breasts, thick thighs, narrow waist");
+    parts.push("hourglass body shape, curvaceous figure, wide hips, large breasts, thick thighs, narrow waist");
     if (charData.bodyType) parts.push(charData.bodyType.toLowerCase());
   } else {
     if (charData.bodyType) parts.push(charData.bodyType.toLowerCase());
@@ -179,6 +179,14 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
+  // Hourglass body shape LoRA for female characters — enhances curves during
+  // portrait/dataset generation so the trained character LoRA captures the proportions.
+  const loras = charData.gender === "female" ? [{
+    filename: "hourglassv2_SDXL.safetensors",
+    strengthModel: 0.4,
+    strengthClip: 0.4,
+  }] : undefined;
+
   const workflow = buildWorkflow({
     positivePrompt,
     negativePrompt,
@@ -186,6 +194,7 @@ export function buildCharacterGenerationPayload(opts: {
     height,
     seed,
     filenamePrefix: `char_${character.id}_${stage}`,
+    loras,
   });
 
   return {

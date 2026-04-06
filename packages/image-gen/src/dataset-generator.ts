@@ -170,7 +170,12 @@ export function buildDatasetWorkflow(opts: {
 }): { workflow: Record<string, any>; positivePrompt: string; negativePrompt: string } {
   const identityDesc = buildIdentityDescription(opts.character);
   const qualityPrefix = buildQualityPrefix('sfw');
-  const positivePrompt = `${qualityPrefix}, ${identityDesc}, ${opts.prompt.tags}`;
+
+  // Add hourglass trigger word for female body/waist shots to activate the LoRA
+  const needsBodyLoRA = opts.character.gender === 'female' &&
+    (opts.prompt.category === 'full-body' || opts.prompt.category === 'waist-up');
+  const bodyTrigger = needsBodyLoRA ? 'hourglass body shape, ' : '';
+  const positivePrompt = `${qualityPrefix}, ${identityDesc}, ${bodyTrigger}${opts.prompt.tags}`;
   let negativePrompt = buildNegativePrompt('sfw');
 
   // Add gender-specific negative tags to prevent gender confusion
@@ -205,6 +210,13 @@ export function buildDatasetWorkflow(opts: {
       height = 1024;
   }
 
+  // Hourglass body shape LoRA for female body/waist shots — trains curves into the character LoRA
+  const loras = needsBodyLoRA ? [{
+    filename: 'hourglassv2_SDXL.safetensors',
+    strengthModel: 0.4,
+    strengthClip: 0.4,
+  }] : undefined;
+
   const workflow = buildWorkflow({
     positivePrompt,
     negativePrompt,
@@ -212,6 +224,7 @@ export function buildDatasetWorkflow(opts: {
     height,
     seed: opts.seed,
     filenamePrefix: `dataset_${opts.prompt.id}`,
+    loras,
   });
 
   return { workflow, positivePrompt, negativePrompt };

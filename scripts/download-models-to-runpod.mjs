@@ -86,6 +86,16 @@ MODELS.push({
   sizeApprox: "67MB",
 });
 
+// Hourglass Body Shape v2 SDXL — female body proportions for portrait/dataset generation
+const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN || process.env.CIVITAI_API_KEY || "";
+const hourglassUrl = `https://civitai.com/api/download/models/911708${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`;
+MODELS.push({
+  name: "Hourglass Body Shape v2 SDXL",
+  filename: "hourglassv2_SDXL.safetensors",
+  url: hourglassUrl,
+  sizeApprox: "55MB",
+});
+
 // Minimal workflow that uses the checkpoint — even if it fails, the download happens first
 function buildMinimalWorkflow(checkpointName) {
   return {
