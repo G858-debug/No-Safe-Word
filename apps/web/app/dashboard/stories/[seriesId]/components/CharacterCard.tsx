@@ -40,6 +40,9 @@ function formatElapsed(updatedAt?: string): string | null {
   return `${hrs}h ${mins % 60}m`;
 }
 
+// ── Negative prompt (mirrors server-side buildNegativePrompt('sfw')) ──
+const SFW_NEGATIVE_PROMPT = 'nudity, naked, nsfw, topless, nude, exposed breasts, nipples, bad anatomy, bad hands, extra limbs, extra fingers, mutated hands, watermark, blurry, text, cartoon, illustration, painting, drawing, low quality, worst quality, deformed, disfigured';
+
 // ── Default prompt builder (mirrors server-side character-image.ts) ──
 
 function buildDefaultPrompt(desc: Record<string, string>, stage: "face" | "body"): string {
@@ -573,12 +576,23 @@ function PortraitStage({
               {showPrompt ? "Hide generated prompt" : "Show generated prompt"}
             </button>
             {showPrompt && (
-              <Textarea
-                value={prompt}
-                onChange={(e) => onPromptChange(e.target.value)}
-                className="mt-1 min-h-[80px] text-[11px] font-mono leading-relaxed bg-muted/30"
-                disabled={isGenerating}
-              />
+              <div className="mt-1 space-y-2">
+                <div>
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5">Positive prompt</p>
+                  <Textarea
+                    value={prompt}
+                    onChange={(e) => onPromptChange(e.target.value)}
+                    className="min-h-[80px] text-[11px] font-mono leading-relaxed bg-muted/30"
+                    disabled={isGenerating}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground font-medium mb-0.5">Negative prompt</p>
+                  <p className="text-[11px] font-mono leading-relaxed text-muted-foreground bg-muted/30 rounded-md border px-3 py-2">
+                    {SFW_NEGATIVE_PROMPT}
+                  </p>
+                </div>
+              </div>
             )}
           </div>
 
