@@ -40,7 +40,8 @@ export async function POST(
       .from("character_loras")
       .select("id, status, storage_url, filename")
       .eq("character_id", storyChar.character_id)
-      .in("status", ["awaiting_dataset_approval", "failed", "training", "validating", "captioning"])
+      .in("status", ["awaiting_dataset_approval", "failed", "training", "validating", "captioning",
+                      "awaiting_pass2_approval", "training_pass2", "validating_pass2", "captioning_pass2"])
       .order("created_at", { ascending: false })
       .limit(1)
       .single();

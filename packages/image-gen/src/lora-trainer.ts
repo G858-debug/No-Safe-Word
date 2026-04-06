@@ -40,6 +40,7 @@ export interface LoraTrainingConfig {
   resolution: number;
   clipSkip: number;
   saveEveryNEpochs: number;
+  currentPass: number;
 }
 
 export function getRecommendedTrainingConfig(characterName: string): LoraTrainingConfig {
@@ -55,6 +56,7 @@ export function getRecommendedTrainingConfig(characterName: string): LoraTrainin
     resolution: 1024,
     clipSkip: 1,
     saveEveryNEpochs: 2,
+    currentPass: 1,
   };
 }
 
@@ -259,24 +261,42 @@ export async function resumeTrainingPipeline(
   console.log(`[LoRAPipeline] Resuming for ${character.characterName} (status: ${currentStatus})`);
 
   try {
-    // ── Stage 4: Caption images (resumable — only captions images with null caption) ──
-    if (['awaiting_dataset_approval', 'captioning', 'failed'].includes(currentStatus)) {
-      await setLoraStatus(loraId, 'captioning', {}, deps);
-      console.log(`[LoRAPipeline] Stage 4: Captioning approved images...`);
+    // Determine if this is a Pass 2 resume
+    const { data: loraRecord } = await deps.supabase
+      .from('character_loras')
+      .select('training_params')
+      .eq('id', loraId)
+      .single();
+    const trainingParams = (loraRecord as any)?.training_params || {};
+    const isPass2 = currentStatus.includes('pass2') || Number(trainingParams.currentPass) === 2;
+
+    const captionStatuses = isPass2
+      ? ['awaiting_pass2_approval', 'captioning_pass2', 'failed']
+      : ['awaiting_dataset_approval', 'captioning', 'failed'];
+    const captionStatus = isPass2 ? 'captioning_pass2' : 'captioning';
+    const trainingStatus = isPass2 ? 'training_pass2' : 'training';
+
+    // Update config pass number
+    if (isPass2) config.currentPass = 2;
+
+    // ── Caption images (resumable — only captions images with null caption) ──
+    if (captionStatuses.includes(currentStatus)) {
+      await setLoraStatus(loraId, captionStatus, {}, deps);
+      console.log(`[LoRAPipeline] Captioning approved images (Pass ${config.currentPass})...`);
       await captionApprovedImages(loraId, character, config, deps);
     } else {
-      console.log(`[LoRAPipeline] Skipping Stage 4 (already at ${currentStatus})`);
+      console.log(`[LoRAPipeline] Skipping captioning (already at ${currentStatus})`);
     }
 
-    // ── Stage 5: Package dataset ──
-    console.log(`[LoRAPipeline] Stage 5: Packaging dataset...`);
+    // ── Package dataset ──
+    console.log(`[LoRAPipeline] Packaging dataset (Pass ${config.currentPass})...`);
 
     const datasetUrl = await packageDataset(loraId, deps);
     console.log(`[LoRAPipeline] Dataset packaged: ${datasetUrl}`);
 
-    // ── Stage 6: Create training pod ──
-    await setLoraStatus(loraId, 'training', {}, deps);
-    console.log(`[LoRAPipeline] Stage 6: Creating training pod...`);
+    // ── Create training pod ──
+    await setLoraStatus(loraId, trainingStatus, {}, deps);
+    console.log(`[LoRAPipeline] Creating training pod (Pass ${config.currentPass})...`);
 
     await createTrainingPodForLora(loraId, config, datasetUrl, deps);
     console.log(`[LoRAPipeline] Training pod created. Pipeline will resume via webhook.`);
@@ -375,12 +395,31 @@ export async function completeTrainingPipeline(
     const pipelineResult = toPipelineValidationResult(validationResult);
 
     if (pipelineResult.overallPass) {
-      // ── Stage 8: Deploy ──
-      await setLoraStatus(loraId, 'deployed', {
-        validation_score: pipelineResult.averageFaceScore,
-        deployed_at: new Date().toISOString(),
-      }, deps);
-      console.log(`[LoRAPipeline] LoRA deployed! Score: ${pipelineResult.averageFaceScore.toFixed(1)}`);
+      const trainingParams = lora.training_params as Record<string, unknown> || {};
+      const currentPass = Number(trainingParams.currentPass) || 1;
+
+      if (currentPass === 1) {
+        // ── Pass 1 validated — start Pass 2 ──
+        const score = pipelineResult.averageFaceScore.toFixed(1);
+        console.log(`[LoRAPipeline] Pass 1 validated (score: ${score}). Starting Pass 2...`);
+        await setLoraStatus(loraId, 'generating_pass2_dataset', {
+          validation_score: pipelineResult.averageFaceScore,
+          training_params: { ...trainingParams, pass1Score: pipelineResult.averageFaceScore },
+        }, deps);
+
+        // Fire-and-forget: generate Pass 2 dataset using the Pass 1 LoRA
+        void runPass2Pipeline(loraId, lora, storyChar, deps).catch(err => {
+          console.error(`[LoRAPipeline] Pass 2 failed:`, err);
+          setLoraError(loraId, `Pass 2 failed: ${err instanceof Error ? err.message : String(err)}`, deps);
+        });
+      } else {
+        // ── Pass 2 validated — deploy ──
+        await setLoraStatus(loraId, 'deployed', {
+          validation_score: pipelineResult.averageFaceScore,
+          deployed_at: new Date().toISOString(),
+        }, deps);
+        console.log(`[LoRAPipeline] Pass 2 LoRA deployed! Score: ${pipelineResult.averageFaceScore.toFixed(1)}`);
+      }
     } else {
       const attempts = (lora.training_attempts || 0) + 1;
       if (attempts < PIPELINE_CONFIG.maxTrainingAttempts) {
@@ -402,6 +441,144 @@ export async function completeTrainingPipeline(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[LoRAPipeline] Completion failed: ${msg}`);
+    await setLoraError(loraId, msg, deps);
+  }
+}
+
+// ── Pass 2 Pipeline ──
+
+/**
+ * Run the second-pass dataset generation using the Pass 1 LoRA.
+ * Generates 34 new images with the Pass 1 LoRA injected at low strength (0.4),
+ * producing more diverse training data. Mirrors stages 1-3 of runTrainingPipeline.
+ */
+async function runPass2Pipeline(
+  loraId: string,
+  lora: any,
+  storyChar: any,
+  deps: PipelineDeps,
+): Promise<void> {
+  const charName = (storyChar.characters as any)?.name || lora.character_id;
+  const desc = (storyChar.characters as any)?.description as Record<string, string> || {};
+
+  // Build CharacterInput for Pass 2 dataset generation
+  const structuredData = {
+    gender: desc.gender || 'female',
+    ethnicity: desc.ethnicity || '',
+    bodyType: desc.bodyType || '',
+    skinTone: desc.skinTone || '',
+    hairColor: desc.hairColor || '',
+    hairStyle: desc.hairStyle || '',
+    eyeColor: desc.eyeColor || '',
+    age: desc.age || '',
+    distinguishingFeatures: desc.distinguishingFeatures || '',
+    loraBodyWeight: desc.loraBodyWeight,
+    loraBubbleButt: desc.loraBubbleButt,
+    loraBreastSize: desc.loraBreastSize,
+  };
+
+  // Get approved portrait URL for evaluation comparison
+  const { data: portraitImg } = await deps.supabase
+    .from('images')
+    .select('stored_url, sfw_url')
+    .eq('id', storyChar.approved_image_id)
+    .single();
+  const approvedUrl = portraitImg?.sfw_url || portraitImg?.stored_url || '';
+
+  const character: CharacterInput = {
+    characterId: lora.character_id,
+    characterName: charName,
+    gender: desc.gender || 'female',
+    approvedImageUrl: approvedUrl,
+    approvedPrompt: '',
+    fullBodyImageUrl: '',
+    fullBodySeed: 42,
+    portraitSeed: 1042, // Offset seeds for Pass 2 variety
+    structuredData: structuredData as any,
+    pipelineType: 'story_character',
+    imageEngine: 'juggernaut_ragnarok',
+  };
+
+  // Normalize LoRA storage URL
+  let loraStorageUrl = lora.storage_url || '';
+  if (loraStorageUrl && !loraStorageUrl.startsWith('https://')) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    loraStorageUrl = `${supabaseUrl}/storage/v1/object/public/lora-training-datasets/${lora.storage_path}`;
+  }
+
+  const pass1Lora = {
+    filename: `characters/${lora.filename}`,
+    url: loraStorageUrl,
+    strength: 0.4,
+  };
+
+  console.log(`[LoRAPipeline] Pass 2: Generating dataset with Pass 1 LoRA at strength ${pass1Lora.strength}...`);
+
+  try {
+    // ── Stage 8: Generate Pass 2 dataset ──
+    const datasetResult = await generateDataset(character, loraId, deps, pass1Lora);
+    console.log(`[LoRAPipeline] Pass 2: Generated ${datasetResult.totalGenerated} images`);
+
+    // ── Stage 9: Evaluate Pass 2 images ──
+    await setLoraStatus(loraId, 'evaluating_pass2', {
+      dataset_size: datasetResult.totalGenerated,
+    }, deps);
+    console.log(`[LoRAPipeline] Pass 2: Evaluating dataset images...`);
+
+    let evaluations = await evaluateDatasetImages(loraId, character, deps);
+
+    for (const eval_ of evaluations) {
+      const score = calculateSimpleScore(eval_);
+      const passed = score >= PIPELINE_CONFIG.minEvalScore;
+      await deps.supabase
+        .from('lora_dataset_images')
+        .update({ eval_status: passed ? 'passed' : 'failed' })
+        .eq('id', eval_.imageId);
+    }
+
+    const initialPassed = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+    console.log(`[LoRAPipeline] Pass 2: ${initialPassed}/${evaluations.length} passed evaluation`);
+
+    // Retry failed images
+    if (initialPassed < PIPELINE_CONFIG.targetPassedImages) {
+      const retryEvals = await retryFailedImages(loraId, character, deps);
+      evaluations = evaluations.concat(retryEvals);
+    }
+
+    // Final curation
+    const allPassingEvals = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore);
+    const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
+    console.log(`[LoRAPipeline] Pass 2: ${selected.length} selected, ${rejected.length} rejected`);
+
+    // Update eval_status for final selection
+    const selectedIds = new Set(selected.map(e => e.imageId));
+    const { data: allImages } = await deps.supabase
+      .from('lora_dataset_images')
+      .select('id')
+      .eq('lora_id', loraId);
+
+    if (allImages) {
+      for (const img of allImages) {
+        const evalStatus = selectedIds.has(img.id) ? 'passed' : 'failed';
+        await deps.supabase
+          .from('lora_dataset_images')
+          .update({ eval_status: evalStatus })
+          .eq('id', img.id);
+      }
+    }
+
+    if (selected.length < PIPELINE_CONFIG.minPassedImages) {
+      throw new Error(
+        `Pass 2: Only ${selected.length} images passed (need ${PIPELINE_CONFIG.minPassedImages}).`
+      );
+    }
+
+    // ── Stage 10: Await human approval ──
+    await setLoraStatus(loraId, 'awaiting_pass2_approval', {}, deps);
+    console.log(`[LoRAPipeline] Pass 2: ${selected.length} images ready for review.`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[LoRAPipeline] Pass 2 failed: ${msg}`);
     await setLoraError(loraId, msg, deps);
   }
 }
@@ -1052,6 +1229,7 @@ async function createTrainingPodForLora(
         batch_size: 2,
         resolution: config.resolution,
         lr_scheduler: 'cosine_with_restarts',
+        currentPass: config.currentPass,
       },
     })
     .eq('id', loraId);

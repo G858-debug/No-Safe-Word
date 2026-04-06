@@ -111,9 +111,11 @@ function getStage(char: CharacterFromAPI, lora: LoraProgress | null): Stage {
 
   if (lora?.status) {
     const s = lora.status;
-    if (s === "validating") return "validation";
-    if (["training", "captioning", "packaging_dataset"].includes(s)) return "training";
-    if (["generating_dataset", "evaluating", "awaiting_dataset_approval"].includes(s)) return "dataset";
+    // Pass 2 statuses map to the same UI stages
+    if (s === "validating" || s === "validating_pass2") return "validation";
+    if (["training", "captioning", "training_pass2", "captioning_pass2"].includes(s)) return "training";
+    if (["generating_dataset", "evaluating", "awaiting_dataset_approval",
+         "generating_pass2_dataset", "evaluating_pass2", "awaiting_pass2_approval"].includes(s)) return "dataset";
     if (s === "failed" || s === "error") {
       return char.approved && char.approved_fullbody ? "dataset" : "portrait";
     }

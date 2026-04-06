@@ -12,12 +12,19 @@ const STALE_THRESHOLDS: Record<string, number> = {
   packaging_dataset: 10 * 60_000,   // 10 min
   training: 90 * 60_000,            // 90 min — pod-based, webhook expected
   validating: 30 * 60_000,          // 30 min
+  // Pass 2 — same thresholds as Pass 1
+  generating_pass2_dataset: 5 * 60_000,
+  evaluating_pass2: 5 * 60_000,
+  captioning_pass2: 5 * 60_000,
+  training_pass2: 90 * 60_000,
+  validating_pass2: 30 * 60_000,
 };
 
 // Stages where we can auto-resume (pipeline functions are resumable)
-// generating_dataset + evaluating → runTrainingPipeline (skips done images)
-// captioning + training (no pod) → resumeTrainingPipeline (re-packages + creates pod)
-const AUTO_RESUMABLE_STAGES = new Set(["generating_dataset", "evaluating", "captioning"]);
+const AUTO_RESUMABLE_STAGES = new Set([
+  "generating_dataset", "evaluating", "captioning",
+  "generating_pass2_dataset", "evaluating_pass2", "captioning_pass2",
+]);
 
 // Statuses that are active pipeline stages (not terminal states)
 const ACTIVE_STATUSES = new Set(Object.keys(STALE_THRESHOLDS));

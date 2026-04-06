@@ -10,6 +10,14 @@ export type PipelineStatus =
   | 'captioning'
   | 'training'
   | 'validating'
+  // Pass 2 statuses
+  | 'generating_pass2_dataset'
+  | 'evaluating_pass2'
+  | 'awaiting_pass2_approval'
+  | 'captioning_pass2'
+  | 'training_pass2'
+  | 'validating_pass2'
+  // Terminal
   | 'deployed'
   | 'failed'
   | 'archived';

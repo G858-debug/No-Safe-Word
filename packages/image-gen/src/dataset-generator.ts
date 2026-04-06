@@ -170,6 +170,7 @@ export function buildDatasetWorkflow(opts: {
   character: DatasetCharacter;
   prompt: DatasetPrompt;
   seed: number;
+  pass1Lora?: { filename: string; strength: number };
 }): { workflow: Record<string, any>; positivePrompt: string; negativePrompt: string } {
   const identityDesc = buildIdentityDescription(opts.character);
   const qualityPrefix = buildQualityPrefix('sfw');
@@ -223,6 +224,14 @@ export function buildDatasetWorkflow(opts: {
     if (bb > 0) bodyLoras.push({ filename: 'Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: bb, strengthClip: 1.0 });
     if (bs > 0) bodyLoras.push({ filename: 'Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: bs, strengthClip: 1.0 });
   }
+  // Pass 1 LoRA injection for Pass 2 dataset generation
+  if (opts.pass1Lora) {
+    bodyLoras.unshift({
+      filename: opts.pass1Lora.filename,
+      strengthModel: opts.pass1Lora.strength,
+      strengthClip: opts.pass1Lora.strength,
+    });
+  }
   const loras = bodyLoras.length > 0 ? bodyLoras : undefined;
 
   const workflow = buildWorkflow({
@@ -256,6 +265,7 @@ export async function generateDataset(
   character: CharacterInput,
   loraId: string,
   deps: DatasetDeps,
+  pass1Lora?: { filename: string; url: string; strength: number },
 ): Promise<DatasetGenerationResult> {
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   if (!endpointId) {
@@ -304,9 +314,15 @@ export async function generateDataset(
         character: datasetChar,
         prompt,
         seed,
+        pass1Lora: pass1Lora ? { filename: pass1Lora.filename, strength: pass1Lora.strength } : undefined,
       });
 
-      const { jobId } = await submitRunPodJob(workflow, undefined, undefined, endpointId);
+      // If Pass 2, include the Pass 1 LoRA as a download so the worker has it
+      const loraDownloads = pass1Lora
+        ? [{ filename: pass1Lora.filename, url: pass1Lora.url }]
+        : undefined;
+
+      const { jobId } = await submitRunPodJob(workflow, undefined, loraDownloads, endpointId);
       const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, endpointId);
 
       // Upload to Supabase storage
