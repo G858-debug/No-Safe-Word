@@ -223,6 +223,43 @@ export async function runTrainingPipeline(
         );
       }
 
+      // ── Category balance check: ensure enough face and body shots ──
+      const { data: selectedWithCategory } = await deps.supabase
+        .from('lora_dataset_images')
+        .select('id, category')
+        .eq('lora_id', loraId)
+        .eq('eval_status', 'passed');
+
+      if (selectedWithCategory) {
+        const categoryCounts: Record<string, number> = {};
+        for (const img of selectedWithCategory) {
+          categoryCounts[img.category] = (categoryCounts[img.category] || 0) + 1;
+        }
+
+        const MIN_CATEGORY_COUNTS: Record<string, number> = {
+          'face-closeup': 5,
+          'full-body': 4,
+          'head-shoulders': 3,
+          'waist-up': 2,
+        };
+
+        const categoryWarnings: string[] = [];
+        for (const [cat, minCount] of Object.entries(MIN_CATEGORY_COUNTS)) {
+          const actual = categoryCounts[cat] || 0;
+          if (actual < minCount) {
+            categoryWarnings.push(`${cat}: need ${minCount}, have ${actual}`);
+          }
+        }
+
+        if (categoryWarnings.length > 0) {
+          console.warn(`[LoRAPipeline] Category balance gaps: ${categoryWarnings.join('; ')}`);
+          // Don't fail — warn and proceed. The diversity system covers angles/framing.
+          // This log helps diagnose if the trained LoRA has weak full-body identity.
+        } else {
+          console.log(`[LoRAPipeline] Category balance OK: ${JSON.stringify(categoryCounts)}`);
+        }
+      }
+
       // ── Stage 3: Await human approval ──
       await setLoraStatus(loraId, 'awaiting_dataset_approval', {}, deps);
       console.log(`[LoRAPipeline] Stage 3: Pausing for human dataset approval. ${selected.length} images ready for review.`);
@@ -571,6 +608,31 @@ async function runPass2Pipeline(
       throw new Error(
         `Pass 2: Only ${selected.length} images passed (need ${PIPELINE_CONFIG.minPassedImages}).`
       );
+    }
+
+    // ── Category balance check ──
+    const { data: selectedWithCategory } = await deps.supabase
+      .from('lora_dataset_images')
+      .select('id, category')
+      .eq('lora_id', loraId)
+      .eq('eval_status', 'passed');
+
+    if (selectedWithCategory) {
+      const categoryCounts: Record<string, number> = {};
+      for (const img of selectedWithCategory) {
+        categoryCounts[img.category] = (categoryCounts[img.category] || 0) + 1;
+      }
+      const MIN_CATEGORY_COUNTS: Record<string, number> = {
+        'face-closeup': 5, 'full-body': 4, 'head-shoulders': 3, 'waist-up': 2,
+      };
+      const gaps = Object.entries(MIN_CATEGORY_COUNTS)
+        .filter(([cat, min]) => (categoryCounts[cat] || 0) < min)
+        .map(([cat, min]) => `${cat}: need ${min}, have ${categoryCounts[cat] || 0}`);
+      if (gaps.length > 0) {
+        console.warn(`[LoRAPipeline] Pass 2 category gaps: ${gaps.join('; ')}`);
+      } else {
+        console.log(`[LoRAPipeline] Pass 2 category balance OK: ${JSON.stringify(categoryCounts)}`);
+      }
     }
 
     // ── Stage 10: Await human approval ──
