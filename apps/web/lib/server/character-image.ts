@@ -183,8 +183,8 @@ export function buildCharacterGenerationPayload(opts: {
   // portrait/dataset generation so the trained character LoRA captures the proportions.
   const loras = charData.gender === "female" ? [{
     filename: "hourglassv2_SDXL.safetensors",
-    strengthModel: 0.4,
-    strengthClip: 0.4,
+    strengthModel: 0.8,
+    strengthClip: 0.8,
   }] : undefined;
 
   const workflow = buildWorkflow({

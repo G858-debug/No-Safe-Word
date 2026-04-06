@@ -213,8 +213,8 @@ export function buildDatasetWorkflow(opts: {
   // Hourglass body shape LoRA for female body/waist shots — trains curves into the character LoRA
   const loras = needsBodyLoRA ? [{
     filename: 'hourglassv2_SDXL.safetensors',
-    strengthModel: 0.4,
-    strengthClip: 0.4,
+    strengthModel: 0.8,
+    strengthClip: 0.8,
   }] : undefined;
 
   const workflow = buildWorkflow({
