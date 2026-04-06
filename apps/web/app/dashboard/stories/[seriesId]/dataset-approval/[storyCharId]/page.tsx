@@ -147,7 +147,7 @@ function ImageLightbox({
   const [approvingImage, setApprovingImage] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [showPrompts, setShowPrompts] = useState(false);
+  const [showPrompts, setShowPrompts] = useState(true);
 
   // Reset local state when image changes (navigation)
   useEffect(() => {
@@ -158,6 +158,7 @@ function ImageLightbox({
     setRegenError(null);
     setDeleteConfirm(false);
     setLockSeed(false);
+    setShowPrompts(true);
   }, [image.id, image.caption, image.resolvedPrompt]);
 
   // Keyboard: Escape to close, arrows to navigate (when not in textarea)
