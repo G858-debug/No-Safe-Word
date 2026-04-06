@@ -100,7 +100,7 @@ function buildBodyPrompt(charData: CharacterData): string {
 
   // Body type — hourglass trigger word activates the LoRA
   if (charData.gender === "female") {
-    parts.push("curvaceous figure, wide hips, large breasts, thick thighs, narrow waist");
+    parts.push("curvaceous figure, wide hips, large breasts, thick thighs");
     if (charData.bodyType) parts.push(charData.bodyType.toLowerCase());
   } else {
     if (charData.bodyType) parts.push(charData.bodyType.toLowerCase());

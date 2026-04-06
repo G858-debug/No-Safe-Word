@@ -73,7 +73,7 @@ function buildDefaultPrompt(desc: Record<string, string>, stage: "face" | "body"
   // Body (full-body only)
   if (stage === "body") {
     if (gender === "female") {
-      parts.push("curvaceous figure, wide hips, large breasts, thick thighs, narrow waist");
+      parts.push("curvaceous figure, wide hips, large breasts, thick thighs");
     }
     if (desc.bodyType) parts.push(desc.bodyType.toLowerCase());
   }
