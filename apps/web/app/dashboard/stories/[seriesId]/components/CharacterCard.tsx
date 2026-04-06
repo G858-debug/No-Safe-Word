@@ -755,9 +755,28 @@ function DatasetStage({
   const status = loraProgress?.status;
   const [isGeneratingMore, setIsGeneratingMore] = useState(false);
   const [generateMoreResult, setGenerateMoreResult] = useState<string | null>(null);
+  const [detectedGaps, setDetectedGaps] = useState<{ hasGaps: boolean; message: string | null } | null>(null);
 
   const loraError = loraProgress?.progress?.error || '';
-  const hasCategoryGaps = loraError.includes('Category gaps');
+  const isAwaitingApproval = status === 'awaiting_dataset_approval' || status === 'awaiting_pass2_approval';
+
+  // For datasets generated before the pipeline gap-check was added, the error field is null.
+  // Fetch gaps live from the server so the warning and Generate More button still appear.
+  useEffect(() => {
+    if (!isAwaitingApproval || loraError) {
+      setDetectedGaps(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/stories/characters/${character.id}/dataset-gaps`)
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled) setDetectedGaps(data); })
+      .catch(() => { /* non-fatal — gap check is best-effort */ });
+    return () => { cancelled = true; };
+  }, [character.id, isAwaitingApproval, loraError]);
+
+  const hasCategoryGaps = loraError.includes('Category gaps') || detectedGaps?.hasGaps === true;
+  const gapMessage = loraError || detectedGaps?.message || '';
 
   async function handleGenerateMore() {
     setIsGeneratingMore(true);
@@ -846,7 +865,7 @@ function DatasetStage({
         <p className="text-sm font-medium">Dataset ready for review</p>
         {hasCategoryGaps && (
           <div className="rounded-md p-2 bg-yellow-500/10 border border-yellow-500/30">
-            <p className="text-xs text-yellow-400">{loraError}</p>
+            <p className="text-xs text-yellow-400">{gapMessage}</p>
           </div>
         )}
         {generateMoreResult && (

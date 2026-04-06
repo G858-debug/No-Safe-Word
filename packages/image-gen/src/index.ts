@@ -72,6 +72,9 @@ export type { WorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, Upsc
 
 // Dataset generation for LoRA training
 export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset, buildTopUpPrompts, generateTopUpImages } from './dataset-generator';
+
+// Category minimums for LoRA dataset validation
+export { MIN_CATEGORY_COUNTS } from './character-lora/category-minimums';
 export type { DatasetPrompt, DatasetCharacter } from './dataset-generator';
 
 // LoRA validation

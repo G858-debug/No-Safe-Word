@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { generateTopUpImages } from "@no-safe-word/image-gen";
+import { generateTopUpImages, MIN_CATEGORY_COUNTS } from "@no-safe-word/image-gen";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
-
-const MIN_CATEGORY_COUNTS: Record<string, number> = {
-  "face-closeup": 5,
-  "full-body": 4,
-  "head-shoulders": 3,
-  "waist-up": 2,
-};
 
 // POST /api/stories/characters/[storyCharId]/generate-more-dataset
 // Generates additional images for deficit categories without restarting the entire pipeline.

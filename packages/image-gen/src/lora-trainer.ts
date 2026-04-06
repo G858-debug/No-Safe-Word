@@ -26,6 +26,7 @@ import { anthropicCreateWithRetry } from './anthropic-retry';
 import { imageUrlToBase64, submitRunPodJob, waitForRunPodResult } from './runpod';
 import type { CharacterInput, PipelineStatus, LoraDatasetImageRow } from './character-lora/types';
 import { PIPELINE_CONFIG } from './character-lora/types';
+import { MIN_CATEGORY_COUNTS } from './character-lora/category-minimums';
 
 // ── Existing exports (keep) ──
 
@@ -235,13 +236,6 @@ export async function runTrainingPipeline(
         for (const img of selectedWithCategory) {
           categoryCounts[img.category] = (categoryCounts[img.category] || 0) + 1;
         }
-
-        const MIN_CATEGORY_COUNTS: Record<string, number> = {
-          'face-closeup': 5,
-          'full-body': 4,
-          'head-shoulders': 3,
-          'waist-up': 2,
-        };
 
         const categoryWarnings: string[] = [];
         for (const [cat, minCount] of Object.entries(MIN_CATEGORY_COUNTS)) {
@@ -623,9 +617,6 @@ async function runPass2Pipeline(
       for (const img of selectedWithCategory) {
         categoryCounts[img.category] = (categoryCounts[img.category] || 0) + 1;
       }
-      const MIN_CATEGORY_COUNTS: Record<string, number> = {
-        'face-closeup': 5, 'full-body': 4, 'head-shoulders': 3, 'waist-up': 2,
-      };
       const gaps = Object.entries(MIN_CATEGORY_COUNTS)
         .filter(([cat, min]) => (categoryCounts[cat] || 0) < min)
         .map(([cat, min]) => `${cat}: need ${min}, have ${categoryCounts[cat] || 0}`);
