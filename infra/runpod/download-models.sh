@@ -227,15 +227,15 @@ download_to_volume \
     "4x_NMKD-Siax_200k.pth" \
     "${UPSCALE_DIR}"
 
-# ---- Hourglass Body Shape v2 SDXL LoRA (female body proportions) ----
-# CivitAI model 129130, version 911708
+# ---- Thick & Fit Female Wellness Body LoRA (female body proportions) ----
+# CivitAI model 1823593, version 2063646
 # Used during portrait and dataset generation for female characters only.
 # NOT used at scene inference time — the trained character LoRA carries the proportions.
-HOURGLASS_URL="https://civitai.com/api/download/models/911708"
-[ -n "${CIVITAI_API_KEY:-}" ] && HOURGLASS_URL="${HOURGLASS_URL}?token=${CIVITAI_API_KEY}"
+THICKFIT_URL="https://civitai.com/api/download/models/2063646"
+[ -n "${CIVITAI_API_KEY:-}" ] && THICKFIT_URL="${THICKFIT_URL}?token=${CIVITAI_API_KEY}"
 download_to_volume \
-    "${HOURGLASS_URL}" \
-    "hourglassv2_SDXL.safetensors" \
+    "${THICKFIT_URL}" \
+    "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors" \
     "${VOLUME_LORAS_DIR}"
 
 # Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).

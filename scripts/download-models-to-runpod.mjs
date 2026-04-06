@@ -86,14 +86,14 @@ MODELS.push({
   sizeApprox: "67MB",
 });
 
-// Hourglass Body Shape v2 SDXL — female body proportions for portrait/dataset generation
+// Thick & Fit Female Wellness Body LoRA — female body proportions for portrait/dataset generation
 const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN || process.env.CIVITAI_API_KEY || "";
-const hourglassUrl = `https://civitai.com/api/download/models/911708${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`;
+const thickFitUrl = `https://civitai.com/api/download/models/2063646${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`;
 MODELS.push({
-  name: "Hourglass Body Shape v2 SDXL",
-  filename: "hourglassv2_SDXL.safetensors",
-  url: hourglassUrl,
-  sizeApprox: "55MB",
+  name: "Thick & Fit Female Wellness Body",
+  filename: "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors",
+  url: thickFitUrl,
+  sizeApprox: "435MB",
 });
 
 // Minimal workflow that uses the checkpoint — even if it fails, the download happens first

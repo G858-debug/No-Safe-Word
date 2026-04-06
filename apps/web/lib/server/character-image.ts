@@ -179,14 +179,14 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
-  // Hourglass body shape LoRA — disabled for testing.
-  // Re-enable by uncommenting and setting desired strength.
-  // const loras = charData.gender === "female" ? [{
-  //   filename: "hourglassv2_SDXL.safetensors",
-  //   strengthModel: 0.8,
-  //   strengthClip: 0.8,
-  // }] : undefined;
-  const loras = undefined;
+  // Thick & Fit Female Wellness Body LoRA — enhances curves during portrait/dataset
+  // generation so the trained character LoRA captures the proportions.
+  // CivitAI model 1823593, version 2063646. No trigger word needed.
+  const loras = charData.gender === "female" ? [{
+    filename: "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors",
+    strengthModel: 0.7,
+    strengthClip: 0.7,
+  }] : undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,
