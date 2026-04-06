@@ -180,13 +180,16 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
-  // Hourglass of Venus v2.0 LoRA — hourglass body proportions.
-  // CivitAI model 2365594, version 2660613. Trigger: "venus body type" (optional).
-  const loras = charData.gender === "female" ? [{
-    filename: "Hourglass_of_Venus_v2.safetensors",
-    strengthModel: 0.8,
-    strengthClip: 0.8,
-  }] : undefined;
+  // Body shape LoRA stack for female characters — enhances curves during portrait/dataset
+  // generation so the trained character LoRA captures the proportions.
+  const loras = charData.gender === "female" ? [
+    // Body Weight Slider (ILXL) — overall curvier/fuller figure. CivitAI 1348692.
+    { filename: "Body_weight_slider_ILXL.safetensors", strengthModel: 1.7, strengthClip: 1.0 },
+    // Bubble Butt Slider — larger butt. CivitAI 479344. Positive = bigger.
+    { filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.5, strengthClip: 1.0 },
+    // Breast Size Slider SDXL — larger breasts. CivitAI 481119. Positive = bigger.
+    { filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.5, strengthClip: 1.0 },
+  ] : undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,

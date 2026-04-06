@@ -86,14 +86,28 @@ MODELS.push({
   sizeApprox: "67MB",
 });
 
-// Hourglass of Venus v2.0 LoRA — female body proportions for portrait/dataset generation
+// Body shape slider LoRAs — female portraits + dataset generation
 const CIVITAI_TOKEN = process.env.CIVITAI_TOKEN || process.env.CIVITAI_API_KEY || "";
-const venusUrl = `https://civitai.com/api/download/models/2660613${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`;
+
 MODELS.push({
-  name: "Hourglass of Venus v2.0",
-  filename: "Hourglass_of_Venus_v2.safetensors",
-  url: venusUrl,
-  sizeApprox: "89MB",
+  name: "Body Weight Slider ILXL",
+  filename: "Body_weight_slider_ILXL.safetensors",
+  url: `https://civitai.com/api/download/models/1523317${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`,
+  sizeApprox: "8MB",
+});
+
+MODELS.push({
+  name: "Bubble Butt Slider",
+  filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors",
+  url: `https://civitai.com/api/download/models/533085${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`,
+  sizeApprox: "8MB",
+});
+
+MODELS.push({
+  name: "Breast Size Slider SDXL",
+  filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors",
+  url: `https://civitai.com/api/download/models/535064${CIVITAI_TOKEN ? `?token=${CIVITAI_TOKEN}` : ""}`,
+  sizeApprox: "8MB",
 });
 
 // Minimal workflow that uses the checkpoint — even if it fails, the download happens first

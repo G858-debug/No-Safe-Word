@@ -210,13 +210,12 @@ export function buildDatasetWorkflow(opts: {
       height = 1024;
   }
 
-  // Hourglass of Venus v2.0 LoRA — hourglass body proportions.
-  // CivitAI model 2365594, version 2660613. Trigger: "venus body type" (optional).
-  const loras = needsBodyLoRA ? [{
-    filename: 'Hourglass_of_Venus_v2.safetensors',
-    strengthModel: 0.8,
-    strengthClip: 0.8,
-  }] : undefined;
+  // Body shape LoRA stack for female body/waist shots — trains curves into the character LoRA.
+  const loras = needsBodyLoRA ? [
+    { filename: 'Body_weight_slider_ILXL.safetensors', strengthModel: 1.7, strengthClip: 1.0 },
+    { filename: 'Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: 1.5, strengthClip: 1.0 },
+    { filename: 'Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: 1.5, strengthClip: 1.0 },
+  ] : undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,

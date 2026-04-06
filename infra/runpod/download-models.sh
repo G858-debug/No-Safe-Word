@@ -163,23 +163,26 @@ fi
 # LoRAs: Juggernaut Ragnarok uses NO style LoRAs.
 # Only character LoRAs (in characters/ subdirectory) are kept.
 # Remove all old Pony style LoRAs from the root loras/ directory.
-PONY_STYLE_LORAS=(
+STALE_LORAS=(
   "pony-ebony-skin.safetensors"
   "pony-skin-tone-slider.safetensors"
   "pony-hourglass-body.safetensors"
   "perfect-breasts-v2.safetensors"
   "pony-realism-stable-yogi.safetensors"
   "pony-detail-slider.safetensors"
+  "hourglassv2_SDXL.safetensors"
+  "Hourglass_of_Venus_v2.safetensors"
+  "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors"
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
-  for lora_name in "${PONY_STYLE_LORAS[@]}"; do
+  for lora_name in "${STALE_LORAS[@]}"; do
     if [ -f "${VOLUME_LORAS_DIR}/${lora_name}" ]; then
       echo "[NSW] Removing Pony style LoRA: ${lora_name}"
       rm -f "${VOLUME_LORAS_DIR}/${lora_name}"
     fi
   done
-  echo "[NSW] ✓ Pony style LoRAs removed (Ragnarok uses no style LoRAs)"
+  echo "[NSW] ✓ Stale LoRAs removed"
 fi
 
 echo "[NSW] Cleanup complete."
@@ -227,15 +230,22 @@ download_to_volume \
     "4x_NMKD-Siax_200k.pth" \
     "${UPSCALE_DIR}"
 
-# ---- Hourglass of Venus v2.0 LoRA (female body proportions) ----
-# CivitAI model 2365594, version 2660613
-# Used during portrait and dataset generation for female characters only.
-VENUS_URL="https://civitai.com/api/download/models/2660613"
-[ -n "${CIVITAI_API_KEY:-}" ] && VENUS_URL="${VENUS_URL}?token=${CIVITAI_API_KEY}"
-download_to_volume \
-    "${VENUS_URL}" \
-    "Hourglass_of_Venus_v2.safetensors" \
-    "${VOLUME_LORAS_DIR}"
+# ---- Body shape slider LoRAs (female characters, portrait + dataset only) ----
+
+# Body Weight Slider (ILXL) — CivitAI 1348692, version 1523317
+BODYWEIGHT_URL="https://civitai.com/api/download/models/1523317"
+[ -n "${CIVITAI_API_KEY:-}" ] && BODYWEIGHT_URL="${BODYWEIGHT_URL}?token=${CIVITAI_API_KEY}"
+download_to_volume "${BODYWEIGHT_URL}" "Body_weight_slider_ILXL.safetensors" "${VOLUME_LORAS_DIR}"
+
+# Bubble Butt Slider — CivitAI 479344, version 533085
+BUBBLEBUTT_URL="https://civitai.com/api/download/models/533085"
+[ -n "${CIVITAI_API_KEY:-}" ] && BUBBLEBUTT_URL="${BUBBLEBUTT_URL}?token=${CIVITAI_API_KEY}"
+download_to_volume "${BUBBLEBUTT_URL}" "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors" "${VOLUME_LORAS_DIR}"
+
+# Breast Size Slider SDXL — CivitAI 481119, version 535064
+BREASTSIZE_URL="https://civitai.com/api/download/models/535064"
+[ -n "${CIVITAI_API_KEY:-}" ] && BREASTSIZE_URL="${BREASTSIZE_URL}?token=${CIVITAI_API_KEY}"
+download_to_volume "${BREASTSIZE_URL}" "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors" "${VOLUME_LORAS_DIR}"
 
 # Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).
 
