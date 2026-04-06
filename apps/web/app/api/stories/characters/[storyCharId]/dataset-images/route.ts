@@ -55,14 +55,14 @@ export async function GET(
       );
     }
 
-    // Fetch all dataset images (passed and failed, not replaced)
+    // Fetch all dataset images (passed, failed, replaced — not pending)
     const { data: images, error: imgError } = await supabase
       .from("lora_dataset_images")
       .select(
         "id, image_url, category, variation_type, eval_status, eval_score, eval_details, human_approved, caption, prompt_template, source"
       )
       .eq("lora_id", lora.id)
-      .in("eval_status", ["passed", "failed"])
+      .in("eval_status", ["passed", "failed", "replaced"])
       .order("category", { ascending: true });
 
     if (imgError) {
@@ -76,7 +76,7 @@ export async function GET(
 
     const stats = {
       total: allImages.length,
-      passed: allImages.filter((i: any) => i.eval_status === "passed").length,
+      passed: allImages.filter((i: any) => i.eval_status === "passed" || i.eval_status === "replaced").length,
       humanApproved: allImages.filter((i: any) => i.human_approved === true).length,
       humanRejected: allImages.filter((i: any) => i.human_approved === false).length,
       humanPending: allImages.filter((i: any) => i.human_approved === null).length,
