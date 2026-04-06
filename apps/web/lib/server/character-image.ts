@@ -186,9 +186,9 @@ export function buildCharacterGenerationPayload(opts: {
     // Body Weight Slider (ILXL) — disabled.
     // { filename: "Body_weight_slider_ILXL.safetensors", strengthModel: 1.7, strengthClip: 1.0 },
     // Bubble Butt Slider — larger butt. CivitAI 479344. Positive = bigger.
-    { filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.7, strengthClip: 1.0 },
+    { filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.4, strengthClip: 1.0 },
     // Breast Size Slider SDXL — larger breasts. CivitAI 481119. Positive = bigger.
-    { filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.5, strengthClip: 1.0 },
+    { filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.2, strengthClip: 1.0 },
   ] : undefined;
 
   const workflow = buildWorkflow({
