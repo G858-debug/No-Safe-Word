@@ -22,6 +22,6 @@ jobs:
       - name: Deploy to Railway
         run: |
           npm install -g @railway/cli
-          railway up --service No-Safe-Word --no-cache
+          NIXPACKS_NO_CACHE=1 railway up --service No-Safe-Word
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
