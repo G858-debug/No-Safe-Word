@@ -27,228 +27,105 @@ export interface CharacterGenerationPayload {
 
 // ── Skin Tone Mapper ──
 
-/**
- * Convert a character's described skin tone to booru tags.
- *
- * Maps faithfully to the character's ACTUAL specified tone.
- * A light-skinned Black character gets light-brown skin tags, not dark.
- * African identity comes from facial features and hair texture, not just skin darkness.
- */
-function mapSkinToneToTags(skinTone: string, gender: string): string[] {
-  if (!skinTone) return [];
-  const tone = skinTone.toLowerCase();
-  const genderSuffix = gender === "male" ? "male" : "female";
-
-  if (tone.includes("ebony") || tone.includes("very dark") || tone.includes("deep dark")) {
-    return [`dark-skinned ${genderSuffix}`, "dark skin"];
-  }
-  if (tone.includes("dark chocolate") || tone.includes("dark brown") || tone.includes("deep brown")) {
-    return [`dark-skinned ${genderSuffix}`, "dark skin", "brown skin"];
-  }
-  if (tone.includes("chocolate") || tone.includes("brown") || tone.includes("warm brown") || tone.includes("medium-dark")) {
-    return [`dark-skinned ${genderSuffix}`, "brown skin"];
-  }
-  if (tone.includes("caramel") || tone.includes("tawny") || tone.includes("honey") || tone.includes("medium")) {
-    return ["brown skin", `dark-skinned ${genderSuffix}`];
-  }
-  if (tone.includes("light brown") || tone.includes("golden") || tone.includes("amber") || tone.includes("light")) {
-    return ["brown skin"];
-  }
-  if (tone.includes("olive") || tone.includes("tan")) {
-    return ["tan", "brown skin"];
-  }
-  if (tone.includes("fair") || tone.includes("pale")) {
-    return ["pale skin"];
-  }
-
-  // Default: use dark-skinned as fallback
-  return [`dark-skinned ${genderSuffix}`, "brown skin"];
-}
-
-// ── Ethnicity Mapper ──
-
-/**
- * Convert ethnicity to booru tags representing African facial features and hair texture.
- *
- * These tags work ALONGSIDE skin tone (handled separately) to produce
- * characters that are recognisably Black African across all skin tones.
- * A light-skinned Black woman should still have African facial features.
- */
-/**
- * Short male hairstyles where "afro-textured hair" would conflict and produce
- * an afro instead of the intended style. For these, the style tag alone is enough.
- */
-const SHORT_MALE_HAIRSTYLES = [
-  "fade", "buzz", "crew cut", "caesar", "bald", "shaved", "close crop",
-  "taper", "flat top", "waves", "line up", "temple fade", "skin fade",
-];
-
-function hasShortMaleHairstyle(hairStyle: string): boolean {
-  const style = hairStyle.toLowerCase();
-  return SHORT_MALE_HAIRSTYLES.some((s) => style.includes(s));
-}
-
-function mapEthnicityToTags(ethnicity: string, opts?: { gender?: string; hairStyle?: string }): string[] {
-  if (!ethnicity) return [];
-  const eth = ethnicity.toLowerCase();
-
-  if (
-    eth.includes("african") || eth.includes("black") ||
-    eth.includes("zulu") || eth.includes("xhosa") || eth.includes("ndebele") ||
-    eth.includes("sotho") || eth.includes("tswana") || eth.includes("venda") ||
-    eth.includes("tsonga") || eth.includes("pedi") || eth.includes("swazi")
-  ) {
-    const tags = ["full lips", "broad nose"];
-    // Only add afro-textured hair if the character doesn't have a specific short male hairstyle
-    // that would conflict (e.g. "low fade" + "afro-textured hair" = model generates an afro)
-    const skipHairTexture =
-      opts?.gender === "male" && opts?.hairStyle && hasShortMaleHairstyle(opts.hairStyle);
-    if (!skipHairTexture) {
-      tags.push("afro-textured hair");
-    }
-    return tags;
-  }
-
-  if (eth.includes("coloured") || eth.includes("mixed") || eth.includes("cape malay")) {
-    return ["full lips"];
-  }
-
-  if (eth.includes("indian") || eth.includes("south asian")) {
-    return ["brown skin"];
-  }
-
-  return [];
-}
-
 // ── Prompt Builders ──
 
 /**
- * Build a booru-style face portrait prompt. TODO: Convert to natural language (Prompt 3).
+ * Build a natural language face portrait prompt for Juggernaut Ragnarok.
+ *
+ * Uses explicit ethnicity + skin tone phrasing early in the prompt for strong
+ * CLIP signal. Booru tags like "dark-skinned male" are weak in Ragnarok —
+ * natural language like "a Black African man with dark brown skin" works better.
  */
 function buildFacePrompt(charData: CharacterData): string {
-  const genderTag = charData.gender === "male" ? "1boy" : "1girl";
-  const tags: string[] = [genderTag];
+  const parts: string[] = [];
 
-  // Skin tone + ethnicity via mappers, deduplicated
-  const skinTags = mapSkinToneToTags(charData.skinTone, charData.gender);
-  const ethnicityTags = mapEthnicityToTags(charData.ethnicity, {
-    gender: charData.gender,
-    hairStyle: charData.hairStyle,
-  });
-  const identityTags = skinTags.concat(ethnicityTags.filter((t) => !skinTags.includes(t)));
-  tags.push(...identityTags);
+  // Lead with ethnicity + gender in natural language — strongest signal for identity
+  const genderWord = charData.gender === "male" ? "man" : "woman";
+  const ethnicityPhrase = charData.ethnicity
+    ? `a ${charData.ethnicity} ${genderWord}`
+    : `a ${genderWord}`;
+  parts.push(ethnicityPhrase);
 
-  // Hair (texture comes from ethnicity mapper, style from charData)
-  if (charData.hairColor) tags.push(`${charData.hairColor.toLowerCase()} hair`);
-  if (charData.hairStyle) tags.push(charData.hairStyle.toLowerCase());
+  // Skin tone — explicit and early
+  if (charData.skinTone) parts.push(`${charData.skinTone} skin`);
+
+  // Hair
+  if (charData.hairColor && charData.hairStyle) {
+    parts.push(`${charData.hairColor.toLowerCase()} ${charData.hairStyle.toLowerCase()}`);
+  } else if (charData.hairStyle) {
+    parts.push(charData.hairStyle.toLowerCase());
+  }
 
   // Eyes
-  if (charData.eyeColor) tags.push(`${charData.eyeColor.toLowerCase()} eyes`);
+  if (charData.eyeColor) parts.push(`${charData.eyeColor.toLowerCase()} eyes`);
 
   // Age
-  if (charData.age) tags.push(`${charData.age} years old`);
+  if (charData.age) parts.push(`${charData.age} years old`);
 
   // Distinguishing features
   if (charData.distinguishingFeatures) {
-    tags.push(charData.distinguishingFeatures.toLowerCase());
+    parts.push(charData.distinguishingFeatures.toLowerCase());
   }
 
-  // Portrait composition — gender-specific tags
-  if (charData.gender === "male") {
-    tags.push(
-      "solo male", "male focus", "masculine",
-      "handsome", "sharp jawline",
-      "looking at viewer",
-      "portrait", "head and shoulders", "face focus",
-      "soft studio lighting", "clean background", "shallow depth of field",
-    );
-  } else {
-    tags.push(
-      "solo female",
-      "looking at viewer", "slight smile",
-      "beautiful face", "detailed eyes",
-      "portrait", "head and shoulders", "face focus",
-      "soft studio lighting", "clean background", "shallow depth of field",
-    );
-  }
+  // Portrait composition
+  parts.push("looking at viewer");
+  parts.push("close-up portrait, head and shoulders, face in focus");
+  parts.push("soft studio lighting, clean neutral background, shallow depth of field");
 
-  return tags.join(", ");
+  return parts.join(", ");
 }
 
 /**
- * Build a booru-style full-body prompt. TODO: Convert to natural language (Prompt 3).
+ * Build a natural language full-body prompt for Juggernaut Ragnarok.
  */
 function buildBodyPrompt(charData: CharacterData): string {
-  const genderTag = charData.gender === "male" ? "1boy" : "1girl";
-  const tags: string[] = [genderTag];
+  const parts: string[] = [];
 
-  // Skin tone + ethnicity via mappers, deduplicated
-  const skinTags = mapSkinToneToTags(charData.skinTone, charData.gender);
-  const ethnicityTags = mapEthnicityToTags(charData.ethnicity, {
-    gender: charData.gender,
-    hairStyle: charData.hairStyle,
-  });
-  const identityTags = skinTags.concat(ethnicityTags.filter((t) => !skinTags.includes(t)));
-  tags.push(...identityTags);
+  // Lead with ethnicity + gender
+  const genderWord = charData.gender === "male" ? "man" : "woman";
+  const ethnicityPhrase = charData.ethnicity
+    ? `a ${charData.ethnicity} ${genderWord}`
+    : `a ${genderWord}`;
+  parts.push(ethnicityPhrase);
+
+  // Skin tone
+  if (charData.skinTone) parts.push(`${charData.skinTone} skin`);
 
   // Hair
-  if (charData.hairColor) tags.push(`${charData.hairColor.toLowerCase()} hair`);
-  if (charData.hairStyle) tags.push(charData.hairStyle.toLowerCase());
+  if (charData.hairColor && charData.hairStyle) {
+    parts.push(`${charData.hairColor.toLowerCase()} ${charData.hairStyle.toLowerCase()}`);
+  } else if (charData.hairStyle) {
+    parts.push(charData.hairStyle.toLowerCase());
+  }
 
-  // Eyes
-  if (charData.eyeColor) tags.push(`${charData.eyeColor.toLowerCase()} eyes`);
-
-  // Body type (female characters get detailed body tags)
+  // Body type
   if (charData.gender === "female") {
-    tags.push("wide hips", "large breasts", "thick thighs", "narrow waist", "voluptuous");
-    if (charData.bodyType) tags.push(charData.bodyType.toLowerCase());
+    parts.push("curvaceous figure, wide hips, large breasts, thick thighs, narrow waist");
+    if (charData.bodyType) parts.push(charData.bodyType.toLowerCase());
   } else {
-    if (charData.bodyType) tags.push(charData.bodyType.toLowerCase());
+    if (charData.bodyType) parts.push(charData.bodyType.toLowerCase());
   }
 
   // Age
-  if (charData.age) tags.push(`${charData.age} years old`);
+  if (charData.age) parts.push(`${charData.age} years old`);
 
   // Distinguishing features
   if (charData.distinguishingFeatures) {
-    tags.push(charData.distinguishingFeatures.toLowerCase());
+    parts.push(charData.distinguishingFeatures.toLowerCase());
   }
 
-  // Clothing (female default: fitted mini skirt + crop top; male: casual)
+  // Clothing — explicit for SFW (Ragnarok defaults to nudity without it)
   if (charData.gender === "female") {
-    tags.push(
-      "fitted mini skirt",
-      "strappy crop top",
-      "high heels",
-      "fully clothed",
-    );
+    parts.push("wearing fitted mini skirt and strappy crop top and high heels, fully clothed");
   } else {
-    tags.push(
-      "fitted henley shirt",
-      "jeans",
-      "casual clothing",
-      "fully clothed",
-    );
+    parts.push("wearing fitted henley shirt and jeans, fully clothed");
   }
 
-  // Full body composition — gender-specific reinforcement
-  if (charData.gender === "male") {
-    tags.push(
-      "solo male", "male focus", "masculine",
-      "standing", "confident pose", "looking at viewer",
-      "full body", "head to toe",
-      "warm studio lighting", "clean background",
-    );
-  } else {
-    tags.push(
-      "solo female",
-      "standing", "confident pose", "looking at viewer",
-      "full body", "head to toe",
-      "warm studio lighting", "clean background",
-    );
-  }
+  // Full body composition
+  parts.push("standing, confident pose, looking at viewer");
+  parts.push("full body portrait head to toe, warm studio lighting, clean background");
 
-  return tags.join(", ");
+  return parts.join(", ");
 }
 
 /**
