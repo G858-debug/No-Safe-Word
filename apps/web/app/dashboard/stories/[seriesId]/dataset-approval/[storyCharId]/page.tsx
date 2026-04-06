@@ -152,14 +152,23 @@ function ImageLightbox({
   // Reset local state when image changes (navigation)
   useEffect(() => {
     setEditedCaption(image.caption || "");
-    setEditedPrompt(image.resolvedPrompt || "");
+    setEditedPrompt("");
     setEditedNegativePrompt(DEFAULT_NEGATIVE_PROMPT);
     setCaptionSaved(false);
     setRegenError(null);
     setDeleteConfirm(false);
     setLockSeed(false);
     setShowPrompts(true);
-  }, [image.id, image.caption, image.resolvedPrompt]);
+
+    // Fetch the resolved positive and negative prompts for this image
+    fetch(`/api/stories/characters/${storyCharId}/dataset-images/${image.id}/resolved-prompt`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.positivePrompt) setEditedPrompt(data.positivePrompt);
+        if (data.negativePrompt) setEditedNegativePrompt(data.negativePrompt);
+      })
+      .catch(() => { /* non-fatal — textarea stays blank */ });
+  }, [image.id, storyCharId]);
 
   // Keyboard: Escape to close, arrows to navigate (when not in textarea)
   useEffect(() => {
