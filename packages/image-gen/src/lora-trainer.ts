@@ -252,16 +252,17 @@ export async function runTrainingPipeline(
         }
 
         if (categoryWarnings.length > 0) {
-          throw new Error(
-            `Category balance failed: ${categoryWarnings.join('; ')}. ` +
-            `Review the dataset and adjust character description, then retry.`
-          );
+          console.warn(`[LoRAPipeline] Category gaps: ${categoryWarnings.join('; ')}`);
+          await setLoraStatus(loraId, 'awaiting_dataset_approval', {
+            error: `Category gaps: ${categoryWarnings.join('; ')}. Use "Generate More" to fill gaps or continue anyway.`,
+          }, deps);
+        } else {
+          console.log(`[LoRAPipeline] Category balance OK: ${JSON.stringify(categoryCounts)}`);
+          await setLoraStatus(loraId, 'awaiting_dataset_approval', {}, deps);
         }
-        console.log(`[LoRAPipeline] Category balance OK: ${JSON.stringify(categoryCounts)}`);
       }
 
       // ── Stage 3: Await human approval ──
-      await setLoraStatus(loraId, 'awaiting_dataset_approval', {}, deps);
       console.log(`[LoRAPipeline] Stage 3: Pausing for human dataset approval. ${selected.length} images ready for review.`);
     } else {
       console.log(`[LoRAPipeline] Skipping Stages 2-3 (already at ${currentStatus})`);
@@ -629,16 +630,17 @@ async function runPass2Pipeline(
         .filter(([cat, min]) => (categoryCounts[cat] || 0) < min)
         .map(([cat, min]) => `${cat}: need ${min}, have ${categoryCounts[cat] || 0}`);
       if (gaps.length > 0) {
-        throw new Error(
-          `Pass 2 category balance failed: ${gaps.join('; ')}. ` +
-          `Review the dataset and adjust character description, then retry.`
-        );
+        console.warn(`[LoRAPipeline] Pass 2 category gaps: ${gaps.join('; ')}`);
+        await setLoraStatus(loraId, 'awaiting_pass2_approval', {
+          error: `Category gaps: ${gaps.join('; ')}. Use "Generate More" to fill gaps or continue anyway.`,
+        }, deps);
+      } else {
+        console.log(`[LoRAPipeline] Pass 2 category balance OK: ${JSON.stringify(categoryCounts)}`);
+        await setLoraStatus(loraId, 'awaiting_pass2_approval', {}, deps);
       }
-      console.log(`[LoRAPipeline] Pass 2 category balance OK: ${JSON.stringify(categoryCounts)}`);
     }
 
     // ── Stage 10: Await human approval ──
-    await setLoraStatus(loraId, 'awaiting_pass2_approval', {}, deps);
     console.log(`[LoRAPipeline] Pass 2: ${selected.length} images ready for review.`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

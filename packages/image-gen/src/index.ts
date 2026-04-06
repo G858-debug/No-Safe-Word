@@ -71,7 +71,7 @@ export { buildWorkflow, buildInpaintWorkflow, buildImg2ImgWorkflow, buildUpscale
 export type { WorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig } from './workflow-builder';
 
 // Dataset generation for LoRA training
-export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset } from './dataset-generator';
+export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset, buildTopUpPrompts, generateTopUpImages } from './dataset-generator';
 export type { DatasetPrompt, DatasetCharacter } from './dataset-generator';
 
 // LoRA validation

@@ -753,6 +753,29 @@ function DatasetStage({
   error: string | null;
 }) {
   const status = loraProgress?.status;
+  const [isGeneratingMore, setIsGeneratingMore] = useState(false);
+  const [generateMoreResult, setGenerateMoreResult] = useState<string | null>(null);
+
+  const loraError = loraProgress?.progress?.error || '';
+  const hasCategoryGaps = loraError.includes('Category gaps');
+
+  async function handleGenerateMore() {
+    setIsGeneratingMore(true);
+    setGenerateMoreResult(null);
+    try {
+      const res = await fetch(`/api/stories/characters/${character.id}/generate-more-dataset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setGenerateMoreResult(`Generated ${data.generated} images for ${data.deficits.map((d: any) => d.category).join(', ')}`);
+    } catch (err) {
+      setGenerateMoreResult(`Error: ${err instanceof Error ? err.message : 'Failed'}`);
+    } finally {
+      setIsGeneratingMore(false);
+    }
+  }
 
   // No training started yet
   if (!status || status === "no_lora" || status === "pending") {
@@ -817,10 +840,18 @@ function DatasetStage({
   }
 
   // Awaiting human approval
-  if (status === "awaiting_dataset_approval") {
+  if (status === "awaiting_dataset_approval" || status === "awaiting_pass2_approval") {
     return (
       <div className="space-y-3">
         <p className="text-sm font-medium">Dataset ready for review</p>
+        {hasCategoryGaps && (
+          <div className="rounded-md p-2 bg-yellow-500/10 border border-yellow-500/30">
+            <p className="text-xs text-yellow-400">{loraError}</p>
+          </div>
+        )}
+        {generateMoreResult && (
+          <p className="text-xs text-green-400">{generateMoreResult}</p>
+        )}
         <p className="text-sm text-muted-foreground">
           Images have been auto-curated. Review the dataset on the approval page, then continue.
         </p>
@@ -828,6 +859,17 @@ function DatasetStage({
           <Button variant="outline" size="sm" asChild>
             <Link href={`/dashboard/stories/${seriesId}/dataset-approval/${character.id}`}>Review Dataset</Link>
           </Button>
+          {hasCategoryGaps && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleGenerateMore}
+              disabled={isGeneratingMore}
+              className="text-yellow-400 border-yellow-500/30"
+            >
+              {isGeneratingMore ? "Generating..." : "Generate More (fill gaps)"}
+            </Button>
+          )}
           <Button size="sm" onClick={onResume}>
             Continue Training
           </Button>

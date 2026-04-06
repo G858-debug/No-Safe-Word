@@ -164,6 +164,41 @@ export function buildDatasetPrompts(char: DatasetCharacter): DatasetPrompt[] {
 }
 
 /**
+ * Build top-up prompts for specific deficit categories.
+ * Uses prompts from the same arrays but with unique IDs to avoid collision with existing images.
+ */
+export function buildTopUpPrompts(
+  char: DatasetCharacter,
+  deficits: Array<{ category: string; needed: number }>,
+): DatasetPrompt[] {
+  const promptsByCategory: Record<string, Omit<DatasetPrompt, 'id'>[]> = {
+    'face-closeup': FACE_PROMPTS,
+    'head-shoulders': HEAD_PROMPTS,
+    'full-body': char.gender === 'female' ? FEMALE_BODY_PROMPTS : MALE_BODY_PROMPTS,
+    'waist-up': WAIST_UP_PROMPTS,
+  };
+
+  const timestamp = Date.now();
+  const result: DatasetPrompt[] = [];
+
+  for (const { category, needed } of deficits) {
+    const pool = promptsByCategory[category];
+    if (!pool) continue;
+
+    // Pick prompts cyclically from the pool, with unique IDs
+    for (let i = 0; i < needed; i++) {
+      const def = pool[i % pool.length];
+      result.push({
+        ...def,
+        id: `topup_${category}_${timestamp}_${i}`,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
  * Build a ComfyUI workflow for a single dataset training image.
  */
 export function buildDatasetWorkflow(opts: {
@@ -402,6 +437,90 @@ export async function generateDataset(
     imageRecords,
     failedPrompts,
   };
+}
+
+/**
+ * Generate top-up images for deficit categories and add to existing dataset.
+ * Returns the number of new images generated.
+ */
+export async function generateTopUpImages(
+  character: CharacterInput,
+  loraId: string,
+  deficits: Array<{ category: string; needed: number }>,
+  deps: DatasetDeps,
+): Promise<{ generated: number; failed: number }> {
+  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+  if (!endpointId) throw new Error('Missing RUNPOD_ENDPOINT_ID');
+
+  const datasetChar: DatasetCharacter = {
+    name: character.characterName,
+    gender: character.structuredData.gender as 'male' | 'female',
+    ethnicity: character.structuredData.ethnicity,
+    skinTone: character.structuredData.skinTone,
+    hairColor: character.structuredData.hairColor,
+    hairStyle: character.structuredData.hairStyle,
+    eyeColor: character.structuredData.eyeColor,
+    bodyType: character.structuredData.bodyType,
+    age: character.structuredData.age,
+    distinguishingFeatures: character.structuredData.distinguishingFeatures || '',
+    loraBodyWeight: (character.structuredData as any).loraBodyWeight,
+    loraBubbleButt: (character.structuredData as any).loraBubbleButt,
+    loraBreastSize: (character.structuredData as any).loraBreastSize,
+  };
+
+  const prompts = buildTopUpPrompts(datasetChar, deficits);
+  let generated = 0;
+  let failed = 0;
+
+  console.log(`[Dataset TopUp] Generating ${prompts.length} images for ${deficits.map(d => `${d.category}:${d.needed}`).join(', ')}`);
+
+  for (let i = 0; i < prompts.length; i++) {
+    const prompt = prompts[i];
+    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+
+    try {
+      const { workflow } = buildDatasetWorkflow({ character: datasetChar, prompt, seed });
+      const { jobId } = await submitRunPodJob(workflow, undefined, undefined, endpointId);
+      const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, endpointId);
+
+      const imageBuffer = Buffer.from(imageBase64, 'base64');
+      const storagePath = `lora-datasets/${loraId}/${prompt.id}.png`;
+
+      const { error: uploadError } = await deps.supabase.storage
+        .from('story-images')
+        .upload(storagePath, imageBuffer, { contentType: 'image/png', upsert: true });
+
+      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+
+      const { data: urlData } = deps.supabase.storage
+        .from('story-images')
+        .getPublicUrl(storagePath);
+
+      await deps.supabase
+        .from('lora_dataset_images')
+        .insert({
+          lora_id: loraId,
+          image_url: urlData.publicUrl,
+          storage_path: storagePath,
+          prompt_template: prompt.id,
+          variation_type: inferVariationType(prompt),
+          source: 'comfyui' as const,
+          category: prompt.category,
+          eval_status: 'pending',
+        });
+
+      generated++;
+      console.log(`[Dataset TopUp] ${i + 1}/${prompts.length}: ${prompt.description} (${prompt.category})`);
+
+      if (i < prompts.length - 1) await new Promise(r => setTimeout(r, 1000));
+    } catch (err) {
+      console.error(`[Dataset TopUp] Failed ${prompt.id}: ${err}`);
+      failed++;
+    }
+  }
+
+  console.log(`[Dataset TopUp] Done: ${generated} generated, ${failed} failed`);
+  return { generated, failed };
 }
 
 function inferVariationType(prompt: DatasetPrompt): VariationType {
