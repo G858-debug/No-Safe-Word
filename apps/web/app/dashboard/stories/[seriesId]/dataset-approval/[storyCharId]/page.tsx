@@ -1015,13 +1015,15 @@ export default function DatasetApprovalPage() {
   }, []);
 
   const handleImageRegenerated = useCallback((oldId: string, newImage: DatasetImage) => {
+    // Cache-bust the URL so the browser fetches the new image (same storage path, overwritten)
+    const withCacheBust: DatasetImage = newImage.image_url
+      ? { ...newImage, image_url: `${newImage.image_url}?t=${Date.now()}` }
+      : newImage;
     setImages((prev) => {
-      // Remove the old image (it was marked as 'replaced' server-side) and add the new one
       const without = prev.filter((img) => img.id !== oldId);
-      return [...without, newImage];
+      return [...without, withCacheBust];
     });
-    // Update zoom to show the new image
-    setZoomImage(newImage);
+    setZoomImage(withCacheBust);
   }, []);
 
   const handleImageDeleted = useCallback((id: string) => {
