@@ -179,14 +179,13 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
-  // Thick & Fit Female Wellness Body LoRA — enhances curves during portrait/dataset
-  // generation so the trained character LoRA captures the proportions.
-  // CivitAI model 1823593, version 2063646. No trigger word needed.
-  const loras = charData.gender === "female" ? [{
-    filename: "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors",
-    strengthModel: 0.8,
-    strengthClip: 0.8,
-  }] : undefined;
+  // Thick & Fit Female Wellness Body LoRA — disabled.
+  // const loras = charData.gender === "female" ? [{
+  //   filename: "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors",
+  //   strengthModel: 0.8,
+  //   strengthClip: 0.8,
+  // }] : undefined;
+  const loras = undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,
