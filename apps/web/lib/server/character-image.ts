@@ -179,13 +179,14 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
-  // Hourglass body shape LoRA for female characters — enhances curves during
-  // portrait/dataset generation so the trained character LoRA captures the proportions.
-  const loras = charData.gender === "female" ? [{
-    filename: "hourglassv2_SDXL.safetensors",
-    strengthModel: 0.8,
-    strengthClip: 0.8,
-  }] : undefined;
+  // Hourglass body shape LoRA — disabled for testing.
+  // Re-enable by uncommenting and setting desired strength.
+  // const loras = charData.gender === "female" ? [{
+  //   filename: "hourglassv2_SDXL.safetensors",
+  //   strengthModel: 0.8,
+  //   strengthClip: 0.8,
+  // }] : undefined;
+  const loras = undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,
