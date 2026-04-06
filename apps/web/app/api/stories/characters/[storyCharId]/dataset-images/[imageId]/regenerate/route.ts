@@ -39,7 +39,7 @@ export async function POST(
     // 1. Fetch story character
     const { data: storyChar, error: scError } = await (supabase as any)
       .from("story_characters")
-      .select(`id, character_id, approved_seed, characters ( id, name, description, approved_image_url )`)
+      .select(`id, character_id, approved_seed, face_url, characters ( id, name, description )`)
       .eq("id", storyCharId)
       .single() as { data: any; error: any };
 
@@ -58,7 +58,8 @@ export async function POST(
       return NextResponse.json({ error: "Dataset image not found" }, { status: 404 });
     }
 
-    const character = storyChar.characters as { id: string; name: string; description: Record<string, string>; approved_image_url: string | null };
+    const character = storyChar.characters as { id: string; name: string; description: Record<string, string> };
+    const approvedImageUrl: string | null = storyChar.face_url || null;
     const desc = character.description as Record<string, string>;
 
     const structuredData: CharacterStructured = {
@@ -171,9 +172,9 @@ export async function POST(
       const content: Anthropic.MessageCreateParams["messages"][0]["content"] = [];
 
       // Include reference portrait if available
-      if (character.approved_image_url) {
+      if (approvedImageUrl) {
         try {
-          const refBase64 = await imageUrlToBase64(character.approved_image_url);
+          const refBase64 = await imageUrlToBase64(approvedImageUrl);
           content.push({ type: "image", source: { type: "base64", media_type: "image/png", data: refBase64 } });
           content.push({ type: "text", text: "Reference image (approved portrait) above." });
         } catch { /* non-fatal */ }
