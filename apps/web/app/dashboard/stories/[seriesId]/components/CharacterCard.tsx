@@ -44,74 +44,60 @@ function formatElapsed(updatedAt?: string): string | null {
 
 function buildDefaultPrompt(desc: Record<string, string>, stage: "face" | "body"): string {
   const gender = desc.gender || "female";
-  const genderTag = gender === "male" ? "1boy" : "1girl";
-  const tags: string[] = [genderTag];
+  const genderWord = gender === "male" ? "man" : "woman";
+  const parts: string[] = [];
 
-  // Skin tone
-  if (desc.skinTone) {
-    const genderSuffix = gender === "male" ? "male" : "female";
-    tags.push(`dark-skinned ${genderSuffix}`, "brown skin");
+  // Lead with ethnicity + gender in natural language — strongest CLIP signal
+  if (desc.ethnicity) {
+    parts.push(`a ${desc.ethnicity} ${genderWord}`);
+  } else {
+    parts.push(`a ${genderWord}`);
   }
 
-  // Ethnicity features
-  const eth = (desc.ethnicity || "").toLowerCase();
-  if (eth.includes("african") || eth.includes("black")) {
-    tags.push("full lips", "broad nose");
-    const shortMale = gender === "male" && desc.hairStyle &&
-      ["fade", "buzz", "crew", "shaved", "close crop", "taper", "waves"].some(s => desc.hairStyle.toLowerCase().includes(s));
-    if (!shortMale) tags.push("afro-textured hair");
-  }
+  // Skin tone — explicit and early
+  if (desc.skinTone) parts.push(`${desc.skinTone} skin`);
 
   // Hair
-  if (desc.hairColor) tags.push(`${desc.hairColor.toLowerCase()} hair`);
-  if (desc.hairStyle) tags.push(desc.hairStyle.toLowerCase());
+  if (desc.hairColor && desc.hairStyle) {
+    parts.push(`${desc.hairColor.toLowerCase()} ${desc.hairStyle.toLowerCase()}`);
+  } else if (desc.hairStyle) {
+    parts.push(desc.hairStyle.toLowerCase());
+  }
 
   // Eyes
-  if (desc.eyeColor) tags.push(`${desc.eyeColor.toLowerCase()} eyes`);
+  if (desc.eyeColor) parts.push(`${desc.eyeColor.toLowerCase()} eyes`);
 
   // Body (full-body only)
   if (stage === "body") {
     if (gender === "female") {
-      tags.push("wide hips", "large breasts", "thick thighs", "narrow waist", "voluptuous");
+      parts.push("curvaceous figure, wide hips, large breasts, thick thighs, narrow waist");
     }
-    if (desc.bodyType) tags.push(desc.bodyType.toLowerCase());
+    if (desc.bodyType) parts.push(desc.bodyType.toLowerCase());
   }
 
   // Age
-  if (desc.age) tags.push(`${desc.age} years old`);
+  if (desc.age) parts.push(`${desc.age} years old`);
 
   // Distinguishing features
-  if (desc.distinguishingFeatures) tags.push(desc.distinguishingFeatures.toLowerCase());
+  if (desc.distinguishingFeatures) parts.push(desc.distinguishingFeatures.toLowerCase());
 
   // Composition
   if (stage === "face") {
-    if (gender === "male") {
-      tags.push("solo male", "male focus", "masculine", "handsome", "sharp jawline",
-        "looking at viewer", "portrait", "head and shoulders", "face focus",
-        "soft studio lighting", "clean background", "shallow depth of field");
-    } else {
-      tags.push("solo female", "looking at viewer", "slight smile",
-        "beautiful face", "detailed eyes", "portrait", "head and shoulders", "face focus",
-        "soft studio lighting", "clean background", "shallow depth of field");
-    }
+    parts.push("looking at viewer");
+    parts.push("close-up portrait, head and shoulders, face in focus");
+    parts.push("soft studio lighting, clean neutral background, shallow depth of field");
   } else {
-    // Clothing
+    // Clothing — explicit for SFW
     if (gender === "female") {
-      tags.push("fitted mini skirt", "strappy crop top", "high heels", "fully clothed");
+      parts.push("wearing fitted mini skirt and strappy crop top and high heels, fully clothed");
     } else {
-      tags.push("fitted henley shirt", "jeans", "casual clothing", "fully clothed");
+      parts.push("wearing fitted henley shirt and jeans, fully clothed");
     }
-    if (gender === "male") {
-      tags.push("solo male", "male focus", "masculine",
-        "standing", "confident pose", "looking at viewer",
-        "full body", "head to toe", "warm studio lighting", "clean background");
-    } else {
-      tags.push("solo female", "standing", "confident pose", "looking at viewer",
-        "full body", "head to toe", "warm studio lighting", "clean background");
-    }
+    parts.push("standing, confident pose, looking at viewer");
+    parts.push("full body portrait head to toe, warm studio lighting, clean background");
   }
 
-  return tags.join(", ");
+  return parts.join(", ");
 }
 
 // ── Stage determination ──
