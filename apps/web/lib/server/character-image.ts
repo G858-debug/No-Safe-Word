@@ -171,6 +171,7 @@ export function buildCharacterGenerationPayload(opts: {
   }
 
   const qualityPrefix = buildQualityPrefix(mode);
+  console.log(`[CharImage] Built scene tags for ${character.name} (${stage}): ${sceneTags.substring(0, 80)}...`);
   const positivePrompt = `${qualityPrefix}, ${sceneTags}`;
   const negativePrompt = buildNegativePrompt(mode);
 
