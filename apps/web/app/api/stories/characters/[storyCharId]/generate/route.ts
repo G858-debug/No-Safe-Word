@@ -20,6 +20,7 @@ export async function POST(
     let imageType: ImageType = "portrait";
     let stage: GenerationStage = "face";
     let customPrompt: string | undefined;
+    let customNegativePrompt: string | undefined;
     try {
       const body = await request.json();
       if (typeof body.seed === "number" && body.seed > 0) {
@@ -33,6 +34,9 @@ export async function POST(
       }
       if (typeof body.customPrompt === 'string' && body.customPrompt.trim().length > 20) {
         customPrompt = body.customPrompt.trim();
+      }
+      if (typeof body.customNegativePrompt === 'string' && body.customNegativePrompt.trim().length > 0) {
+        customNegativePrompt = body.customNegativePrompt.trim();
       }
     } catch {
       // No body or invalid JSON — use defaults
@@ -84,6 +88,7 @@ export async function POST(
       stage,
       seed: customSeed,
       customPrompt,
+      customNegativePrompt,
     });
 
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;

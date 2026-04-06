@@ -137,8 +137,9 @@ export function buildCharacterGenerationPayload(opts: {
   stage: GenerationStage;
   seed?: number;
   customPrompt?: string;
+  customNegativePrompt?: string;
 }): CharacterGenerationPayload {
-  const { character, stage, customPrompt } = opts;
+  const { character, stage, customPrompt, customNegativePrompt } = opts;
   const desc = character.description;
 
   const charData: CharacterData = {
@@ -173,7 +174,7 @@ export function buildCharacterGenerationPayload(opts: {
   const qualityPrefix = buildQualityPrefix(mode);
   console.log(`[CharImage] Built scene tags for ${character.name} (${stage}): ${sceneTags.substring(0, 80)}...`);
   const positivePrompt = `${qualityPrefix}, ${sceneTags}`;
-  const negativePrompt = buildNegativePrompt(mode);
+  const negativePrompt = customNegativePrompt || buildNegativePrompt(mode);
 
   // Dimensions — portrait orientation for both
   const width = 832;

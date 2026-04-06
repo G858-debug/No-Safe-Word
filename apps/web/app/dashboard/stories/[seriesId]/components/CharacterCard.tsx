@@ -147,6 +147,9 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [genImageId, setGenImageId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState(
+    (character.characters.description as Record<string, string>).negativePrompt || SFW_NEGATIVE_PROMPT
+  );
   const [error, setError] = useState<string | null>(null);
   const [isTraining, setIsTraining] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -256,6 +259,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           stage,
           type: stage === "body" ? "fullBody" : "portrait",
           customPrompt: prompt || undefined,
+          customNegativePrompt: negativePrompt !== SFW_NEGATIVE_PROMPT ? negativePrompt : undefined,
         }),
       });
       const data = await res.json();
@@ -272,14 +276,17 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     if (!genImageId) return;
     setError(null);
     try {
-      // Save edited structured data back to the characters table
-      // so dataset generation uses the correct description
-      const descChanged = JSON.stringify(editableDesc) !== JSON.stringify(initialDesc);
+      // Save edited structured data (including custom negative prompt) back to the
+      // characters table so dataset generation uses the correct description
+      const descToSave = negativePrompt !== SFW_NEGATIVE_PROMPT
+        ? { ...editableDesc, negativePrompt }
+        : editableDesc;
+      const descChanged = JSON.stringify(descToSave) !== JSON.stringify(initialDesc);
       if (descChanged) {
         const charRes = await fetch(`/api/characters`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: character.characters.id, description: editableDesc }),
+          body: JSON.stringify({ id: character.characters.id, description: descToSave }),
         });
         if (!charRes.ok) {
           console.warn("Failed to save character description, continuing with approval");
@@ -435,6 +442,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             isGenerating={isGenerating}
             prompt={prompt}
             onPromptChange={setPrompt}
+            negativePrompt={negativePrompt}
+            onNegativePromptChange={setNegativePrompt}
             onGenerate={handleGenerate}
             onApprove={handleApprove}
             approvedPortraitUrl={character.approved_image_url}
@@ -508,6 +517,7 @@ const EDITABLE_FIELDS: Array<{ key: string; label: string; face: boolean; body: 
 
 function PortraitStage({
   character, editableDesc, onFieldChange, imageUrl, imageId, isGenerating, prompt, onPromptChange,
+  negativePrompt, onNegativePromptChange,
   onGenerate, onApprove, approvedPortraitUrl, approvedBodyUrl,
 }: {
   character: CharacterFromAPI;
@@ -518,6 +528,8 @@ function PortraitStage({
   isGenerating: boolean;
   prompt: string;
   onPromptChange: (p: string) => void;
+  negativePrompt: string;
+  onNegativePromptChange: (p: string) => void;
   onGenerate: (stage: "face" | "body") => void;
   onApprove: (type: "portrait" | "fullBody") => void;
   approvedPortraitUrl: string | null;
@@ -588,9 +600,12 @@ function PortraitStage({
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground font-medium mb-0.5">Negative prompt</p>
-                  <p className="text-[11px] font-mono leading-relaxed text-muted-foreground bg-muted/30 rounded-md border px-3 py-2">
-                    {SFW_NEGATIVE_PROMPT}
-                  </p>
+                  <Textarea
+                    value={negativePrompt}
+                    onChange={(e) => onNegativePromptChange(e.target.value)}
+                    className="min-h-[60px] text-[11px] font-mono leading-relaxed bg-muted/30"
+                    disabled={isGenerating}
+                  />
                 </div>
               </div>
             )}
