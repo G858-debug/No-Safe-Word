@@ -162,12 +162,15 @@ function ImageLightbox({
 
     // Fetch the resolved positive and negative prompts for this image
     fetch(`/api/stories/characters/${storyCharId}/dataset-images/${image.id}/resolved-prompt`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`resolved-prompt returned ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         if (data.positivePrompt) setEditedPrompt(data.positivePrompt);
         if (data.negativePrompt) setEditedNegativePrompt(data.negativePrompt);
       })
-      .catch(() => { /* non-fatal — textarea stays blank */ });
+      .catch((err) => console.error("[resolved-prompt] fetch failed:", err));
   }, [image.id, storyCharId]);
 
   // Keyboard: Escape to close, arrows to navigate (when not in textarea)
