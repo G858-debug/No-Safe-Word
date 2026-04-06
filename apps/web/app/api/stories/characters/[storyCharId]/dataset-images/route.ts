@@ -16,7 +16,8 @@ export async function GET(
     const { data: storyChar, error: scError } = await (supabase as any)
       .from("story_characters")
       .select(`
-        character_id, active_lora_id
+        character_id, active_lora_id,
+        characters ( description )
       `)
       .eq("id", storyCharId)
       .single() as { data: any; error: any };
@@ -83,11 +84,21 @@ export async function GET(
       minRequired: MIN_PASSED_IMAGES,
     };
 
+    // Extract character info for the lightbox (gender + body LoRA strengths)
+    const desc = (storyChar.characters?.description || {}) as Record<string, string>;
+    const characterInfo = {
+      gender: desc.gender || "female",
+      loraBodyWeight: parseFloat(desc.loraBodyWeight || "0"),
+      loraBubbleButt: parseFloat(desc.loraBubbleButt || "0"),
+      loraBreastSize: parseFloat(desc.loraBreastSize || "0"),
+    };
+
     return NextResponse.json({
       loraId: lora.id,
       loraStatus: lora.status,
       images: allImages,
       stats,
+      characterInfo,
     });
   } catch (err) {
     console.error("[Dataset Images API] Failed:", err);

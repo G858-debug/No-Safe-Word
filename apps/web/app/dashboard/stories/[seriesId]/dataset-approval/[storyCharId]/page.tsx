@@ -53,6 +53,13 @@ interface Stats {
   minRequired: number;
 }
 
+interface CharacterInfo {
+  gender: string;
+  loraBodyWeight: number;
+  loraBubbleButt: number;
+  loraBreastSize: number;
+}
+
 type FilterTab = "all" | "approved" | "rejected" | "needs_review";
 
 // ─────────────────────────────────────────────────────────────────
@@ -91,11 +98,15 @@ function sourceBadgeColor(source: string): string {
 // Image Lightbox
 // ─────────────────────────────────────────────────────────────────
 
+const DEFAULT_NEGATIVE_PROMPT =
+  "nudity, naked, nsfw, topless, nude, exposed breasts, nipples, bad anatomy, bad hands, extra limbs, extra fingers, mutated hands, watermark, blurry, text, cartoon, illustration, painting, drawing, low quality, worst quality, deformed, disfigured";
+
 function ImageLightbox({
   image,
   images,
   currentIndex,
   storyCharId,
+  characterInfo,
   onClose,
   onNavigate,
   onApprove,
@@ -109,6 +120,7 @@ function ImageLightbox({
   images: DatasetImage[];
   currentIndex: number;
   storyCharId: string;
+  characterInfo: CharacterInfo;
   onClose: () => void;
   onNavigate: (index: number) => void;
   onApprove: (id: string) => void;
@@ -118,8 +130,16 @@ function ImageLightbox({
   onImageDeleted: (id: string) => void;
   readOnly?: boolean;
 }) {
+  const isFemale = characterInfo.gender === "female";
+
   const [editedCaption, setEditedCaption] = useState(image.caption || "");
   const [editedPrompt, setEditedPrompt] = useState(image.resolvedPrompt || "");
+  const [editedNegativePrompt, setEditedNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
+  const [lockSeed, setLockSeed] = useState(false);
+  const [lastSeed, setLastSeed] = useState<number | null>(null);
+  const [loraBodyWeight, setLoraBodyWeight] = useState(characterInfo.loraBodyWeight);
+  const [loraBubbleButt, setLoraBubbleButt] = useState(characterInfo.loraBubbleButt);
+  const [loraBreastSize, setLoraBreastSize] = useState(characterInfo.loraBreastSize);
   const [savingCaption, setSavingCaption] = useState(false);
   const [captionSaved, setCaptionSaved] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -127,14 +147,17 @@ function ImageLightbox({
   const [approvingImage, setApprovingImage] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [showPrompts, setShowPrompts] = useState(false);
 
   // Reset local state when image changes (navigation)
   useEffect(() => {
     setEditedCaption(image.caption || "");
     setEditedPrompt(image.resolvedPrompt || "");
+    setEditedNegativePrompt(DEFAULT_NEGATIVE_PROMPT);
     setCaptionSaved(false);
     setRegenError(null);
     setDeleteConfirm(false);
+    setLockSeed(false);
   }, [image.id, image.caption, image.resolvedPrompt]);
 
   // Keyboard: Escape to close, arrows to navigate (when not in textarea)
@@ -184,10 +207,30 @@ function ImageLightbox({
     setRegenerating(true);
     setRegenError(null);
     try {
-      const body: Record<string, string> = {};
-      // Only send custom prompt if it was edited and source supports it
+      const body: Record<string, unknown> = {};
+
+      // Positive prompt — only if edited
       if (image.source !== "sdxl-img2img" && editedPrompt && editedPrompt !== image.resolvedPrompt) {
         body.customPrompt = editedPrompt;
+      }
+
+      // Negative prompt — only if changed from default
+      if (editedNegativePrompt !== DEFAULT_NEGATIVE_PROMPT) {
+        body.customNegativePrompt = editedNegativePrompt;
+      }
+
+      // Seed — only if locked and we have a seed
+      if (lockSeed && lastSeed !== null) {
+        body.seed = lastSeed;
+      }
+
+      // Body LoRA strengths (female only — only if different from character defaults)
+      if (isFemale) {
+        body.loraStrengths = {
+          bodyWeight: loraBodyWeight,
+          bubbleButt: loraBubbleButt,
+          breastSize: loraBreastSize,
+        };
       }
 
       // 1. Fire off the regeneration (returns immediately)
@@ -209,8 +252,9 @@ function ImageLightbox({
 
       const data = await res.json();
       if (!data.accepted || !data.placeholderId) {
-        // Legacy synchronous response (e.g. nano-banana that completed fast)
+        // Synchronous response — our endpoint returns { image, seed }
         if (data.image) {
+          if (data.seed) setLastSeed(data.seed);
           onImageRegenerated(image.id, data.image);
           setRegenerating(false);
           return;
@@ -423,23 +467,108 @@ function ImageLightbox({
           </div>
         )}
 
-        {/* Generation Prompt */}
-        <div>
-          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
-            Generation Prompt
-          </label>
-          {image.source === "sdxl-img2img" && !image.resolvedPrompt ? (
-            <p className="rounded bg-zinc-900 px-2 py-2 text-xs italic text-zinc-600">
-              Dynamically generated with random pose — prompt not stored
-            </p>
-          ) : (
-            <textarea
-              value={editedPrompt}
-              onChange={(e) => setEditedPrompt(e.target.value)}
-              rows={4}
-              className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
-              placeholder="No prompt available"
-            />
+        {/* Generation controls: prompts + sliders */}
+        <div className="space-y-3">
+          <button
+            onClick={() => setShowPrompts(!showPrompts)}
+            className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {showPrompts ? "Hide generation controls ▲" : "Show generation controls ▼"}
+          </button>
+
+          {showPrompts && (
+            <div className="space-y-3">
+              {/* Positive prompt */}
+              <div>
+                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+                  Positive Prompt
+                </label>
+                {image.source === "sdxl-img2img" && !image.resolvedPrompt ? (
+                  <p className="rounded bg-zinc-900 px-2 py-2 text-xs italic text-zinc-600">
+                    Dynamically generated — prompt not stored
+                  </p>
+                ) : (
+                  <textarea
+                    value={editedPrompt}
+                    onChange={(e) => setEditedPrompt(e.target.value)}
+                    rows={4}
+                    className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-zinc-300 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                    placeholder="Leave empty to auto-generate from template"
+                  />
+                )}
+              </div>
+
+              {/* Negative prompt */}
+              <div>
+                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+                  Negative Prompt
+                </label>
+                <textarea
+                  value={editedNegativePrompt}
+                  onChange={(e) => setEditedNegativePrompt(e.target.value)}
+                  rows={3}
+                  className="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px] font-mono leading-relaxed text-zinc-300 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Body LoRA sliders — female characters only */}
+              {isFemale && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-[11px] font-medium text-zinc-500">Body Shape LoRAs</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] text-zinc-500">
+                        Weight {loraBodyWeight > 0 ? loraBodyWeight.toFixed(1) : "off"}
+                      </label>
+                      <input
+                        type="range" min="0" max="3" step="0.1"
+                        value={loraBodyWeight}
+                        onChange={(e) => setLoraBodyWeight(parseFloat(e.target.value))}
+                        className="w-full h-1.5 accent-purple-500"
+                        disabled={regenerating}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] text-zinc-500">
+                        Butt {loraBubbleButt > 0 ? loraBubbleButt.toFixed(1) : "off"}
+                      </label>
+                      <input
+                        type="range" min="0" max="3" step="0.1"
+                        value={loraBubbleButt}
+                        onChange={(e) => setLoraBubbleButt(parseFloat(e.target.value))}
+                        className="w-full h-1.5 accent-pink-500"
+                        disabled={regenerating}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-[10px] text-zinc-500">
+                        Breasts {loraBreastSize > 0 ? loraBreastSize.toFixed(1) : "off"}
+                      </label>
+                      <input
+                        type="range" min="0" max="3" step="0.1"
+                        value={loraBreastSize}
+                        onChange={(e) => setLoraBreastSize(parseFloat(e.target.value))}
+                        className="w-full h-1.5 accent-rose-500"
+                        disabled={regenerating}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Seed control */}
+              {lastSeed !== null && (
+                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-zinc-500">
+                  <input
+                    type="checkbox"
+                    checked={lockSeed}
+                    onChange={(e) => setLockSeed(e.target.checked)}
+                    className="rounded"
+                  />
+                  Lock seed ({lastSeed})
+                </label>
+              )}
+            </div>
           )}
         </div>
 
@@ -770,6 +899,7 @@ export default function DatasetApprovalPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loraId, setLoraId] = useState<string | null>(null);
   const [loraStatus, setLoraStatus] = useState<string | null>(null);
+  const [characterInfo, setCharacterInfo] = useState<CharacterInfo>({ gender: "female", loraBodyWeight: 0, loraBubbleButt: 0, loraBreastSize: 0 });
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>("all");
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -791,6 +921,7 @@ export default function DatasetApprovalPage() {
     setStats(data.stats ?? null);
     setLoraId(data.loraId ?? null);
     setLoraStatus(data.loraStatus ?? null);
+    if (data.characterInfo) setCharacterInfo(data.characterInfo);
     setLoading(false);
   }, [storyCharId]);
 
@@ -1062,6 +1193,7 @@ export default function DatasetApprovalPage() {
           images={filteredImages}
           currentIndex={zoomIndex}
           storyCharId={storyCharId}
+          characterInfo={characterInfo}
           onClose={() => setZoomImage(null)}
           onNavigate={handleLightboxNavigate}
           onApprove={handleApprove}

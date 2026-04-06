@@ -17,8 +17,8 @@ const MIN_EVAL_SCORE = 6;
 
 // POST /api/stories/characters/[storyCharId]/dataset-images/[imageId]/regenerate
 // Regenerates a single dataset image in-place. Synchronous — runs generation + evaluation,
-// updates the DB record, and returns { image: updatedRecord }.
-// Optional body: { customPrompt: string }
+// updates the DB record, and returns { image: updatedRecord, seed: number }.
+// Body (all optional): { customPrompt, customNegativePrompt, seed, loraStrengths: { bodyWeight, bubbleButt, breastSize } }
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string; imageId: string }> }
@@ -26,6 +26,9 @@ export async function POST(
   const { storyCharId, imageId } = await props.params;
   const body = await request.json().catch(() => ({}));
   const customPrompt: string | undefined = body.customPrompt;
+  const customNegativePrompt: string | undefined = body.customNegativePrompt;
+  const fixedSeed: number | undefined = typeof body.seed === "number" ? body.seed : undefined;
+  const loraStrengths: { bodyWeight?: number; bubbleButt?: number; breastSize?: number } | undefined = body.loraStrengths;
 
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   if (!endpointId) {
@@ -84,20 +87,36 @@ export async function POST(
     };
 
     // 3. Build the generation workflow
-    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    const seed = fixedSeed ?? (Math.floor(Math.random() * 2_147_483_647) + 1);
+    const dims = existingImage.category === "face-closeup"
+      ? { width: 1024, height: 1024 }
+      : { width: 832, height: 1216 };
+
+    // Body LoRA stack — from UI overrides if provided, else from character description
+    const isFemale = desc.gender !== "male";
+    const needsBodyLoRA = isFemale &&
+      (existingImage.category === "full-body" || existingImage.category === "waist-up");
+    const bodyLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+    if (needsBodyLoRA) {
+      const bw = loraStrengths?.bodyWeight ?? parseFloat(desc.loraBodyWeight || "0");
+      const bb = loraStrengths?.bubbleButt ?? parseFloat(desc.loraBubbleButt || "0");
+      const bs = loraStrengths?.breastSize ?? parseFloat(desc.loraBreastSize || "0");
+      if (bw > 0) bodyLoras.push({ filename: "Body_weight_slider_ILXL.safetensors", strengthModel: bw, strengthClip: 1.0 });
+      if (bb > 0) bodyLoras.push({ filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: bb, strengthClip: 1.0 });
+      if (bs > 0) bodyLoras.push({ filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: bs, strengthClip: 1.0 });
+    }
+
     let workflow: Record<string, unknown>;
 
     if (customPrompt) {
-      // User-supplied prompt — use generic workflow with category-appropriate dimensions
-      const dims = existingImage.category === "face-closeup"
-        ? { width: 1024, height: 1024 }
-        : { width: 832, height: 1216 };
+      // User-supplied prompt
       workflow = buildWorkflow({
         positivePrompt: customPrompt,
-        negativePrompt: buildNegativePrompt("sfw"),
+        negativePrompt: customNegativePrompt ?? buildNegativePrompt("sfw"),
         ...dims,
         seed,
         filenamePrefix: `regen_${imageId}`,
+        loras: bodyLoras.length > 0 ? bodyLoras : undefined,
       });
     } else {
       // Build a fresh prompt for this category
@@ -105,8 +124,21 @@ export async function POST(
       if (!prompt) {
         return NextResponse.json({ error: `No prompt template for category: ${existingImage.category}` }, { status: 400 });
       }
-      const built = buildDatasetWorkflow({ character: datasetChar, prompt, seed });
-      workflow = built.workflow;
+      if (customNegativePrompt || bodyLoras.length > 0) {
+        // Use buildWorkflow directly so we can apply overrides
+        const built = buildDatasetWorkflow({ character: datasetChar, prompt, seed });
+        workflow = buildWorkflow({
+          positivePrompt: built.positivePrompt,
+          negativePrompt: customNegativePrompt ?? built.negativePrompt,
+          ...dims,
+          seed,
+          filenamePrefix: `regen_${imageId}`,
+          loras: bodyLoras.length > 0 ? bodyLoras : undefined,
+        });
+      } else {
+        const built = buildDatasetWorkflow({ character: datasetChar, prompt, seed });
+        workflow = built.workflow;
+      }
     }
 
     // 4. Generate via RunPod
@@ -236,7 +268,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     console.log(`[Regenerate] ${imageId}: ${evalStatus} (score ${evalScore})`);
 
     // Return the legacy synchronous format — client handles this directly
-    return NextResponse.json({ image: updatedImage });
+    return NextResponse.json({ image: updatedImage, seed });
   } catch (err) {
     console.error("[Regenerate] Failed:", err);
     return NextResponse.json(
