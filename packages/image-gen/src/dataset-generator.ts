@@ -214,7 +214,7 @@ export function buildDatasetWorkflow(opts: {
   // CivitAI model 1348692, version 1523317. No trigger word.
   const loras = needsBodyLoRA ? [{
     filename: 'Body_weight_slider_ILXL.safetensors',
-    strengthModel: 2.0,
+    strengthModel: 1.8,
     strengthClip: 1.0,
   }] : undefined;
 
