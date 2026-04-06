@@ -183,8 +183,8 @@ export function buildCharacterGenerationPayload(opts: {
   // Body shape LoRA stack for female characters — enhances curves during portrait/dataset
   // generation so the trained character LoRA captures the proportions.
   const loras = charData.gender === "female" ? [
-    // Body Weight Slider (ILXL) — overall curvier/fuller figure. CivitAI 1348692.
-    { filename: "Body_weight_slider_ILXL.safetensors", strengthModel: 1.7, strengthClip: 1.0 },
+    // Body Weight Slider (ILXL) — disabled.
+    // { filename: "Body_weight_slider_ILXL.safetensors", strengthModel: 1.7, strengthClip: 1.0 },
     // Bubble Butt Slider — larger butt. CivitAI 479344. Positive = bigger.
     { filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.5, strengthClip: 1.0 },
     // Breast Size Slider SDXL — larger breasts. CivitAI 481119. Positive = bigger.

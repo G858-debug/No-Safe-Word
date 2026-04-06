@@ -212,7 +212,7 @@ export function buildDatasetWorkflow(opts: {
 
   // Body shape LoRA stack for female body/waist shots — trains curves into the character LoRA.
   const loras = needsBodyLoRA ? [
-    { filename: 'Body_weight_slider_ILXL.safetensors', strengthModel: 1.7, strengthClip: 1.0 },
+    // { filename: 'Body_weight_slider_ILXL.safetensors', strengthModel: 1.7, strengthClip: 1.0 },
     { filename: 'Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: 1.5, strengthClip: 1.0 },
     { filename: 'Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: 1.5, strengthClip: 1.0 },
   ] : undefined;
