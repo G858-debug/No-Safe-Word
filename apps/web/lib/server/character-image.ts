@@ -184,7 +184,7 @@ export function buildCharacterGenerationPayload(opts: {
   // Slider range: -0.5 (lean) to 3.5 (very curvy). Using 1.5 for moderate enhancement.
   const loras = charData.gender === "female" ? [{
     filename: "Body_weight_slider_ILXL.safetensors",
-    strengthModel: 1.5,
+    strengthModel: 2.0,
     strengthClip: 1.0,
   }] : undefined;
 
