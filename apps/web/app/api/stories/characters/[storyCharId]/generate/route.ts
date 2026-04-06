@@ -71,7 +71,7 @@ export async function POST(
     const desc = character.description as Record<string, string>;
     const isMale = desc.gender === 'male';
 
-    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name}`);
+    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} [v2-ragnarok]`);
 
     // Build character generation payload
     const payload = buildCharacterGenerationPayload({
