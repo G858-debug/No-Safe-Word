@@ -24,7 +24,11 @@
 ### Database
 - [ ] Run migration to update `story_series.image_engine` default from `pony_cyberreal` to `juggernaut_ragnarok`
 - [ ] Update existing series rows: `UPDATE story_series SET image_engine = 'juggernaut_ragnarok' WHERE image_engine = 'pony_cyberreal'`
+- [ ] Archive old Pony-trained LoRAs: `UPDATE character_loras SET status = 'archived' WHERE base_model IN ('pony_cyberreal', 'CyberRealistic_PonySemi_V4.5') AND status != 'archived'`
+- [ ] Clear `active_lora_id` on story characters that reference archived LoRAs so they retrain from scratch
 - [ ] Image category migration (follow-up): `facebook_sfw`/`website_nsfw_paired`/`website_only` to `shared`/`progression_pairs`/`website_exclusive`
+
+**Note on existing LoRAs:** Pony-era LoRAs (dim 8, clip skip 2, trained on ponyDiffusionV6XL) will not produce good results with Juggernaut Ragnarok. They may load without errors but will cause identity drift and artifacts. All characters need retraining from scratch with the new pipeline (dim 32, clip skip 1, trained on SDXL 1.0 base).
 
 ### Codebase
 - [ ] All TypeScript compiles without import errors
