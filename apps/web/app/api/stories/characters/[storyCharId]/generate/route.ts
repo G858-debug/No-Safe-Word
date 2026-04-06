@@ -21,6 +21,7 @@ export async function POST(
     let stage: GenerationStage = "face";
     let customPrompt: string | undefined;
     let customNegativePrompt: string | undefined;
+    let loraStrengths: { bodyWeight?: number; bubbleButt?: number; breastSize?: number } | undefined;
     try {
       const body = await request.json();
       if (typeof body.seed === "number" && body.seed > 0) {
@@ -37,6 +38,9 @@ export async function POST(
       }
       if (typeof body.customNegativePrompt === 'string' && body.customNegativePrompt.trim().length > 0) {
         customNegativePrompt = body.customNegativePrompt.trim();
+      }
+      if (body.loraStrengths && typeof body.loraStrengths === 'object') {
+        loraStrengths = body.loraStrengths;
       }
     } catch {
       // No body or invalid JSON — use defaults
@@ -89,6 +93,7 @@ export async function POST(
       seed: customSeed,
       customPrompt,
       customNegativePrompt,
+      loraStrengths,
     });
 
     const endpointId = process.env.RUNPOD_ENDPOINT_ID;

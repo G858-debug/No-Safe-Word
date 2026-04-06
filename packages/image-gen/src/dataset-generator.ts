@@ -40,6 +40,9 @@ export interface DatasetCharacter {
   bodyType: string;
   age: string;
   distinguishingFeatures: string;
+  loraBodyWeight?: string;
+  loraBubbleButt?: string;
+  loraBreastSize?: string;
 }
 
 /**
@@ -210,12 +213,17 @@ export function buildDatasetWorkflow(opts: {
       height = 1024;
   }
 
-  // Body shape LoRA stack for female body/waist shots — trains curves into the character LoRA.
-  const loras = needsBodyLoRA ? [
-    // { filename: 'Body_weight_slider_ILXL.safetensors', strengthModel: 1.7, strengthClip: 1.0 },
-    { filename: 'Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: 1.4, strengthClip: 1.0 },
-    { filename: 'Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: 1.2, strengthClip: 1.0 },
-  ] : undefined;
+  // Body shape LoRA stack for female body/waist shots — strengths from character description.
+  const bodyLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  if (needsBodyLoRA) {
+    const bw = parseFloat(opts.character.loraBodyWeight || '0');
+    const bb = parseFloat(opts.character.loraBubbleButt || '1.4');
+    const bs = parseFloat(opts.character.loraBreastSize || '1.2');
+    if (bw > 0) bodyLoras.push({ filename: 'Body_weight_slider_ILXL.safetensors', strengthModel: bw, strengthClip: 1.0 });
+    if (bb > 0) bodyLoras.push({ filename: 'Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: bb, strengthClip: 1.0 });
+    if (bs > 0) bodyLoras.push({ filename: 'Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors', strengthModel: bs, strengthClip: 1.0 });
+  }
+  const loras = bodyLoras.length > 0 ? bodyLoras : undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,
@@ -265,6 +273,9 @@ export async function generateDataset(
     bodyType: character.structuredData.bodyType,
     age: character.structuredData.age,
     distinguishingFeatures: character.structuredData.distinguishingFeatures || '',
+    loraBodyWeight: (character.structuredData as any).loraBodyWeight,
+    loraBubbleButt: (character.structuredData as any).loraBubbleButt,
+    loraBreastSize: (character.structuredData as any).loraBreastSize,
   };
 
   const prompts = buildDatasetPrompts(datasetChar);

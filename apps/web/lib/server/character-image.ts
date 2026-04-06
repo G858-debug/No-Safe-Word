@@ -138,8 +138,9 @@ export function buildCharacterGenerationPayload(opts: {
   seed?: number;
   customPrompt?: string;
   customNegativePrompt?: string;
+  loraStrengths?: { bodyWeight?: number; bubbleButt?: number; breastSize?: number };
 }): CharacterGenerationPayload {
-  const { character, stage, customPrompt, customNegativePrompt } = opts;
+  const { character, stage, customPrompt, customNegativePrompt, loraStrengths } = opts;
   const desc = character.description;
 
   const charData: CharacterData = {
@@ -180,16 +181,26 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
-  // Body shape LoRA stack for female characters — enhances curves during portrait/dataset
-  // generation so the trained character LoRA captures the proportions.
-  const loras = charData.gender === "female" ? [
-    // Body Weight Slider (ILXL) — disabled.
-    // { filename: "Body_weight_slider_ILXL.safetensors", strengthModel: 1.7, strengthClip: 1.0 },
-    // Bubble Butt Slider — larger butt. CivitAI 479344. Positive = bigger.
-    { filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.4, strengthClip: 1.0 },
-    // Breast Size Slider SDXL — larger breasts. CivitAI 481119. Positive = bigger.
-    { filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: 1.2, strengthClip: 1.0 },
-  ] : undefined;
+  // Body shape LoRA stack for female characters — strengths controlled by UI sliders.
+  // 0 = disabled. Values are passed from the dashboard UI or read from character description.
+  const bodyStrengths = loraStrengths || {
+    bodyWeight: parseFloat(desc.loraBodyWeight || "0"),
+    bubbleButt: parseFloat(desc.loraBubbleButt || "1.4"),
+    breastSize: parseFloat(desc.loraBreastSize || "1.2"),
+  };
+  const bodyLoras: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
+  if (charData.gender === "female") {
+    if (bodyStrengths.bodyWeight && bodyStrengths.bodyWeight > 0) {
+      bodyLoras.push({ filename: "Body_weight_slider_ILXL.safetensors", strengthModel: bodyStrengths.bodyWeight, strengthClip: 1.0 });
+    }
+    if (bodyStrengths.bubbleButt && bodyStrengths.bubbleButt > 0) {
+      bodyLoras.push({ filename: "Bubble Butt_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: bodyStrengths.bubbleButt, strengthClip: 1.0 });
+    }
+    if (bodyStrengths.breastSize && bodyStrengths.breastSize > 0) {
+      bodyLoras.push({ filename: "Breast Slider - SDXL_alpha1.0_rank4_noxattn_last.safetensors", strengthModel: bodyStrengths.breastSize, strengthClip: 1.0 });
+    }
+  }
+  const loras = bodyLoras.length > 0 ? bodyLoras : undefined;
 
   const workflow = buildWorkflow({
     positivePrompt,

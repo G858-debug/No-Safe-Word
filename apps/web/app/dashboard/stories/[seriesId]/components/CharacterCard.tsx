@@ -150,6 +150,11 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [negativePrompt, setNegativePrompt] = useState(
     (character.characters.description as Record<string, string>).negativePrompt || SFW_NEGATIVE_PROMPT
   );
+  const descInit = character.characters.description as Record<string, string>;
+  const isFemale = (descInit.gender || "female") === "female";
+  const [loraBodyWeight, setLoraBodyWeight] = useState(parseFloat(descInit.loraBodyWeight || "0"));
+  const [loraBubbleButt, setLoraBubbleButt] = useState(parseFloat(descInit.loraBubbleButt || "1.4"));
+  const [loraBreastSize, setLoraBreastSize] = useState(parseFloat(descInit.loraBreastSize || "1.2"));
   const [error, setError] = useState<string | null>(null);
   const [isTraining, setIsTraining] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -260,6 +265,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           type: stage === "body" ? "fullBody" : "portrait",
           customPrompt: prompt || undefined,
           customNegativePrompt: negativePrompt !== SFW_NEGATIVE_PROMPT ? negativePrompt : undefined,
+          loraStrengths: isFemale ? { bodyWeight: loraBodyWeight, bubbleButt: loraBubbleButt, breastSize: loraBreastSize } : undefined,
         }),
       });
       const data = await res.json();
@@ -278,9 +284,15 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     try {
       // Save edited structured data (including custom negative prompt) back to the
       // characters table so dataset generation uses the correct description
-      const descToSave = negativePrompt !== SFW_NEGATIVE_PROMPT
-        ? { ...editableDesc, negativePrompt }
-        : editableDesc;
+      const descToSave = {
+        ...editableDesc,
+        ...(negativePrompt !== SFW_NEGATIVE_PROMPT ? { negativePrompt } : {}),
+        ...(isFemale ? {
+          loraBodyWeight: String(loraBodyWeight),
+          loraBubbleButt: String(loraBubbleButt),
+          loraBreastSize: String(loraBreastSize),
+        } : {}),
+      };
       const descChanged = JSON.stringify(descToSave) !== JSON.stringify(initialDesc);
       if (descChanged) {
         const charRes = await fetch(`/api/characters`, {
@@ -444,6 +456,10 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             onPromptChange={setPrompt}
             negativePrompt={negativePrompt}
             onNegativePromptChange={setNegativePrompt}
+            isFemale={isFemale}
+            loraBodyWeight={loraBodyWeight} onBodyWeightChange={setLoraBodyWeight}
+            loraBubbleButt={loraBubbleButt} onBubbleButtChange={setLoraBubbleButt}
+            loraBreastSize={loraBreastSize} onBreastSizeChange={setLoraBreastSize}
             onGenerate={handleGenerate}
             onApprove={handleApprove}
             approvedPortraitUrl={character.approved_image_url}
@@ -518,6 +534,7 @@ const EDITABLE_FIELDS: Array<{ key: string; label: string; face: boolean; body: 
 function PortraitStage({
   character, editableDesc, onFieldChange, imageUrl, imageId, isGenerating, prompt, onPromptChange,
   negativePrompt, onNegativePromptChange,
+  isFemale, loraBodyWeight, onBodyWeightChange, loraBubbleButt, onBubbleButtChange, loraBreastSize, onBreastSizeChange,
   onGenerate, onApprove, approvedPortraitUrl, approvedBodyUrl,
 }: {
   character: CharacterFromAPI;
@@ -530,6 +547,13 @@ function PortraitStage({
   onPromptChange: (p: string) => void;
   negativePrompt: string;
   onNegativePromptChange: (p: string) => void;
+  isFemale: boolean;
+  loraBodyWeight: number;
+  onBodyWeightChange: (v: number) => void;
+  loraBubbleButt: number;
+  onBubbleButtChange: (v: number) => void;
+  loraBreastSize: number;
+  onBreastSizeChange: (v: number) => void;
   onGenerate: (stage: "face" | "body") => void;
   onApprove: (type: "portrait" | "fullBody") => void;
   approvedPortraitUrl: string | null;
@@ -578,6 +602,51 @@ function PortraitStage({
               </div>
             ))}
           </div>
+
+          {/* Body shape LoRA sliders (female only) */}
+          {isFemale && (
+            <div className="space-y-2 pt-1">
+              <p className="text-[11px] text-muted-foreground font-medium">Body Shape LoRAs</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">
+                    Weight {loraBodyWeight > 0 ? loraBodyWeight.toFixed(1) : "off"}
+                  </label>
+                  <input
+                    type="range" min="0" max="3" step="0.1"
+                    value={loraBodyWeight}
+                    onChange={(e) => onBodyWeightChange(parseFloat(e.target.value))}
+                    className="w-full h-1.5 accent-purple-500"
+                    disabled={isGenerating}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">
+                    Butt {loraBubbleButt > 0 ? loraBubbleButt.toFixed(1) : "off"}
+                  </label>
+                  <input
+                    type="range" min="0" max="3" step="0.1"
+                    value={loraBubbleButt}
+                    onChange={(e) => onBubbleButtChange(parseFloat(e.target.value))}
+                    className="w-full h-1.5 accent-pink-500"
+                    disabled={isGenerating}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">
+                    Breasts {loraBreastSize > 0 ? loraBreastSize.toFixed(1) : "off"}
+                  </label>
+                  <input
+                    type="range" min="0" max="3" step="0.1"
+                    value={loraBreastSize}
+                    onChange={(e) => onBreastSizeChange(parseFloat(e.target.value))}
+                    className="w-full h-1.5 accent-rose-500"
+                    disabled={isGenerating}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Collapsible prompt preview */}
           <div>
