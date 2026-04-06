@@ -184,8 +184,8 @@ export function buildCharacterGenerationPayload(opts: {
   // CivitAI model 1823593, version 2063646. No trigger word needed.
   const loras = charData.gender === "female" ? [{
     filename: "Thick__Fit_Female_Wellness_Body_LoRA-000057.safetensors",
-    strengthModel: 0.7,
-    strengthClip: 0.7,
+    strengthModel: 0.8,
+    strengthClip: 0.8,
   }] : undefined;
 
   const workflow = buildWorkflow({
