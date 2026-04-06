@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enhancePromptForScene, convertProseToBooru } from "@no-safe-word/image-gen";
+import { enhancePromptForScene, convertProseToPrompt } from "@no-safe-word/image-gen";
 
 // POST /api/image-generator/enhance
 // Body: { prompt: string, nsfw?: boolean, format?: 'prose' | 'booru' }
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
 
     let enhancedPrompt: string;
     if (format === 'booru') {
-      enhancedPrompt = await convertProseToBooru(prompt, { nsfw: !!nsfw });
+      enhancedPrompt = await convertProseToPrompt(prompt, { nsfw: !!nsfw });
     } else {
       enhancedPrompt = await enhancePromptForScene(prompt, { nsfw: !!nsfw });
     }

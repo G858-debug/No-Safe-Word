@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
-import { buildPonyCharacterGenerationPayload } from "@/lib/server/pony-character-image";
+import { buildCharacterGenerationPayload } from "@/lib/server/character-image";
 
 type ImageType = "portrait" | "fullBody";
 type GenerationStage = "face" | "body";
@@ -82,8 +82,8 @@ export async function POST(
       console.warn("Failed to clean up old character images:", err);
     }
 
-    // 4. Build Pony CyberRealistic payload
-    const ponyPayload = buildPonyCharacterGenerationPayload({
+    // 4. Build character generation payload
+    const payload = buildCharacterGenerationPayload({
       character: {
         id: character.id,
         name: character.name,
@@ -97,22 +97,22 @@ export async function POST(
         : undefined,
     });
 
-    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
-    const { jobId } = await submitRunPodJob(ponyPayload.workflow, undefined, undefined, ponyEndpointId);
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+    const { jobId } = await submitRunPodJob(payload.workflow, undefined, undefined, endpointId);
 
     const { data: imageRow, error: imgError } = await supabase
       .from("images")
       .insert({
         character_id: character.id,
-        prompt: ponyPayload.positivePrompt,
-        negative_prompt: ponyPayload.negativePrompt,
+        prompt: payload.positivePrompt,
+        negative_prompt: payload.negativePrompt,
         settings: {
-          width: ponyPayload.width,
-          height: ponyPayload.height,
-          engine: "pony-cyberreal",
+          width: payload.width,
+          height: payload.height,
+          engine: "juggernaut-ragnarok",
           imageType,
           stage,
-          seed: ponyPayload.seed,
+          seed: payload.seed,
         },
         mode: "sfw",
       })
@@ -130,7 +130,7 @@ export async function POST(
       cost: 0,
     });
 
-    console.log(`[StoryPublisher] Pony ${stage} regeneration job: runpod-${jobId}, imageId: ${imageRow.id}`);
+    console.log(`[StoryPublisher] ${stage} regeneration job: runpod-${jobId}, imageId: ${imageRow.id}`);
 
     return NextResponse.json({
       jobId: `runpod-${jobId}`,

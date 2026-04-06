@@ -15,8 +15,8 @@ const STALE_THRESHOLDS: Record<string, number> = {
 };
 
 // Stages where we can auto-resume (pipeline functions are resumable)
-// generating_dataset + evaluating → runPonyPipeline (skips done images)
-// captioning + training (no pod) → resumePonyPipeline (re-packages + creates pod)
+// generating_dataset + evaluating → runTrainingPipeline (skips done images)
+// captioning + training (no pod) → resumeTrainingPipeline (re-packages + creates pod)
 const AUTO_RESUMABLE_STAGES = new Set(["generating_dataset", "evaluating", "captioning"]);
 
 // Statuses that are active pipeline stages (not terminal states)
@@ -75,7 +75,7 @@ async function buildCharacterInput(storyCharId: string): Promise<CharacterInput 
     portraitSeed: sc.approved_seed || 42,
     structuredData,
     pipelineType: "story_character",
-    imageEngine: "pony_cyberreal",
+    imageEngine: "juggernaut_ragnarok",
   };
 }
 
@@ -131,10 +131,10 @@ async function detectAndRecoverStale(lora: any, storyCharId: string): Promise<bo
       resumingLoras.add(lora.id);
       const useResumePipeline = lora.status === "captioning"
         || (lora.status === "training" && !lora.training_id);
-      console.log(`[LoRA Stale] Auto-resuming ${lora.id} via ${useResumePipeline ? "resumePonyPipeline" : "runPonyPipeline"} (was "${lora.status}" for ${ageMin}min)`);
+      console.log(`[LoRA Stale] Auto-resuming ${lora.id} via ${useResumePipeline ? "resumeTrainingPipeline" : "runTrainingPipeline"} (was "${lora.status}" for ${ageMin}min)`);
 
-      import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ runPonyPipeline, resumePonyPipeline }) => {
-        const fn = useResumePipeline ? resumePonyPipeline : runPonyPipeline;
+      import("@no-safe-word/image-gen/server/lora-trainer").then(({ runTrainingPipeline, resumeTrainingPipeline }) => {
+        const fn = useResumePipeline ? resumeTrainingPipeline : runTrainingPipeline;
         fn(charInput, lora.id, { supabase })
           .catch(err => console.error(`[LoRA Stale] Auto-resume failed:`, err))
           .finally(() => resumingLoras.delete(lora.id));
@@ -286,8 +286,8 @@ export async function GET(
           resumingLoras.add(lora.id);
           console.log(`[LoRA AutoRetry] LoRA ${lora.id} already trained (${lora.filename}). Re-running validation only.`);
 
-          import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ completePonyPipeline }) => {
-            completePonyPipeline(lora.id, { supabase })
+          import("@no-safe-word/image-gen/server/lora-trainer").then(({ completeTrainingPipeline }) => {
+            completeTrainingPipeline(lora.id, { supabase })
               .catch(err => console.error(`[LoRA AutoRetry] Validation retry failed:`, err))
               .finally(() => resumingLoras.delete(lora.id));
           }).catch(err => {
@@ -300,14 +300,14 @@ export async function GET(
             resumingLoras.add(lora.id);
             console.log(`[LoRA AutoRetry] Retrying ${lora.id} after transient failure (${Math.round(failedAge / 60_000)}min ago): ${lora.error.substring(0, 80)}`);
 
-            // Set back to captioning so resumePonyPipeline picks it up
+            // Set back to captioning so resumeTrainingPipeline picks it up
             await (supabase as any)
               .from("character_loras")
               .update({ status: "captioning", error: null, training_id: null, updated_at: new Date().toISOString() })
               .eq("id", lora.id);
 
-            import("@no-safe-word/image-gen/server/pony-lora-trainer").then(({ resumePonyPipeline }) => {
-              resumePonyPipeline(charInput, lora.id, { supabase })
+            import("@no-safe-word/image-gen/server/lora-trainer").then(({ resumeTrainingPipeline }) => {
+              resumeTrainingPipeline(charInput, lora.id, { supabase })
                 .catch(err => console.error(`[LoRA AutoRetry] Failed:`, err))
                 .finally(() => resumingLoras.delete(lora.id));
             }).catch(err => {

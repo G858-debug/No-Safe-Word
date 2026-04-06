@@ -1,4 +1,4 @@
-# Kohya LoRA Training Image for Pony V6 / CyberRealistic SDXL
+# Kohya LoRA Training Image for SDXL Character LoRAs (Juggernaut Ragnarok pipeline)
 #
 # Runs sdxl_train_network.py with Prodigy optimizer.
 # Receives config via env vars, downloads dataset + checkpoint,

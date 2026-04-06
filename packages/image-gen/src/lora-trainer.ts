@@ -1,24 +1,26 @@
 /**
- * Pony V6 Character LoRA Training Pipeline.
+ * SDXL Character LoRA Training Pipeline.
  *
  * Orchestrates: dataset generation → evaluation → captioning → packaging → Kohya training → validation.
  *
  * Training runs on RunPod GPU pods via Kohya sd-scripts (NOT serverless).
  * The orchestrator creates the pod and returns — the pod POSTs a webhook on completion,
- * which triggers validation and deployment via completePonyPipeline().
+ * which triggers validation and deployment via completeTrainingPipeline().
+ *
+ * See docs/skills/sdxl-character-lora-training/SKILL.md for the full two-pass training architecture.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import archiver from 'archiver';
 import { PassThrough } from 'stream';
 
-import { generatePonyDataset } from './pony-dataset-generator';
-import type { PonyDatasetCharacter } from './pony-dataset-generator';
-import { buildPonyQualityPrefix, buildPonyNegativePrompt } from './pony-prompt-builder';
-import { buildPonyWorkflow } from './pony-workflow-builder';
-import { selectTrainingSet, type TrainingImageEvaluation } from './pony-character-lora/training-image-evaluator';
-import { buildTrainingCaption, type CharacterIdentity } from './pony-character-lora/training-caption-builder';
-import { validatePonyLora, toPipelineValidationResult } from './pony-character-lora-validator';
+import { generateDataset } from './dataset-generator';
+import type { DatasetCharacter } from './dataset-generator';
+import { buildQualityPrefix, buildNegativePrompt } from './prompt-builder';
+import { buildWorkflow } from './workflow-builder';
+import { selectTrainingSet, type TrainingImageEvaluation } from './character-lora/training-image-evaluator';
+import { buildTrainingCaption, type CharacterIdentity } from './character-lora/training-caption-builder';
+import { validateLora, toPipelineValidationResult } from './character-lora-validator';
 import { createTrainingPod, terminateTrainingPod } from './runpod-pods';
 import { anthropicCreateWithRetry } from './anthropic-retry';
 import { imageUrlToBase64, submitRunPodJob, waitForRunPodResult } from './runpod';
@@ -27,30 +29,32 @@ import { PIPELINE_CONFIG } from './character-lora/types';
 
 // ── Existing exports (keep) ──
 
-export interface PonyLoraTrainingConfig {
+export interface LoraTrainingConfig {
   characterId: string;
   triggerWord: string;
-  baseModel: 'ponyDiffusionV6XL' | 'CyberRealistic_PonySemi_V4.5';
+  baseModel: 'sdxl_base_1.0';
   networkDim: number;
   networkAlpha: number;
   epochs: number;
   noiseOffset: number;
   resolution: number;
   clipSkip: number;
+  saveEveryNEpochs: number;
 }
 
-export function getRecommendedTrainingConfig(characterName: string): PonyLoraTrainingConfig {
+export function getRecommendedTrainingConfig(characterName: string): LoraTrainingConfig {
   const trigger = characterName.toLowerCase().replace(/\s+/g, '_') + '_nsw';
   return {
     characterId: '',
     triggerWord: trigger,
-    baseModel: 'CyberRealistic_PonySemi_V4.5',
-    networkDim: 8,
-    networkAlpha: 8,
+    baseModel: 'sdxl_base_1.0',
+    networkDim: 32,
+    networkAlpha: 16,
     epochs: 12,
     noiseOffset: 0.03,
     resolution: 1024,
-    clipSkip: 2,
+    clipSkip: 1,
+    saveEveryNEpochs: 2,
   };
 }
 
@@ -87,7 +91,7 @@ export interface PipelineDeps {
   supabase: any;
 }
 
-const KOHYA_DOCKER_IMAGE = process.env.KOHYA_TRAINER_IMAGE || 'ghcr.io/g858-debug/nsw-kohya-trainer:v4';
+const KOHYA_DOCKER_IMAGE = process.env.KOHYA_TRAINER_IMAGE || 'ghcr.io/g858-debug/nsw-kohya-trainer:v5-ragnarok';
 const DATASET_BUCKET = 'lora-training-datasets';
 const IMAGES_BUCKET = 'story-images';
 
@@ -112,14 +116,14 @@ async function setLoraError(loraId: string, error: string, deps: PipelineDeps): 
 // ── Main Pipeline ──
 
 /**
- * Run the Pony LoRA training pipeline (stages 1-6).
+ * Run the LoRA training pipeline (stages 1-6).
  *
  * Called fire-and-forget from the train-lora route. Stages 1-3 run synchronously
  * in this process. Stage 3 pauses the pipeline for human approval. After approval,
- * resumePonyPipeline() continues from stage 4. Stage 6 creates the training pod
- * and returns — the pod webhook triggers completePonyPipeline() for validation.
+ * resumeTrainingPipeline() continues from stage 4. Stage 6 creates the training pod
+ * and returns — the pod webhook triggers completeTrainingPipeline() for validation.
  */
-export async function runPonyPipeline(
+export async function runTrainingPipeline(
   character: CharacterInput,
   loraId: string,
   deps: PipelineDeps,
@@ -136,28 +140,28 @@ export async function runPonyPipeline(
   const currentStatus = (currentLora as any)?.status || 'pending';
 
   const isResume = currentStatus !== 'pending';
-  console.log(`[PonyPipeline] ${isResume ? 'Resuming' : 'Starting'} for ${character.characterName} (loraId: ${loraId}, status: ${currentStatus}, trigger: ${config.triggerWord})`);
+  console.log(`[LoRAPipeline] ${isResume ? 'Resuming' : 'Starting'} for ${character.characterName} (loraId: ${loraId}, status: ${currentStatus}, trigger: ${config.triggerWord})`);
 
   try {
     // ── Stage 1: Generate dataset (resumable — skips existing images) ──
     if (['pending', 'generating_dataset'].includes(currentStatus)) {
       await setLoraStatus(loraId, 'generating_dataset', {}, deps);
-      console.log(`[PonyPipeline] Stage 1: Generating dataset...`);
+      console.log(`[LoRAPipeline] Stage 1: Generating dataset...`);
 
-      const datasetResult = await generatePonyDataset(character, loraId, deps);
-      console.log(`[PonyPipeline] Generated ${datasetResult.totalGenerated} images, ${datasetResult.failedPrompts.length} failed`);
+      const datasetResult = await generateDataset(character, loraId, deps);
+      console.log(`[LoRAPipeline] Generated ${datasetResult.totalGenerated} images, ${datasetResult.failedPrompts.length} failed`);
 
       await setLoraStatus(loraId, 'generating_dataset', {
         dataset_size: datasetResult.totalGenerated,
       }, deps);
     } else {
-      console.log(`[PonyPipeline] Skipping Stage 1 (already at ${currentStatus})`);
+      console.log(`[LoRAPipeline] Skipping Stage 1 (already at ${currentStatus})`);
     }
 
     // ── Stage 2: Evaluate images (resumable — only evaluates pending images) ──
     if (['pending', 'generating_dataset', 'evaluating'].includes(currentStatus)) {
       await setLoraStatus(loraId, 'evaluating', {}, deps);
-      console.log(`[PonyPipeline] Stage 2: Evaluating dataset images...`);
+      console.log(`[LoRAPipeline] Stage 2: Evaluating dataset images...`);
 
       let evaluations = await evaluateDatasetImages(loraId, character, deps);
 
@@ -172,11 +176,11 @@ export async function runPonyPipeline(
       }
 
       const initialPassed = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
-      console.log(`[PonyPipeline] Initial evaluation: ${initialPassed}/${evaluations.length} passed`);
+      console.log(`[LoRAPipeline] Initial evaluation: ${initialPassed}/${evaluations.length} passed`);
 
       // Retry failed images with improved prompts (up to 3 rounds)
       if (initialPassed < PIPELINE_CONFIG.targetPassedImages) {
-        console.log(`[PonyPipeline] Need ${PIPELINE_CONFIG.targetPassedImages}, have ${initialPassed}. Retrying failed images with improved prompts...`);
+        console.log(`[LoRAPipeline] Need ${PIPELINE_CONFIG.targetPassedImages}, have ${initialPassed}. Retrying failed images with improved prompts...`);
         const retryEvals = await retryFailedImages(loraId, character, deps);
         evaluations = evaluations.concat(retryEvals);
       }
@@ -185,12 +189,12 @@ export async function runPonyPipeline(
       const allPassingEvals = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore);
       const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
 
-      console.log(`[PonyPipeline] Final: ${selected.length} selected, ${rejected.length} rejected (after retries)`);
+      console.log(`[LoRAPipeline] Final: ${selected.length} selected, ${rejected.length} rejected (after retries)`);
       if (warnings.length > 0) {
-        console.warn(`[PonyPipeline] Warnings: ${warnings.join('; ')}`);
+        console.warn(`[LoRAPipeline] Warnings: ${warnings.join('; ')}`);
       }
       if (!diversityCoverage.met) {
-        console.warn(`[PonyPipeline] Missing diversity: ${diversityCoverage.missing.join(', ')}`);
+        console.warn(`[LoRAPipeline] Missing diversity: ${diversityCoverage.missing.join(', ')}`);
       }
 
       // Update eval_status for final selection
@@ -219,15 +223,15 @@ export async function runPonyPipeline(
 
       // ── Stage 3: Await human approval ──
       await setLoraStatus(loraId, 'awaiting_dataset_approval', {}, deps);
-      console.log(`[PonyPipeline] Stage 3: Pausing for human dataset approval. ${selected.length} images ready for review.`);
+      console.log(`[LoRAPipeline] Stage 3: Pausing for human dataset approval. ${selected.length} images ready for review.`);
     } else {
-      console.log(`[PonyPipeline] Skipping Stages 2-3 (already at ${currentStatus})`);
+      console.log(`[LoRAPipeline] Skipping Stages 2-3 (already at ${currentStatus})`);
     }
     // Pipeline STOPS here. Human uses the approve-dataset route, then
     // calls resume-training to continue from stage 4.
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[PonyPipeline] Failed: ${msg}`);
+    console.error(`[LoRAPipeline] Failed: ${msg}`);
     await setLoraError(loraId, msg, deps);
   }
 }
@@ -236,7 +240,7 @@ export async function runPonyPipeline(
  * Resume the pipeline after human dataset approval (stages 4-6).
  * Called by the resume-training API route.
  */
-export async function resumePonyPipeline(
+export async function resumeTrainingPipeline(
   character: CharacterInput,
   loraId: string,
   deps: PipelineDeps,
@@ -252,33 +256,33 @@ export async function resumePonyPipeline(
     .single();
   const currentStatus = (currentLora as any)?.status || 'captioning';
 
-  console.log(`[PonyPipeline] Resuming for ${character.characterName} (status: ${currentStatus})`);
+  console.log(`[LoRAPipeline] Resuming for ${character.characterName} (status: ${currentStatus})`);
 
   try {
     // ── Stage 4: Caption images (resumable — only captions images with null caption) ──
     if (['awaiting_dataset_approval', 'captioning', 'failed'].includes(currentStatus)) {
       await setLoraStatus(loraId, 'captioning', {}, deps);
-      console.log(`[PonyPipeline] Stage 4: Captioning approved images...`);
+      console.log(`[LoRAPipeline] Stage 4: Captioning approved images...`);
       await captionApprovedImages(loraId, character, config, deps);
     } else {
-      console.log(`[PonyPipeline] Skipping Stage 4 (already at ${currentStatus})`);
+      console.log(`[LoRAPipeline] Skipping Stage 4 (already at ${currentStatus})`);
     }
 
     // ── Stage 5: Package dataset ──
-    console.log(`[PonyPipeline] Stage 5: Packaging dataset...`);
+    console.log(`[LoRAPipeline] Stage 5: Packaging dataset...`);
 
     const datasetUrl = await packageDataset(loraId, deps);
-    console.log(`[PonyPipeline] Dataset packaged: ${datasetUrl}`);
+    console.log(`[LoRAPipeline] Dataset packaged: ${datasetUrl}`);
 
     // ── Stage 6: Create training pod ──
     await setLoraStatus(loraId, 'training', {}, deps);
-    console.log(`[PonyPipeline] Stage 6: Creating training pod...`);
+    console.log(`[LoRAPipeline] Stage 6: Creating training pod...`);
 
     await createTrainingPodForLora(loraId, config, datasetUrl, deps);
-    console.log(`[PonyPipeline] Training pod created. Pipeline will resume via webhook.`);
+    console.log(`[LoRAPipeline] Training pod created. Pipeline will resume via webhook.`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[PonyPipeline] Resume failed: ${msg}`);
+    console.error(`[LoRAPipeline] Resume failed: ${msg}`);
     await setLoraError(loraId, msg, deps);
   }
 }
@@ -287,11 +291,11 @@ export async function resumePonyPipeline(
  * Complete the pipeline after training pod finishes (stages 7-8).
  * Called by the lora-training-webhook route.
  */
-export async function completePonyPipeline(
+export async function completeTrainingPipeline(
   loraId: string,
   deps: PipelineDeps,
 ): Promise<void> {
-  console.log(`[PonyPipeline] Completing pipeline for loraId: ${loraId}`);
+  console.log(`[LoRAPipeline] Completing pipeline for loraId: ${loraId}`);
 
   try {
     // Fetch the LoRA record
@@ -348,7 +352,7 @@ export async function completePonyPipeline(
     if (loraStorageUrl && !loraStorageUrl.startsWith('https://')) {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       loraStorageUrl = `${supabaseUrl}/storage/v1/object/public/lora-training-datasets/${lora.storage_path}`;
-      console.log(`[PonyPipeline] Normalized storage URL from path: ${loraStorageUrl}`);
+      console.log(`[LoRAPipeline] Normalized storage URL from path: ${loraStorageUrl}`);
     }
     if (!loraStorageUrl) {
       throw new Error(`LoRA "${lora.filename}" has no download URL. Re-upload the trained file.`);
@@ -356,10 +360,10 @@ export async function completePonyPipeline(
 
     // ── Stage 7: Validate ──
     await setLoraStatus(loraId, 'validating', {}, deps);
-    console.log(`[PonyPipeline] Stage 7: Validating trained LoRA...`);
+    console.log(`[LoRAPipeline] Stage 7: Validating trained LoRA...`);
 
     const desc = storyChar.characters?.description as Record<string, string> || {};
-    const validationResult = await validatePonyLora(
+    const validationResult = await validateLora(
       { gender: desc.gender || 'female', approvedImageUrl: approvedUrl },
       lora.filename,
       loraStorageUrl,
@@ -376,11 +380,11 @@ export async function completePonyPipeline(
         validation_score: pipelineResult.averageFaceScore,
         deployed_at: new Date().toISOString(),
       }, deps);
-      console.log(`[PonyPipeline] LoRA deployed! Score: ${pipelineResult.averageFaceScore.toFixed(1)}`);
+      console.log(`[LoRAPipeline] LoRA deployed! Score: ${pipelineResult.averageFaceScore.toFixed(1)}`);
     } else {
       const attempts = (lora.training_attempts || 0) + 1;
       if (attempts < PIPELINE_CONFIG.maxTrainingAttempts) {
-        console.warn(`[PonyPipeline] Validation failed (attempt ${attempts}/${PIPELINE_CONFIG.maxTrainingAttempts}). Will retry.`);
+        console.warn(`[LoRAPipeline] Validation failed (attempt ${attempts}/${PIPELINE_CONFIG.maxTrainingAttempts}). Will retry.`);
         await setLoraStatus(loraId, 'failed', {
           validation_score: pipelineResult.averageFaceScore,
           training_attempts: attempts,
@@ -392,12 +396,12 @@ export async function completePonyPipeline(
           training_attempts: attempts,
           error: `Validation failed after ${attempts} attempts. Avg score: ${pipelineResult.averageFaceScore.toFixed(1)}`,
         }, deps);
-        console.error(`[PonyPipeline] Validation failed after max attempts.`);
+        console.error(`[LoRAPipeline] Validation failed after max attempts.`);
       }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[PonyPipeline] Completion failed: ${msg}`);
+    console.error(`[LoRAPipeline] Completion failed: ${msg}`);
     await setLoraError(loraId, msg, deps);
   }
 }
@@ -426,7 +430,7 @@ async function evaluateDatasetImages(
   try {
     referenceBase64 = await imageUrlToBase64(character.approvedImageUrl);
   } catch {
-    console.warn('[PonyPipeline] Could not fetch reference image for evaluation');
+    console.warn('[LoRAPipeline] Could not fetch reference image for evaluation');
   }
 
   const anthropic = new Anthropic();
@@ -473,7 +477,7 @@ async function evaluateDatasetImages(
       }
     }
 
-    console.log(`[PonyPipeline] Evaluated ${Math.min(i + concurrency, images.length)}/${images.length}`);
+    console.log(`[LoRAPipeline] Evaluated ${Math.min(i + concurrency, images.length)}/${images.length}`);
 
     // Heartbeat: update timestamp so stale detection knows we're alive
     await deps.supabase
@@ -498,8 +502,8 @@ async function retryFailedImages(
   character: CharacterInput,
   deps: PipelineDeps,
 ): Promise<TrainingImageEvaluation[]> {
-  const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
-  if (!ponyEndpointId) return [];
+  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
+  if (!endpointId) return [];
 
   const anthropic = new Anthropic();
   let referenceBase64: string | null = null;
@@ -518,7 +522,7 @@ async function retryFailedImages(
       .eq('eval_status', 'failed');
 
     if (!failedImages || failedImages.length === 0) {
-      console.log(`[PonyPipeline] Retry round ${round}: no failed images left`);
+      console.log(`[LoRAPipeline] Retry round ${round}: no failed images left`);
       break;
     }
 
@@ -530,11 +534,11 @@ async function retryFailedImages(
       .eq('eval_status', 'passed');
 
     if ((passedCount || 0) >= PIPELINE_CONFIG.targetPassedImages) {
-      console.log(`[PonyPipeline] Retry round ${round}: already have ${passedCount} passed images, stopping`);
+      console.log(`[LoRAPipeline] Retry round ${round}: already have ${passedCount} passed images, stopping`);
       break;
     }
 
-    console.log(`[PonyPipeline] Retry round ${round}/${MAX_RETRY_ROUNDS}: ${failedImages.length} failed images to retry`);
+    console.log(`[LoRAPipeline] Retry round ${round}/${MAX_RETRY_ROUNDS}: ${failedImages.length} failed images to retry`);
 
     for (const failedImg of failedImages) {
       const evalDetails = failedImg.eval_details as {
@@ -561,12 +565,12 @@ async function retryFailedImages(
 
         if (!improvedPrompt || improvedPrompt === originalPrompt) continue;
 
-        console.log(`[PonyPipeline] Retry ${failedImg.id}: improved prompt for ${failedImg.category}`);
+        console.log(`[LoRAPipeline] Retry ${failedImg.id}: improved prompt for ${failedImg.category}`);
 
         // Regenerate with improved prompt
         const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
-        const qualityPrefix = buildPonyQualityPrefix('sfw');
-        const negativePrompt = buildPonyNegativePrompt('sfw');
+        const qualityPrefix = buildQualityPrefix('sfw');
+        const negativePrompt = buildNegativePrompt('sfw');
         const positivePrompt = `${qualityPrefix}, ${improvedPrompt}`;
 
         // Dimensions based on category
@@ -574,7 +578,7 @@ async function retryFailedImages(
           ? { width: 1024, height: 1024 }
           : { width: 832, height: 1216 };
 
-        const workflow = buildPonyWorkflow({
+        const workflow = buildWorkflow({
           positivePrompt,
           negativePrompt,
           ...dims,
@@ -582,8 +586,8 @@ async function retryFailedImages(
           filenamePrefix: `dataset_retry_${failedImg.id}`,
         });
 
-        const { jobId } = await submitRunPodJob(workflow, undefined, undefined, ponyEndpointId);
-        const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, ponyEndpointId);
+        const { jobId } = await submitRunPodJob(workflow, undefined, undefined, endpointId);
+        const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, endpointId);
 
         // Upload replacement image
         const imageBuffer = Buffer.from(imageBase64, 'base64');
@@ -594,7 +598,7 @@ async function retryFailedImages(
           .upload(storagePath, imageBuffer, { contentType: 'image/png', upsert: true });
 
         if (uploadError) {
-          console.warn(`[PonyPipeline] Upload failed for retry: ${uploadError.message}`);
+          console.warn(`[LoRAPipeline] Upload failed for retry: ${uploadError.message}`);
           continue;
         }
 
@@ -640,15 +644,15 @@ async function retryFailedImages(
 
         if (passed) {
           newEvaluations.push(evaluation);
-          console.log(`[PonyPipeline] Retry SUCCESS: ${failedImg.id} now scores ${score} (was ${failedImg.eval_score})`);
+          console.log(`[LoRAPipeline] Retry SUCCESS: ${failedImg.id} now scores ${score} (was ${failedImg.eval_score})`);
         } else {
-          console.log(`[PonyPipeline] Retry round ${round}: ${failedImg.id} still failing (score ${score}, issues: ${newIssues.join(', ')})`);
+          console.log(`[LoRAPipeline] Retry round ${round}: ${failedImg.id} still failing (score ${score}, issues: ${newIssues.join(', ')})`);
         }
 
         // Small delay between retries
         await new Promise(r => setTimeout(r, 1000));
       } catch (err) {
-        console.warn(`[PonyPipeline] Retry failed for ${failedImg.id}: ${err}`);
+        console.warn(`[LoRAPipeline] Retry failed for ${failedImg.id}: ${err}`);
       }
     }
   }
@@ -805,7 +809,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     const parsed = JSON.parse(jsonMatch[0]);
     return { imageId: img.id, ...parsed } as TrainingImageEvaluation;
   } catch (err) {
-    console.warn(`[PonyPipeline] Eval failed for ${img.id}: ${err}`);
+    console.warn(`[LoRAPipeline] Eval failed for ${img.id}: ${err}`);
     return makeFailingEvaluation(img.id);
   }
 }
@@ -834,7 +838,7 @@ function makeFailingEvaluation(imageId: string): TrainingImageEvaluation {
 async function captionApprovedImages(
   loraId: string,
   character: CharacterInput,
-  config: PonyLoraTrainingConfig,
+  config: LoraTrainingConfig,
   deps: PipelineDeps,
 ): Promise<void> {
   const { data: images } = await deps.supabase
@@ -845,7 +849,7 @@ async function captionApprovedImages(
     .is('caption', null);
 
   if (!images || images.length === 0) {
-    console.log('[PonyPipeline] No images need captioning');
+    console.log('[LoRAPipeline] No images need captioning');
     return;
   }
 
@@ -886,7 +890,7 @@ async function captionApprovedImages(
         .update({ caption })
         .eq('id', img.id);
 
-      console.log(`[PonyPipeline] Captioned ${img.id}: ${caption.substring(0, 60)}...`);
+      console.log(`[LoRAPipeline] Captioned ${img.id}: ${caption.substring(0, 60)}...`);
 
       // Heartbeat every 3 images
       const idx = images.indexOf(img);
@@ -897,7 +901,7 @@ async function captionApprovedImages(
           .eq('id', loraId);
       }
     } catch (err) {
-      console.warn(`[PonyPipeline] Caption failed for ${img.id}: ${err}`);
+      console.warn(`[LoRAPipeline] Caption failed for ${img.id}: ${err}`);
     }
   }
 }
@@ -928,7 +932,7 @@ async function packageDataset(loraId: string, deps: PipelineDeps): Promise<strin
       const buffer = Buffer.from(await resp.arrayBuffer());
       entries.push({ index: i, buffer, caption: img.caption });
     } catch (err) {
-      console.warn(`[PonyPipeline] Failed to download ${img.id}: ${err}`);
+      console.warn(`[LoRAPipeline] Failed to download ${img.id}: ${err}`);
     }
   }
 
@@ -958,7 +962,7 @@ async function packageDataset(loraId: string, deps: PipelineDeps): Promise<strin
   });
 
   // Upload to Supabase Storage
-  const storagePath = `pony/${loraId}.tar.gz`;
+  const storagePath = `datasets/${loraId}.tar.gz`;
   const { error: uploadErr } = await deps.supabase.storage
     .from(DATASET_BUCKET)
     .upload(storagePath, tarBuffer, {
@@ -979,7 +983,7 @@ async function packageDataset(loraId: string, deps: PipelineDeps): Promise<strin
     throw new Error(`Failed to create signed URL: ${signErr?.message}`);
   }
 
-  console.log(`[PonyPipeline] Dataset: ${entries.length} images, ${(tarBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+  console.log(`[LoRAPipeline] Dataset: ${entries.length} images, ${(tarBuffer.length / 1024 / 1024).toFixed(1)}MB`);
   return signedData.signedUrl;
 }
 
@@ -988,7 +992,7 @@ async function packageDataset(loraId: string, deps: PipelineDeps): Promise<strin
  */
 async function createTrainingPodForLora(
   loraId: string,
-  config: PonyLoraTrainingConfig,
+  config: LoraTrainingConfig,
   datasetUrl: string,
   deps: PipelineDeps,
 ): Promise<void> {
@@ -1012,7 +1016,8 @@ async function createTrainingPodForLora(
     dockerImage: KOHYA_DOCKER_IMAGE,
     env: {
       DATASET_URL: datasetUrl,
-      CHECKPOINT_PATH: '/tmp/models/CyberRealistic_PonySemi_V4.5.safetensors',
+      CHECKPOINT_PATH: '/workspace/models/checkpoints/sd_xl_base_1.0.safetensors',
+      CHECKPOINT_FALLBACK_URL: 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors',
       CIVITAI_API_KEY: process.env.CIVITAI_API_KEY || '',
       TRIGGER_WORD: config.triggerWord,
       LORA_ID: loraId,
@@ -1026,6 +1031,7 @@ async function createTrainingPodForLora(
         noiseOffset: config.noiseOffset,
         resolution: config.resolution,
         clipSkip: config.clipSkip,
+        saveEveryNEpochs: config.saveEveryNEpochs,
       }),
     },
   });
@@ -1050,5 +1056,5 @@ async function createTrainingPodForLora(
     })
     .eq('id', loraId);
 
-  console.log(`[PonyPipeline] Training pod created: ${podId}`);
+  console.log(`[LoRAPipeline] Training pod created: ${podId}`);
 }

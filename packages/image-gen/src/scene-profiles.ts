@@ -37,14 +37,13 @@ const SOLO_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
 
 const DUAL_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
   charLoraStrength: 0.75,
-  cfg: 6.5,
+  cfg: 5.0,
   steps: 35,
   regionalOverlap: 64,
   regionalStrength: 1.0,
-  loraOverrides: {
-    'pony-detail-slider.safetensors': 2.5,
-    'pony-skin-tone-slider.safetensors': 2.5,
-  },
+  // Style LoRA overrides removed — Juggernaut Ragnarok uses no style LoRAs.
+  // Only character LoRAs are injected at inference time.
+  loraOverrides: {},
 };
 
 // ── Profile Resolution ──

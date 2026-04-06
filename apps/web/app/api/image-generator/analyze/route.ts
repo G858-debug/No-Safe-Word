@@ -49,7 +49,7 @@ Return ONLY a JSON array of selected LoRAs (empty array if none are useful). Max
 const STYLE_CHECKPOINTS: Record<string, { name: string; modelId: number; versionId: number }> = {
   realistic: { name: "Juggernaut XL", modelId: 133005, versionId: 357609 },
   anime: { name: "Pony Diffusion V6 XL", modelId: 257749, versionId: 290640 },
-  "semi-realistic": { name: "CyberRealistic Pony", modelId: 443821, versionId: 722049 },
+  "semi-realistic": { name: "Juggernaut XL Ragnarok", modelId: 133005, versionId: 357609 },
   illustration: { name: "DreamShaper XL", modelId: 112902, versionId: 351306 },
 };
 

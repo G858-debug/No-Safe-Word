@@ -1,52 +1,50 @@
 /**
- * Failure-aware tag rewriter for the evaluate-and-retry pipeline.
+ * Failure-aware prompt rewriter for the evaluate-and-retry pipeline.
  *
- * Unlike convertProseToBooru (initial conversion), this takes the failure
- * diagnosis as context and specifically fixes what went wrong without
- * undoing what worked.
+ * Takes the failure diagnosis as context and specifically fixes what went wrong
+ * in the generation prompt without undoing what worked.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const REWRITE_SYSTEM_BASE = `You are a booru tag specialist fixing AI image generation tags that produced a wrong result.
+const REWRITE_SYSTEM_BASE = `You are an image generation prompt specialist fixing prompts that produced a wrong result for Juggernaut XL Ragnarok (a photorealistic SDXL model).
 
 You are given:
 1. The original scene description (what the image should show)
-2. The current booru tags (what was used to generate the failed image)
+2. The current prompt (what was used to generate the failed image)
 3. Specific failure analysis (what went wrong)
 
-Your job: Rewrite the booru tags to fix the identified failures while preserving everything that worked.
+Your job: Rewrite the prompt to fix the identified failures while preserving everything that worked.
 
 Rules:
-- Output ONLY comma-separated booru tags, nothing else
-- Keep tags that are working well (don't change what's not broken)
-- Add or strengthen tags for the failing dimensions
-- Move important tags earlier in the list (earlier = more weight in CLIP)
-- Do NOT include quality tags (score_9, etc.) — added separately
-- Do NOT include rating tags (rating_safe, etc.) — added separately
-- Do NOT include character identity tags (skin color, hair, body shape) — handled by LoRA
-- Do NOT include character count tags (1girl, 1boy) — added separately
-- Use booru-style comma-separated tags, not prose sentences`;
+- Output ONLY the rewritten prompt, nothing else
+- Keep elements that are working well (don't change what's not broken)
+- Add or strengthen descriptors for the failing dimensions
+- Place the most important elements early (earlier = more weight in CLIP)
+- Stay under 75 tokens total
+- Do NOT include quality tags (photograph, cinematic, etc.) — added separately
+- Do NOT include character identity (skin color, hair, body shape) — handled by LoRA`;
 
 function buildRewriteSystem(contentMode: 'sfw' | 'nsfw'): string {
   if (contentMode === 'nsfw') {
     return `${REWRITE_SYSTEM_BASE}
 
-This is an EXPLICIT NSFW scene. You MUST output explicit sexual content tags without sanitizing.
-- Nude characters need: nude, naked, topless, bare breasts, no clothes, exposed skin
-- Explicit sex acts need anatomical position tags: penetration, sex, specific body positions, who is on top, leg positions
+This is an EXPLICIT NSFW scene. You MUST output explicit content without sanitizing.
+- Nude characters need explicit descriptors: nude, naked, topless, bare breasts, no clothes
+- Explicit acts need anatomical positioning: specific body positions, who is on top, leg positions
 - Do NOT clothe characters that should be nude
 - Do NOT replace explicit acts with euphemisms
-- The model REQUIRES these exact explicit tags to render the scene correctly`;
+- The model REQUIRES specific content descriptors to render the scene correctly`;
   }
   return `${REWRITE_SYSTEM_BASE}
 
-This is a SFW scene. Do not include nudity or explicit sexual content tags.`;
+This is a SFW scene. Do not include nudity or explicit content.
+CRITICAL: Always include specific clothing descriptions — the model defaults toward nudity without them.`;
 }
 
 /**
- * Rewrite booru tags based on evaluation failures.
- * Uses Haiku for attempts 4, Sonnet for attempts 5-6.
+ * Rewrite a prompt based on evaluation failures.
+ * Uses Haiku for attempt 4, Sonnet for attempts 5-6.
  */
 export async function rewriteTagsForFailure(
   originalProse: string,
@@ -66,7 +64,7 @@ export async function rewriteTagsForFailure(
 
     const userMessage =
       `ORIGINAL SCENE:\n${originalProse}\n\n` +
-      `CURRENT TAGS (produced wrong result):\n${currentTags}\n\n` +
+      `CURRENT PROMPT (produced wrong result):\n${currentTags}\n\n` +
       `FAILURE ANALYSIS:\n${rewriteInstructions}`;
 
     const response = await anthropic.messages.create({
@@ -82,7 +80,7 @@ export async function rewriteTagsForFailure(
       return currentTags;
     }
 
-    console.log(`[TagRewriter] Rewrote tags using ${model}`);
+    console.log(`[TagRewriter] Rewrote prompt using ${model}`);
     return text;
   } catch (err) {
     console.error('[TagRewriter] Rewrite failed:', err instanceof Error ? err.message : err);

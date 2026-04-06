@@ -174,7 +174,7 @@ export interface CharacterInput {
   pipelineType: PipelineType;
   /** Image engine — controls dataset generation and validation routing.
    *  undefined = default Flux/Kontext pipeline. */
-  imageEngine?: 'pony_cyberreal';
+  imageEngine?: 'juggernaut_ragnarok';
 }
 
 // ── Stage Results ───────────────────────────────────────────────

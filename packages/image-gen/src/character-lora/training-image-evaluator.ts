@@ -1,7 +1,7 @@
 /**
- * Training Image Evaluator for Pony V6 Character LoRAs.
+ * Training Image Evaluator for SDXL Character LoRAs.
  *
- * IMPORTANT: Read docs/skills/pony-lora-training/SKILL.md before modifying this file.
+ * IMPORTANT: Read docs/skills/sdxl-character-lora-training/SKILL.md before modifying this file.
  *
  * This module provides evaluation criteria for curating character LoRA training datasets.
  * It is used during the dataset generation → curation pipeline to score and filter

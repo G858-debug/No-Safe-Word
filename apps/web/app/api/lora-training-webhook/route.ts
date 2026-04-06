@@ -3,9 +3,9 @@ import { supabase } from '@no-safe-word/story-engine';
 import { terminateTrainingPod } from '@no-safe-word/image-gen/runpod-pods';
 
 // Lazy import to avoid pulling in heavy deps at module level
-async function getCompletePonyPipeline() {
-  const { completePonyPipeline } = await import('@no-safe-word/image-gen/server/pony-lora-trainer');
-  return completePonyPipeline;
+async function getCompleteTrainingPipeline() {
+  const { completeTrainingPipeline } = await import('@no-safe-word/image-gen/server/lora-trainer');
+  return completeTrainingPipeline;
 }
 
 /**
@@ -96,8 +96,8 @@ export async function POST(request: NextRequest) {
     console.log(`[TrainingWebhook] Training complete. Starting validation for ${loraId}`);
 
     // Fire-and-forget: run validation + deployment
-    getCompletePonyPipeline().then(completePonyPipeline => {
-      void completePonyPipeline(loraId, { supabase }).catch(err => {
+    getCompleteTrainingPipeline().then(completeTrainingPipeline => {
+      void completeTrainingPipeline(loraId, { supabase }).catch(err => {
         console.error(`[TrainingWebhook] Pipeline completion error:`, err);
       });
     });

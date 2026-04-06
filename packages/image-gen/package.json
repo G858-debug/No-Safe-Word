@@ -8,9 +8,9 @@
     ".": "./src/index.ts",
     "./runpod": "./src/runpod.ts",
     "./runpod-pods": "./src/runpod-pods.ts",
-    "./server/pony-lora-trainer": "./src/pony-lora-trainer.ts",
-    "./server/pony-character-lora/training-image-evaluator": "./src/pony-character-lora/training-image-evaluator.ts",
-    "./server/pony-character-lora/training-caption-builder": "./src/pony-character-lora/training-caption-builder.ts"
+    "./server/lora-trainer": "./src/lora-trainer.ts",
+    "./server/character-lora/training-image-evaluator": "./src/character-lora/training-image-evaluator.ts",
+    "./server/character-lora/training-caption-builder": "./src/character-lora/training-caption-builder.ts"
   },
   "scripts": {
     "lint": "eslint . --ext .ts,.tsx"

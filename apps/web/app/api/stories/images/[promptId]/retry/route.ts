@@ -68,7 +68,7 @@ export async function POST(
     );
     const characterDataMap = await fetchCharacterDataMap(characterIds);
 
-    // 4. Build V4 Pony generation payload with new seed + optional overrides
+    // 4. Build V4 generation payload with new seed + optional overrides
     const result = await buildV4SceneGenerationPayload({
       imgPrompt,
       seriesId: post.series_id,
@@ -78,13 +78,13 @@ export async function POST(
       overrideTags,
     });
 
-    // 5. Submit to RunPod (Pony endpoint)
-    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+    // 5. Submit to RunPod
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
     const { jobId: runpodJobId } = await submitRunPodJob(
       result.workflow,
       result.images.length > 0 ? result.images : undefined,
       result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
-      ponyEndpointId,
+      endpointId,
     );
 
     const newJobId = `runpod-${runpodJobId}`;
@@ -107,7 +107,7 @@ export async function POST(
             steps: result.profile.steps,
             cfg: result.profile.cfg,
             seed: newSeed,
-            engine: "runpod-v4-pony-cyberreal",
+            engine: "runpod-v4-juggernaut-ragnarok",
             attemptNumber: attemptNumber || 1,
           },
         })
@@ -115,7 +115,7 @@ export async function POST(
     }
 
     console.log(
-      `[Retry/Pony][${promptId}] Attempt ${attemptNumber || '?'}: ` +
+      `[Retry][${promptId}] Attempt ${attemptNumber || '?'}: ` +
       `seed=${newSeed}, job=${newJobId}` +
       (profileOverrides ? `, overrides=${JSON.stringify(profileOverrides)}` : '') +
       (overrideTags ? ', tags=rewritten' : ''),

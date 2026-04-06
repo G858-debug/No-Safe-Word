@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kohya LoRA Training Entrypoint for Pony V6 / CyberRealistic Pony.
+SDXL Character LoRA Training Entrypoint.
 
 Runs inside a RunPod GPU pod. Receives all configuration via environment variables.
 Downloads dataset, runs Kohya sdxl_train_network.py, uploads trained LoRA,
@@ -32,7 +32,11 @@ import requests
 DATASET_URL = os.environ.get("DATASET_URL")
 CHECKPOINT_PATH = os.environ.get(
     "CHECKPOINT_PATH",
-    "/workspace/models/checkpoints/CyberRealistic_PonySemi_V4.5.safetensors",
+    "/workspace/models/checkpoints/sd_xl_base_1.0.safetensors",
+)
+CHECKPOINT_FALLBACK_URL = os.environ.get(
+    "CHECKPOINT_FALLBACK_URL",
+    "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
 )
 TRIGGER_WORD = os.environ.get("TRIGGER_WORD", "character_nsw")
 LORA_ID = os.environ.get("LORA_ID", "unknown")
@@ -48,8 +52,8 @@ except json.JSONDecodeError:
     CONFIG_OVERRIDES = {}
 
 # Training defaults (from getRecommendedTrainingConfig)
-NETWORK_DIM = int(CONFIG_OVERRIDES.get("networkDim", 8))
-NETWORK_ALPHA = int(CONFIG_OVERRIDES.get("networkAlpha", 8))
+NETWORK_DIM = int(CONFIG_OVERRIDES.get("networkDim", 32))
+NETWORK_ALPHA = int(CONFIG_OVERRIDES.get("networkAlpha", 16))
 NUM_EPOCHS = int(CONFIG_OVERRIDES.get("epochs", 12))
 LEARNING_RATE = float(CONFIG_OVERRIDES.get("learningRate", 1.0))
 OPTIMIZER = CONFIG_OVERRIDES.get("optimizer", "Prodigy")
@@ -57,8 +61,8 @@ SCHEDULER = CONFIG_OVERRIDES.get("scheduler", "cosine_with_restarts")
 NOISE_OFFSET = float(CONFIG_OVERRIDES.get("noiseOffset", 0.03))
 RESOLUTION = int(CONFIG_OVERRIDES.get("resolution", 1024))
 BATCH_SIZE = int(CONFIG_OVERRIDES.get("batchSize", 2))
-CLIP_SKIP = int(CONFIG_OVERRIDES.get("clipSkip", 2))
-SAVE_EVERY_N_EPOCHS = int(CONFIG_OVERRIDES.get("saveEveryNEpochs", 4))
+CLIP_SKIP = int(CONFIG_OVERRIDES.get("clipSkip", 1))
+SAVE_EVERY_N_EPOCHS = int(CONFIG_OVERRIDES.get("saveEveryNEpochs", 2))
 
 # Paths
 DATASET_DIR = Path("/tmp/dataset")
@@ -285,6 +289,33 @@ def upload_lora(lora_path: Path) -> str | None:
         return OUTPUT_UPLOAD_URL
 
 
+def ensure_checkpoint():
+    """Ensure the training checkpoint exists, downloading from HuggingFace if necessary."""
+    if os.path.exists(CHECKPOINT_PATH):
+        ckpt_size_mb = os.path.getsize(CHECKPOINT_PATH) / 1024 / 1024
+        print(f"Checkpoint exists: {CHECKPOINT_PATH} ({ckpt_size_mb:.0f}MB)")
+        return
+
+    print(f"[Kohya] Checkpoint not found at {CHECKPOINT_PATH}")
+    print(f"[Kohya] Downloading from {CHECKPOINT_FALLBACK_URL}...")
+    os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+
+    subprocess.run(
+        ["wget", "--progress=dot:mega", "-O", CHECKPOINT_PATH, CHECKPOINT_FALLBACK_URL],
+        check=True,
+    )
+
+    ckpt_size_mb = os.path.getsize(CHECKPOINT_PATH) / 1024 / 1024
+    print(f"[Kohya] Downloaded: {CHECKPOINT_PATH} ({ckpt_size_mb:.0f}MB)")
+
+    # Sanity check — SDXL base should be ~6.9GB
+    if ckpt_size_mb < 1000:
+        raise RuntimeError(
+            f"Checkpoint too small ({ckpt_size_mb:.0f}MB) — download may have failed. "
+            f"SDXL 1.0 base should be ~6900MB."
+        )
+
+
 def main():
     print(f"{'='*60}")
     print(f"Kohya LoRA Training — {TRIGGER_WORD}")
@@ -299,20 +330,7 @@ def main():
         img_dir, num_images = download_and_extract_dataset()
 
         # 2. Verify / download checkpoint
-        if not os.path.exists(CHECKPOINT_PATH):
-            os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
-            print(f"[Kohya] Base model not found locally. Downloading from CivitAI...")
-            civitai_token = os.environ.get("CIVITAI_API_KEY", "")
-            url = "https://civitai.com/api/download/models/2601141"
-            if civitai_token:
-                url += f"?token={civitai_token}"
-            subprocess.run(
-                ["wget", "--progress=dot:mega", "-O", CHECKPOINT_PATH, url],
-                check=True,
-            )
-            print(f"[Kohya] Checkpoint downloaded successfully.")
-        ckpt_size_mb = os.path.getsize(CHECKPOINT_PATH) / 1024 / 1024
-        print(f"Checkpoint: {CHECKPOINT_PATH} ({ckpt_size_mb:.0f}MB)")
+        ensure_checkpoint()
 
         # 3. Kohya directory structure
         dataset_dir = setup_kohya_directory(img_dir, num_images)

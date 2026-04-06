@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  buildPonyWorkflow,
+  buildWorkflow,
   submitRunPodJob,
   imageUrlToBase64,
 } from '@no-safe-word/image-gen';
@@ -90,10 +90,10 @@ export async function POST(
     img.angle_category,
   );
 
-  // Build the Pony SDXL ComfyUI workflow
-  // TODO: Phase 3 — review whether LoRA Studio conversion still makes sense for Pony pipeline
-  const negativePrompt = 'score_4, score_3, score_2, score_1, lowres, bad anatomy, bad hands, text, error, missing fingers, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, source_pony';
-  const workflow = buildPonyWorkflow({
+  // Build the SDXL ComfyUI workflow
+  // TODO: Review whether LoRA Studio conversion still makes sense for Juggernaut Ragnarok pipeline
+  const negativePrompt = 'bad anatomy, bad hands, text, error, missing fingers, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, cartoon, illustration, painting, deformed';
+  const workflow = buildWorkflow({
     positivePrompt: prompt,
     negativePrompt,
     width: 768,

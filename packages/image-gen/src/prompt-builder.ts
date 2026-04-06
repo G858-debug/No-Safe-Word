@@ -1,4 +1,242 @@
 import type { CharacterData } from "@no-safe-word/shared";
+import Anthropic from '@anthropic-ai/sdk';
+
+// ── Juggernaut Ragnarok Prompt Building ──
+// See docs/skills/juggernaut-ragnarok/SKILL.md for prompting reference
+
+export type ContentMode = 'sfw' | 'nsfw';
+
+export interface CharacterPromptData {
+  gender: 'male' | 'female';
+  ethnicity?: string;
+  skinTone?: string;
+  hairColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
+  bodyType?: string;
+  age?: string;
+  distinguishingFeatures?: string;
+}
+
+/**
+ * Build quality prefix for Juggernaut Ragnarok prompts.
+ *
+ * Ragnarok responds well to photography-style quality tokens.
+ * Keep it concise — the 75-token CLIP limit means every token matters.
+ */
+export function buildQualityPrefix(contentMode: ContentMode): string {
+  return 'photograph, high resolution, cinematic, skin textures, detailed';
+}
+
+/**
+ * Build negative prompt for Juggernaut Ragnarok.
+ *
+ * SFW negative MUST include nudity/NSFW prevention tokens because
+ * Ragnarok was trained on NSFW data and defaults toward nudity.
+ */
+export function buildNegativePrompt(contentMode: ContentMode): string {
+  const base = 'bad anatomy, bad hands, extra limbs, extra fingers, mutated hands, watermark, blurry, text, cartoon, illustration, painting, drawing, low quality, worst quality, deformed, disfigured';
+
+  if (contentMode === 'sfw') {
+    return `nudity, naked, nsfw, topless, nude, exposed breasts, nipples, ${base}`;
+  }
+
+  return base;
+}
+
+/**
+ * Build character identity description for scene prompts.
+ *
+ * For characters WITH a deployed LoRA (triggerWord provided): return ONLY the trigger word.
+ * The LoRA carries identity — inline physical descriptions would conflict.
+ *
+ * For characters WITHOUT a LoRA (extras, background figures): return
+ * a concise natural language physical description.
+ */
+export function buildCharacterTags(
+  charData: CharacterPromptData,
+  opts?: { mode?: ContentMode; triggerWord?: string },
+): string {
+  if (opts?.triggerWord) {
+    return opts.triggerWord;
+  }
+
+  const parts: string[] = [];
+
+  const genderWord = charData.gender === 'female' ? 'woman' : 'man';
+  if (charData.age && charData.ethnicity) {
+    parts.push(`a ${charData.age} year old ${charData.ethnicity} ${genderWord}`);
+  } else if (charData.ethnicity) {
+    parts.push(`a ${charData.ethnicity} ${genderWord}`);
+  } else {
+    parts.push(`a ${genderWord}`);
+  }
+
+  if (charData.skinTone) parts.push(`${charData.skinTone} skin`);
+
+  if (charData.hairColor && charData.hairStyle) {
+    parts.push(`${charData.hairColor} ${charData.hairStyle}`);
+  } else if (charData.hairStyle) {
+    parts.push(charData.hairStyle);
+  }
+
+  if (charData.bodyType) parts.push(charData.bodyType);
+  if (charData.distinguishingFeatures) parts.push(charData.distinguishingFeatures);
+
+  return parts.join(', ');
+}
+
+/**
+ * Assemble the full positive prompt for Juggernaut Ragnarok.
+ *
+ * Component order matters — earlier tokens get more weight.
+ * Total should stay under 75 tokens.
+ */
+export function buildPositivePrompt(opts: {
+  qualityPrefix: string;
+  characterTags: string;
+  secondaryCharacterTags?: string;
+  sceneTags: string;
+  triggerWords: string[];
+  mode: ContentMode;
+}): string {
+  const parts: string[] = [opts.qualityPrefix];
+
+  // LoRA trigger words must appear early for strong activation
+  for (const trigger of opts.triggerWords) {
+    parts.push(trigger);
+  }
+
+  // Character identity — skip if it's already covered by a trigger word
+  const charTagIsJustTrigger = opts.triggerWords.includes(opts.characterTags);
+  if (!charTagIsJustTrigger) {
+    parts.push(opts.characterTags);
+  }
+  if (opts.secondaryCharacterTags) {
+    const secIsJustTrigger = opts.triggerWords.includes(opts.secondaryCharacterTags);
+    if (!secIsJustTrigger) {
+      parts.push(opts.secondaryCharacterTags);
+    }
+  }
+
+  // Scene description (from enhancer or pre-formatted)
+  parts.push(opts.sceneTags);
+
+  return parts.filter(Boolean).join(', ');
+}
+
+/**
+ * Convert a prose scene prompt to Ragnarok-optimized format using Claude.
+ *
+ * SFW: natural language with explicit clothing descriptions
+ * NSFW: natural language scene + Booru tags for anatomical precision
+ *
+ * Returns the original prompt if conversion fails.
+ */
+export async function convertProseToPrompt(
+  prosePrompt: string,
+  opts: { nsfw: boolean },
+): Promise<string> {
+  const trimmed = prosePrompt.trim();
+  if (!trimmed) return trimmed;
+
+  const systemPrompt = opts.nsfw
+    ? `You convert scene descriptions into image generation prompts for a photorealistic SDXL model.
+Output concise comma-separated tags under 75 tokens. Use natural language for the scene, booru-style tags for anatomical positioning.
+Include: pose, expression, body positioning, setting, specific lighting source, composition.
+For explicit content: be anatomically specific — specify positions, hand placement, who is where.
+Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), character count tags.
+Output ONLY the prompt tags, nothing else.`
+    : `You convert scene descriptions into image generation prompts for a photorealistic SDXL model.
+Output concise comma-separated tags under 75 tokens. Use natural language.
+CRITICAL: Always include specific clothing descriptions — the model defaults toward nudity without them.
+Include: clothing, pose, expression, setting, specific lighting source, composition.
+Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), nudity or explicit content.
+Output ONLY the prompt tags, nothing else.`;
+
+  try {
+    const anthropic = new Anthropic();
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: trimmed }],
+    });
+
+    const tags = message.content[0].type === 'text' ? message.content[0].text.trim() : trimmed;
+    return tags;
+  } catch (err) {
+    console.error('[PromptBuilder] Prose conversion failed, using original:', err);
+    return trimmed;
+  }
+}
+
+/**
+ * Get dimensions for generation based on orientation and character count.
+ */
+export function getDimensions(
+  orientation: 'portrait' | 'landscape' | 'square',
+  hasDualCharacters: boolean,
+): { width: number; height: number } {
+  if (hasDualCharacters) {
+    return { width: 1216, height: 832 };
+  }
+
+  switch (orientation) {
+    case 'portrait':
+      return { width: 832, height: 1216 };
+    case 'landscape':
+      return { width: 1216, height: 832 };
+    case 'square':
+      return { width: 1024, height: 1024 };
+  }
+}
+
+/**
+ * Get identity-related phrases to strip from training captions.
+ *
+ * The trigger word should carry identity — these phrases are stripped
+ * so the model learns them from images, not text.
+ */
+export function getIdentityPhrasesToRemove(characterData: {
+  hairColor: string;
+  hairStyle: string;
+  eyeColor: string;
+  skinTone: string;
+  bodyType: string;
+  ethnicity: string;
+}): string[] {
+  const phrases: string[] = [];
+
+  if (characterData.hairColor) {
+    phrases.push(`${characterData.hairColor} hair`, characterData.hairColor);
+  }
+  if (characterData.hairStyle) phrases.push(characterData.hairStyle);
+  if (characterData.eyeColor) phrases.push(`${characterData.eyeColor} eyes`);
+  if (characterData.skinTone) {
+    phrases.push(`${characterData.skinTone} skin`, characterData.skinTone);
+  }
+  if (characterData.bodyType) {
+    phrases.push(characterData.bodyType);
+    const bodyParts = characterData.bodyType.split(',').map(s => s.trim());
+    phrases.push(...bodyParts);
+  }
+  if (characterData.ethnicity) {
+    phrases.push(characterData.ethnicity, characterData.ethnicity.toLowerCase());
+  }
+
+  // Common identity phrases that should be learned from images
+  phrases.push(
+    'dark skin', 'dark-skinned', 'light skin', 'light-skinned',
+    'medium-brown skin', 'brown skin',
+    'curvy', 'curvaceous', 'voluptuous', 'slim', 'athletic', 'muscular',
+    'african', 'black', 'south african',
+  );
+
+  return phrases.filter(Boolean);
+}
+
+// ── Generic Utilities (existing) ──
 
 /** Generate a default body description for a character based on gender and body type. */
 export function generateDefaultBodyPrompt(charData: CharacterData): string {

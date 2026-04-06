@@ -1,13 +1,15 @@
 /**
- * Training Caption Builder for Pony V6 Character LoRAs.
+ * Training Caption Builder for SDXL Character LoRAs.
  *
- * IMPORTANT: Read docs/skills/pony-lora-training/SKILL.md before modifying this file.
+ * IMPORTANT: Read docs/skills/sdxl-character-lora-training/SKILL.md before modifying this file.
  *
- * Prepares booru-style tag captions for LoRA training by:
- * 1. Auto-tagging images (via WD Tagger or equivalent)
- * 2. Removing identity tags (hair, skin, eyes, body, ethnicity)
+ * Prepares natural language captions for LoRA training by:
+ * 1. Auto-tagging images via Claude Vision (natural language description)
+ * 2. Removing identity phrases (hair, skin, eyes, body, ethnicity)
  * 3. Prepending the trigger word
- * 4. Optionally adding Pony score tags
+ *
+ * Caption format: {trigger_word}, a young woman smiling, fitted blazer, warm office lighting
+ * Identity phrases are stripped so the LoRA learns them from images, not text.
  */
 
 export interface CharacterIdentity {
@@ -94,12 +96,12 @@ function getIdentityTagsToRemove(character: {
 }
 
 /**
- * Process a raw auto-tagged caption for LoRA training.
+ * Process a raw caption for LoRA training.
  *
- * @param rawTags - Comma-separated booru tags from WD Tagger
+ * @param rawTags - Comma-separated descriptive tags from Claude Vision
  * @param character - Character identity data
- * @param imageQualityTier - 'best' | 'good' | 'acceptable' for score tag assignment
- * @returns Processed caption string ready for training
+ * @param imageQualityTier - 'best' | 'good' | 'acceptable' (unused — retained for API compat)
+ * @returns Processed caption string ready for training: "{trigger}, scene description..."
  */
 export function buildTrainingCaption(
   rawTags: string,
@@ -144,12 +146,8 @@ export function buildTrainingCaption(
   // Build final caption
   const parts: string[] = [character.triggerWord];
 
-  // Optionally add score tags based on quality tier
-  // Note: Some trainers recommend omitting score tags entirely.
-  // If using them, only use score_9 on the best images.
-  if (imageQualityTier === 'best') {
-    parts.push('score_9');
-  }
+  // Score tags removed — Pony-specific quality tags are not used with Juggernaut Ragnarok.
+  // Quality is controlled at inference time, not in training captions.
 
   parts.push(...tags);
 

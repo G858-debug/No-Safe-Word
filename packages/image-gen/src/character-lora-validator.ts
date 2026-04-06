@@ -1,14 +1,11 @@
 /**
- * Pony LoRA validation — generates test images with the trained LoRA
- * using CyberRealistic Pony Semi-Realistic and evaluates face consistency via Claude Vision.
- *
- * Mirrors the Flux validator (character-lora/validator.ts) but uses
- * buildPonyWorkflow instead of buildKontextWorkflow.
+ * SDXL LoRA validation — generates test images with the trained LoRA
+ * using Juggernaut Ragnarok and evaluates face consistency via Claude Vision.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { buildPonyWorkflow } from './pony-workflow-builder';
-import { buildPonyQualityPrefix, buildPonyNegativePrompt } from './pony-prompt-builder';
+import { buildWorkflow } from './workflow-builder';
+import { buildQualityPrefix, buildNegativePrompt } from './prompt-builder';
 import { submitRunPodJob, waitForRunPodResult } from './runpod';
 import { anthropicCreateWithRetry } from './anthropic-retry';
 import type { ValidationResult } from './character-lora/types';
@@ -16,7 +13,7 @@ import type { ValidationResult } from './character-lora/types';
 const VALIDATION_MODEL = 'claude-haiku-4-5-20251001';
 
 /**
- * 6 test prompts in booru tag format for Pony validation.
+ * 6 test prompts for LoRA validation.
  * Trigger word 'tok' is prepended; gender tag substituted at runtime.
  */
 function getValidationPrompts(genderTag: string): Array<{ tags: string; description: string }> {
@@ -48,14 +45,14 @@ function getValidationPrompts(genderTag: string): Array<{ tags: string; descript
   ];
 }
 
-interface PonyValidatorDeps {
+interface ValidatorDeps {
   supabase: {
     from: (table: string) => any;
     storage: { from: (bucket: string) => any };
   };
 }
 
-export interface PonyValidationResult {
+export interface ValidationResultDetail {
   passed: boolean;
   passedCount: number;
   totalCount: number;
@@ -68,13 +65,13 @@ export interface PonyValidationResult {
 }
 
 /**
- * Adapt PonyValidationResult to the pipeline's ValidationResult shape.
+ * Adapt ValidationResultDetail to the pipeline's ValidationResult shape.
  */
-export function toPipelineValidationResult(pony: PonyValidationResult): ValidationResult {
+export function toPipelineValidationResult(detail: ValidationResultDetail): ValidationResult {
   return {
-    overallPass: pony.passed,
-    averageFaceScore: pony.averageFaceScore,
-    testResults: pony.testResults.map((r) => ({
+    overallPass: detail.passed,
+    averageFaceScore: detail.averageFaceScore,
+    testResults: detail.testResults.map((r) => ({
       prompt: r.tags,
       faceScore: r.faceScore,
       passed: r.passed,
@@ -83,9 +80,9 @@ export function toPipelineValidationResult(pony: PonyValidationResult): Validati
 }
 
 /**
- * Validate a trained Pony/SDXL LoRA by generating test images and scoring them.
+ * Validate a trained SDXL LoRA by generating test images and scoring them.
  */
-export async function validatePonyLora(
+export async function validateLora(
   character: {
     gender: string;
     approvedImageUrl: string;
@@ -94,8 +91,8 @@ export async function validatePonyLora(
   loraStorageUrl: string,
   triggerWord: string,
   loraId: string,
-  deps: PonyValidatorDeps,
-): Promise<PonyValidationResult> {
+  deps: ValidatorDeps,
+): Promise<ValidationResultDetail> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -104,32 +101,32 @@ export async function validatePonyLora(
 
   const genderTag = character.gender.toLowerCase() === 'male' ? '1boy' : '1girl';
   const prompts = getValidationPrompts(genderTag);
-  const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+  const endpointId = process.env.RUNPOD_ENDPOINT_ID;
 
-  console.log(`[Pony Validate] Running ${prompts.length} test generations...`);
+  console.log(`[LoRA Validate] Running ${prompts.length} test generations...`);
 
   const referenceBase64 = await fetchImageAsBase64(character.approvedImageUrl);
 
-  const testResults: PonyValidationResult['testResults'] = [];
+  const testResults: ValidationResultDetail['testResults'] = [];
   const MIN_FACE_SCORE = 7;
   const MIN_PASSES = 5;
 
   for (let i = 0; i < prompts.length; i++) {
     const { tags, description } = prompts[i];
-    console.log(`[Pony Validate] Test ${i + 1}/${prompts.length}: ${description}`);
+    console.log(`[LoRA Validate] Test ${i + 1}/${prompts.length}: ${description}`);
 
     try {
-      const qualityPrefix = buildPonyQualityPrefix('sfw');
+      const qualityPrefix = buildQualityPrefix('sfw');
       const positivePrompt = `${qualityPrefix}, ${triggerWord}, ${tags}`;
-      const negativePrompt = buildPonyNegativePrompt('sfw');
+      const negativePrompt = buildNegativePrompt('sfw');
 
-      const workflow = buildPonyWorkflow({
+      const workflow = buildWorkflow({
         positivePrompt,
         negativePrompt,
         width: 1024,
         height: 1024,
         seed: 42 + i,
-        filenamePrefix: `pony_validate_${loraId}`,
+        filenamePrefix: `validate_${loraId}`,
         loras: [
           {
             filename: `characters/${loraFilename}`,
@@ -143,10 +140,10 @@ export async function validatePonyLora(
         workflow,
         undefined,
         [{ filename: `characters/${loraFilename}`, url: loraStorageUrl }],
-        ponyEndpointId,
+        endpointId,
       );
 
-      const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, ponyEndpointId);
+      const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, endpointId);
 
       const faceScore = await evaluateTestImage(
         anthropic,
@@ -162,10 +159,10 @@ export async function validatePonyLora(
       });
 
       console.log(
-        `[Pony Validate] ${description}: face_score=${faceScore} ${faceScore >= MIN_FACE_SCORE ? 'PASS' : 'FAIL'}`,
+        `[LoRA Validate] ${description}: face_score=${faceScore} ${faceScore >= MIN_FACE_SCORE ? 'PASS' : 'FAIL'}`,
       );
     } catch (error) {
-      console.error(`[Pony Validate] Test failed for "${description}": ${error}`);
+      console.error(`[LoRA Validate] Test failed for "${description}": ${error}`);
       testResults.push({ tags, faceScore: 0, passed: false });
     }
   }
@@ -176,7 +173,7 @@ export async function validatePonyLora(
   const overallPass = passedCount >= MIN_PASSES;
 
   console.log(
-    `[Pony Validate] Result: ${passedCount}/${testResults.length} passed, avg=${averageFaceScore.toFixed(1)} → ${overallPass ? 'PASS' : 'FAIL'}`,
+    `[LoRA Validate] Result: ${passedCount}/${testResults.length} passed, avg=${averageFaceScore.toFixed(1)} → ${overallPass ? 'PASS' : 'FAIL'}`,
   );
 
   await deps.supabase

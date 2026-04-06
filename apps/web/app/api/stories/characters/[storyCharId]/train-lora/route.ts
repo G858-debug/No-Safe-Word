@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { runPonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
+import { runTrainingPipeline } from "@no-safe-word/image-gen/server/lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/train-lora
@@ -52,7 +52,7 @@ export async function POST(
     }
 
     // 4. Check if a LoRA is already training or deployed for this character
-    // TODO: Phase 3 — replace with Pony pipeline progress check
+    // Check for existing in-progress LoRA
     const existingLoraQuery = await (supabase as any)
       .from("character_loras")
       .select("id, status")
@@ -82,7 +82,7 @@ export async function POST(
         .eq('id', storyCharId);
     }
 
-    // 5. Check series image engine for Pony dispatch
+    // 5. Check series image engine
     const { data: seriesRow } = await (supabase as any)
       .from("story_characters")
       .select("series_id")
@@ -129,7 +129,7 @@ export async function POST(
         filename: "",
         storage_path: "",
         trigger_word: "tok",
-        base_model: imageEngine === "pony_cyberreal" ? "pony_cyberreal" : "sdxl",
+        base_model: "sdxl",
         training_provider: "replicate",
         training_params: {},
         dataset_size: 0,
@@ -170,13 +170,13 @@ export async function POST(
       portraitSeed: storyChar.approved_seed || 42,
       structuredData,
       pipelineType: "story_character",
-      imageEngine: imageEngine === "pony_cyberreal" ? "pony_cyberreal" : undefined,
+      imageEngine: "juggernaut_ragnarok",
     };
 
     // 8. Fire-and-forget — start the pipeline in the background
-    console.log(`[LoRA API] Triggering Pony LoRA pipeline for ${character.name} (loraId: ${loraRecord.id})`);
-    void runPonyPipeline(characterInput, loraRecord.id, { supabase }).catch((err) => {
-      console.error(`[LoRA API] Pony pipeline background error:`, err);
+    console.log(`[LoRA API] Triggering LoRA pipeline for ${character.name} (loraId: ${loraRecord.id})`);
+    void runTrainingPipeline(characterInput, loraRecord.id, { supabase }).catch((err) => {
+      console.error(`[LoRA API] Pipeline background error:`, err);
     });
 
     // 9. Update story_characters to link the LoRA

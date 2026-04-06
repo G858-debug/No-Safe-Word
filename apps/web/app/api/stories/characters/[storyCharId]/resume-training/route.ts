@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { resumePonyPipeline, completePonyPipeline } from "@no-safe-word/image-gen/server/pony-lora-trainer";
+import { resumeTrainingPipeline, completeTrainingPipeline } from "@no-safe-word/image-gen/server/lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 const MIN_PASSED_IMAGES = 15;
@@ -56,7 +56,7 @@ export async function POST(
     if (lora.status === "failed" && lora.storage_url && lora.filename) {
       console.log(`[LoRA API] LoRA ${lora.id} already trained (${lora.filename}). Skipping to validation.`);
 
-      completePonyPipeline(lora.id, { supabase }).catch((err) => {
+      completeTrainingPipeline(lora.id, { supabase }).catch((err) => {
         console.error(`[LoRA API] Validation-only retry error:`, err);
       });
 
@@ -130,7 +130,7 @@ export async function POST(
     // 5. Fire-and-forget — resume the pipeline in the background
     console.log(`[LoRA API] Resuming pipeline for ${character.name} (loraId: ${lora.id}, ${approvedCount} approved images)`);
 
-    resumePonyPipeline(characterInput, lora.id, { supabase }).catch((err) => {
+    resumeTrainingPipeline(characterInput, lora.id, { supabase }).catch((err) => {
       console.error(`[LoRA API] Resume pipeline background error:`, err);
     });
 

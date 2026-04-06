@@ -40,7 +40,7 @@ function formatElapsed(updatedAt?: string): string | null {
   return `${hrs}h ${mins % 60}m`;
 }
 
-// ── Default prompt builder (mirrors server-side pony-character-image.ts) ──
+// ── Default prompt builder (mirrors server-side character-image.ts) ──
 
 function buildDefaultPrompt(desc: Record<string, string>, stage: "face" | "body"): string {
   const gender = desc.gender || "female";

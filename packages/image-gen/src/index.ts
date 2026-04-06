@@ -1,4 +1,9 @@
-export { extractCharacterTags, cleanScenePrompt, generateDefaultBodyPrompt } from './prompt-builder';
+export {
+  extractCharacterTags, cleanScenePrompt, generateDefaultBodyPrompt,
+  buildQualityPrefix, buildNegativePrompt, buildCharacterTags, buildPositivePrompt,
+  convertProseToPrompt, getDimensions, getIdentityPhrasesToRemove,
+} from './prompt-builder';
+export type { ContentMode, CharacterPromptData } from './prompt-builder';
 
 export {
   submitRunPodJob,
@@ -19,7 +24,7 @@ export type { DimensionPreset } from './dimension-presets';
 export { validatePersonCount, canRetryValidation, buildRetrySettings, generateRetrySeed } from './person-validator';
 export type { PersonValidationResult } from './person-validator';
 
-// Claude prompt enhancement — Pony booru tag output
+// Claude prompt enhancement
 export { enhancePromptForScene } from './prompt-enhancer';
 
 // Anthropic API retry wrapper — exponential backoff on 500/502/503/529
@@ -29,7 +34,7 @@ export { anthropicCreateWithRetry } from './anthropic-retry';
 export { DEFAULT_DIAGNOSTIC_FLAGS } from './diagnostic-flags';
 export type { DiagnosticFlags } from './diagnostic-flags';
 
-// Character LoRA pipeline types — shared by Pony pipeline
+// Character LoRA pipeline types
 export type {
   CharacterInput,
   CharacterStructured,
@@ -61,34 +66,23 @@ export { rewriteTagsForFailure } from './tag-rewriter';
 export { ARCHITECTURAL_LESSONS, checkArchitecturalLessons, requestStructuralDiagnosis } from './architectural-lessons';
 export type { ArchitecturalLesson } from './architectural-lessons';
 
-// Pony V6 CyberRealistic Pipeline
-export { buildPonyWorkflow } from './pony-workflow-builder';
-export type { PonyWorkflowConfig } from './pony-workflow-builder';
-export { PONY_LORA_REGISTRY, getPonyLoras, selectPonyResources } from './pony-lora-registry';
-export type { LoraEntry, ContentMode, LoraCategory, PonyResourceSelection } from './pony-lora-registry';
-export {
-  buildPonyQualityPrefix,
-  buildPonyNegativePrompt,
-  buildPonyCharacterTags,
-  buildPonyPositivePrompt,
-  convertProseToBooru,
-  getPonyDimensions,
-} from './pony-prompt-builder';
-export type { PonyCharacterData } from './pony-prompt-builder';
+// Juggernaut Ragnarok Workflow Builder
+export { buildWorkflow, buildInpaintWorkflow, buildImg2ImgWorkflow, buildUpscaleWorkflow } from './workflow-builder';
+export type { WorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig } from './workflow-builder';
 
-// Pony dataset generation for LoRA training
-export { buildPonyDatasetPrompts, buildPonyDatasetWorkflow, generatePonyDataset } from './pony-dataset-generator';
-export type { PonyDatasetPrompt, PonyDatasetCharacter } from './pony-dataset-generator';
+// Dataset generation for LoRA training
+export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset } from './dataset-generator';
+export type { DatasetPrompt, DatasetCharacter } from './dataset-generator';
 
-// Pony LoRA validation
-export { validatePonyLora, toPipelineValidationResult } from './pony-character-lora-validator';
-export type { PonyValidationResult } from './pony-character-lora-validator';
+// LoRA validation
+export { validateLora, toPipelineValidationResult } from './character-lora-validator';
+export type { ValidationResultDetail } from './character-lora-validator';
 
-// Pony LoRA training pipeline + helpers
-export { getRecommendedTrainingConfig, getIdentityTagsToRemove } from './pony-lora-trainer';
-export type { PonyLoraTrainingConfig } from './pony-lora-trainer';
+// LoRA training pipeline + helpers
+export { getRecommendedTrainingConfig, getIdentityTagsToRemove } from './lora-trainer';
+export type { LoraTrainingConfig } from './lora-trainer';
 // Pipeline orchestrator is server-only (uses archiver, streams) — import directly:
-//   import { runPonyPipeline, resumePonyPipeline, completePonyPipeline } from '@no-safe-word/image-gen/server/pony-lora-trainer'
+//   import { runTrainingPipeline, resumeTrainingPipeline, completeTrainingPipeline } from '@no-safe-word/image-gen/server/lora-trainer'
 
 // RunPod Pod API (batch GPU jobs — LoRA training)
 export { createTrainingPod, getTrainingPodStatus, terminateTrainingPod } from './runpod-pods';

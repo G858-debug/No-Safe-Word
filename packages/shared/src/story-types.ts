@@ -98,7 +98,7 @@ export interface MarketingImport {
 // DATABASE ROW TYPES (what Supabase stores)
 // ============================================================
 
-export type ImageEngine = 'pony_cyberreal';
+export type ImageEngine = 'juggernaut_ragnarok';
 
 export interface StorySeriesRow {
   id: string;

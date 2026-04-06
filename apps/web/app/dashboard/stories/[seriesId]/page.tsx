@@ -218,7 +218,7 @@ export default function SeriesDetailPage() {
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
   const allLorasDeployed =
     loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
-  // Pony CyberRealistic requires character LoRAs for scene generation
+  // Juggernaut Ragnarok requires character LoRAs for scene generation
   const allReadyForImages = allCharsApproved && allLorasDeployed;
 
   // ------- Loading state -------
@@ -395,7 +395,7 @@ export default function SeriesDetailPage() {
                   <div className="flex items-center gap-3">
                     <p className="text-sm text-muted-foreground">
                       <span className="font-medium text-foreground">Engine:</span>{" "}
-                      CyberRealistic Pony Semi-Realistic (SDXL) — booru tags, negative prompts, character LoRAs
+                      Juggernaut XL Ragnarok (SDXL) — photorealistic, character LoRAs
                     </p>
                   </div>
                 </div>

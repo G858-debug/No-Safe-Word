@@ -12,13 +12,13 @@ Tech stack: Next.js 14 monorepo, Supabase (PostgreSQL + Storage), Railway deploy
 
 ```
 apps/web/              — Next.js app (dashboard + public site + API — ONE app for everything)
-packages/image-gen/    — Image generation pipeline (Pony CyberRealistic)
+packages/image-gen/    — Image generation pipeline (Juggernaut Ragnarok)
 packages/shared/       — Types, constants, utilities
 packages/story-engine/ — Supabase client, story import logic
 infra/runpod/          — ComfyUI inference Docker image (serverless)
 infra/kohya-trainer/   — Kohya LoRA training Docker image (pods)
 supabase/migrations/   — Append-only migration history (never delete these)
-docs/skills/           — Pony prompting + training reference guides
+docs/skills/           — Prompting, training, and editing reference guides
 scripts/               — Utility scripts (model downloads, LoRA uploads, data management)
 ```
 
@@ -26,12 +26,12 @@ scripts/               — Utility scripts (model downloads, LoRA uploads, data 
 
 ## Image Generation Pipeline
 
-**There is ONE image pipeline: Pony CyberRealistic (`pony_cyberreal`).**
+**There is ONE image pipeline: Juggernaut Ragnarok (`juggernaut_ragnarok`).**
 No engine switching, no engine selector, no conditional paths.
 
-- **Checkpoint:** CyberRealistic Pony Semi-Realistic v4.5 (SDXL architecture)
+- **Checkpoint:** Juggernaut XL Ragnarok (SDXL architecture, photorealistic)
 - **Compute:** RunPod serverless → ComfyUI → character LoRAs → FaceDetailer
-- **Defaults:** DPM++ 2M SDE Karras, 30 steps, CFG 5.0, Clip Skip 2
+- **Defaults:** DPM++ 2M SDE Karras, 30 steps, CFG 3-5, Clip Skip 1
 - **Resolutions:** 832×1216 (portrait), 1216×832 (landscape), 1024×1024 (square)
 
 Key files:
@@ -41,93 +41,100 @@ Key files:
 - `apps/web/lib/server/generate-scene-image-v4.ts` — Scene generation orchestration
 - `apps/web/lib/server/pony-character-image.ts` — Character portrait/body generation
 
-## Pony Prompting Rules
+## Juggernaut Ragnarok Prompting Rules
 
-**Read `docs/skills/pony-scene-generation/SKILL.md` before writing ANY image prompt.**
+**Read `docs/skills/juggernaut-ragnarok/SKILL.md` before writing ANY image prompt.**
 
-### Format: Booru Tags, NOT Prose
+### Format: Natural Language + Booru Tags
 
-Pony uses CLIP encoder with comma-separated booru-style tags. **Never write flowing prose sentences.**
+Juggernaut Ragnarok supports BOTH natural language prompts AND Booru-style tags. Use natural language for SFW scenes and Booru tags for NSFW anatomical detail.
 
-### Quality Tags (mandatory, always first)
+### Quality Tags
+
+For maximum photorealism, prepend to positive prompt:
+```
+masterpiece, 4k, ray tracing, intricate details, highly-detailed, hyper-realistic, 8k RAW Editorial Photo
+```
+
+For clean photographic look (simpler, often better):
+```
+photograph, high resolution, cinematic, skin textures
+```
+
+Do NOT use Pony-specific tags (`score_9`, `score_8_up`, `score_7_up`, `rating_safe`, `rating_explicit`, `source_pony`). These are meaningless to Juggernaut Ragnarok.
+
+### SFW/NSFW Control
+
+Juggernaut Ragnarok has NSFW baked into training. Control content through prompts:
+
+**SFW (Facebook):** Always describe clothing explicitly. Add to negative prompt: `nudity, naked, nsfw, topless, nude`
+
+**NSFW (Website):** Use Booru-style tags for anatomical precision. No special rating tag needed — the model generates NSFW content when prompted.
+
+### Prompt Component Order (earlier = more weight)
 
 ```
-score_9, score_8_up, score_7_up
-```
-
-Do NOT include `score_6_up` (dilutes quality) or `score_9_up` (no training data).
-
-### Rating Tags (controls SFW/NSFW)
-
-| Tag | Platform | Content |
-|-----|----------|---------|
-| `rating_safe` | Facebook | No nudity |
-| `rating_questionable` | Teaser | Revealing but not explicit |
-| `rating_explicit` | Website NSFW | Full nudity, sexual content |
-
-### Source Tags
-
-With CyberRealistic Pony checkpoint: **omit source tags entirely**. The checkpoint defaults to semi-realism. Add `source_pony` to the NEGATIVE prompt to prevent MLP aesthetic.
-
-### Tag Order (earlier = more weight)
-
-```
-[quality], [rating], [character LoRA trigger], [character count],
-[pose/action], [expression/gaze], [clothing],
-[body interaction], [setting], [props],
-[lighting source], [atmosphere], [composition]
+[subject], [action/pose], [clothing — REQUIRED for SFW],
+[expression/gaze], [setting], [props],
+[lighting source], [atmosphere], [composition],
+[quality boosters — optional]
 ```
 
 ### Negative Prompts
 
-Pony uses negative prompts. Standard negative:
-
+**SFW standard:**
 ```
-score_6, score_5, score_4, worst quality, low quality, source_pony,
-bad anatomy, bad hands, extra limbs, watermark, blurry, text
+nudity, naked, nsfw, topless, nude, bad anatomy, bad hands, extra limbs, watermark, blurry, text, cartoon, illustration, painting, low quality, worst quality, deformed
+```
+
+**NSFW standard:**
+```
+bad anatomy, bad hands, extra limbs, watermark, blurry, text, cartoon, illustration, painting, low quality, worst quality, deformed
 ```
 
 ### What NOT to Do
 
-- **No emphasis weights** — `(word:1.3)` is not supported by CLIP. Remove them.
-- **No prose sentences** — Use comma-separated tags, not "A beautiful woman standing in..."
-- **No quality tags like `masterpiece, best quality`** — Pony uses score tags instead.
-- **No physical descriptions for approved characters** — Identity comes from the LoRA trigger word, not inline text. Don't write skin tone, hair color, or body type into scene prompts.
+- **No Pony quality/rating tags** — `score_9`, `rating_safe`, `source_pony` etc. are Pony-specific
+- **No emphasis weights** — `(word:1.3)` syntax is not reliably supported in SDXL CLIP
+- **No missing clothing in SFW** — The model defaults toward nudity. Always describe clothing.
+- **No CFG above 7** — Causes waxy skin and oversaturation
+- **No prompts over 75 tokens** — Content is truncated beyond CLIP limit
+- **No physical descriptions for approved characters** — Identity comes from the LoRA trigger word
 
 ## Character LoRA System
 
-Characters get SDXL identity LoRAs trained with Kohya sd-scripts on RunPod GPU pods.
+Characters get SDXL identity LoRAs trained with Kohya sd-scripts on RunPod GPU pods. Read `docs/skills/sdxl-character-lora-training/SKILL.md` for the full two-pass training architecture.
 
 ### Training Pipeline (8 stages)
 
-1. **Dataset generation** — 24 images (8 face, 6 head-shoulders, 6 full-body, 4 waist-up) via RunPod serverless with CyberRealistic Pony checkpoint
+1. **Dataset generation** — 40-60 images (10-12 face, 6-8 head-shoulders, 6-8 waist-up, 8-10 full-body) via RunPod serverless with Juggernaut Ragnarok checkpoint
 2. **Claude Vision evaluation** — Auto-scores each image for face/skin/body/quality consistency
-3. **Curation** — `selectTrainingSet()` curates to best 15-20 meeting diversity requirements
+3. **Curation** — `selectTrainingSet()` curates to best 30-50 meeting diversity requirements
 4. **Human approval** — Pipeline pauses; user reviews in dashboard
-5. **Captioning** — Booru tags with identity tag stripping via `buildTrainingCaption()`
+5. **Captioning** — Natural language captions with identity tag stripping via `buildTrainingCaption()`
 6. **Packaging** — Images + captions → tar.gz → Supabase Storage
-7. **Training** — Kohya `sdxl_train_network.py` on RunPod GPU pod (30-60 min)
+7. **Training** — Kohya `sdxl_train_network.py` on RunPod GPU pod against SDXL 1.0 base (30-60 min)
 8. **Validation** — 6 test images scored by Claude Vision against reference portrait
 
 Training runs on RunPod **PODS** (batch jobs), NOT serverless. The orchestrator creates the pod and returns — a webhook handles completion.
 
 ### Training Parameters
 
-- Network dim: 8, alpha: 8
+- Network dim: 32, alpha: 16
 - Optimizer: Prodigy, LR: 1.0
 - Scheduler: cosine_with_restarts
 - Noise offset: 0.03
-- Resolution: 1024, Clip skip: 2
-- Epochs: 12, Batch size: 2
+- Resolution: 1024, Clip skip: 1
+- Epochs: 10-15, Save every 2 epochs, Batch size: 2
 - Trigger word format: `{firstname}_nsw` (e.g., `lindiwe_nsw`)
 
 ### Key Files
 
-- `packages/image-gen/src/pony-lora-trainer.ts` — Pipeline orchestrator (`runPonyPipeline`, `resumePonyPipeline`, `completePonyPipeline`)
-- `packages/image-gen/src/pony-dataset-generator.ts` — Training image generation
-- `packages/image-gen/src/pony-character-lora-validator.ts` — Post-training validation
-- `packages/image-gen/src/pony-character-lora/training-image-evaluator.ts` — Dataset curation
-- `packages/image-gen/src/pony-character-lora/training-caption-builder.ts` — Caption generation
+- `packages/image-gen/src/lora-trainer.ts` — Pipeline orchestrator
+- `packages/image-gen/src/dataset-generator.ts` — Training image generation
+- `packages/image-gen/src/character-lora-validator.ts` — Post-training validation
+- `packages/image-gen/src/character-lora/training-image-evaluator.ts` — Dataset curation
+- `packages/image-gen/src/character-lora/training-caption-builder.ts` — Caption generation
 
 ### RunPod Interfaces
 
@@ -157,9 +164,15 @@ Every image prompt must be fully self-contained. Each image is generated indepen
 
 ### SFW/NSFW Paired Prompts
 
-- SFW (Facebook): Use the "moment before" technique — anticipation, tension, `rating_safe`
-- NSFW (Website): Same setting independently described, intimate action, `rating_explicit`
+- SFW (Facebook): Use the "moment before" technique — anticipation, tension, explicit clothing description
+- NSFW (Website): Same setting independently described, intimate action, Booru tags for anatomical precision
 - Achieve visual continuity by describing the same setting details, not by saying "same"
+
+### Image Categories
+
+- `shared` — images identical on both Facebook and website
+- `progression_pairs` — SFW + intimate versions, only where scenes build toward intimacy
+- `website_exclusive` — additional images for website reading experience
 
 ### Composition Preferences
 
@@ -173,7 +186,7 @@ Settings must be specific: Middelburg, Soweto, Sandton — not generic "African"
 
 ## LoRA Training Standards
 
-**Read `docs/skills/pony-lora-training/SKILL.md` before modifying any training code.**
+**Read `docs/skills/sdxl-character-lora-training/SKILL.md` before modifying any training code.**
 
 ### Body Shape Requirements (Female Characters)
 
@@ -192,29 +205,32 @@ Minimum 20% per category. Plain/neutral backgrounds must not exceed 20%.
 
 ### Caption Format
 
-Trigger word first, then booru-style tags describing the scene. Identity tags (hair, skin, body, ethnicity) are STRIPPED — the trigger word carries these.
+Trigger word first, then natural language description of the scene. Identity tags (hair, skin, body, ethnicity) are STRIPPED — the trigger word carries these.
 
 ```
-lindiwe_nsw, 1girl, solo, smile, looking at viewer, upper body,
-fitted blazer, gold earrings, indoor, warm lighting, seated
+lindiwe_nsw, a young woman smiling, fitted blazer and tailored trousers, warm expression looking at camera, modern office interior, soft window light
 ```
 
 ## Prompt Enhancement
 
-All scene prompts route through Claude before generation (`prompt-enhancer.ts`). The enhancer converts Five Layers Framework descriptions into Pony booru tags:
+All scene prompts route through Claude before generation (`prompt-enhancer.ts`). The enhancer converts Five Layers Framework descriptions into Juggernaut Ragnarok prompts:
 - Layer 1: Expression & Gaze
 - Layer 2: Narrative Moment (specific action/pose)
 - Layer 3: Lighting (named source, never generic)
 - Layer 4: Composition (shot type, angle)
 - Layer 5: South African Setting (specific location + props)
 
-Output is always booru-style tags via `claude-haiku-4-5-20251001`.
+Output format:
+- **SFW scenes:** Natural language prompt with explicit clothing descriptions + SFW negative prompt
+- **NSFW scenes:** Natural language scene description + Booru tags for anatomical precision + NSFW negative prompt
+
+Enhancement via `claude-haiku-4-5-20251001`.
 
 ## Database
 
 Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prompts`, `images`, `character_loras`, `lora_dataset_images`
 
-- `story_series.image_engine` — always `pony_cyberreal`
+- `story_series.image_engine` — always `juggernaut_ragnarok`
 - `character_loras.status` — pipeline stages: pending → generating_dataset → evaluating → awaiting_dataset_approval → captioning → training → validating → deployed
 - Migrations are append-only. Never delete migration files.
 

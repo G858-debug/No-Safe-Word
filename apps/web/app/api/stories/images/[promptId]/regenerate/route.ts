@@ -68,7 +68,7 @@ export async function POST(
     const seriesId = post.series_id;
     const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
 
-    // 5. Build V4 Pony CyberRealistic payload
+    // 5. Build V4 scene generation payload
     const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
       (id): id is string => id !== null,
     );
@@ -85,13 +85,13 @@ export async function POST(
       `[V4][${promptId}] Regenerate: mode=${result.mode}, dims=${result.width}x${result.height}, loras=${result.characterLoraDownloads.length}`,
     );
 
-    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
 
     const { jobId: runpodJobId } = await submitRunPodJob(
       result.workflow,
       result.images.length > 0 ? result.images : undefined,
       result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
-      ponyEndpointId,
+      endpointId,
     );
 
     const { data: imageRow, error: imgError } = await supabase
@@ -106,7 +106,7 @@ export async function POST(
           steps: 30,
           cfg: 6.5,
           seed: result.seed,
-          engine: "runpod-v4-pony-cyberreal",
+          engine: "runpod-v4-juggernaut-ragnarok",
         },
         mode: result.mode,
       })

@@ -1,25 +1,22 @@
 /**
- * Character approval image generation for the Pony V4 (pony_cyberreal) pipeline.
+ * Character approval image generation using Juggernaut Ragnarok via RunPod/ComfyUI.
  *
- * Generates face portraits and full-body shots using CyberRealistic Pony Semi-Realistic v4.5
- * via RunPod/ComfyUI. Both stages produce actual images (unlike V3 where body
- * is text-only).
- *
- * Uses booru-style tags and SDXL negative prompts for maximum control.
+ * TODO: Refactor prompt builders for natural language (Prompt 3).
+ * Currently still uses booru-style tags — will be updated when prompt-builder stubs are implemented.
  */
 
 import {
-  buildPonyWorkflow,
-  buildPonyQualityPrefix,
-  buildPonyNegativePrompt,
+  buildWorkflow,
+  buildQualityPrefix,
+  buildNegativePrompt,
 } from "@no-safe-word/image-gen";
 import type { CharacterData } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
 type GenerationStage = "face" | "body";
 
-export interface PonyCharacterPayload {
-  engine: "runpod-pony";
+export interface CharacterGenerationPayload {
+  engine: "runpod-comfyui";
   workflow: Record<string, any>;
   positivePrompt: string;
   negativePrompt: string;
@@ -31,13 +28,13 @@ export interface PonyCharacterPayload {
 // ── Skin Tone Mapper ──
 
 /**
- * Convert a character's described skin tone to Pony-compatible booru tags.
+ * Convert a character's described skin tone to booru tags.
  *
  * Maps faithfully to the character's ACTUAL specified tone.
  * A light-skinned Black character gets light-brown skin tags, not dark.
  * African identity comes from facial features and hair texture, not just skin darkness.
  */
-function mapSkinToneToPonyTags(skinTone: string, gender: string): string[] {
+function mapSkinToneToTags(skinTone: string, gender: string): string[] {
   if (!skinTone) return [];
   const tone = skinTone.toLowerCase();
   const genderSuffix = gender === "male" ? "male" : "female";
@@ -91,7 +88,7 @@ function hasShortMaleHairstyle(hairStyle: string): boolean {
   return SHORT_MALE_HAIRSTYLES.some((s) => style.includes(s));
 }
 
-function mapEthnicityToPonyTags(ethnicity: string, opts?: { gender?: string; hairStyle?: string }): string[] {
+function mapEthnicityToTags(ethnicity: string, opts?: { gender?: string; hairStyle?: string }): string[] {
   if (!ethnicity) return [];
   const eth = ethnicity.toLowerCase();
 
@@ -126,15 +123,15 @@ function mapEthnicityToPonyTags(ethnicity: string, opts?: { gender?: string; hai
 // ── Prompt Builders ──
 
 /**
- * Build a booru-style face portrait prompt for CyberRealistic Pony Semi-Realistic.
+ * Build a booru-style face portrait prompt. TODO: Convert to natural language (Prompt 3).
  */
-function buildPonyFacePrompt(charData: CharacterData): string {
+function buildFacePrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
   // Skin tone + ethnicity via mappers, deduplicated
-  const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
-  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity, {
+  const skinTags = mapSkinToneToTags(charData.skinTone, charData.gender);
+  const ethnicityTags = mapEthnicityToTags(charData.ethnicity, {
     gender: charData.gender,
     hairStyle: charData.hairStyle,
   });
@@ -156,7 +153,7 @@ function buildPonyFacePrompt(charData: CharacterData): string {
     tags.push(charData.distinguishingFeatures.toLowerCase());
   }
 
-  // Portrait composition — gender-specific tags to prevent Pony defaulting to female
+  // Portrait composition — gender-specific tags
   if (charData.gender === "male") {
     tags.push(
       "solo male", "male focus", "masculine",
@@ -179,15 +176,15 @@ function buildPonyFacePrompt(charData: CharacterData): string {
 }
 
 /**
- * Build a booru-style full-body prompt for CyberRealistic Pony Semi-Realistic.
+ * Build a booru-style full-body prompt. TODO: Convert to natural language (Prompt 3).
  */
-function buildPonyBodyPrompt(charData: CharacterData): string {
+function buildBodyPrompt(charData: CharacterData): string {
   const genderTag = charData.gender === "male" ? "1boy" : "1girl";
   const tags: string[] = [genderTag];
 
   // Skin tone + ethnicity via mappers, deduplicated
-  const skinTags = mapSkinToneToPonyTags(charData.skinTone, charData.gender);
-  const ethnicityTags = mapEthnicityToPonyTags(charData.ethnicity, {
+  const skinTags = mapSkinToneToTags(charData.skinTone, charData.gender);
+  const ethnicityTags = mapEthnicityToTags(charData.ethnicity, {
     gender: charData.gender,
     hairStyle: charData.hairStyle,
   });
@@ -255,15 +252,15 @@ function buildPonyBodyPrompt(charData: CharacterData): string {
 }
 
 /**
- * Build the character generation payload for CyberRealistic Pony Semi-Realistic.
+ * Build the character generation payload for Juggernaut Ragnarok.
  */
-export function buildPonyCharacterGenerationPayload(opts: {
+export function buildCharacterGenerationPayload(opts: {
   character: { id: string; name: string; description: Record<string, string> };
   imageType: ImageType;
   stage: GenerationStage;
   seed?: number;
   customPrompt?: string;
-}): PonyCharacterPayload {
+}): CharacterGenerationPayload {
   const { character, stage, customPrompt } = opts;
   const desc = character.description;
 
@@ -291,20 +288,20 @@ export function buildPonyCharacterGenerationPayload(opts: {
   if (customPrompt) {
     sceneTags = customPrompt;
   } else if (stage === "face") {
-    sceneTags = buildPonyFacePrompt(charData);
+    sceneTags = buildFacePrompt(charData);
   } else {
-    sceneTags = buildPonyBodyPrompt(charData);
+    sceneTags = buildBodyPrompt(charData);
   }
 
-  const qualityPrefix = buildPonyQualityPrefix(mode);
+  const qualityPrefix = buildQualityPrefix(mode);
   const positivePrompt = `${qualityPrefix}, ${sceneTags}`;
-  const negativePrompt = buildPonyNegativePrompt(mode);
+  const negativePrompt = buildNegativePrompt(mode);
 
   // Dimensions — portrait orientation for both
   const width = 832;
   const height = 1216;
 
-  const workflow = buildPonyWorkflow({
+  const workflow = buildWorkflow({
     positivePrompt,
     negativePrompt,
     width,
@@ -314,7 +311,7 @@ export function buildPonyCharacterGenerationPayload(opts: {
   });
 
   return {
-    engine: "runpod-pony",
+    engine: "runpod-comfyui",
     workflow,
     positivePrompt,
     negativePrompt,

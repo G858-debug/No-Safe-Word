@@ -57,26 +57,25 @@ except Exception as e:
 }
 
 download_to_volume() {
-    # Download a file directly to the network volume (/runpod-volume/models/loras/).
-    # Files here persist across container restarts.
-    # Usage: download_to_volume <civitai_version_id> <filename> [<token>]
-    local version_id="$1"
+    # Download a file directly to the network volume.
+    # Usage: download_to_volume <url> <filename> <dest_dir>
+    #   dest_dir defaults to /runpod-volume/models/loras/
+    local url="$1"
     local filename="$2"
-    local token="${3:-${CIVITAI_API_KEY:-}}"
-    local dest="${VOLUME_LORAS_DIR}/${filename}"
+    local dest_dir="${3:-${VOLUME_LORAS_DIR}}"
+    local dest="${dest_dir}/${filename}"
 
     if [ -f "$dest" ]; then
         echo "[NSW] ✓ ${filename} (volume, exists)"
         return 0
     fi
 
-    if [ ! -d "${VOLUME_LORAS_DIR}" ]; then
-        echo "[NSW] Volume loras dir not mounted — skipping ${filename}"
-        return 0
+    if [ ! -d "${dest_dir}" ]; then
+        mkdir -p "${dest_dir}" 2>/dev/null || {
+            echo "[NSW] Volume dir not writable — skipping ${filename}"
+            return 0
+        }
     fi
-
-    local url="https://civitai.com/api/download/models/${version_id}"
-    [ -n "$token" ] && url="${url}?token=${token}"
 
     echo "[NSW] Downloading ${filename} to volume..."
     local tmp_path="${dest}.tmp"
@@ -87,7 +86,7 @@ import urllib.request, sys, shutil
 try:
     req = urllib.request.Request('${url}')
     req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
-    resp = urllib.request.urlopen(req, timeout=600)
+    resp = urllib.request.urlopen(req, timeout=900)
     with open('${tmp_path}', 'wb') as f:
         shutil.copyfileobj(resp, f)
     resp.close()
@@ -111,7 +110,7 @@ except Exception as e:
 }
 
 echo "[NSW] ========================================="
-echo "[NSW] Checking models..."
+echo "[NSW] Checking models (Juggernaut Ragnarok pipeline)..."
 echo "[NSW] ========================================="
 
 # Log to network volume for remote diagnostics
@@ -128,25 +127,26 @@ fi
 
 VOLUME_MODELS="${VOLUME_LORAS_DIR%/loras}"  # /runpod-volume/models
 
-echo "[NSW] Cleaning up SDXL model files..."
+echo "[NSW] Cleaning up old model files..."
 
-# Checkpoints dir: remove old SDXL checkpoints but keep active ones
+# Checkpoints dir: keep only Juggernaut Ragnarok
 if [ -d "${VOLUME_MODELS}/checkpoints" ]; then
   for ckpt_file in "${VOLUME_MODELS}/checkpoints/"*.safetensors "${VOLUME_MODELS}/checkpoints/"*.ckpt; do
     [ -f "$ckpt_file" ] || continue
     ckpt_name=$(basename "$ckpt_file")
     case "$ckpt_name" in
-      CyberRealistic_PonySemi_V4.5.safetensors)
-        ;; # keep
+      Juggernaut-Ragnarok.safetensors)
+        ;; # keep — inference checkpoint
+      sd_xl_base_1.0.safetensors)
+        ;; # keep — LoRA training base
       *)
         echo "[NSW] Removing old checkpoint: $ckpt_name"
         rm -f "$ckpt_file"
         ;;
     esac
   done
-  echo "[NSW] ✓ Old checkpoints removed (kept CyberRealistic_PonySemi_V4.5)"
+  echo "[NSW] ✓ Old checkpoints cleaned (kept Juggernaut-Ragnarok, sd_xl_base_1.0)"
 fi
-
 
 # SAM segmentation models (used by FaceDetailer, no longer needed)
 if [ -d "${VOLUME_MODELS}/sams" ]; then
@@ -154,16 +154,16 @@ if [ -d "${VOLUME_MODELS}/sams" ]; then
   echo "[NSW] ✓ Cleared sams/ (SAM segmentation removed)"
 fi
 
-
 # IPAdapter models (no longer used)
 if [ -d "${VOLUME_MODELS}/ipadapter" ]; then
   rm -rf "${VOLUME_MODELS}/ipadapter"
   echo "[NSW] ✓ Cleared ipadapter/ (IPAdapter models removed)"
 fi
 
-# LoRAs to keep — all other .safetensors in the loras/ directory will be deleted.
-# Pony scene generation LoRAs only.
-KEEP_LORAS=(
+# LoRAs: Juggernaut Ragnarok uses NO style LoRAs.
+# Only character LoRAs (in characters/ subdirectory) are kept.
+# Remove all old Pony style LoRAs from the root loras/ directory.
+PONY_STYLE_LORAS=(
   "pony-ebony-skin.safetensors"
   "pony-skin-tone-slider.safetensors"
   "pony-hourglass-body.safetensors"
@@ -173,90 +173,62 @@ KEEP_LORAS=(
 )
 
 if [ -d "${VOLUME_LORAS_DIR}" ]; then
-  for lora_file in "${VOLUME_LORAS_DIR}"/*.safetensors; do
-    [ -f "$lora_file" ] || continue
-    basename_file=$(basename "$lora_file")
-    keep=false
-    for keep_name in "${KEEP_LORAS[@]}"; do
-      if [ "$basename_file" = "$keep_name" ]; then
-        keep=true
-        break
-      fi
-    done
-    if [ "$keep" = false ]; then
-      echo "[NSW] Removing stale LoRA: $basename_file"
-      rm -f "$lora_file"
+  for lora_name in "${PONY_STYLE_LORAS[@]}"; do
+    if [ -f "${VOLUME_LORAS_DIR}/${lora_name}" ]; then
+      echo "[NSW] Removing Pony style LoRA: ${lora_name}"
+      rm -f "${VOLUME_LORAS_DIR}/${lora_name}"
     fi
   done
-  echo "[NSW] ✓ Stale LoRAs removed from loras/"
+  echo "[NSW] ✓ Pony style LoRAs removed (Ragnarok uses no style LoRAs)"
 fi
 
 echo "[NSW] Cleanup complete."
 echo "[NSW] ========================================="
 
-# ---- Pony / CyberRealistic Semi-Realistic checkpoint (for V4 pony_cyberreal pipeline) ----
-# CivitAI model 709404, version 2601141 (v4.5)
-# https://civitai.com/models/709404/cyberrealistic-pony-semi-realistic
-PONY_CKPT_DEST="${VOLUME_MODELS}/checkpoints/CyberRealistic_PonySemi_V4.5.safetensors"
-if [ -f "$PONY_CKPT_DEST" ]; then
-    echo "[NSW] ✓ CyberRealistic_PonySemi_V4.5.safetensors (exists)"
+# ---- Juggernaut XL Ragnarok checkpoint (inference) ----
+# HuggingFace: RunDiffusion/Juggernaut-XL-v9
+RAGNAROK_CKPT_DEST="${VOLUME_MODELS}/checkpoints/Juggernaut-Ragnarok.safetensors"
+RAGNAROK_URL="https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
+if [ -f "$RAGNAROK_CKPT_DEST" ]; then
+    echo "[NSW] ✓ Juggernaut-Ragnarok.safetensors (exists)"
 elif [ -d "${VOLUME_MODELS}/checkpoints" ]; then
-    PONY_URL="https://civitai.com/api/download/models/2601141"
-    [ -n "${CIVITAI_API_KEY:-}" ] && PONY_URL="${PONY_URL}?token=${CIVITAI_API_KEY}"
-    echo "[NSW] Downloading CyberRealistic_PonySemi_V4.5.safetensors (~6GB)..."
+    echo "[NSW] Downloading Juggernaut-Ragnarok.safetensors (~6.5GB)..."
     python3 -c "
 import urllib.request, sys, shutil
 try:
-    req = urllib.request.Request('${PONY_URL}')
+    req = urllib.request.Request('${RAGNAROK_URL}')
     req.add_header('User-Agent', 'Mozilla/5.0 (ComfyUI-Worker)')
     resp = urllib.request.urlopen(req, timeout=900)
-    with open('${PONY_CKPT_DEST}.tmp', 'wb') as f:
+    with open('${RAGNAROK_CKPT_DEST}.tmp', 'wb') as f:
         shutil.copyfileobj(resp, f)
     resp.close()
 except Exception as e:
     print(f'Error: {e}', file=sys.stderr)
     sys.exit(1)
-" 2>&1 && mv "${PONY_CKPT_DEST}.tmp" "${PONY_CKPT_DEST}" || \
-    { rm -f "${PONY_CKPT_DEST}.tmp"; echo "[NSW] ERROR: CyberRealistic Pony Semi-Realistic download failed"; }
+" 2>&1 && mv "${RAGNAROK_CKPT_DEST}.tmp" "${RAGNAROK_CKPT_DEST}" || \
+    { rm -f "${RAGNAROK_CKPT_DEST}.tmp"; echo "[NSW] ERROR: Juggernaut Ragnarok download failed"; }
     # Sanity check: SDXL checkpoints are typically 6-7GB
-    if [ -f "$PONY_CKPT_DEST" ]; then
-        PONY_SIZE=$(stat -c%s "${PONY_CKPT_DEST}" 2>/dev/null || stat -f%z "${PONY_CKPT_DEST}" 2>/dev/null || echo 0)
-        if [ "$PONY_SIZE" -lt 2000000000 ]; then
-            echo "[NSW] ERROR: CyberRealistic Pony Semi-Realistic file too small (${PONY_SIZE} bytes) — likely a redirect/error page"
-            rm -f "${PONY_CKPT_DEST}"
+    if [ -f "$RAGNAROK_CKPT_DEST" ]; then
+        CKPT_SIZE=$(stat -c%s "${RAGNAROK_CKPT_DEST}" 2>/dev/null || stat -f%z "${RAGNAROK_CKPT_DEST}" 2>/dev/null || echo 0)
+        if [ "$CKPT_SIZE" -lt 2000000000 ]; then
+            echo "[NSW] ERROR: Juggernaut Ragnarok file too small (${CKPT_SIZE} bytes) — likely a redirect/error page"
+            rm -f "${RAGNAROK_CKPT_DEST}"
         else
-            echo "[NSW] ✓ CyberRealistic_PonySemi_V4.5.safetensors downloaded ($(( PONY_SIZE / 1024 / 1024 ))MB)"
+            echo "[NSW] ✓ Juggernaut-Ragnarok.safetensors downloaded ($(( CKPT_SIZE / 1024 / 1024 ))MB)"
         fi
     fi
 fi
 
+# ---- 4x NMKD Siax upscaler ----
+UPSCALE_DIR="${VOLUME_MODELS}/upscale_models"
+mkdir -p "${UPSCALE_DIR}" 2>/dev/null
+download_to_volume \
+    "https://huggingface.co/gemasai/4x_NMKD-Siax_200k/resolve/main/4x_NMKD-Siax_200k.pth" \
+    "4x_NMKD-Siax_200k.pth" \
+    "${UPSCALE_DIR}"
 
-# ---- Pony Scene Generation LoRAs ----
-
-# Ebony Pony (dark skin) — CivitAI model 513296, version 595483
-# Trigger: aiebonyskin | Strength: 0.6 | Pony-native
-download_to_volume "595483" "pony-ebony-skin.safetensors"
-
-# Skin Tone Slider PonyXL v1.2 BETA — CivitAI model 421744, version 1106176
-# Trigger: none (slider LoRA) | Strength: 3.0 | Pony-native
-download_to_volume "1106176" "pony-skin-tone-slider.safetensors"
-
-# Hourglass Body Shape v2 Pony — CivitAI model 129130, version 928762
-# Trigger: hourglass body shape | Strength: 0.85 | Pony-native
-download_to_volume "928762" "pony-hourglass-body.safetensors"
-
-# Perfect Breasts v2 — CivitAI model 1621732, version 1987668
-# Already on volume; re-download only if missing.
-download_to_volume "1987668" "perfect-breasts-v2.safetensors"
-
-# Realism LoRA Stable Yogi v3.0_lite — CivitAI model 1098033, version 2074888
-# Trigger: none | Strength: 0.7 | Pony-native
-download_to_volume "2074888" "pony-realism-stable-yogi.safetensors"
-
-# Detail Slider PonyXL v1.4 — CivitAI model 402462, version 712947
-# Trigger: none (slider LoRA) | Strength: 3.0 | Pony-native
-download_to_volume "712947" "pony-detail-slider.safetensors"
-
+# Note: No style LoRAs to download — Juggernaut Ragnarok handles photorealism natively.
+# Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob, validateTagsPreflight, convertProseToBooru } from "@no-safe-word/image-gen";
+import { submitRunPodJob, validateTagsPreflight, convertProseToPrompt } from "@no-safe-word/image-gen";
 import {
   buildV4SceneGenerationPayload,
   fetchCharacterDataMap,
@@ -16,7 +16,7 @@ interface FailedJob {
   error: string;
 }
 
-// POST /api/stories/[seriesId]/generate-images-v4 — Batch generate V4 scene images (Pony CyberRealistic)
+// POST /api/stories/[seriesId]/generate-images-v4 — Batch generate V4 scene images (Juggernaut Ragnarok)
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ seriesId: string }> },
@@ -28,16 +28,16 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const { post_id, regenerate } = body as { post_id?: string; regenerate?: boolean };
 
-    // 1. Verify series uses pony_cyberreal engine
+    // 1. Verify series uses juggernaut_ragnarok engine
     const { data: series } = await (supabase as any)
       .from("story_series")
       .select("image_engine")
       .eq("id", seriesId)
       .single() as { data: { image_engine: string } | null };
 
-    if (series?.image_engine !== "pony_cyberreal") {
+    if (series?.image_engine !== "juggernaut_ragnarok") {
       return NextResponse.json(
-        { error: `Series engine is "${series?.image_engine}", not "pony_cyberreal". Use the correct batch endpoint.` },
+        { error: `Series engine is "${series?.image_engine}", not "juggernaut_ragnarok". Use the correct batch endpoint.` },
         { status: 400 },
       );
     }
@@ -65,7 +65,7 @@ export async function POST(
     }
 
     if (postIds.length === 0) {
-      return NextResponse.json({ pipeline: "v4-pony-cyberreal", queued: 0, failed: 0, jobs: [] });
+      return NextResponse.json({ pipeline: "v4-juggernaut-ragnarok", queued: 0, failed: 0, jobs: [] });
     }
 
     // 3. Reset generated prompts if regenerate flag
@@ -89,7 +89,7 @@ export async function POST(
     }
 
     if (!prompts || prompts.length === 0) {
-      return NextResponse.json({ pipeline: "v4-pony-cyberreal", queued: 0, failed: 0, jobs: [] });
+      return NextResponse.json({ pipeline: "v4-juggernaut-ragnarok", queued: 0, failed: 0, jobs: [] });
     }
 
     // 5. Pre-fetch character data
@@ -105,7 +105,7 @@ export async function POST(
     // 6. Generate each image sequentially
     const jobs: QueuedJob[] = [];
     const failed: FailedJob[] = [];
-    const ponyEndpointId = process.env.RUNPOD_PONY_ENDPOINT_ID;
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
 
     for (let i = 0; i < prompts.length; i++) {
       const imgPrompt = prompts[i];
@@ -119,7 +119,7 @@ export async function POST(
 
         // Tier 0: Pre-flight tag validation (before spending GPU credits)
         const isNsfw = imgPrompt.image_type !== "facebook_sfw";
-        const preflightTags = await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
+        const preflightTags = await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw });
         const preflight = await validateTagsPreflight(imgPrompt.prompt, preflightTags);
         if (!preflight.passed) {
           console.warn(
@@ -135,12 +135,12 @@ export async function POST(
           seed,
         });
 
-        // Submit to RunPod Pony endpoint
+        // Submit to RunPod endpoint
         const { jobId: runpodJobId } = await submitRunPodJob(
           result.workflow,
           result.images.length > 0 ? result.images : undefined,
           result.characterLoraDownloads.length > 0 ? result.characterLoraDownloads : undefined,
-          ponyEndpointId,
+          endpointId,
         );
 
         // Create image record
@@ -156,7 +156,7 @@ export async function POST(
               steps: result.profile.steps,
               cfg: result.profile.cfg,
               seed: result.seed,
-              engine: "runpod-v4-pony-cyberreal",
+              engine: "runpod-v4-juggernaut-ragnarok",
               attemptNumber: 1,
               compositionType: result.profile.compositionType,
               contentMode: result.profile.contentMode,
@@ -209,7 +209,7 @@ export async function POST(
     }
 
     return NextResponse.json({
-      pipeline: "v4-pony-cyberreal",
+      pipeline: "v4-juggernaut-ragnarok",
       queued: jobs.length,
       failed: failed.length,
       jobs,

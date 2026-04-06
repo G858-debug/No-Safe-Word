@@ -1,13 +1,13 @@
 /**
- * V4 Scene Image Generation: Pony V6 / CyberRealistic Pony Semi-Realistic via RunPod + ComfyUI
+ * V4 Scene Image Generation: Juggernaut Ragnarok via RunPod + ComfyUI
  *
  * Single-step pipeline — character identity via trained SDXL LoRAs (no face swap):
  *
- * 1. Convert prose scene prompt → booru-style tags via Claude
+ * 1. Convert prose scene prompt via Claude
  * 2. Build character identity tags from character data
- * 3. Assemble Pony positive prompt (quality + triggers + identity + scene)
- * 4. Build ComfyUI SDXL workflow (CyberRealistic Pony Semi-Realistic v4.5 checkpoint)
- * 5. Submit to RunPod (Pony endpoint) with character LoRA downloads
+ * 3. Assemble positive prompt (quality + triggers + identity + scene)
+ * 4. Build ComfyUI SDXL workflow (Juggernaut Ragnarok checkpoint)
+ * 5. Submit to RunPod with character LoRA downloads
  *
  * Character consistency comes from SDXL-trained character LoRAs injected into
  * the workflow's LoRA chain — no PuLID, no face-swap post-processing.
@@ -16,18 +16,18 @@
 import { supabase } from "@no-safe-word/story-engine";
 import type { CharacterData } from "@no-safe-word/shared";
 import {
-  buildPonyQualityPrefix,
-  buildPonyNegativePrompt,
-  buildPonyCharacterTags,
-  buildPonyPositivePrompt,
-  convertProseToBooru,
-  getPonyDimensions,
-  selectPonyResources,
-  buildPonyWorkflow,
+  buildQualityPrefix,
+  buildNegativePrompt,
+  buildCharacterTags,
+  buildPositivePrompt,
+  convertProseToPrompt,
+  getDimensions,
+  buildWorkflow,
   getDefaultProfile,
   deriveCompositionType,
   deriveContentMode,
 } from "@no-safe-word/image-gen";
+// selectResources removed — Juggernaut Ragnarok uses no style LoRAs
 import type { CharacterLoraDownload, SceneProfile } from "@no-safe-word/image-gen";
 
 /** Fetch character data from the characters table for the given IDs */
@@ -102,7 +102,7 @@ export interface V4SceneResult {
   seed: number;
   width: number;
   height: number;
-  engine: "pony_cyberreal";
+  engine: "juggernaut_ragnarok";
   /** The scene profile used for this generation (for evaluation storage) */
   profile: SceneProfile;
 }
@@ -114,7 +114,7 @@ interface V4GenerateSceneParams {
   seed: number;
   /** Override scene profile (used by retry strategy to adjust parameters) */
   profileOverrides?: Partial<SceneProfile>;
-  /** Pre-rewritten booru tags (bypasses convertProseToBooru on retries) */
+  /** Pre-rewritten booru tags (bypasses convertProseToPrompt on retries) */
   overrideTags?: string;
 }
 
@@ -167,7 +167,7 @@ async function fetchCharacterLora(
 // ── Main Pipeline ──
 
 /**
- * Build the V4 scene generation payload (Pony CyberRealistic Semi-Realistic).
+ * Build the V4 scene generation payload (Juggernaut Ragnarok).
  *
  * Returns a workflow + metadata ready for submitRunPodJob().
  * The caller is responsible for submitting to RunPod and storing the result.
@@ -251,7 +251,7 @@ export async function buildV4SceneGenerationPayload(
 
   // ── Prompt building ──
   // Convert prose scene prompt to booru tags (or use pre-rewritten tags from retry)
-  const sceneTags = overrideTags || await convertProseToBooru(imgPrompt.prompt, { nsfw: isNsfw });
+  const sceneTags = overrideTags || await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw });
   console.log(`[V4][${promptId}] Scene tags: ${sceneTags}`);
 
   // Build character identity tags.
@@ -267,7 +267,7 @@ export async function buildV4SceneGenerationPayload(
       // LoRA carries identity — only inject the character count tag
       characterTags = primaryCharData.gender === "male" ? "1boy" : "1girl";
     } else {
-      characterTags = buildPonyCharacterTags({
+      characterTags = buildCharacterTags({
         gender: primaryCharData.gender === "male" ? "male" : "female",
         ethnicity: primaryCharData.ethnicity,
         skinTone: primaryCharData.skinTone,
@@ -286,7 +286,7 @@ export async function buildV4SceneGenerationPayload(
     if (hasLoraForSecondary) {
       secondaryCharacterTags = secondaryCharData.gender === "male" ? "1boy" : "1girl";
     } else {
-      secondaryCharacterTags = buildPonyCharacterTags({
+      secondaryCharacterTags = buildCharacterTags({
         gender: secondaryCharData.gender === "male" ? "male" : "female",
         ethnicity: secondaryCharData.ethnicity,
         skinTone: secondaryCharData.skinTone,
@@ -300,33 +300,16 @@ export async function buildV4SceneGenerationPayload(
     }
   }
 
-  // Select style LoRAs
-  const resources = selectPonyResources({
-    gender: primaryGender,
-    secondaryGender: secondaryGenderVal,
-    isSfw: !isNsfw,
-    imageType: imgPrompt.image_type,
-    prompt: imgPrompt.prompt,
-    hasDualCharacter: isDualCharacter,
-    primaryEthnicity: primaryCharData?.ethnicity,
-  });
-
-  // Add style LoRAs after character LoRAs, applying profile-driven strength overrides
-  for (const lora of resources.loras) {
-    const overrideStrength = profile.loraOverrides[lora.filename];
-    if (overrideStrength !== undefined) {
-      loraStack.push({ ...lora, strengthModel: overrideStrength, strengthClip: Math.min(overrideStrength, 1.0) });
-    } else {
-      loraStack.push(lora);
-    }
-  }
+  // Style LoRA stack removed — Juggernaut Ragnarok handles photorealism natively.
+  // Character LoRAs (already in loraStack) are the only LoRAs injected at inference time.
+  // See docs/skills/juggernaut-ragnarok/SKILL.md for details.
 
   // Assemble prompts
-  const qualityPrefix = buildPonyQualityPrefix(mode);
-  const negativePrompt = buildPonyNegativePrompt(mode);
+  const qualityPrefix = buildQualityPrefix(mode);
+  const negativePrompt = buildNegativePrompt(mode);
 
   // ── Dimensions ──
-  const { width, height } = getPonyDimensions("portrait", isDualCharacter);
+  const { width, height } = getDimensions("portrait", isDualCharacter);
 
   // ── Build workflow ──
   let positivePrompt: string;
@@ -337,8 +320,7 @@ export async function buildV4SceneGenerationPayload(
     // ONLY used for SFW dual-character scenes (e.g. two characters side-by-side).
     // NSFW scenes use a single combined prompt — regional left/right splitting
     // produces two separate people rather than interacting/overlapping bodies.
-    const styleTriggers = resources.triggerWords;
-    const sharedParts = [qualityPrefix, ...styleTriggers, sceneTags].filter(Boolean);
+    const sharedParts = [qualityPrefix, sceneTags].filter(Boolean);
     positivePrompt = sharedParts.join(', ');
 
     // Character 1 (left region): trigger word + identity tags
@@ -357,17 +339,17 @@ export async function buildV4SceneGenerationPayload(
     console.log(`[V4][${promptId}] Char2 (right): ${dualCharacterPrompts.char2Prompt}`);
   } else {
     // Single character: all in one prompt
-    positivePrompt = buildPonyPositivePrompt({
+    positivePrompt = buildPositivePrompt({
       qualityPrefix,
       characterTags,
       secondaryCharacterTags,
       sceneTags,
-      triggerWords: [...triggerWords, ...resources.triggerWords],
+      triggerWords,
       mode,
     });
   }
 
-  const workflow = buildPonyWorkflow({
+  const workflow = buildWorkflow({
     positivePrompt,
     negativePrompt,
     width,
@@ -389,7 +371,7 @@ export async function buildV4SceneGenerationPayload(
   console.log(
     `[V4][${promptId}] === GENERATION SUMMARY ===\n` +
     JSON.stringify({
-      pipeline: "V4 (pony_cyberreal)",
+      pipeline: "V4 (juggernaut_ragnarok)",
       promptId,
       primaryCharacter: imgPrompt.character_id
         ? { id: imgPrompt.character_id, name: imgPrompt.character_name, gender: primaryGender }
@@ -419,7 +401,7 @@ export async function buildV4SceneGenerationPayload(
     seed,
     width,
     height,
-    engine: "pony_cyberreal",
+    engine: "juggernaut_ragnarok",
     profile,
   };
 }

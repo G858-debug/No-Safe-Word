@@ -4,7 +4,7 @@
  * Unlike the serverless endpoint in runpod.ts (which runs short inference jobs),
  * pods are full GPU instances that run until explicitly stopped or the entrypoint exits.
  *
- * Patterns extracted from scripts/download-pony-checkpoint.mjs.
+ * Patterns extracted from RunPod Pod management scripts.
  */
 
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
