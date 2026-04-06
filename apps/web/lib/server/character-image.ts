@@ -179,13 +179,12 @@ export function buildCharacterGenerationPayload(opts: {
   const width = 832;
   const height = 1216;
 
-  // Body Weight Slider LoRA — positive strength = curvier/fuller figure.
-  // CivitAI model 1348692, version 1523317. No trigger word.
-  // Slider range: -0.5 (lean) to 3.5 (very curvy). Using 1.5 for moderate enhancement.
+  // Hourglass of Venus v2.0 LoRA — hourglass body proportions.
+  // CivitAI model 2365594, version 2660613. Trigger: "venus body type" (optional).
   const loras = charData.gender === "female" ? [{
-    filename: "Body_weight_slider_ILXL.safetensors",
-    strengthModel: 1.8,
-    strengthClip: 1.0,
+    filename: "Hourglass_of_Venus_v2.safetensors",
+    strengthModel: 0.8,
+    strengthClip: 0.8,
   }] : undefined;
 
   const workflow = buildWorkflow({

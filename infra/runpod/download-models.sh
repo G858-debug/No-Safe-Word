@@ -227,15 +227,14 @@ download_to_volume \
     "4x_NMKD-Siax_200k.pth" \
     "${UPSCALE_DIR}"
 
-# ---- Body Weight Slider LoRA (female body proportions) ----
-# CivitAI model 1348692, version 1523317
-# Slider LoRA: positive strength = curvier, negative = leaner. No trigger word.
+# ---- Hourglass of Venus v2.0 LoRA (female body proportions) ----
+# CivitAI model 2365594, version 2660613
 # Used during portrait and dataset generation for female characters only.
-BODYSLIDER_URL="https://civitai.com/api/download/models/1523317"
-[ -n "${CIVITAI_API_KEY:-}" ] && BODYSLIDER_URL="${BODYSLIDER_URL}?token=${CIVITAI_API_KEY}"
+VENUS_URL="https://civitai.com/api/download/models/2660613"
+[ -n "${CIVITAI_API_KEY:-}" ] && VENUS_URL="${VENUS_URL}?token=${CIVITAI_API_KEY}"
 download_to_volume \
-    "${BODYSLIDER_URL}" \
-    "Body_weight_slider_ILXL.safetensors" \
+    "${VENUS_URL}" \
+    "Hourglass_of_Venus_v2.safetensors" \
     "${VOLUME_LORAS_DIR}"
 
 # Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).
