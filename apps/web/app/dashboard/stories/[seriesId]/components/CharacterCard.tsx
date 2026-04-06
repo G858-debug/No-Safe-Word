@@ -155,6 +155,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [loraBodyWeight, setLoraBodyWeight] = useState(parseFloat(descInit.loraBodyWeight || "0"));
   const [loraBubbleButt, setLoraBubbleButt] = useState(parseFloat(descInit.loraBubbleButt || "1.4"));
   const [loraBreastSize, setLoraBreastSize] = useState(parseFloat(descInit.loraBreastSize || "1.2"));
+  const [lastSeed, setLastSeed] = useState<number | null>(null);
+  const [lockSeed, setLockSeed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isTraining, setIsTraining] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -210,6 +212,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         const data = await res.json();
         if (data.completed && data.imageUrl) {
           setGenImageUrl(data.imageUrl);
+          if (data.seed) setLastSeed(Number(data.seed));
           setIsGenerating(false);
           setGenJobId(null);
           clearInterval(interval);
@@ -263,6 +266,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         body: JSON.stringify({
           stage,
           type: stage === "body" ? "fullBody" : "portrait",
+          seed: lockSeed && lastSeed ? lastSeed : undefined,
           customPrompt: prompt || undefined,
           customNegativePrompt: negativePrompt !== SFW_NEGATIVE_PROMPT ? negativePrompt : undefined,
           loraStrengths: isFemale ? { bodyWeight: loraBodyWeight, bubbleButt: loraBubbleButt, breastSize: loraBreastSize } : undefined,
@@ -460,6 +464,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             loraBodyWeight={loraBodyWeight} onBodyWeightChange={setLoraBodyWeight}
             loraBubbleButt={loraBubbleButt} onBubbleButtChange={setLoraBubbleButt}
             loraBreastSize={loraBreastSize} onBreastSizeChange={setLoraBreastSize}
+            lastSeed={lastSeed} lockSeed={lockSeed} onLockSeedChange={setLockSeed}
             onGenerate={handleGenerate}
             onApprove={handleApprove}
             approvedPortraitUrl={character.approved_image_url}
@@ -535,6 +540,7 @@ function PortraitStage({
   character, editableDesc, onFieldChange, imageUrl, imageId, isGenerating, prompt, onPromptChange,
   negativePrompt, onNegativePromptChange,
   isFemale, loraBodyWeight, onBodyWeightChange, loraBubbleButt, onBubbleButtChange, loraBreastSize, onBreastSizeChange,
+  lastSeed, lockSeed, onLockSeedChange,
   onGenerate, onApprove, approvedPortraitUrl, approvedBodyUrl,
 }: {
   character: CharacterFromAPI;
@@ -554,6 +560,9 @@ function PortraitStage({
   onBubbleButtChange: (v: number) => void;
   loraBreastSize: number;
   onBreastSizeChange: (v: number) => void;
+  lastSeed: number | null;
+  lockSeed: boolean;
+  onLockSeedChange: (v: boolean) => void;
   onGenerate: (stage: "face" | "body") => void;
   onApprove: (type: "portrait" | "fullBody") => void;
   approvedPortraitUrl: string | null;
@@ -688,6 +697,17 @@ function PortraitStage({
           ) : imageUrl ? (
             <div className="space-y-3">
               <img src={imageUrl} alt="Generated" className="w-full max-w-sm rounded-md border" />
+              {lastSeed && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={lockSeed}
+                    onChange={(e) => onLockSeedChange(e.target.checked)}
+                    className="rounded"
+                  />
+                  Lock seed ({lastSeed})
+                </label>
+              )}
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => onGenerate(stageLabel)}>
                   Regenerate
