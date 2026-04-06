@@ -765,7 +765,7 @@ function DatasetStage({
           </div>
         )}
         <Button onClick={onTrain} disabled={isTraining}>
-          {isTraining ? "Starting..." : "Train Character LoRA"}
+          {isTraining ? "Starting..." : "Generate Dataset"}
         </Button>
       </div>
     );
