@@ -200,16 +200,26 @@ export async function runTrainingPipeline(
         console.warn(`[LoRAPipeline] Missing diversity: ${diversityCoverage.missing.join(', ')}`);
       }
 
-      // Update eval_status for final selection
+      // Update eval_status for final selection.
+      // 'passed'   = selected for training
+      // 'replaced' = passed quality evaluation but culled by diversity selection
+      // 'failed'   = genuinely failed quality evaluation (score below threshold)
       const selectedIds = new Set(selected.map(e => e.imageId));
       const { data: allImages } = await deps.supabase
         .from('lora_dataset_images')
-        .select('id')
+        .select('id, eval_score')
         .eq('lora_id', loraId);
 
       if (allImages) {
         for (const img of allImages) {
-          const evalStatus = selectedIds.has(img.id) ? 'passed' : 'failed';
+          let evalStatus: string;
+          if (selectedIds.has(img.id)) {
+            evalStatus = 'passed';
+          } else if ((img.eval_score || 0) >= PIPELINE_CONFIG.minEvalScore) {
+            evalStatus = 'replaced'; // Passed quality, culled by diversity curation
+          } else {
+            evalStatus = 'failed';
+          }
           await deps.supabase
             .from('lora_dataset_images')
             .update({ eval_status: evalStatus })
@@ -582,16 +592,23 @@ async function runPass2Pipeline(
     const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
     console.log(`[LoRAPipeline] Pass 2: ${selected.length} selected, ${rejected.length} rejected`);
 
-    // Update eval_status for final selection
+    // Update eval_status for final selection (same semantics as Pass 1).
     const selectedIds = new Set(selected.map(e => e.imageId));
     const { data: allImages } = await deps.supabase
       .from('lora_dataset_images')
-      .select('id')
+      .select('id, eval_score')
       .eq('lora_id', loraId);
 
     if (allImages) {
       for (const img of allImages) {
-        const evalStatus = selectedIds.has(img.id) ? 'passed' : 'failed';
+        let evalStatus: string;
+        if (selectedIds.has(img.id)) {
+          evalStatus = 'passed';
+        } else if ((img.eval_score || 0) >= PIPELINE_CONFIG.minEvalScore) {
+          evalStatus = 'replaced';
+        } else {
+          evalStatus = 'failed';
+        }
         await deps.supabase
           .from('lora_dataset_images')
           .update({ eval_status: evalStatus })

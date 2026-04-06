@@ -622,6 +622,7 @@ function DatasetImageCard({
 }) {
   const isFailed = img.eval_status === "failed";
   const isPassed = img.eval_status === "passed";
+  const isReplaced = img.eval_status === "replaced"; // Passed quality, culled by diversity curation
   const isHumanApproved = img.human_approved === true;
   const isHumanRejected = img.human_approved === false;
 
@@ -642,7 +643,7 @@ function DatasetImageCard({
         <img
           src={img.image_url}
           alt={`Dataset ${img.category}`}
-          className={`h-full w-full object-cover${(isFailed || isHumanRejected) && !isHumanApproved ? " opacity-60" : ""}`}
+          className={`h-full w-full object-cover${(isFailed || isHumanRejected) && !isHumanApproved ? " opacity-60" : isReplaced && !isHumanApproved ? " opacity-80" : ""}`}
         />
         <div
           className="absolute inset-0 cursor-zoom-in"
@@ -668,6 +669,10 @@ function DatasetImageCard({
         ) : isPassed ? (
           <span className="absolute left-1.5 top-1.5 rounded bg-orange-700/80 px-1.5 py-0.5 text-[9px] font-semibold text-orange-100">
             AI ✓
+          </span>
+        ) : isReplaced ? (
+          <span className="absolute left-1.5 top-1.5 rounded bg-zinc-600/80 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-300" title="Passed quality check but not selected (diversity curation)">
+            AI ✓ –
           </span>
         ) : isFailed ? (
           <span className="absolute left-1.5 top-1.5 flex items-center rounded bg-red-800/80 px-1.5 py-0.5 text-[9px] font-semibold text-red-200">
@@ -800,7 +805,7 @@ export default function DatasetApprovalPage() {
   const humanApproved = images.filter((i) => i.human_approved === true).length;
   const humanRejected = images.filter((i) => i.human_approved === false).length;
   const humanPending = images.filter((i) => i.human_approved === null).length;
-  const aiPassed = images.filter((i) => i.eval_status === "passed").length;
+  const aiPassed = images.filter((i) => i.eval_status === "passed" || i.eval_status === "replaced").length;
   const minRequired = stats?.minRequired ?? 20;
   const canResume = isApprovalMode && humanApproved >= minRequired;
   const canRetry = loraStatus === "failed" && humanApproved >= minRequired;
@@ -810,8 +815,9 @@ export default function DatasetApprovalPage() {
   const rejected = images.filter(
     (i) => i.eval_status === "failed" && i.human_approved !== true
   );
+  // 'replaced' images passed quality but were culled by diversity curation — treat as needing review
   const needsReview = images.filter(
-    (i) => i.eval_status === "passed" && i.human_approved !== true
+    (i) => (i.eval_status === "passed" || i.eval_status === "replaced") && i.human_approved !== true
   );
 
   const filteredImages = images.filter((img) => {
@@ -819,7 +825,7 @@ export default function DatasetApprovalPage() {
     if (filter === "rejected")
       return img.eval_status === "failed" && img.human_approved !== true;
     if (filter === "needs_review")
-      return img.eval_status === "passed" && img.human_approved !== true;
+      return (img.eval_status === "passed" || img.eval_status === "replaced") && img.human_approved !== true;
     return true;
   });
 
@@ -905,7 +911,7 @@ export default function DatasetApprovalPage() {
   const handleApproveAllAIPassed = useCallback(async () => {
     setApproveAllConfirm(false);
     const aiPassedIds = images
-      .filter((i) => i.eval_status === "passed" && i.human_approved !== true)
+      .filter((i) => (i.eval_status === "passed" || i.eval_status === "replaced") && i.human_approved !== true)
       .map((i) => i.id);
     if (aiPassedIds.length > 0) {
       await updateApproval(aiPassedIds, true);
