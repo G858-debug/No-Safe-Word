@@ -106,10 +106,14 @@ async function setLoraStatus(
   extra: Record<string, unknown> = {},
   deps: PipelineDeps,
 ): Promise<void> {
-  await deps.supabase
+  const { error } = await deps.supabase
     .from('character_loras')
     .update({ status, ...extra, updated_at: new Date().toISOString() })
     .eq('id', loraId);
+  if (error) {
+    console.error(`[LoRAPipeline] Failed to set status "${status}" for ${loraId}: ${error.message}`);
+    throw new Error(`Failed to update LoRA status to "${status}": ${error.message}`);
+  }
 }
 
 async function setLoraError(loraId: string, error: string, deps: PipelineDeps): Promise<void> {
