@@ -201,35 +201,18 @@ export async function runTrainingPipeline(
       if (passedAfterRetries < PIPELINE_CONFIG.minPassedImages) {
         console.log(`[LoRAPipeline] After retries: ${passedAfterRetries} passed hard+score check (need ${PIPELINE_CONFIG.minPassedImages}). Auto-generating top-up images...`);
 
-        // Count passing images per category
-        const { data: passedImages } = await deps.supabase
-          .from('lora_dataset_images')
-          .select('category')
-          .eq('lora_id', loraId)
-          .eq('eval_status', 'passed');
-
-        const catCounts: Record<string, number> = {};
-        for (const img of (passedImages || [])) {
-          catCounts[img.category] = (catCounts[img.category] || 0) + 1;
-        }
-
-        // Calculate deficits: need enough in each category, plus extra to compensate for eval failures
-        const deficits: Array<{ category: string; needed: number }> = [];
-        for (const [cat, min] of Object.entries(MIN_CATEGORY_COUNTS)) {
-          const have = catCounts[cat] || 0;
-          // Generate 2x the deficit to account for eval failures
-          const needed = Math.max(0, (min * 2) - have);
-          if (needed > 0) deficits.push({ category: cat, needed });
-        }
-        // Also add general top-up if we're broadly short
+        // Calculate total shortfall and generate 3x to account for ~30-50% hard requirement failure rate.
+        // Spread across categories weighted by category minimums. Face close-ups have best success rate
+        // (no hands/body to get wrong), so weight them more heavily.
         const totalNeeded = PIPELINE_CONFIG.minPassedImages - passedAfterRetries;
-        if (totalNeeded > 0 && deficits.length === 0) {
-          // Spread across all categories
-          deficits.push({ category: 'face-closeup', needed: Math.ceil(totalNeeded * 0.3) });
-          deficits.push({ category: 'head-shoulders', needed: Math.ceil(totalNeeded * 0.25) });
-          deficits.push({ category: 'full-body', needed: Math.ceil(totalNeeded * 0.25) });
-          deficits.push({ category: 'waist-up', needed: Math.ceil(totalNeeded * 0.2) });
-        }
+        const generateCount = Math.max(totalNeeded * 3, 10); // At least 10, or 3x shortfall
+        const deficits: Array<{ category: string; needed: number }> = [
+          { category: 'face-closeup', needed: Math.ceil(generateCount * 0.35) },
+          { category: 'head-shoulders', needed: Math.ceil(generateCount * 0.30) },
+          { category: 'full-body', needed: Math.ceil(generateCount * 0.20) },
+          { category: 'waist-up', needed: Math.ceil(generateCount * 0.15) },
+        ];
+        console.log(`[LoRAPipeline] Top-up: shortfall=${totalNeeded}, generating ${generateCount} images across categories`);
 
         if (deficits.length > 0) {
           const topUpResult = await generateTopUpImages(character, loraId, deficits, deps);
@@ -661,31 +644,15 @@ async function runPass2Pipeline(
     if (passedAfterRetries < PIPELINE_CONFIG.minPassedImages) {
       console.log(`[LoRAPipeline] Pass 2: After retries: ${passedAfterRetries} passed hard+score check (need ${PIPELINE_CONFIG.minPassedImages}). Auto top-up...`);
 
-      const { data: passedImages } = await deps.supabase
-        .from('lora_dataset_images')
-        .select('category, prompt_template')
-        .eq('lora_id', loraId)
-        .eq('eval_status', 'passed')
-        .like('prompt_template', 'p2_%');
-
-      const catCounts: Record<string, number> = {};
-      for (const img of (passedImages || [])) {
-        catCounts[img.category] = (catCounts[img.category] || 0) + 1;
-      }
-
-      const deficits: Array<{ category: string; needed: number }> = [];
-      for (const [cat, min] of Object.entries(MIN_CATEGORY_COUNTS)) {
-        const have = catCounts[cat] || 0;
-        const needed = Math.max(0, (min * 2) - have);
-        if (needed > 0) deficits.push({ category: cat, needed });
-      }
       const totalNeeded = PIPELINE_CONFIG.minPassedImages - passedAfterRetries;
-      if (totalNeeded > 0 && deficits.length === 0) {
-        deficits.push({ category: 'face-closeup', needed: Math.ceil(totalNeeded * 0.3) });
-        deficits.push({ category: 'head-shoulders', needed: Math.ceil(totalNeeded * 0.25) });
-        deficits.push({ category: 'full-body', needed: Math.ceil(totalNeeded * 0.25) });
-        deficits.push({ category: 'waist-up', needed: Math.ceil(totalNeeded * 0.2) });
-      }
+      const generateCount = Math.max(totalNeeded * 3, 10);
+      const deficits: Array<{ category: string; needed: number }> = [
+        { category: 'face-closeup', needed: Math.ceil(generateCount * 0.35) },
+        { category: 'head-shoulders', needed: Math.ceil(generateCount * 0.30) },
+        { category: 'full-body', needed: Math.ceil(generateCount * 0.20) },
+        { category: 'waist-up', needed: Math.ceil(generateCount * 0.15) },
+      ];
+      console.log(`[LoRAPipeline] Pass 2 top-up: shortfall=${totalNeeded}, generating ${generateCount} images`);
 
       if (deficits.length > 0) {
         const topUpResult = await generateTopUpImages(character, loraId, deficits, deps);
