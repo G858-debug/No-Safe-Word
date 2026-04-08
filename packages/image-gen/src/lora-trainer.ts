@@ -18,7 +18,7 @@ import { generateDataset, generateTopUpImages } from './dataset-generator';
 import type { DatasetCharacter } from './dataset-generator';
 import { buildQualityPrefix, buildNegativePrompt } from './prompt-builder';
 import { buildWorkflow } from './workflow-builder';
-import { selectTrainingSet, type TrainingImageEvaluation } from './character-lora/training-image-evaluator';
+import { selectTrainingSet, passesRequirements, type TrainingImageEvaluation } from './character-lora/training-image-evaluator';
 import { buildTrainingCaption, type CharacterIdentity } from './character-lora/training-caption-builder';
 import { validateLora, toPipelineValidationResult } from './character-lora-validator';
 import { createTrainingPod, terminateTrainingPod } from './runpod-pods';
@@ -188,10 +188,14 @@ export async function runTrainingPipeline(
         evaluations = evaluations.concat(retryEvals);
       }
 
-      // Auto top-up: if still below target after retries, generate fresh images for deficit categories
-      const passedAfterRetries = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+      // Auto top-up: if still below target after retries, generate fresh images for deficit categories.
+      // Must check BOTH score threshold AND hard requirements (faceVisible, noAnatomyErrors, imageSharp)
+      // since selectTrainingSet filters by hard requirements too.
+      const passedAfterRetries = evaluations.filter(e =>
+        calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore && passesRequirements(e)
+      ).length;
       if (passedAfterRetries < PIPELINE_CONFIG.minPassedImages) {
-        console.log(`[LoRAPipeline] After retries: ${passedAfterRetries} passed (need ${PIPELINE_CONFIG.minPassedImages}). Auto-generating top-up images...`);
+        console.log(`[LoRAPipeline] After retries: ${passedAfterRetries} passed hard+score check (need ${PIPELINE_CONFIG.minPassedImages}). Auto-generating top-up images...`);
 
         // Count passing images per category
         const { data: passedImages } = await deps.supabase
@@ -645,10 +649,13 @@ async function runPass2Pipeline(
       evaluations = evaluations.concat(retryEvals);
     }
 
-    // Auto top-up for Pass 2: if still below target, generate fresh images
-    const passedAfterRetries = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+    // Auto top-up for Pass 2: if still below target, generate fresh images.
+    // Check both score AND hard requirements (selectTrainingSet filters by both).
+    const passedAfterRetries = evaluations.filter(e =>
+      calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore && passesRequirements(e)
+    ).length;
     if (passedAfterRetries < PIPELINE_CONFIG.minPassedImages) {
-      console.log(`[LoRAPipeline] Pass 2: After retries: ${passedAfterRetries} passed (need ${PIPELINE_CONFIG.minPassedImages}). Auto top-up...`);
+      console.log(`[LoRAPipeline] Pass 2: After retries: ${passedAfterRetries} passed hard+score check (need ${PIPELINE_CONFIG.minPassedImages}). Auto top-up...`);
 
       const { data: passedImages } = await deps.supabase
         .from('lora_dataset_images')
