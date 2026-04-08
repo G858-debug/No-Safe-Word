@@ -795,6 +795,7 @@ async function evaluateDatasetImages(
         // Update the DB record with eval results
         const score = calculateSimpleScore(evaluation);
         const issues = (evaluation as any).issues || [];
+        const hardPass = passesRequirements(evaluation);
         await deps.supabase
           .from('lora_dataset_images')
           .update({
@@ -806,6 +807,11 @@ async function evaluateDatasetImages(
               verdict: score >= PIPELINE_CONFIG.minEvalScore ? 'PASS' : 'FAIL',
               issues,
               proportions_realistic: evaluation.requirements.correctBodyProportions,
+              // Store hard requirement results for DB-based curation after auto-resume
+              face_visible: evaluation.requirements.faceVisible,
+              no_anatomy_errors: evaluation.requirements.noAnatomyErrors,
+              image_sharp: evaluation.requirements.imageSharp,
+              passes_hard_requirements: hardPass,
             },
           })
           .eq('id', img.id);
@@ -977,6 +983,7 @@ async function retryFailedImages(
         const newIssues = (evaluation as any).issues || [];
 
         const passed = score >= PIPELINE_CONFIG.minEvalScore;
+        const hardPass = passesRequirements(evaluation);
         await deps.supabase
           .from('lora_dataset_images')
           .update({
@@ -989,6 +996,10 @@ async function retryFailedImages(
               verdict: passed ? 'PASS' : 'FAIL',
               issues: newIssues,
               proportions_realistic: evaluation.requirements.correctBodyProportions,
+              face_visible: evaluation.requirements.faceVisible,
+              no_anatomy_errors: evaluation.requirements.noAnatomyErrors,
+              image_sharp: evaluation.requirements.imageSharp,
+              passes_hard_requirements: hardPass,
               reason: `Retry round ${round}: ${passed ? 'improved and passed' : 'still failing'}`,
             },
           })
