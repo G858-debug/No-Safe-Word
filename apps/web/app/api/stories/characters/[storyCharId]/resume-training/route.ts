@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { resumeTrainingPipeline, completeTrainingPipeline } from "@no-safe-word/image-gen/server/lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
+import { PIPELINE_CONFIG } from "@no-safe-word/image-gen";
 
-const MIN_PASSED_IMAGES = 15;
+const MIN_PASSED_IMAGES = PIPELINE_CONFIG.minPassedImages;
 
 // POST /api/stories/characters/[storyCharId]/resume-training
 // Resume the LoRA pipeline after human dataset approval.

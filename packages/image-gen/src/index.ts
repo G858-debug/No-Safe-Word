@@ -34,7 +34,8 @@ export { anthropicCreateWithRetry } from './anthropic-retry';
 export { DEFAULT_DIAGNOSTIC_FLAGS } from './diagnostic-flags';
 export type { DiagnosticFlags } from './diagnostic-flags';
 
-// Character LoRA pipeline types
+// Character LoRA pipeline types & config
+export { PIPELINE_CONFIG } from './character-lora/types';
 export type {
   CharacterInput,
   CharacterStructured,

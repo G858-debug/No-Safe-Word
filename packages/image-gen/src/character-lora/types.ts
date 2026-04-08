@@ -123,7 +123,7 @@ export const PIPELINE_CONFIG = {
   /** Max images to generate per run */
   datasetSize: 30,
   /** Minimum passed images to proceed with training */
-  minPassedImages: 15,
+  minPassedImages: 20,
   /** Target passed images before proceeding */
   targetPassedImages: 20,
   /** Max rounds of replacement generation for failed images */

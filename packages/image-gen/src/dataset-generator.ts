@@ -301,6 +301,7 @@ export async function generateDataset(
   loraId: string,
   deps: DatasetDeps,
   pass1Lora?: { filename: string; url: string; strength: number },
+  promptIdPrefix?: string,
 ): Promise<DatasetGenerationResult> {
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   if (!endpointId) {
@@ -324,6 +325,12 @@ export async function generateDataset(
   };
 
   const prompts = buildDatasetPrompts(datasetChar);
+  // Apply prefix for pass scoping (Pass 2 gets 'p2_' prefix to avoid collision with Pass 1 IDs)
+  if (promptIdPrefix) {
+    for (const p of prompts) {
+      p.id = `${promptIdPrefix}${p.id}`;
+    }
+  }
   const imageRecords: LoraDatasetImageRow[] = [];
   const failedPrompts: DatasetGenerationResult['failedPrompts'] = [];
 

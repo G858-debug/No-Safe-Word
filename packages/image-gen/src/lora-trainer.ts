@@ -14,7 +14,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import archiver from 'archiver';
 import { PassThrough } from 'stream';
 
-import { generateDataset } from './dataset-generator';
+import { generateDataset, generateTopUpImages } from './dataset-generator';
 import type { DatasetCharacter } from './dataset-generator';
 import { buildQualityPrefix, buildNegativePrompt } from './prompt-builder';
 import { buildWorkflow } from './workflow-builder';
@@ -188,6 +188,62 @@ export async function runTrainingPipeline(
         evaluations = evaluations.concat(retryEvals);
       }
 
+      // Auto top-up: if still below target after retries, generate fresh images for deficit categories
+      const passedAfterRetries = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+      if (passedAfterRetries < PIPELINE_CONFIG.minPassedImages) {
+        console.log(`[LoRAPipeline] After retries: ${passedAfterRetries} passed (need ${PIPELINE_CONFIG.minPassedImages}). Auto-generating top-up images...`);
+
+        // Count passing images per category
+        const { data: passedImages } = await deps.supabase
+          .from('lora_dataset_images')
+          .select('category')
+          .eq('lora_id', loraId)
+          .eq('eval_status', 'passed');
+
+        const catCounts: Record<string, number> = {};
+        for (const img of (passedImages || [])) {
+          catCounts[img.category] = (catCounts[img.category] || 0) + 1;
+        }
+
+        // Calculate deficits: need enough in each category, plus extra to compensate for eval failures
+        const deficits: Array<{ category: string; needed: number }> = [];
+        for (const [cat, min] of Object.entries(MIN_CATEGORY_COUNTS)) {
+          const have = catCounts[cat] || 0;
+          // Generate 2x the deficit to account for eval failures
+          const needed = Math.max(0, (min * 2) - have);
+          if (needed > 0) deficits.push({ category: cat, needed });
+        }
+        // Also add general top-up if we're broadly short
+        const totalNeeded = PIPELINE_CONFIG.minPassedImages - passedAfterRetries;
+        if (totalNeeded > 0 && deficits.length === 0) {
+          // Spread across all categories
+          deficits.push({ category: 'face-closeup', needed: Math.ceil(totalNeeded * 0.3) });
+          deficits.push({ category: 'head-shoulders', needed: Math.ceil(totalNeeded * 0.25) });
+          deficits.push({ category: 'full-body', needed: Math.ceil(totalNeeded * 0.25) });
+          deficits.push({ category: 'waist-up', needed: Math.ceil(totalNeeded * 0.2) });
+        }
+
+        if (deficits.length > 0) {
+          const topUpResult = await generateTopUpImages(character, loraId, deficits, deps);
+          console.log(`[LoRAPipeline] Top-up generated: ${topUpResult.generated} images (${topUpResult.failed} failed)`);
+
+          // Evaluate the new top-up images
+          const topUpEvals = await evaluateDatasetImages(loraId, character, deps);
+          for (const eval_ of topUpEvals) {
+            const score = calculateSimpleScore(eval_);
+            const passed = score >= PIPELINE_CONFIG.minEvalScore;
+            await deps.supabase
+              .from('lora_dataset_images')
+              .update({ eval_status: passed ? 'passed' : 'failed' })
+              .eq('id', eval_.imageId);
+          }
+          evaluations = evaluations.concat(topUpEvals);
+
+          const passedAfterTopUp = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+          console.log(`[LoRAPipeline] After top-up: ${passedAfterTopUp} passed total`);
+        }
+      }
+
       // Final curation
       const allPassingEvals = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore);
       const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
@@ -325,7 +381,8 @@ export async function resumeTrainingPipeline(
     if (captionStatuses.includes(currentStatus)) {
       await setLoraStatus(loraId, captionStatus, {}, deps);
       console.log(`[LoRAPipeline] Captioning approved images (Pass ${config.currentPass})...`);
-      await captionApprovedImages(loraId, character, config, deps);
+      const prefix = isPass2 ? 'p2_' : undefined;
+      await captionApprovedImages(loraId, character, config, deps, prefix);
     } else {
       console.log(`[LoRAPipeline] Skipping captioning (already at ${currentStatus})`);
     }
@@ -333,7 +390,8 @@ export async function resumeTrainingPipeline(
     // ── Package dataset ──
     console.log(`[LoRAPipeline] Packaging dataset (Pass ${config.currentPass})...`);
 
-    const datasetUrl = await packageDataset(loraId, deps);
+    const prefix = isPass2 ? 'p2_' : undefined;
+    const datasetUrl = await packageDataset(loraId, deps, prefix);
     console.log(`[LoRAPipeline] Dataset packaged: ${datasetUrl}`);
 
     // ── Create training pod ──
@@ -558,7 +616,7 @@ async function runPass2Pipeline(
 
   try {
     // ── Stage 8: Generate Pass 2 dataset ──
-    const datasetResult = await generateDataset(character, loraId, deps, pass1Lora);
+    const datasetResult = await generateDataset(character, loraId, deps, pass1Lora, 'p2_');
     console.log(`[LoRAPipeline] Pass 2: Generated ${datasetResult.totalGenerated} images`);
 
     // ── Stage 9: Evaluate Pass 2 images ──
@@ -583,8 +641,57 @@ async function runPass2Pipeline(
 
     // Retry failed images
     if (initialPassed < PIPELINE_CONFIG.targetPassedImages) {
-      const retryEvals = await retryFailedImages(loraId, character, deps);
+      const retryEvals = await retryFailedImages(loraId, character, deps, 'p2_');
       evaluations = evaluations.concat(retryEvals);
+    }
+
+    // Auto top-up for Pass 2: if still below target, generate fresh images
+    const passedAfterRetries = evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length;
+    if (passedAfterRetries < PIPELINE_CONFIG.minPassedImages) {
+      console.log(`[LoRAPipeline] Pass 2: After retries: ${passedAfterRetries} passed (need ${PIPELINE_CONFIG.minPassedImages}). Auto top-up...`);
+
+      const { data: passedImages } = await deps.supabase
+        .from('lora_dataset_images')
+        .select('category, prompt_template')
+        .eq('lora_id', loraId)
+        .eq('eval_status', 'passed')
+        .like('prompt_template', 'p2_%');
+
+      const catCounts: Record<string, number> = {};
+      for (const img of (passedImages || [])) {
+        catCounts[img.category] = (catCounts[img.category] || 0) + 1;
+      }
+
+      const deficits: Array<{ category: string; needed: number }> = [];
+      for (const [cat, min] of Object.entries(MIN_CATEGORY_COUNTS)) {
+        const have = catCounts[cat] || 0;
+        const needed = Math.max(0, (min * 2) - have);
+        if (needed > 0) deficits.push({ category: cat, needed });
+      }
+      const totalNeeded = PIPELINE_CONFIG.minPassedImages - passedAfterRetries;
+      if (totalNeeded > 0 && deficits.length === 0) {
+        deficits.push({ category: 'face-closeup', needed: Math.ceil(totalNeeded * 0.3) });
+        deficits.push({ category: 'head-shoulders', needed: Math.ceil(totalNeeded * 0.25) });
+        deficits.push({ category: 'full-body', needed: Math.ceil(totalNeeded * 0.25) });
+        deficits.push({ category: 'waist-up', needed: Math.ceil(totalNeeded * 0.2) });
+      }
+
+      if (deficits.length > 0) {
+        const topUpResult = await generateTopUpImages(character, loraId, deficits, deps);
+        console.log(`[LoRAPipeline] Pass 2 top-up: ${topUpResult.generated} generated, ${topUpResult.failed} failed`);
+
+        const topUpEvals = await evaluateDatasetImages(loraId, character, deps);
+        for (const eval_ of topUpEvals) {
+          const score = calculateSimpleScore(eval_);
+          const passed = score >= PIPELINE_CONFIG.minEvalScore;
+          await deps.supabase
+            .from('lora_dataset_images')
+            .update({ eval_status: passed ? 'passed' : 'failed' })
+            .eq('id', eval_.imageId);
+        }
+        evaluations = evaluations.concat(topUpEvals);
+        console.log(`[LoRAPipeline] Pass 2 after top-up: ${evaluations.filter(e => calculateSimpleScore(e) >= PIPELINE_CONFIG.minEvalScore).length} passed total`);
+      }
     }
 
     // Final curation
@@ -592,15 +699,18 @@ async function runPass2Pipeline(
     const { selected, rejected, diversityCoverage, warnings } = selectTrainingSet(allPassingEvals);
     console.log(`[LoRAPipeline] Pass 2: ${selected.length} selected, ${rejected.length} rejected`);
 
-    // Update eval_status for final selection (same semantics as Pass 1).
+    // Update eval_status for final selection — scoped to Pass 2 images only.
     const selectedIds = new Set(selected.map(e => e.imageId));
     const { data: allImages } = await deps.supabase
       .from('lora_dataset_images')
-      .select('id, eval_score')
+      .select('id, eval_score, prompt_template')
       .eq('lora_id', loraId);
 
     if (allImages) {
-      for (const img of allImages) {
+      const pass2Images = allImages.filter((img: any) =>
+        (img.prompt_template || '').startsWith('p2_')
+      );
+      for (const img of pass2Images) {
         let evalStatus: string;
         if (selectedIds.has(img.id)) {
           evalStatus = 'passed';
@@ -622,16 +732,20 @@ async function runPass2Pipeline(
       );
     }
 
-    // ── Category balance check ──
+    // ── Category balance check — scoped to Pass 2 images only ──
     const { data: selectedWithCategory } = await deps.supabase
       .from('lora_dataset_images')
-      .select('id, category')
+      .select('id, category, prompt_template')
       .eq('lora_id', loraId)
       .eq('eval_status', 'passed');
 
     if (selectedWithCategory) {
+      // Only count Pass 2 images for the category balance check
+      const pass2Selected = selectedWithCategory.filter(
+        (img: any) => (img.prompt_template || '').startsWith('p2_')
+      );
       const categoryCounts: Record<string, number> = {};
-      for (const img of selectedWithCategory) {
+      for (const img of pass2Selected) {
         categoryCounts[img.category] = (categoryCounts[img.category] || 0) + 1;
       }
       const gaps = Object.entries(MIN_CATEGORY_COUNTS)
@@ -752,6 +866,7 @@ async function retryFailedImages(
   loraId: string,
   character: CharacterInput,
   deps: PipelineDeps,
+  promptPrefix?: string,
 ): Promise<TrainingImageEvaluation[]> {
   const endpointId = process.env.RUNPOD_ENDPOINT_ID;
   if (!endpointId) return [];
@@ -765,24 +880,32 @@ async function retryFailedImages(
   const newEvaluations: TrainingImageEvaluation[] = [];
 
   for (let round = 1; round <= MAX_RETRY_ROUNDS; round++) {
-    // Fetch images that failed evaluation
-    const { data: failedImages } = await deps.supabase
+    // Fetch images that failed evaluation (scoped by prompt prefix when provided)
+    let failedQuery = deps.supabase
       .from('lora_dataset_images')
       .select('*')
       .eq('lora_id', loraId)
       .eq('eval_status', 'failed');
+    if (promptPrefix) {
+      failedQuery = failedQuery.like('prompt_template', `${promptPrefix}%`);
+    }
+    const { data: failedImages } = await failedQuery;
 
     if (!failedImages || failedImages.length === 0) {
       console.log(`[LoRAPipeline] Retry round ${round}: no failed images left`);
       break;
     }
 
-    // Check if we already have enough passing images
-    const { count: passedCount } = await deps.supabase
+    // Check if we already have enough passing images (scoped by prefix)
+    let passedQuery = deps.supabase
       .from('lora_dataset_images')
       .select('*', { count: 'exact', head: true })
       .eq('lora_id', loraId)
       .eq('eval_status', 'passed');
+    if (promptPrefix) {
+      passedQuery = passedQuery.like('prompt_template', `${promptPrefix}%`);
+    }
+    const { count: passedCount } = await passedQuery;
 
     if ((passedCount || 0) >= PIPELINE_CONFIG.targetPassedImages) {
       console.log(`[LoRAPipeline] Retry round ${round}: already have ${passedCount} passed images, stopping`);
@@ -1091,13 +1214,18 @@ async function captionApprovedImages(
   character: CharacterInput,
   config: LoraTrainingConfig,
   deps: PipelineDeps,
+  promptPrefix?: string,
 ): Promise<void> {
-  const { data: images } = await deps.supabase
+  let query = deps.supabase
     .from('lora_dataset_images')
     .select('*')
     .eq('lora_id', loraId)
     .eq('eval_status', 'passed')
     .is('caption', null);
+  if (promptPrefix) {
+    query = query.like('prompt_template', `${promptPrefix}%`);
+  }
+  const { data: images } = await query;
 
   if (!images || images.length === 0) {
     console.log('[LoRAPipeline] No images need captioning');
@@ -1161,12 +1289,16 @@ async function captionApprovedImages(
  * Package approved+captioned images into a tar.gz and upload to Supabase Storage.
  * Returns a signed download URL for the training pod.
  */
-async function packageDataset(loraId: string, deps: PipelineDeps): Promise<string> {
-  const { data: images } = await deps.supabase
+async function packageDataset(loraId: string, deps: PipelineDeps, promptPrefix?: string): Promise<string> {
+  let pkgQuery = deps.supabase
     .from('lora_dataset_images')
     .select('id, image_url, storage_path, caption')
     .eq('lora_id', loraId)
-    .eq('eval_status', 'passed')
+    .eq('eval_status', 'passed');
+  if (promptPrefix) {
+    pkgQuery = pkgQuery.like('prompt_template', `${promptPrefix}%`);
+  }
+  const { data: images } = await pkgQuery
     .not('caption', 'is', null);
 
   if (!images || images.length === 0) {

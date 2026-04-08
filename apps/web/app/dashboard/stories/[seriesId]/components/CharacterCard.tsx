@@ -28,6 +28,8 @@ interface LoraProgress {
     deployed?: boolean;
     updatedAt?: string;
     datasetSize?: number;
+    currentPass?: number;
+    pass1Score?: number;
   };
 }
 
@@ -815,8 +817,11 @@ function DatasetStage({
     );
   }
 
-  // Dataset generation / evaluation in progress
-  if (status === "generating_dataset" || status === "evaluating") {
+  // Dataset generation / evaluation in progress (Pass 1 or Pass 2)
+  if (status === "generating_dataset" || status === "evaluating"
+    || status === "generating_pass2_dataset" || status === "evaluating_pass2") {
+    const isPass2 = status.includes("pass2");
+    const pass1Score = loraProgress?.progress?.pass1Score;
     const elapsed = formatElapsed(loraProgress?.progress?.updatedAt);
     const elapsedMin = loraProgress?.progress?.updatedAt
       ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
@@ -829,12 +834,19 @@ function DatasetStage({
     const progressPct = status === "generating_dataset" && datasetSize > 0
       ? Math.min(95, Math.round((datasetSize / targetImages) * 100))
       : status === "generating_dataset" ? 5 : 70;
+    const isGenerating = status === "generating_dataset" || status === "generating_pass2_dataset";
     return (
       <div className="space-y-2">
+        {isPass2 && (
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="outline" className="text-xs border-blue-500/40 text-blue-400">Pass 2</Badge>
+            {pass1Score && <span className="text-xs text-muted-foreground">Pass 1 score: {pass1Score.toFixed(1)}</span>}
+          </div>
+        )}
         <p className="text-sm font-medium">
-          {status === "generating_dataset"
-            ? `Generating training images...${datasetSize > 0 ? ` (${datasetSize}/${targetImages})` : ""}`
-            : "Auto-reviewing images with Claude Vision..."}
+          {isGenerating
+            ? `${isPass2 ? "Pass 2: " : ""}Generating training images...${datasetSize > 0 ? ` (${datasetSize}/${targetImages})` : ""}`
+            : `${isPass2 ? "Pass 2: " : ""}Auto-reviewing images with Claude Vision...`}
         </p>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div className={`h-full rounded-full ${isLikelyStuck ? "bg-yellow-500" : "bg-blue-600 animate-pulse"}`} style={{ width: `${progressPct}%` }} />
@@ -860,9 +872,15 @@ function DatasetStage({
 
   // Awaiting human approval
   if (status === "awaiting_dataset_approval" || status === "awaiting_pass2_approval") {
+    const isPass2 = status === "awaiting_pass2_approval";
+    const pass1Score = loraProgress?.progress?.pass1Score;
     return (
       <div className="space-y-3">
-        <p className="text-sm font-medium">Dataset ready for review</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">{isPass2 ? "Pass 2 dataset" : "Dataset"} ready for review</p>
+          {isPass2 && <Badge variant="outline" className="text-xs border-blue-500/40 text-blue-400">Pass 2</Badge>}
+          {isPass2 && pass1Score && <span className="text-xs text-muted-foreground">Pass 1 score: {pass1Score.toFixed(1)}</span>}
+        </div>
         {hasCategoryGaps && (
           <div className="rounded-md p-2 bg-yellow-500/10 border border-yellow-500/30">
             <p className="text-xs text-yellow-400">{gapMessage}</p>
@@ -904,7 +922,10 @@ function DatasetStage({
   if (status === "failed") {
     const errMsg = loraProgress?.progress?.error || "Training failed";
     const isStale = errMsg.includes("stalled");
+    const isPass2Error = errMsg.includes("Pass 2:");
     const alreadyTrained = !!(loraProgress?.progress?.loraUrl && loraProgress?.progress?.filename);
+    const currentPass = loraProgress?.progress?.currentPass || 1;
+    const pass1Score = loraProgress?.progress?.pass1Score;
 
     // Parse "Only X images passed" from error message
     const passedMatch = errMsg.match(/(\d+) images? passed/);
@@ -914,18 +935,26 @@ function DatasetStage({
 
     const failureTitle = isStale
       ? "Pipeline stalled — automatic recovery"
-      : passed !== null
-        ? "Dataset evaluation incomplete"
-        : alreadyTrained
-          ? "Validation failed"
-          : "Training failed";
+      : isPass2Error
+        ? "Pass 2 dataset evaluation failed"
+        : passed !== null
+          ? "Dataset evaluation incomplete"
+          : alreadyTrained
+            ? "Validation failed"
+            : "Training failed";
 
     return (
       <div className="space-y-3">
         <div className={`rounded-md p-3 space-y-2 ${isStale ? "bg-yellow-500/10 border border-yellow-500/30" : "bg-red-500/10 border border-red-500/30"}`}>
-          <p className={`text-sm font-medium ${isStale ? "text-yellow-400" : "text-red-400"}`}>
-            {failureTitle}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className={`text-sm font-medium ${isStale ? "text-yellow-400" : "text-red-400"}`}>
+              {failureTitle}
+            </p>
+            {isPass2Error && <Badge variant="outline" className="text-xs border-red-500/40 text-red-400">Pass 2</Badge>}
+          </div>
+          {isPass2Error && pass1Score && (
+            <p className="text-xs text-muted-foreground">Pass 1 LoRA trained successfully (score: {pass1Score.toFixed(1)}). Pass 2 generates a refined dataset using the Pass 1 LoRA.</p>
+          )}
           {passed !== null ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -940,7 +969,9 @@ function DatasetStage({
               <p className="text-xs text-muted-foreground">
                 {passed >= 15
                   ? "Close to the target — review the dataset and approve good images manually, or retry to generate fresh ones."
-                  : "Most images failed quality checks. Try editing the character description (hair, features) and retry."}
+                  : isPass2Error
+                    ? "The LoRA-enhanced dataset didn't produce enough quality images. Try regenerating the dataset."
+                    : "Most images failed quality checks. Try editing the character description (hair, features) and retry."}
               </p>
             </div>
           ) : (
@@ -983,21 +1014,34 @@ function TrainingStage({ loraProgress, onForceReset }: { loraProgress: LoraProgr
   const elapsedMin = loraProgress?.progress?.updatedAt
     ? Math.round((Date.now() - new Date(loraProgress.progress.updatedAt).getTime()) / 60_000)
     : 0;
+  const currentPass = loraProgress?.progress?.currentPass || (status.includes("pass2") ? 2 : 1);
+  const pass1Score = loraProgress?.progress?.pass1Score;
+  const isPass2 = currentPass === 2 || status.includes("pass2");
   // No pod ID means the process died before creating the RunPod pod — definitely stuck.
   // With a pod, allow 90 min (training takes 30-60 min). Without, show stuck immediately.
   const noPod = status === "training" && !podId;
   const isLikelyStuck = noPod
     ? elapsedMin > 5
-    : status === "training" ? elapsedMin > 90 : elapsedMin > 15;
+    : status === "training" || status === "training_pass2" ? elapsedMin > 90 : elapsedMin > 15;
 
   const statusLabel: Record<string, string> = {
     captioning: "Captioning images...",
+    captioning_pass2: "Pass 2: Captioning images...",
     packaging_dataset: "Packaging dataset...",
     training: "Training on RunPod...",
+    training_pass2: "Pass 2: Training on RunPod...",
+    validating: "Validating LoRA quality...",
+    validating_pass2: "Pass 2: Validating LoRA quality...",
   };
 
   return (
     <div className="space-y-2">
+      {isPass2 && (
+        <div className="flex items-center gap-2 mb-1">
+          <Badge variant="outline" className="text-xs border-blue-500/40 text-blue-400">Pass 2</Badge>
+          {pass1Score && <span className="text-xs text-muted-foreground">Pass 1 score: {pass1Score.toFixed(1)}</span>}
+        </div>
+      )}
       <p className="text-sm font-medium">{statusLabel[status] || "Training in progress..."}</p>
       <div className="h-2 bg-muted rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${isLikelyStuck ? "bg-yellow-500" : "bg-blue-600 animate-pulse"}`} style={{

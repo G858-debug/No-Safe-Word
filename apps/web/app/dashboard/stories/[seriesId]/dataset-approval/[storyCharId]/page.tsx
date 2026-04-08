@@ -839,6 +839,11 @@ function DatasetImageCard({
       {/* Tags & scores */}
       <div className="space-y-1 px-1.5 pt-1.5">
         <div className="flex flex-wrap gap-0.5">
+          {(img.prompt_template || "").startsWith("p2_") && (
+            <span className="rounded bg-blue-900/50 px-1 py-0.5 text-[8px] leading-tight font-semibold text-blue-300">
+              P2
+            </span>
+          )}
           <span className="rounded bg-zinc-800 px-1 py-0.5 text-[8px] leading-tight text-zinc-400">
             {fmtTag(img.category)}
           </span>
@@ -915,6 +920,7 @@ export default function DatasetApprovalPage() {
   const [characterInfo, setCharacterInfo] = useState<CharacterInfo>({ gender: "female", loraBodyWeight: 0, loraBubbleButt: 0, loraBreastSize: 0 });
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>("all");
+  const [passFilter, setPassFilter] = useState<"all" | "pass1" | "pass2">("all");
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [zoomImage, setZoomImage] = useState<DatasetImage | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
@@ -944,27 +950,41 @@ export default function DatasetApprovalPage() {
 
   // ── Derived ─────────────────────────────────────────────────
 
-  const isApprovalMode = loraStatus === "awaiting_dataset_approval";
+  const isApprovalMode = loraStatus === "awaiting_dataset_approval" || loraStatus === "awaiting_pass2_approval";
+  const isPass2Approval = loraStatus === "awaiting_pass2_approval";
   const readOnly = loraStatus === "deployed" || loraStatus === "archived";
-  const humanApproved = images.filter((i) => i.human_approved === true).length;
-  const humanRejected = images.filter((i) => i.human_approved === false).length;
-  const humanPending = images.filter((i) => i.human_approved === null).length;
-  const aiPassed = images.filter((i) => i.eval_status === "passed" || i.eval_status === "replaced").length;
+
+  // Check if this dataset has both Pass 1 and Pass 2 images
+  const hasPass1Images = images.some(i => !(i.prompt_template || "").startsWith("p2_"));
+  const hasPass2Images = images.some(i => (i.prompt_template || "").startsWith("p2_"));
+  const hasMultiplePasses = hasPass1Images && hasPass2Images;
+
+  // Apply pass filter first
+  const passFilteredImages = images.filter(i => {
+    if (passFilter === "pass1") return !(i.prompt_template || "").startsWith("p2_");
+    if (passFilter === "pass2") return (i.prompt_template || "").startsWith("p2_");
+    return true;
+  });
+
+  const humanApproved = passFilteredImages.filter((i) => i.human_approved === true).length;
+  const humanRejected = passFilteredImages.filter((i) => i.human_approved === false).length;
+  const humanPending = passFilteredImages.filter((i) => i.human_approved === null).length;
+  const aiPassed = passFilteredImages.filter((i) => i.eval_status === "passed" || i.eval_status === "replaced").length;
   const minRequired = stats?.minRequired ?? 20;
   const canResume = isApprovalMode && humanApproved >= minRequired;
   const canRetry = loraStatus === "failed" && humanApproved >= minRequired;
 
   // ── Filtered images ─────────────────────────────────────────
 
-  const rejected = images.filter(
+  const rejected = passFilteredImages.filter(
     (i) => i.eval_status === "failed" && i.human_approved !== true
   );
   // 'replaced' images passed quality but were culled by diversity curation — treat as needing review
-  const needsReview = images.filter(
+  const needsReview = passFilteredImages.filter(
     (i) => (i.eval_status === "passed" || i.eval_status === "replaced") && i.human_approved !== true
   );
 
-  const filteredImages = images.filter((img) => {
+  const filteredImages = passFilteredImages.filter((img) => {
     if (filter === "approved") return img.human_approved === true;
     if (filter === "rejected")
       return img.eval_status === "failed" && img.human_approved !== true;
@@ -1193,7 +1213,7 @@ export default function DatasetApprovalPage() {
   // ─────────────────────────────────────────────────────────────
 
   const TABS: { key: FilterTab; label: string; count: number }[] = [
-    { key: "all", label: "All", count: images.length },
+    { key: "all", label: "All", count: passFilteredImages.length },
     { key: "approved", label: "Approved", count: humanApproved },
     { key: "rejected", label: "Rejected", count: rejected.length },
     { key: "needs_review", label: "Needs Review", count: needsReview.length },
@@ -1350,10 +1370,41 @@ export default function DatasetApprovalPage() {
         </div>
       )}
 
+      {/* Pass filter (only shown when both Pass 1 and Pass 2 images exist) */}
+      {hasMultiplePasses && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-xs text-zinc-500">Pass:</span>
+          <div className="flex gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+            {(["all", "pass1", "pass2"] as const).map((key) => {
+              const count = key === "all" ? images.length
+                : key === "pass1" ? images.filter(i => !(i.prompt_template || "").startsWith("p2_")).length
+                : images.filter(i => (i.prompt_template || "").startsWith("p2_")).length;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setPassFilter(key)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                    passFilter === key
+                      ? key === "pass2" ? "bg-blue-700/50 text-blue-200" : "bg-zinc-700 text-zinc-100"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {key === "all" ? "All" : key === "pass1" ? "Pass 1" : "Pass 2"}
+                  <span className="ml-1.5 text-[10px] opacity-70">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          {isPass2Approval && (
+            <span className="text-xs text-blue-400 ml-2">Pass 2 dataset for review</span>
+          )}
+        </div>
+      )}
+
       {/* Stats bar */}
       <div className="mb-6 grid grid-cols-3 gap-2 sm:grid-cols-6">
         {[
-          { label: "Total", value: images.length, color: "text-zinc-100" },
+          { label: "Total", value: passFilteredImages.length, color: "text-zinc-100" },
           { label: "AI Passed", value: aiPassed, color: "text-blue-400" },
           { label: "Approved", value: humanApproved, color: "text-emerald-400" },
           { label: "Rejected", value: rejected.length, color: "text-red-400" },

@@ -220,7 +220,7 @@ export async function GET(
     // Find the most relevant LoRA record
     let { data: lora } = await (supabase as any)
       .from("character_loras")
-      .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+      .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, training_params, created_at, updated_at, deployed_at")
       .eq("character_id", storyChar.character_id)
       .not("status", "eq", "archived")
       .order("created_at", { ascending: false })
@@ -245,7 +245,7 @@ export async function GET(
             .eq("id", lora.id);
           const { data: refreshed } = await (supabase as any)
             .from("character_loras")
-            .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+            .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, training_params, created_at, updated_at, deployed_at")
             .eq("id", lora.id)
             .single() as { data: any };
           if (refreshed) lora = refreshed;
@@ -259,7 +259,7 @@ export async function GET(
           .eq("id", lora.id);
         const { data: refreshed } = await (supabase as any)
           .from("character_loras")
-          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, training_params, created_at, updated_at, deployed_at")
           .eq("id", lora.id)
           .single() as { data: any };
         if (refreshed) lora = refreshed;
@@ -273,7 +273,7 @@ export async function GET(
         // Re-fetch the now-failed record
         const { data: refreshed } = await (supabase as any)
           .from("character_loras")
-          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, training_params, created_at, updated_at, deployed_at")
           .eq("id", lora.id)
           .single() as { data: any };
         if (refreshed) lora = refreshed;
@@ -327,12 +327,16 @@ export async function GET(
         // Re-fetch for updated status in response
         const { data: refreshed } = await (supabase as any)
           .from("character_loras")
-          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, created_at, updated_at, deployed_at")
+          .select("id, character_id, status, error, validation_score, training_attempts, training_id, trigger_word, storage_url, filename, dataset_size, training_params, created_at, updated_at, deployed_at")
           .eq("id", lora.id)
           .single() as { data: any };
         if (refreshed) lora = refreshed;
       }
     }
+
+    const trainingParams = (lora.training_params as Record<string, unknown>) || {};
+    const currentPass = Number(trainingParams.currentPass) || (lora.status?.includes('pass2') ? 2 : 1);
+    const pass1Score = trainingParams.pass1Score as number | undefined;
 
     return NextResponse.json({
       loraId: lora.id,
@@ -350,6 +354,8 @@ export async function GET(
         deployedAt: lora.deployed_at,
         updatedAt: lora.updated_at,
         datasetSize: lora.dataset_size,
+        currentPass,
+        pass1Score,
       },
     });
   } catch (err) {
