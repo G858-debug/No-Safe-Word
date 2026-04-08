@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { runTrainingPipeline } from "@no-safe-word/image-gen/server/lora-trainer";
+import { runTrainingPipeline, getRecommendedTrainingConfig } from "@no-safe-word/image-gen/server/lora-trainer";
 import type { CharacterInput, CharacterStructured } from "@no-safe-word/image-gen";
 
 // POST /api/stories/characters/[storyCharId]/train-lora
@@ -128,7 +128,7 @@ export async function POST(
         character_id: character.id,
         filename: "",
         storage_path: "",
-        trigger_word: "tok",
+        trigger_word: getRecommendedTrainingConfig(character.name).triggerWord,
         base_model: "sdxl",
         training_provider: "replicate",
         training_params: {},
