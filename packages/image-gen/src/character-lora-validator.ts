@@ -143,7 +143,8 @@ export async function validateLora(
         endpointId,
       );
 
-      const { imageBase64 } = await waitForRunPodResult(jobId, 300000, 3000, endpointId);
+      // 10 min timeout — validation requires downloading the 228MB LoRA file on cold start
+      const { imageBase64 } = await waitForRunPodResult(jobId, 600000, 5000, endpointId);
 
       const faceScore = await evaluateTestImage(
         anthropic,
