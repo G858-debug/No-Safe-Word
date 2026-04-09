@@ -420,6 +420,12 @@ export async function completeTrainingPipeline(
       throw new Error(`LoRA record not found: ${loraId}`);
     }
 
+    // Guard: don't overwrite a LoRA that's already deployed or archived
+    if (lora.status === 'deployed' || lora.status === 'archived') {
+      console.log(`[LoRAPipeline] LoRA ${loraId} is already ${lora.status} — skipping stale validation.`);
+      return;
+    }
+
     // Fetch the character for validation
     const { data: charRows } = await deps.supabase
       .from('story_characters')
