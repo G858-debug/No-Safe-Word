@@ -119,7 +119,7 @@ export async function POST(
 
         // Tier 0: Pre-flight tag validation (before spending GPU credits)
         const isNsfw = imgPrompt.image_type !== "facebook_sfw";
-        const preflightTags = await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw });
+        const preflightTags = await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw, tokenBudget: 60 });
         const preflight = await validateTagsPreflight(imgPrompt.prompt, preflightTags);
         if (!preflight.passed) {
           console.warn(

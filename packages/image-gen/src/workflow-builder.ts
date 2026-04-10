@@ -42,6 +42,8 @@ export interface WorkflowConfig {
     char1Prompt: string;
     char2Prompt: string;
   };
+  /** Regional overlap in pixels for dual-character scenes (default 64) */
+  regionalOverlap?: number;
 }
 
 /**
@@ -105,7 +107,7 @@ export function buildWorkflow(config: WorkflowConfig): Record<string, any> {
   if (config.dualCharacterPrompts) {
     // Regional conditioning: separate each character into left/right regions
     // with shared quality+scene prompt applied globally.
-    const overlap = 64; // ~5% of 1216 for smooth blending
+    const overlap = config.regionalOverlap ?? 64;
     const regionWidth = Math.ceil(config.width / 2) + overlap;
     // Round to nearest 8 (ComfyUI requirement)
     const regionW = Math.ceil(regionWidth / 8) * 8;

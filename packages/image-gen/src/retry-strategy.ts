@@ -163,11 +163,13 @@ function applyMinorCorrections(
     plan.actions.push(`CFG ${profile.cfg} → ${newCfg}`);
   }
 
-  // Increase character LoRA strength if identity is weak
+  // Increase character LoRA model strength if identity is weak (keep CLIP capped for prompt adherence)
   if (failures.includes('weak_identity') || failures.includes('characters_identical')) {
-    const newStrength = Math.min(profile.charLoraStrength + 0.05, 1.0);
-    plan.paramAdjustments.charLoraStrength = newStrength;
-    plan.actions.push(`charLoRA ${profile.charLoraStrength} → ${newStrength}`);
+    const newModel = Math.min(profile.charLoraStrengthModel + 0.05, 0.85);
+    const newClip = Math.min(profile.charLoraStrengthClip + 0.03, 0.65);
+    plan.paramAdjustments.charLoraStrengthModel = newModel;
+    plan.paramAdjustments.charLoraStrengthClip = newClip;
+    plan.actions.push(`charLoRA model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip}`);
   }
 
   // Widen regional overlap if characters are identical
@@ -190,11 +192,13 @@ function applyMajorCorrections(
     plan.actions.push(`CFG ${profile.cfg} → ${newCfg}`);
   }
 
-  // Larger LoRA strength increase
+  // Larger LoRA model strength increase (keep CLIP capped for prompt adherence)
   if (failures.includes('weak_identity') || failures.includes('characters_identical')) {
-    const newStrength = Math.min(profile.charLoraStrength + 0.1, 1.0);
-    plan.paramAdjustments.charLoraStrength = newStrength;
-    plan.actions.push(`charLoRA ${profile.charLoraStrength} → ${newStrength}`);
+    const newModel = Math.min(profile.charLoraStrengthModel + 0.1, 0.85);
+    const newClip = Math.min(profile.charLoraStrengthClip + 0.05, 0.65);
+    plan.paramAdjustments.charLoraStrengthModel = newModel;
+    plan.paramAdjustments.charLoraStrengthClip = newClip;
+    plan.actions.push(`charLoRA model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip}`);
   }
 
   // More steps for better detail
@@ -207,11 +211,12 @@ function applyResetCorrections(
   plan: CorrectionPlan,
   profile: SceneProfile,
 ): void {
-  // Reset to aggressive but safe defaults
+  // Reset to aggressive but safe defaults (cap CLIP strength to preserve prompt adherence)
   plan.paramAdjustments = {
     cfg: 7.0,
     steps: 40,
-    charLoraStrength: Math.min(profile.charLoraStrength + 0.15, 1.0),
+    charLoraStrengthModel: Math.min(profile.charLoraStrengthModel + 0.15, 0.85),
+    charLoraStrengthClip: Math.min(profile.charLoraStrengthClip + 0.1, 0.65),
     regionalOverlap: profile.regionalOverlap > 0 ? profile.regionalOverlap + 48 : 0,
     regionalStrength: profile.regionalStrength,
   };

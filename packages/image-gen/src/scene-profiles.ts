@@ -13,7 +13,10 @@ export type CompositionType = 'solo' | '1boy_1girl' | '1girl_1girl' | '1boy_1boy
 export interface SceneProfile {
   compositionType: CompositionType;
   contentMode: 'sfw' | 'nsfw';
-  charLoraStrength: number;
+  /** LoRA strength applied to the U-Net model weights (controls visual identity) */
+  charLoraStrengthModel: number;
+  /** LoRA strength applied to the CLIP text encoder (lower = better prompt adherence) */
+  charLoraStrengthClip: number;
   cfg: number;
   steps: number;
   /** Regional conditioning overlap in pixels (dual-character only) */
@@ -27,7 +30,8 @@ export interface SceneProfile {
 // ── Default Profiles ──
 
 const SOLO_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
-  charLoraStrength: 0.8,
+  charLoraStrengthModel: 0.8,
+  charLoraStrengthClip: 0.55,
   cfg: 5.0,
   steps: 30,
   regionalOverlap: 0,
@@ -36,7 +40,8 @@ const SOLO_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
 };
 
 const DUAL_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
-  charLoraStrength: 0.75,
+  charLoraStrengthModel: 0.75,
+  charLoraStrengthClip: 0.5,
   cfg: 5.0,
   steps: 35,
   regionalOverlap: 64,
@@ -57,7 +62,15 @@ export function getDefaultProfile(
 ): SceneProfile {
   const isDual = compositionType !== 'solo';
   const base = isDual ? DUAL_DEFAULTS : SOLO_DEFAULTS;
-  return { ...base, compositionType, contentMode };
+  const profile = { ...base, compositionType, contentMode };
+
+  // NSFW dual-character scenes need a much larger regional overlap so characters
+  // can physically interact/overlap while still having spatial identity guidance.
+  if (isDual && contentMode === 'nsfw') {
+    profile.regionalOverlap = 200;
+  }
+
+  return profile;
 }
 
 /**
