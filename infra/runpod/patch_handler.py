@@ -33,6 +33,58 @@ def _nsw_extract_safetensors_from_tar(tar_path, dest_path):
                 return
     raise RuntimeError("No .safetensors file found in tar archive")
 
+def _nsw_validate_safetensors(filepath, filename, expected_bytes=None):
+    """Validate a downloaded safetensors file is not truncated or corrupt."""
+    import struct as _struct
+    sz = _nsw_os.path.getsize(filepath)
+    # SDXL LoRAs are typically 30-200 MB; anything under 1 MB is suspicious
+    if sz < 1 * 1024 * 1024:
+        raise RuntimeError(
+            f"LoRA {filename} is suspiciously small ({sz / 1024:.0f} KB). "
+            f"Expected at least 1 MB for an SDXL LoRA. File may be truncated or corrupt."
+        )
+    # Check against expected size if provided — detects truncated downloads
+    if expected_bytes and abs(sz - expected_bytes) > 1024:
+        raise RuntimeError(
+            f"LoRA {filename} size mismatch: got {sz} bytes, expected {expected_bytes} bytes "
+            f"(diff={sz - expected_bytes}). File is likely truncated from an incomplete download."
+        )
+    # safetensors format: first 8 bytes are the header length as little-endian uint64
+    with open(filepath, "rb") as f:
+        header_bytes = f.read(8)
+    if len(header_bytes) < 8:
+        raise RuntimeError(f"LoRA {filename} is too short to be a valid safetensors file ({sz} bytes)")
+    header_len = _struct.unpack("<Q", header_bytes)[0]
+    # Header length should be reasonable (< 10 MB) and less than the file size
+    if header_len == 0 or header_len > 10 * 1024 * 1024 or header_len >= sz:
+        raise RuntimeError(
+            f"LoRA {filename} has invalid safetensors header (header_len={header_len}, file_size={sz}). "
+            f"File is likely corrupt."
+        )
+    # Verify file contains enough data for all declared tensors
+    expected_total = 8 + header_len  # header_len_bytes + header_json
+    import json as _json
+    with open(filepath, "rb") as f:
+        f.seek(8)
+        header_json = f.read(header_len)
+    try:
+        header = _json.loads(header_json)
+        for key, info in header.items():
+            if key == "__metadata__":
+                continue
+            # Each tensor has shape and dtype — compute expected bytes
+            offsets = info.get("data_offsets")
+            if offsets and len(offsets) == 2:
+                tensor_end = offsets[1]
+                if 8 + header_len + tensor_end > sz:
+                    raise RuntimeError(
+                        f"LoRA {filename} is truncated: tensor '{key}' ends at offset {8 + header_len + tensor_end} "
+                        f"but file is only {sz} bytes. Download was incomplete."
+                    )
+    except _json.JSONDecodeError:
+        raise RuntimeError(f"LoRA {filename} has invalid JSON header — file is corrupt.")
+    print(f"[NSW] Validated: {filename} (header={header_len} bytes, file={sz / (1024*1024):.1f} MB)")
+
 def _nsw_download_character_loras(downloads):
     """Download character LoRAs to ComfyUI loras dir if not cached."""
     if not downloads:
@@ -40,21 +92,28 @@ def _nsw_download_character_loras(downloads):
     for entry in downloads:
         filename = entry.get("filename", "")
         url = entry.get("url", "")
+        expected_bytes = entry.get("expected_bytes")
         if not filename or not url:
             print(f"[NSW] Skipping invalid LoRA entry: {entry}")
             continue
         dest = _nsw_os.path.join(_nsw_LORAS_DIR, filename)
         if _nsw_os.path.isfile(dest):
-            sz = _nsw_os.path.getsize(dest) / (1024 * 1024)
-            print(f"[NSW] Cached: {filename} ({sz:.1f} MB)")
-            continue
+            # Validate cached file — a corrupt/truncated cached file causes noise images
+            try:
+                _nsw_validate_safetensors(dest, filename, expected_bytes)
+                sz = _nsw_os.path.getsize(dest) / (1024 * 1024)
+                print(f"[NSW] Cached: {filename} ({sz:.1f} MB)")
+                continue
+            except RuntimeError as ve:
+                print(f"[NSW] Cached file INVALID — re-downloading: {ve}")
+                _nsw_os.remove(dest)
         _nsw_os.makedirs(_nsw_os.path.dirname(dest), exist_ok=True)
         print(f"[NSW] Downloading: {filename}")
         tmp = dest + ".tmp"
         try:
             req = _nsw_urllib_request.Request(url)
             req.add_header("User-Agent", "Mozilla/5.0 (ComfyUI-Worker)")
-            resp = _nsw_urllib_request.urlopen(req, timeout=120)
+            resp = _nsw_urllib_request.urlopen(req, timeout=300)
             with open(tmp, "wb") as f:
                 _nsw_shutil.copyfileobj(resp, f)
             resp.close()
@@ -71,12 +130,17 @@ def _nsw_download_character_loras(downloads):
                 _nsw_os.remove(tmp)
             else:
                 _nsw_os.rename(tmp, dest)
+            # Validate the downloaded file
+            _nsw_validate_safetensors(dest, filename, expected_bytes)
             sz = _nsw_os.path.getsize(dest) / (1024 * 1024)
             print(f"[NSW] Downloaded: {filename} ({sz:.1f} MB)")
         except Exception as e:
             print(f"[NSW] FAILED to download {filename}: {e}")
             if _nsw_os.path.exists(tmp):
                 _nsw_os.remove(tmp)
+            # Also remove the dest file if it was partially written
+            if _nsw_os.path.exists(dest):
+                _nsw_os.remove(dest)
             raise RuntimeError(f"Failed to download character LoRA {filename}: {e}")
 
 def _nsw_refresh_cache():

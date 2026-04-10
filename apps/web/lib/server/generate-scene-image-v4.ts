@@ -26,6 +26,7 @@ import {
   getDefaultProfile,
   deriveCompositionType,
   deriveContentMode,
+  estimateClipTokens,
 } from "@no-safe-word/image-gen";
 // selectResources removed — Juggernaut Ragnarok uses no style LoRAs
 import type { CharacterLoraDownload, SceneProfile } from "@no-safe-word/image-gen";
@@ -124,19 +125,21 @@ interface CharacterLoraInfo {
   filename: string;
   storageUrl: string;
   triggerWord: string;
+  fileSizeBytes: number | null;
 }
 
 /**
  * Fetch deployed character LoRA from the character_loras table.
- * Throws if no deployed LoRA exists — scene generation requires trained LoRAs.
+ * Returns null if no usable deployed LoRA exists — the pipeline will fall back
+ * to inline character descriptions (less consistent but still generates real images).
  */
 async function fetchCharacterLora(
   characterId: string,
   characterName: string,
-): Promise<CharacterLoraInfo> {
+): Promise<CharacterLoraInfo | null> {
   const { data: loraRow, error } = await supabase
     .from("character_loras")
-    .select("filename, storage_url, trigger_word")
+    .select("filename, storage_url, trigger_word, file_size_bytes")
     .eq("character_id", characterId)
     .eq("status", "deployed")
     .order("created_at", { ascending: false })
@@ -144,23 +147,26 @@ async function fetchCharacterLora(
     .single();
 
   if (error || !loraRow) {
-    throw new Error(
-      `Character "${characterName}" does not have a deployed LoRA. ` +
-      `Complete LoRA training before generating scene images.`,
+    console.warn(
+      `[V4] Character "${characterName}" has no deployed LoRA — ` +
+      `falling back to inline character descriptions.`,
     );
+    return null;
   }
 
   if (!loraRow.storage_url) {
-    throw new Error(
-      `Character "${characterName}" LoRA is deployed but has no storage URL. ` +
-      `Re-deploy the LoRA to fix this.`,
+    console.warn(
+      `[V4] Character "${characterName}" LoRA is deployed but has no storage URL — ` +
+      `falling back to inline character descriptions.`,
     );
+    return null;
   }
 
   return {
     filename: loraRow.filename,
     storageUrl: loraRow.storage_url,
     triggerWord: loraRow.trigger_word || "tok",
+    fileSizeBytes: loraRow.file_size_bytes,
   };
 }
 
@@ -185,10 +191,15 @@ export async function buildV4SceneGenerationPayload(
   // ── Character data + LoRAs ──
   const characterLoraDownloads: CharacterLoraDownload[] = [];
   const triggerWords: string[] = [];
+  // Per-character trigger words — indexed by character position, not LoRA order.
+  // Empty string when the character has no LoRA (uses inline descriptions instead).
+  let primaryTriggerWord = "";
+  let secondaryTriggerWord = "";
   const loraStack: Array<{ filename: string; strengthModel: number; strengthClip: number }> = [];
 
   // Primary character
   let primaryCharData: CharacterData | null = null;
+  let hasLoraForPrimaryChar = false;
   if (imgPrompt.character_id) {
     primaryCharData = characterDataMap.get(imgPrompt.character_id) || null;
     if (!primaryCharData) {
@@ -196,18 +207,29 @@ export async function buildV4SceneGenerationPayload(
     }
 
     const lora = await fetchCharacterLora(imgPrompt.character_id, primaryCharData.name);
-    characterLoraDownloads.push({ filename: `characters/${lora.filename}`, url: lora.storageUrl });
-    triggerWords.push(lora.triggerWord);
-    loraStack.push({
-      filename: `characters/${lora.filename}`,
-      strengthModel: 0.8,
-      strengthClip: 0.8,
-    });
-    console.log(`[V4][${promptId}] Primary LoRA: ${lora.filename} (trigger: ${lora.triggerWord})`);
+    if (lora) {
+      hasLoraForPrimaryChar = true;
+      primaryTriggerWord = lora.triggerWord;
+      characterLoraDownloads.push({
+        filename: `characters/${lora.filename}`,
+        url: lora.storageUrl,
+        ...(lora.fileSizeBytes ? { expected_bytes: lora.fileSizeBytes } : {}),
+      });
+      triggerWords.push(lora.triggerWord);
+      loraStack.push({
+        filename: `characters/${lora.filename}`,
+        strengthModel: 0.8,
+        strengthClip: 0.8,
+      });
+      console.log(`[V4][${promptId}] Primary LoRA: ${lora.filename} (trigger: ${lora.triggerWord})`);
+    } else {
+      console.log(`[V4][${promptId}] Primary character "${primaryCharData.name}" — no LoRA, using inline description`);
+    }
   }
 
   // Secondary character
   let secondaryCharData: CharacterData | null = null;
+  let hasLoraForSecondaryChar = false;
   if (imgPrompt.secondary_character_id) {
     secondaryCharData = characterDataMap.get(imgPrompt.secondary_character_id) || null;
     if (!secondaryCharData) {
@@ -215,14 +237,24 @@ export async function buildV4SceneGenerationPayload(
     }
 
     const lora = await fetchCharacterLora(imgPrompt.secondary_character_id, secondaryCharData.name);
-    characterLoraDownloads.push({ filename: `characters/${lora.filename}`, url: lora.storageUrl });
-    triggerWords.push(lora.triggerWord);
-    loraStack.push({
-      filename: `characters/${lora.filename}`,
-      strengthModel: 0.8,
-      strengthClip: 0.8,
-    });
-    console.log(`[V4][${promptId}] Secondary LoRA: ${lora.filename} (trigger: ${lora.triggerWord})`);
+    if (lora) {
+      hasLoraForSecondaryChar = true;
+      secondaryTriggerWord = lora.triggerWord;
+      characterLoraDownloads.push({
+        filename: `characters/${lora.filename}`,
+        url: lora.storageUrl,
+        ...(lora.fileSizeBytes ? { expected_bytes: lora.fileSizeBytes } : {}),
+      });
+      triggerWords.push(lora.triggerWord);
+      loraStack.push({
+        filename: `characters/${lora.filename}`,
+        strengthModel: 0.8,
+        strengthClip: 0.8,
+      });
+      console.log(`[V4][${promptId}] Secondary LoRA: ${lora.filename} (trigger: ${lora.triggerWord})`);
+    } else {
+      console.log(`[V4][${promptId}] Secondary character "${secondaryCharData.name}" — no LoRA, using inline description`);
+    }
   }
 
   const isDualCharacter = !!imgPrompt.secondary_character_id;
@@ -241,30 +273,24 @@ export async function buildV4SceneGenerationPayload(
     ? { ...baseProfile, ...profileOverrides, loraOverrides: { ...baseProfile.loraOverrides, ...profileOverrides.loraOverrides } }
     : baseProfile;
 
-  console.log(`[V4][${promptId}] Profile: ${profile.compositionType}/${profile.contentMode} (charLora=${profile.charLoraStrength}, cfg=${profile.cfg}, steps=${profile.steps})`);
+  console.log(`[V4][${promptId}] Profile: ${profile.compositionType}/${profile.contentMode} (loraModel=${profile.charLoraStrengthModel}, loraClip=${profile.charLoraStrengthClip}, cfg=${profile.cfg}, steps=${profile.steps})`);
 
   // Apply profile-driven LoRA strengths to character LoRAs already in the stack
+  // Model strength controls visual identity; CLIP strength controls text encoder influence.
+  // Lower CLIP strength improves prompt adherence while preserving character appearance.
   for (const lora of loraStack) {
-    lora.strengthModel = profile.charLoraStrength;
-    lora.strengthClip = profile.charLoraStrength;
+    lora.strengthModel = profile.charLoraStrengthModel;
+    lora.strengthClip = profile.charLoraStrengthClip;
   }
 
-  // ── Prompt building ──
-  // Convert prose scene prompt to booru tags (or use pre-rewritten tags from retry)
-  const sceneTags = overrideTags || await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw });
-  console.log(`[V4][${promptId}] Scene tags: ${sceneTags}`);
-
-  // Build character identity tags.
+  // ── Build character identity tags FIRST so we know the token budget for scene tags ──
   // Characters with deployed LoRAs carry their identity via the trigger word — adding
   // inline physical descriptions (skin, hair, body type) competes with the LoRA and
   // can override explicit content tags. Only include the character count tag (1girl/1boy).
-  const hasLoraForPrimary = imgPrompt.character_id !== null;
-  const hasLoraForSecondary = imgPrompt.secondary_character_id !== null;
-
+  // Characters WITHOUT a LoRA get concise inline descriptions for identity.
   let characterTags = "";
   if (primaryCharData) {
-    if (hasLoraForPrimary) {
-      // LoRA carries identity — only inject the character count tag
+    if (hasLoraForPrimaryChar) {
       characterTags = primaryCharData.gender === "male" ? "1boy" : "1girl";
     } else {
       characterTags = buildCharacterTags({
@@ -276,14 +302,13 @@ export async function buildV4SceneGenerationPayload(
         eyeColor: primaryCharData.eyeColor,
         bodyType: primaryCharData.bodyType,
         age: primaryCharData.age,
-        distinguishingFeatures: primaryCharData.distinguishingFeatures,
       }, { mode });
     }
   }
 
   let secondaryCharacterTags: string | undefined;
   if (secondaryCharData) {
-    if (hasLoraForSecondary) {
+    if (hasLoraForSecondaryChar) {
       secondaryCharacterTags = secondaryCharData.gender === "male" ? "1boy" : "1girl";
     } else {
       secondaryCharacterTags = buildCharacterTags({
@@ -295,10 +320,19 @@ export async function buildV4SceneGenerationPayload(
         eyeColor: secondaryCharData.eyeColor,
         bodyType: secondaryCharData.bodyType,
         age: secondaryCharData.age,
-        distinguishingFeatures: secondaryCharData.distinguishingFeatures,
       }, { mode });
     }
   }
+
+  // ── Calculate token budget for scene tags using ACTUAL character tag lengths ──
+  const prefixTokenEstimate = 7; // "photograph, high resolution, cinematic, skin textures, detailed"
+  const triggerTokenEstimate = triggerWords.length * 2;
+  const charTagTokenEstimate = estimateClipTokens(characterTags) + (secondaryCharacterTags ? estimateClipTokens(secondaryCharacterTags) : 0);
+  const sceneTokenBudget = Math.max(20, 75 - prefixTokenEstimate - triggerTokenEstimate - charTagTokenEstimate - 2);
+
+  // Convert prose scene prompt to booru tags (or use pre-rewritten tags from retry)
+  const sceneTags = overrideTags || await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw, tokenBudget: sceneTokenBudget });
+  console.log(`[V4][${promptId}] Scene tags (budget=${sceneTokenBudget}): ${sceneTags}`);
 
   // Style LoRA stack removed — Juggernaut Ragnarok handles photorealism natively.
   // Character LoRAs (already in loraStack) are the only LoRAs injected at inference time.
@@ -315,25 +349,25 @@ export async function buildV4SceneGenerationPayload(
   let positivePrompt: string;
   let dualCharacterPrompts: { char1Prompt: string; char2Prompt: string } | undefined;
 
-  if (isDualCharacter && secondaryCharacterTags && mode === "sfw") {
-    // Regional conditioning: split character prompts into separate regions.
-    // ONLY used for SFW dual-character scenes (e.g. two characters side-by-side).
-    // NSFW scenes use a single combined prompt — regional left/right splitting
-    // produces two separate people rather than interacting/overlapping bodies.
+  if (isDualCharacter && secondaryCharacterTags) {
+    // Regional conditioning for ALL dual-character scenes (SFW and NSFW).
+    // Each character gets area-constrained conditioning (left/right regions).
+    // NSFW scenes use a much larger overlap (200px vs 64px) so characters
+    // can physically interact while still maintaining spatial identity guidance.
     const sharedParts = [qualityPrefix, sceneTags].filter(Boolean);
     positivePrompt = sharedParts.join(', ');
 
-    // Character 1 (left region): trigger word + identity tags
-    const char1Parts = [triggerWords[0], characterTags].filter(Boolean);
-    // Character 2 (right region): trigger word + identity tags
-    const char2Parts = [triggerWords[1], secondaryCharacterTags].filter(Boolean);
+    // Character 1 (left region): per-character trigger word + identity tags
+    const char1Parts = [primaryTriggerWord, characterTags].filter(Boolean);
+    // Character 2 (right region): per-character trigger word + identity tags
+    const char2Parts = [secondaryTriggerWord, secondaryCharacterTags].filter(Boolean);
 
     dualCharacterPrompts = {
       char1Prompt: char1Parts.join(', '),
       char2Prompt: char2Parts.join(', '),
     };
 
-    console.log(`[V4][${promptId}] DUAL-CHARACTER regional prompting enabled (SFW)`);
+    console.log(`[V4][${promptId}] DUAL-CHARACTER regional prompting enabled (${mode}, overlap=${profile.regionalOverlap}px)`);
     console.log(`[V4][${promptId}] Shared: ${positivePrompt}`);
     console.log(`[V4][${promptId}] Char1 (left): ${dualCharacterPrompts.char1Prompt}`);
     console.log(`[V4][${promptId}] Char2 (right): ${dualCharacterPrompts.char2Prompt}`);
@@ -360,6 +394,7 @@ export async function buildV4SceneGenerationPayload(
     filenamePrefix: `v4_${promptId}`,
     loras: loraStack.length > 0 ? loraStack : undefined,
     dualCharacterPrompts,
+    regionalOverlap: profile.regionalOverlap,
   });
 
   // ── Assembled prompt for storage (includes all parts) ──

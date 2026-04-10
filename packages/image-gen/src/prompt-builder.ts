@@ -18,6 +18,23 @@ export interface CharacterPromptData {
   distinguishingFeatures?: string;
 }
 
+/** CLIP token limit for SDXL — content beyond this is silently truncated */
+const CLIP_TOKEN_LIMIT = 75;
+
+/**
+ * Estimate CLIP token count for a prompt string.
+ * CLIP's BPE tokenizer averages ~1.3 tokens per word for English text,
+ * with commas and punctuation each counting as a token.
+ */
+export function estimateClipTokens(text: string): number {
+  if (!text) return 0;
+  // Split on whitespace and commas, count non-empty parts
+  const parts = text.split(/[\s,]+/).filter(Boolean);
+  // Each comma separator also counts as a token
+  const commaCount = (text.match(/,/g) || []).length;
+  return Math.ceil(parts.length * 1.3) + commaCount;
+}
+
 /**
  * Build quality prefix for Juggernaut Ragnarok prompts.
  *
@@ -80,8 +97,17 @@ export function buildCharacterTags(
     parts.push(charData.hairStyle);
   }
 
-  if (charData.bodyType) parts.push(charData.bodyType);
-  if (charData.distinguishingFeatures) parts.push(charData.distinguishingFeatures);
+  // Keep body type concise — strip emphasis weights like (word:1.5) which SDXL CLIP
+  // doesn't support, and condense to essential terms to preserve token budget for scene tags.
+  if (charData.bodyType) {
+    const cleaned = charData.bodyType
+      .replace(/\([^)]*:\d+\.?\d*\)/g, '') // strip "(word:1.5)" emphasis
+      .replace(/,(\s*,)+/g, ',')           // collapse consecutive commas
+      .replace(/\s*,\s*/g, ', ')           // normalize comma spacing
+      .replace(/^\s*,\s*|\s*,\s*$/g, '')   // trim leading/trailing commas
+      .trim();
+    if (cleaned) parts.push(cleaned);
+  }
 
   return parts.join(', ');
 }
@@ -90,7 +116,7 @@ export function buildCharacterTags(
  * Assemble the full positive prompt for Juggernaut Ragnarok.
  *
  * Component order matters — earlier tokens get more weight.
- * Total should stay under 75 tokens.
+ * Enforces the 75-token CLIP limit by truncating scene tags if needed.
  */
 export function buildPositivePrompt(opts: {
   qualityPrefix: string;
@@ -119,8 +145,33 @@ export function buildPositivePrompt(opts: {
     }
   }
 
-  // Scene description (from enhancer or pre-formatted)
-  parts.push(opts.sceneTags);
+  // Calculate remaining token budget for scene tags
+  const prefixText = parts.filter(Boolean).join(', ');
+  const prefixTokens = estimateClipTokens(prefixText);
+  const sceneTokenBudget = CLIP_TOKEN_LIMIT - prefixTokens - 2; // 2 token safety margin
+
+  // Truncate scene tags to fit within budget
+  let sceneTags = opts.sceneTags;
+  const sceneTokens = estimateClipTokens(sceneTags);
+  if (sceneTokens > sceneTokenBudget && sceneTokenBudget > 0) {
+    const tagList = sceneTags.split(',').map(t => t.trim()).filter(Boolean);
+    const truncated: string[] = [];
+    let runningTokens = 0;
+    for (const tag of tagList) {
+      const tagTokens = estimateClipTokens(tag) + 1; // +1 for the comma separator
+      if (runningTokens + tagTokens > sceneTokenBudget) break;
+      truncated.push(tag);
+      runningTokens += tagTokens;
+    }
+    sceneTags = truncated.join(', ');
+    console.warn(
+      `[PromptBuilder] Scene tags truncated from ~${sceneTokens} to ~${runningTokens} tokens ` +
+      `(budget: ${sceneTokenBudget}, prefix used: ${prefixTokens}). ` +
+      `Dropped: ${tagList.length - truncated.length} tags`,
+    );
+  }
+
+  parts.push(sceneTags);
 
   return parts.filter(Boolean).join(', ');
 }
@@ -132,26 +183,47 @@ export function buildPositivePrompt(opts: {
  * NSFW: natural language scene + Booru tags for anatomical precision
  *
  * Returns the original prompt if conversion fails.
+ *
+ * @param tokenBudget - Maximum tokens for the scene portion (default 60).
+ *   The caller should subtract prefix/trigger/identity tokens from the 75-token CLIP limit.
  */
 export async function convertProseToPrompt(
   prosePrompt: string,
-  opts: { nsfw: boolean },
+  opts: { nsfw: boolean; tokenBudget?: number },
 ): Promise<string> {
   const trimmed = prosePrompt.trim();
   if (!trimmed) return trimmed;
 
+  const budget = opts.tokenBudget ?? 60;
+
   const systemPrompt = opts.nsfw
     ? `You convert scene descriptions into image generation prompts for a photorealistic SDXL model.
-Output concise comma-separated tags under 75 tokens. Use natural language for the scene, booru-style tags for anatomical positioning.
-Include: pose, expression, body positioning, setting, specific lighting source, composition.
+Output concise comma-separated tags under ${budget} tokens. Use natural language for the scene, booru-style tags for anatomical positioning.
+
+PRIORITY ORDER (most important first):
+1. SETTING — preserve the EXACT location, venue, and environment described (e.g., "mechanic workshop", "shebeen bathroom", "township bedroom"). Never generalize.
+2. KEY PROPS — include specific objects mentioned (e.g., "Toyota car", "beer bottles", "workbench", "corrugated iron wall")
+3. POSE & BODY POSITIONING — specific action, hand placement, body contact, who is where
+4. LIGHTING — name the specific light source (e.g., "single work lamp", "neon beer signs", "moonlight through curtains"), not generic "dramatic lighting"
+5. COMPOSITION — shot type and camera angle as described
+6. EXPRESSION — facial expression and gaze direction
+
 For explicit content: be anatomically specific — specify positions, hand placement, who is where.
-Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), character count tags.
+Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), character count tags (1girl/1boy).
 Output ONLY the prompt tags, nothing else.`
     : `You convert scene descriptions into image generation prompts for a photorealistic SDXL model.
-Output concise comma-separated tags under 75 tokens. Use natural language.
-CRITICAL: Always include specific clothing descriptions — the model defaults toward nudity without them.
-Include: clothing, pose, expression, setting, specific lighting source, composition.
-Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), nudity or explicit content.
+Output concise comma-separated tags under ${budget} tokens. Use natural language.
+
+PRIORITY ORDER (most important first):
+1. CLOTHING — CRITICAL: Always include specific clothing descriptions. The model defaults toward nudity without them. Use exact clothing from the description (e.g., "grease-stained overalls", "fitted blazer and tailored trousers", "nurse's uniform under open jacket").
+2. SETTING — preserve the EXACT location described (e.g., "mechanic workshop in Middelburg", "township shebeen interior", "dusty construction lot"). Never generalize.
+3. KEY PROPS — include specific objects mentioned (e.g., "tools on workbench", "beer bottle", "phone screen illuminating face")
+4. POSE & ACTION — specific action being performed, hand positions, body positioning
+5. LIGHTING — name the specific light source (e.g., "golden hour light through bay door", "neon beer signs", "single streetlight"), not generic terms
+6. COMPOSITION — shot type and camera angle as described
+7. EXPRESSION — facial expression and gaze direction
+
+Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), nudity or explicit content, character count tags (1girl/1boy).
 Output ONLY the prompt tags, nothing else.`;
 
   try {

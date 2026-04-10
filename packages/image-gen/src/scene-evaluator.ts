@@ -15,6 +15,7 @@ import type { CompositionType } from './scene-profiles';
 // ── Types ──
 
 export type FailureCategory =
+  | 'corrupted_image'
   | 'wrong_person_count'
   | 'weak_identity'
   | 'wrong_setting'
@@ -134,6 +135,46 @@ export async function validateTagsPreflight(
   }
 }
 
+// ── Tier 0.5: Corruption Detection ──
+
+/**
+ * Detect corrupted/noise images before spending on full evaluation.
+ * Uses a single cheap Haiku call to determine if the image is a real photograph
+ * or random noise/static/corruption artifacts.
+ */
+export async function detectCorruptedImage(
+  imageBase64: string,
+): Promise<{ corrupted: boolean; reason: string }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { corrupted: false, reason: '' };
+
+  try {
+    const anthropic = new Anthropic({ apiKey });
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 32,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
+          { type: 'text', text: 'Is this a real photograph/image or is it random noise/static/corrupted pixels? Reply with ONLY "REAL" or "NOISE" followed by a brief reason.' },
+        ],
+      }],
+    });
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    const isNoise = text.toUpperCase().startsWith('NOISE');
+    if (isNoise) {
+      return { corrupted: true, reason: text };
+    }
+    return { corrupted: false, reason: '' };
+  } catch (err) {
+    console.error('[SceneEvaluator] Corruption check failed:', err instanceof Error ? err.message : err);
+    // Don't block on failure — proceed to normal evaluation
+    return { corrupted: false, reason: '' };
+  }
+}
+
 // ── Tier 1: Person Count ──
 
 /**
@@ -219,6 +260,26 @@ export async function evaluateSceneFull(
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return buildPassResult(ctx, 'skipped — no API key');
+  }
+
+  // Tier 0.5: Corruption check — detect random noise / non-photographic output.
+  // A quick vision call that's cheaper than running full evaluation on garbage data.
+  const corruptionCheck = await detectCorruptedImage(ctx.imageBase64);
+  if (corruptionCheck.corrupted) {
+    console.error(`[SceneEvaluator] CORRUPTED IMAGE DETECTED: ${corruptionCheck.reason}`);
+    return {
+      passed: false,
+      tier: 1,
+      scores: {
+        personCount: { expected: ctx.expectedPersonCount, detected: 0, passed: false },
+        setting: 0, clothing: 0, pose: 0, lighting: 0, composition: 0,
+        characterDistinction: null,
+      },
+      overallScore: 0,
+      failureCategories: ['corrupted_image'],
+      diagnosis: `Corrupted image: ${corruptionCheck.reason}`,
+      rawResponse: { corrupted: true, reason: corruptionCheck.reason },
+    };
   }
 
   // Tier 1: Person count

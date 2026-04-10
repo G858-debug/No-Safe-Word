@@ -1,7 +1,7 @@
 export {
   extractCharacterTags, cleanScenePrompt, generateDefaultBodyPrompt,
   buildQualityPrefix, buildNegativePrompt, buildCharacterTags, buildPositivePrompt,
-  convertProseToPrompt, getDimensions, getIdentityPhrasesToRemove,
+  convertProseToPrompt, getDimensions, getIdentityPhrasesToRemove, estimateClipTokens,
 } from './prompt-builder';
 export type { ContentMode, CharacterPromptData } from './prompt-builder';
 
@@ -53,7 +53,7 @@ export { getDefaultProfile, deriveCompositionType, deriveContentMode, applyProfi
 export type { SceneProfile, CompositionType } from './scene-profiles';
 
 // Scene evaluator — tiered image evaluation pipeline
-export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull } from './scene-evaluator';
+export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull, detectCorruptedImage } from './scene-evaluator';
 export type { EvaluationResult, EvaluationContext, EvaluationScores, FailureCategory, PreflightResult } from './scene-evaluator';
 
 // Retry strategy — correction logic and escalation

@@ -3,6 +3,7 @@ import {
   getRunPodJobStatus,
   base64ToBuffer,
   evaluateSceneFull,
+  detectCorruptedImage,
   computeCorrectionPlan,
   canRetry,
   generateRetrySeedV2,
@@ -74,12 +75,53 @@ export async function GET(
         });
       }
 
+      // ── Early corruption detection ──
+      // Noise images are valid PNGs but contain random static instead of real content.
+      // Detect BEFORE evaluation to avoid wasting API calls and storing garbage.
+      const corruptionCheck = await detectCorruptedImage(base64Data);
+      if (corruptionCheck.corrupted) {
+        console.error(
+          `[Status][${jobId}] NOISE IMAGE DETECTED for image ${imageId}: ${corruptionCheck.reason}. ` +
+          `Rejecting — not storing.`,
+        );
+        await supabase
+          .from("generation_jobs")
+          .update({ status: "failed" })
+          .eq("job_id", jobId);
+
+        // Look up the prompt to mark it as failed too
+        const { data: failedPrompt } = await supabase
+          .from("story_image_prompts")
+          .select("id")
+          .eq("image_id", imageId)
+          .single();
+        if (failedPrompt) {
+          await supabase
+            .from("story_image_prompts")
+            .update({ status: "failed" })
+            .eq("id", failedPrompt.id);
+        }
+
+        return NextResponse.json({
+          jobId,
+          completed: false,
+          error: `RunPod returned noise/corrupted image: ${corruptionCheck.reason}`,
+        });
+      }
+
       // Fetch prompt metadata for evaluation
       const { data: promptResult } = await supabase
         .from("story_image_prompts")
         .select("id, secondary_character_id, secondary_character_name, character_name, prompt, image_type")
         .eq("image_id", imageId)
         .single();
+
+      if (!promptResult) {
+        console.error(
+          `[Status][${jobId}] No prompt metadata found for image ${imageId} — ` +
+          `evaluation will be skipped. This indicates a DB inconsistency (story_image_prompts.image_id not set).`,
+        );
+      }
 
       const seed = settings.seed != null ? Number(settings.seed) : null;
       const isDualCharacter = !!promptResult?.secondary_character_id;
@@ -214,7 +256,8 @@ export async function GET(
           const currentProfile: SceneProfile = {
             compositionType,
             contentMode,
-            charLoraStrength: 0.75,
+            charLoraStrengthModel: 0.75,
+            charLoraStrengthClip: 0.5,
             cfg: (settings.cfg as number) || 6.5,
             steps: (settings.steps as number) || 30,
             regionalOverlap: 64,
@@ -344,8 +387,45 @@ export async function GET(
         }
       }
 
-      // ── Store the image ──
+      // ── Validate image before storing ──
       const buffer = base64ToBuffer(base64Data);
+
+      // Check PNG magic bytes — reject corrupt/non-image data from RunPod
+      const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+      if (buffer.length < 1024 || !buffer.subarray(0, 8).equals(PNG_MAGIC)) {
+        console.error(
+          `[Status][${jobId}] CORRUPTED IMAGE DETECTED for image ${imageId}: ` +
+          `buffer length=${buffer.length}, first bytes=${buffer.subarray(0, 8).toString('hex')}. ` +
+          `Rejecting — not storing.`,
+        );
+        await supabase
+          .from("generation_jobs")
+          .update({ status: "failed" })
+          .eq("job_id", jobId);
+        if (promptId) {
+          await supabase
+            .from("story_image_prompts")
+            .update({ status: "failed" })
+            .eq("id", promptId);
+        }
+        return NextResponse.json({
+          jobId,
+          completed: false,
+          error: "RunPod returned corrupted image data (invalid PNG)",
+        });
+      }
+
+      // Minimum file size check — a real 832x1216 PNG is typically 500KB+.
+      // Random noise PNGs compress to much smaller or much larger sizes.
+      const minExpectedBytes = 100 * 1024; // 100KB absolute minimum for any SDXL output
+      if (buffer.length < minExpectedBytes) {
+        console.warn(
+          `[Status][${jobId}] Suspiciously small image for ${imageId}: ${(buffer.length / 1024).toFixed(0)}KB. ` +
+          `Expected at least ${(minExpectedBytes / 1024).toFixed(0)}KB for SDXL output. Proceeding with caution.`,
+        );
+      }
+
+      // ── Store the image ──
       const timestamp = Date.now();
       const storagePath = `stories/${imageId}-${timestamp}.png`;
 

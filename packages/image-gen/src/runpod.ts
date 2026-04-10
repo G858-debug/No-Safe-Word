@@ -9,6 +9,8 @@ interface RunPodImage {
 export interface CharacterLoraDownload {
   filename: string; // e.g. "characters/char_zanele_abc123.safetensors"
   url: string;      // Supabase Storage URL to download from
+  /** Expected file size in bytes — used by the worker to detect truncated downloads */
+  expected_bytes?: number;
 }
 
 interface RunPodRequest {
