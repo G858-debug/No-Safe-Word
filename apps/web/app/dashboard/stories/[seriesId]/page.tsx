@@ -218,8 +218,8 @@ export default function SeriesDetailPage() {
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
   const allLorasDeployed =
     loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
-  // Juggernaut Ragnarok requires character LoRAs for scene generation
-  const allReadyForImages = allCharsApproved && allLorasDeployed;
+  // LoRAs are recommended but not required — pipeline falls back to inline descriptions
+  const allReadyForImages = allCharsApproved;
 
   // ------- Loading state -------
   if (loading) {
@@ -527,23 +527,20 @@ export default function SeriesDetailPage() {
           {allCharsApproved && !allLorasDeployed && loraCheckDone && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">
               <p className="text-sm font-medium text-amber-400 mb-2">
-                LoRA training required before generating images
+                Some characters have no deployed LoRA — images will use generic descriptions
               </p>
               <ul className="text-sm text-amber-400/80 space-y-1">
                 {characters
                   .filter((c) => !loraStatus[c.id]?.deployed)
                   .map((c) => (
                     <li key={c.id}>
-                      {c.characters.name} — LoRA not deployed
+                      {c.characters.name} — no LoRA (will use inline description)
                     </li>
                   ))}
               </ul>
-              <button
-                onClick={() => setActiveTab("characters")}
-                className="mt-3 text-sm text-amber-400 underline hover:text-amber-300"
-              >
-                Go to Character Approval
-              </button>
+              <p className="mt-2 text-xs text-amber-400/60">
+                Train a LoRA for consistent character identity. Without one, the character will look different across images.
+              </p>
             </div>
           )}
         </div>
