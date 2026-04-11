@@ -24,6 +24,7 @@ export type FailureCategory =
   | 'wrong_lighting'
   | 'wrong_composition'
   | 'characters_identical'
+  | 'weak_intent'
   | 'evaluation_error';
 
 export interface EvaluationScores {
@@ -34,6 +35,8 @@ export interface EvaluationScores {
   lighting: number;
   composition: number;
   characterDistinction: number | null;
+  /** How well the image conveys the narrative intent of the original prose description */
+  intentMatch: number;
 }
 
 export interface EvaluationResult {
@@ -65,15 +68,18 @@ export interface PreflightResult {
 // ── Score Weights ──
 
 const SCORE_WEIGHTS = {
-  setting: 0.20,
-  clothing: 0.15,
+  setting: 0.15,
+  clothing: 0.10,
   pose: 0.15,
-  lighting: 0.10,
+  lighting: 0.05,
   composition: 0.10,
   characterDistinction: 0.05,
+  intentMatch: 0.25,
 } as const;
 
-const PASS_THRESHOLD = 3.5;
+const PASS_THRESHOLD = 4.0;
+/** Intent must independently pass at this threshold even if overall score passes */
+const INTENT_THRESHOLD = 4.0;
 const MIN_INDIVIDUAL_SCORE = 2;
 
 // ── Tier 0: Pre-flight Tag Validation ──
@@ -234,6 +240,7 @@ Reply with JSON ONLY:
   "lighting": <1-5>,
   "composition": <1-5>,
   ${isDual ? '"characterDistinction": <1-5>,' : ''}
+  "intentMatch": <1-5>,
   "diagnosis": "brief explanation of what matches and what doesn't"
 }
 
@@ -244,6 +251,7 @@ Scoring guidelines:
 - **lighting**: Does the lighting match? (e.g., "single work lamp" should show directed light with shadows)
 - **composition**: Does the framing match? (e.g., "two-shot, tight framing" should show both characters framed tightly)
 ${isDual ? '- **characterDistinction**: Do the two characters look like different people? (different face, body type, hair)' : ''}
+- **intentMatch**: Does the image convey the NARRATIVE INTENT of the scene? Compare against the original prose description, not the booru tags. Score based on whether someone viewing this image would understand the story moment being depicted. A "passionate kiss" should show passion and physical contact, not two people standing near each other. A "tense confrontation" should show tension and opposition. A "cowgirl position" should show a woman on top. Score the emotional and physical truth of the scene, not individual elements. This is the MOST IMPORTANT dimension.
 
 This is a ${contentMode.toUpperCase()} ${isDual ? 'dual-character' : 'single-character'} scene.
 Be strict but fair. Focus on what the description explicitly asks for.`;
@@ -274,6 +282,7 @@ export async function evaluateSceneFull(
         personCount: { expected: ctx.expectedPersonCount, detected: 0, passed: false },
         setting: 0, clothing: 0, pose: 0, lighting: 0, composition: 0,
         characterDistinction: null,
+        intentMatch: 0,
       },
       overallScore: 0,
       failureCategories: ['corrupted_image'],
@@ -323,11 +332,16 @@ export async function evaluateSceneFull(
       lighting: clampScore(parsed.lighting),
       composition: clampScore(parsed.composition),
       characterDistinction: ctx.compositionType !== 'solo' ? clampScore(parsed.characterDistinction) : null,
+      intentMatch: clampScore(parsed.intentMatch),
     };
 
     const overallScore = computeOverallScore(scores);
     const failureCategories = diagnoseFailures(scores);
-    const passed = failureCategories.length === 0 && overallScore >= PASS_THRESHOLD;
+    // Intent must independently pass — an image can score well on individual dimensions
+    // but still miss the narrative intent entirely (e.g., "passionate kiss" → two people standing apart)
+    const passed = failureCategories.length === 0 &&
+      overallScore >= PASS_THRESHOLD &&
+      scores.intentMatch >= INTENT_THRESHOLD;
 
     const result: EvaluationResult = {
       passed,
@@ -390,6 +404,10 @@ function diagnoseFailures(scores: EvaluationScores): FailureCategory[] {
   if (scores.characterDistinction != null && scores.characterDistinction < 3) {
     failures.push('weak_identity');
   }
+  // Intent below 3 is a hard failure — the image doesn't convey the story moment
+  if (scores.intentMatch < 3) {
+    failures.push('weak_intent');
+  }
 
   return failures;
 }
@@ -402,6 +420,7 @@ function buildPassResult(ctx: EvaluationContext, diagnosis: string): EvaluationR
       personCount: { expected: ctx.expectedPersonCount, detected: ctx.expectedPersonCount, passed: true },
       setting: 5, clothing: 5, pose: 5, lighting: 5, composition: 5,
       characterDistinction: ctx.compositionType !== 'solo' ? 5 : null,
+      intentMatch: 5,
     },
     overallScore: 5,
     failureCategories: [],
@@ -423,10 +442,98 @@ function buildFailResult(
       personCount: { expected: ctx.expectedPersonCount, detected: personCheck.detected, passed: false },
       setting: 0, clothing: 0, pose: 0, lighting: 0, composition: 0,
       characterDistinction: ctx.compositionType !== 'solo' ? 0 : null,
+      intentMatch: 0,
     },
     overallScore: 0,
     failureCategories: ['wrong_person_count'],
     diagnosis,
     rawResponse: {},
   };
+}
+
+// ── Tier 3: Resource LoRA Recommendation (runs on failure only) ──
+
+import type { ResourceLora } from './resource-lora-registry';
+
+export interface LoraRecommendation {
+  needed: boolean;
+  category: 'pose' | 'kissing' | 'multi-person' | 'lighting' | 'style';
+  searchQuery: string;
+  reasoning: string;
+  existingLoraId?: string;
+}
+
+/**
+ * Deep analysis of why an image failed and whether a resource LoRA could help.
+ *
+ * Uses Claude Sonnet with extended thinking to analyze the gap between
+ * the original prose intent and the generated image, then recommends
+ * resource LoRAs from the registry or suggests CivitAI search queries.
+ */
+export async function recommendResourceLoras(
+  ctx: EvaluationContext,
+  evalResult: EvaluationResult,
+  availableResourceLoras: ResourceLora[],
+): Promise<LoraRecommendation[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return [];
+
+  const loraListStr = availableResourceLoras.length > 0
+    ? availableResourceLoras.map(l =>
+        `- ID: ${l.id}, Category: ${l.category}, Keywords: [${l.triggerKeywords.join(', ')}], Trigger: ${l.triggerWord || 'none'}`
+      ).join('\n')
+    : '(none available)';
+
+  try {
+    const anthropic = new Anthropic({ apiKey });
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8000,
+      thinking: { type: 'enabled', budget_tokens: 5000 },
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: ctx.imageBase64 } },
+          {
+            type: 'text',
+            text: `ORIGINAL SCENE INTENT:\n${ctx.originalProse}\n\n` +
+              `EVALUATION SCORES:\n${JSON.stringify(evalResult.scores, null, 2)}\n` +
+              `DIAGNOSIS: ${evalResult.diagnosis}\n` +
+              `FAILURES: [${evalResult.failureCategories.join(', ')}]\n\n` +
+              `AVAILABLE RESOURCE LORAS:\n${loraListStr}\n\n` +
+              `Analyze the gap between what this image shows and what the scene INTENDED.\n` +
+              `Would a specialized LoRA model help close this gap? Consider:\n` +
+              `- Pose/position LoRAs (for specific body positions, sex positions, interactions)\n` +
+              `- Kissing/embrace LoRAs (for physical contact between characters)\n` +
+              `- Multi-person composition LoRAs (for correct person count and placement)\n` +
+              `- Style/lighting LoRAs (for specific visual styles)\n\n` +
+              `Reply with JSON ONLY — an array of recommendations:\n` +
+              `[{ "needed": true/false, "category": "pose|kissing|multi-person|lighting|style", ` +
+              `"searchQuery": "CivitAI search terms for SDXL LoRA", ` +
+              `"reasoning": "why this would help", ` +
+              `"existingLoraId": "ID from available list or null" }]`,
+          },
+        ],
+      }],
+    });
+
+    // Extract text from response (skip thinking blocks)
+    const textBlock = response.content.find(b => b.type === 'text');
+    const rawText = textBlock?.type === 'text' ? textBlock.text.trim() : '';
+    if (!rawText) return [];
+
+    const text = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const parsed = JSON.parse(text) as LoraRecommendation[];
+
+    console.log(
+      `[SceneEvaluator] LoRA recommendations: ${parsed.filter(r => r.needed).length} needed ` +
+      `(${parsed.filter(r => r.existingLoraId).length} from registry, ` +
+      `${parsed.filter(r => r.needed && !r.existingLoraId).length} need download)`,
+    );
+
+    return parsed.filter(r => r.needed);
+  } catch (err) {
+    console.error('[SceneEvaluator] LoRA recommendation failed:', err instanceof Error ? err.message : err);
+    return [];
+  }
 }

@@ -9,7 +9,7 @@ import type { FailureCategory, EvaluationResult } from './scene-evaluator';
 import type { SceneProfile } from './scene-profiles';
 import { checkArchitecturalLessons } from './architectural-lessons';
 
-export const MAX_EVAL_RETRY_ATTEMPTS = 6;
+export const MAX_EVAL_RETRY_ATTEMPTS = 8;
 
 // ── Types ──
 
@@ -26,6 +26,8 @@ export interface CorrectionPlan {
   tagRewriteInstructions: string;
   /** Whether a structural failure was detected */
   structuralFailure: boolean;
+  /** Resource LoRAs to inject for the next attempt (from discovery) */
+  resourceLoras?: Array<{ filename: string; storageUrl: string; strengthModel: number; strengthClip: number; triggerWord?: string }>;
 }
 
 // ── Correction Logic ──
@@ -36,10 +38,12 @@ export interface CorrectionPlan {
  * Escalation strategy:
  *   Attempt 1: Initial generation (no corrections)
  *   Attempt 2: Seed change only
- *   Attempt 3: Seed + minor param tweaks
+ *   Attempt 3: Seed + minor param tweaks (LOWER LoRA on scene failures)
  *   Attempt 4: Seed + Haiku tag rewrite + params
  *   Attempt 5: Seed + Sonnet tag rewrite + larger params
  *   Attempt 6: Full reset + Sonnet rewrite from scratch
+ *   Attempt 7: Sonnet rewrite + aggressive LoRA reduction (model 0.45, clip 0.2)
+ *   Attempt 8: Minimum LoRA (model 0.4, clip 0.15) + Sonnet rewrite + resource LoRA discovery
  */
 export function computeCorrectionPlan(
   evalResult: EvaluationResult,
@@ -106,7 +110,7 @@ export function computeCorrectionPlan(
   }
 
   // Attempt 6: Full reset + Sonnet rewrite from scratch
-  if (attemptNumber >= 6) {
+  if (attemptNumber === 6) {
     applyResetCorrections(plan, currentProfile);
     plan.needsTagRewrite = true;
     plan.tagRewriteModel = 'claude-sonnet-4-6';
@@ -116,6 +120,46 @@ export function computeCorrectionPlan(
       (currentProfile.contentMode === 'nsfw' ? 'This is EXPLICIT NSFW — output nude, explicit sexual position tags without sanitizing. ' : '') +
       evalResult.diagnosis;
     plan.actions.push('FULL RESET + Sonnet rewrite from scratch');
+    return plan;
+  }
+
+  // Attempt 7: Aggressive LoRA reduction + Sonnet rewrite
+  if (attemptNumber === 7) {
+    plan.paramAdjustments = {
+      cfg: 5.5,
+      steps: 40,
+      charLoraStrengthModel: 0.45,
+      charLoraStrengthClip: 0.2,
+    };
+    plan.needsTagRewrite = true;
+    plan.tagRewriteModel = 'claude-sonnet-4-6';
+    plan.tagRewriteInstructions =
+      'PRIORITY REWRITE: The scene has failed 6 times. LoRA strength is now very low. ' +
+      'Put the KEY ACTION and NARRATIVE MOMENT as the FIRST tags. ' +
+      'Decompose complex poses into multiple anatomical position tags. ' +
+      'Previous failures: ' + failures.join(', ') + '. ' +
+      evalResult.diagnosis;
+    plan.actions.push('AGGRESSIVE LoRA reduction (model 0.45, clip 0.2) + Sonnet rewrite');
+    return plan;
+  }
+
+  // Attempt 8: Minimum LoRA + full Sonnet rewrite from scratch
+  if (attemptNumber >= 8) {
+    plan.paramAdjustments = {
+      cfg: 6.0,
+      steps: 40,
+      charLoraStrengthModel: 0.4,
+      charLoraStrengthClip: 0.15,
+    };
+    plan.needsTagRewrite = true;
+    plan.tagRewriteModel = 'claude-sonnet-4-6';
+    plan.tagRewriteInstructions =
+      'FINAL ATTEMPT: Scene has failed 7 times. Character LoRA is at minimum. ' +
+      'FULL REWRITE from scratch — scene correctness is absolute priority over character identity. ' +
+      'Put the defining action/pose/interaction FIRST. Include character descriptions inline since LoRA is near-zero. ' +
+      'Previous failures: ' + failures.join(', ') + '. ' +
+      evalResult.diagnosis;
+    plan.actions.push('MINIMUM LoRA (model 0.4, clip 0.15) + final Sonnet rewrite');
     return plan;
   }
 
@@ -157,19 +201,37 @@ function applyMinorCorrections(
   profile: SceneProfile,
 ): void {
   // Bump CFG slightly for better prompt adherence
-  if (failures.some(f => ['wrong_setting', 'wrong_clothing', 'wrong_pose'].includes(f))) {
+  if (failures.some(f => ['wrong_setting', 'wrong_clothing', 'wrong_pose', 'weak_intent'].includes(f))) {
     const newCfg = Math.min(profile.cfg + 0.5, 8.0);
     plan.paramAdjustments.cfg = newCfg;
     plan.actions.push(`CFG ${profile.cfg} → ${newCfg}`);
   }
 
-  // Increase character LoRA model strength if identity is weak (keep CLIP capped for prompt adherence)
-  if (failures.includes('weak_identity') || failures.includes('characters_identical')) {
+  // Determine failure type to decide LoRA direction
+  const hasIdentityFailure = failures.includes('weak_identity') || failures.includes('characters_identical');
+  const hasSceneFailure = failures.some(f =>
+    ['wrong_setting', 'wrong_clothing', 'wrong_pose', 'weak_intent'].includes(f),
+  );
+
+  if (hasIdentityFailure && !hasSceneFailure) {
+    // Identity-only failure: increase LoRA strength
     const newModel = Math.min(profile.charLoraStrengthModel + 0.05, 0.85);
     const newClip = Math.min(profile.charLoraStrengthClip + 0.03, 0.65);
     plan.paramAdjustments.charLoraStrengthModel = newModel;
     plan.paramAdjustments.charLoraStrengthClip = newClip;
-    plan.actions.push(`charLoRA model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip}`);
+    plan.actions.push(`charLoRA INCREASED model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip} (identity fix)`);
+  } else if (hasSceneFailure && !hasIdentityFailure) {
+    // Scene-only failure: DECREASE LoRA to free CLIP headroom for scene tags
+    const newModel = Math.max(profile.charLoraStrengthModel - 0.05, 0.35);
+    const newClip = Math.max(profile.charLoraStrengthClip - 0.05, 0.15);
+    plan.paramAdjustments.charLoraStrengthModel = newModel;
+    plan.paramAdjustments.charLoraStrengthClip = newClip;
+    plan.actions.push(`charLoRA REDUCED model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip} (scene adherence)`);
+  } else if (hasIdentityFailure && hasSceneFailure) {
+    // Conflict: keep model strength, decrease CLIP slightly (compromise)
+    const newClip = Math.max(profile.charLoraStrengthClip - 0.03, 0.2);
+    plan.paramAdjustments.charLoraStrengthClip = newClip;
+    plan.actions.push(`charLoRA clip ${profile.charLoraStrengthClip} → ${newClip} (identity+scene conflict — compromise)`);
   }
 
   // Widen regional overlap if characters are identical
@@ -186,19 +248,34 @@ function applyMajorCorrections(
   profile: SceneProfile,
 ): void {
   // Larger CFG bump
-  if (failures.some(f => ['wrong_setting', 'wrong_clothing', 'wrong_pose'].includes(f))) {
+  if (failures.some(f => ['wrong_setting', 'wrong_clothing', 'wrong_pose', 'weak_intent'].includes(f))) {
     const newCfg = Math.min(profile.cfg + 1.0, 8.0);
     plan.paramAdjustments.cfg = newCfg;
     plan.actions.push(`CFG ${profile.cfg} → ${newCfg}`);
   }
 
-  // Larger LoRA model strength increase (keep CLIP capped for prompt adherence)
-  if (failures.includes('weak_identity') || failures.includes('characters_identical')) {
+  // Determine failure type to decide LoRA direction (same logic as minor, larger magnitudes)
+  const hasIdentityFailure = failures.includes('weak_identity') || failures.includes('characters_identical');
+  const hasSceneFailure = failures.some(f =>
+    ['wrong_setting', 'wrong_clothing', 'wrong_pose', 'weak_intent'].includes(f),
+  );
+
+  if (hasIdentityFailure && !hasSceneFailure) {
     const newModel = Math.min(profile.charLoraStrengthModel + 0.1, 0.85);
     const newClip = Math.min(profile.charLoraStrengthClip + 0.05, 0.65);
     plan.paramAdjustments.charLoraStrengthModel = newModel;
     plan.paramAdjustments.charLoraStrengthClip = newClip;
-    plan.actions.push(`charLoRA model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip}`);
+    plan.actions.push(`charLoRA INCREASED model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip} (identity fix)`);
+  } else if (hasSceneFailure && !hasIdentityFailure) {
+    const newModel = Math.max(profile.charLoraStrengthModel - 0.1, 0.35);
+    const newClip = Math.max(profile.charLoraStrengthClip - 0.08, 0.15);
+    plan.paramAdjustments.charLoraStrengthModel = newModel;
+    plan.paramAdjustments.charLoraStrengthClip = newClip;
+    plan.actions.push(`charLoRA REDUCED model ${profile.charLoraStrengthModel} → ${newModel}, clip ${profile.charLoraStrengthClip} → ${newClip} (scene adherence)`);
+  } else if (hasIdentityFailure && hasSceneFailure) {
+    const newClip = Math.max(profile.charLoraStrengthClip - 0.05, 0.2);
+    plan.paramAdjustments.charLoraStrengthClip = newClip;
+    plan.actions.push(`charLoRA clip ${profile.charLoraStrengthClip} → ${newClip} (identity+scene conflict)`);
   }
 
   // More steps for better detail
@@ -211,16 +288,18 @@ function applyResetCorrections(
   plan: CorrectionPlan,
   profile: SceneProfile,
 ): void {
-  // Reset to aggressive but safe defaults (cap CLIP strength to preserve prompt adherence)
+  // Reset to moderate LoRA + higher CFG for maximum prompt adherence.
+  // Previous bug: this INCREASED LoRA strength, which made scene failures worse.
+  // Now uses fixed moderate values that balance identity and scene accuracy.
   plan.paramAdjustments = {
-    cfg: 7.0,
+    cfg: 6.0,
     steps: 40,
-    charLoraStrengthModel: Math.min(profile.charLoraStrengthModel + 0.15, 0.85),
-    charLoraStrengthClip: Math.min(profile.charLoraStrengthClip + 0.1, 0.65),
+    charLoraStrengthModel: 0.5,
+    charLoraStrengthClip: 0.25,
     regionalOverlap: profile.regionalOverlap > 0 ? profile.regionalOverlap + 48 : 0,
     regionalStrength: profile.regionalStrength,
   };
-  plan.actions.push('full parameter reset to aggressive defaults');
+  plan.actions.push('full parameter reset (moderate LoRA 0.5/0.25, CFG 6.0, 40 steps)');
 }
 
 function buildRewriteInstructions(
@@ -262,6 +341,15 @@ function buildRewriteInstructions(
   }
   if (failures.includes('wrong_composition')) {
     parts.push('COMPOSITION: Specify exact shot type, camera angle, and framing.');
+  }
+  if (failures.includes('weak_intent')) {
+    parts.push(
+      'INTENT: The image does not convey the narrative intent of the scene. ' +
+      'Restructure tags to prioritize the KEY ACTION and EMOTIONAL BEAT. ' +
+      'Place the most scene-critical tag FIRST in the prompt. ' +
+      'For interaction scenes: emphasize physical contact, body positioning, and emotional state. ' +
+      'For sex scenes: decompose the position into anatomical tags (who on top, leg positions, penetration direction).',
+    );
   }
 
   parts.push(`Previous evaluation: ${diagnosis}`);

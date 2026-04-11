@@ -30,8 +30,11 @@ export interface SceneProfile {
 // ── Default Profiles ──
 
 const SOLO_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
-  charLoraStrengthModel: 0.8,
-  charLoraStrengthClip: 0.55,
+  // Lower LoRA strengths improve prompt adherence for scene/pose details.
+  // Previous defaults (0.8/0.55) overwhelmed CLIP, producing "character portrait"
+  // instead of "character in scene". See CLAUDE.md § Image Generation Iteration Learnings.
+  charLoraStrengthModel: 0.65,
+  charLoraStrengthClip: 0.4,
   cfg: 5.0,
   steps: 30,
   regionalOverlap: 0,
@@ -40,14 +43,14 @@ const SOLO_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
 };
 
 const DUAL_DEFAULTS: Omit<SceneProfile, 'compositionType' | 'contentMode'> = {
-  charLoraStrengthModel: 0.75,
-  charLoraStrengthClip: 0.5,
+  // Dual-character scenes need even lower LoRA to prevent one character dominating.
+  // Previous defaults (0.75/0.5) caused missing second characters and ignored interactions.
+  charLoraStrengthModel: 0.6,
+  charLoraStrengthClip: 0.35,
   cfg: 5.0,
   steps: 35,
   regionalOverlap: 64,
   regionalStrength: 1.0,
-  // Style LoRA overrides removed — Juggernaut Ragnarok uses no style LoRAs.
-  // Only character LoRAs are injected at inference time.
   loraOverrides: {},
 };
 
