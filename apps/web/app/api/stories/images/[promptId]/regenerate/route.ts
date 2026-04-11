@@ -37,32 +37,16 @@ export async function POST(
       );
     }
 
-    // 2. Clean up old image from storage if it exists
-    try {
-      if (imgPrompt.image_id) {
-        const { data: oldImage } = await supabase
-          .from("images")
-          .select("stored_url")
-          .eq("id", imgPrompt.image_id)
-          .single();
+    // 2. Preserve old image for revert (instead of deleting)
+    const previousImageId = imgPrompt.image_id || null;
 
-        if (oldImage?.stored_url) {
-          const urlParts = oldImage.stored_url.split("/story-images/");
-          if (urlParts.length === 2) {
-            const storagePath = urlParts[1];
-            await supabase.storage.from("story-images").remove([storagePath]);
-            console.log(`Deleted old story image from storage: ${storagePath}`);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to clean up old story image:", err);
-    }
-
-    // 3. Mark as generating
+    // 3. Mark as generating + save previous image reference
     await supabase
       .from("story_image_prompts")
-      .update({ status: "generating" })
+      .update({
+        status: "generating",
+        ...(previousImageId ? { previous_image_id: previousImageId } : {}),
+      })
       .eq("id", promptId);
 
     // 4. Fetch series info via post

@@ -254,7 +254,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         storage_path: storagePath,
         eval_status: evalStatus,
         eval_score: evalScore,
-        eval_details: evalDetails,
+        eval_details: evalDetails as Record<string, unknown> as any,
         human_approved: null, // Reset human approval since it's a new image
         caption: null,
       })

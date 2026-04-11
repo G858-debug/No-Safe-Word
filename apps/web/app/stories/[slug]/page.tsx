@@ -119,7 +119,7 @@ export default async function SeriesPage({ params }: PageProps) {
 
     characterDetails = characters.map((c) => ({
       name: nameMap[c.character_id] || "Unknown",
-      role: c.role,
+      role: c.role || "",
       description: c.prose_description,
       imageUrl: c.approved_image_id
         ? urlMap[c.approved_image_id] || null

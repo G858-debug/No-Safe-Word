@@ -30,6 +30,7 @@ import {
   Bug,
   Settings2,
   SlidersHorizontal,
+  Undo2,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ export interface ImagePromptData {
   character_id: string | null;
   prompt: string;
   image_id: string | null;
+  previous_image_id: string | null;
   status: string;
 }
 
@@ -111,6 +113,9 @@ interface PromptState {
   error: string | null;
   diagnosticFlags: DiagnosticFlags;
   showDiagnostic: boolean;
+  // Revert support
+  previousImageId: string | null;
+  isReverting: boolean;
   // Advanced controls
   showAdvanced: boolean;
   negativePrompt: string;
@@ -223,6 +228,8 @@ export default function ImageGeneration({
           error: null,
           diagnosticFlags: { ...DEFAULT_DIAGNOSTIC_FLAGS },
           showDiagnostic: false,
+          previousImageId: ip.previous_image_id || null,
+          isReverting: false,
           showAdvanced: false,
           negativePrompt: "",
           useRawPrompt: false,
@@ -586,6 +593,44 @@ export default function ImageGeneration({
     [promptStates, updatePrompt]
   );
 
+  const handleRevert = useCallback(
+    async (promptId: string) => {
+      const state = promptStates[promptId];
+      if (!state?.previousImageId) return;
+
+      updatePrompt(promptId, { isReverting: true, error: null });
+
+      try {
+        const res = await fetch(
+          `/api/stories/images/${promptId}/revert`,
+          { method: "POST" }
+        );
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Revert failed");
+        }
+
+        const data = await res.json();
+        // API swaps current ↔ previous in the DB, so the user
+        // can toggle back and forth between the two images
+        updatePrompt(promptId, {
+          status: "generated",
+          imageUrl: data.imageUrl || null,
+          // The old current image is now the previous
+          previousImageId: state.previousImageId,
+          isReverting: false,
+        });
+      } catch (err) {
+        updatePrompt(promptId, {
+          isReverting: false,
+          error: err instanceof Error ? err.message : "Revert failed",
+        });
+      }
+    },
+    [promptStates, updatePrompt]
+  );
+
   const handleApproveAllGenerated = useCallback(async () => {
     const toApprove = Object.entries(promptStates)
       .filter(([, s]) => s.status === "generated")
@@ -879,6 +924,7 @@ export default function ImageGeneration({
                             onUpdatePrompt={updatePrompt}
                             onRegenerate={handleRegenerate}
                             onApprove={handleApprove}
+                            onRevert={handleRevert}
                             onGenerate={async () => {
                               const pState = promptStates[ip.id];
                               updatePrompt(ip.id, {
@@ -1228,6 +1274,7 @@ interface ImageCardProps {
   onUpdatePrompt: (id: string, updates: Partial<PromptState>) => void;
   onRegenerate: (id: string) => void;
   onApprove: (id: string) => void;
+  onRevert: (id: string) => void;
   onGenerate: () => void;
   onImageClick: (url: string) => void;
   batchGenerating: boolean;
@@ -1242,6 +1289,7 @@ function ImageCard({
   onUpdatePrompt,
   onRegenerate,
   onApprove,
+  onRevert,
   onGenerate,
   onImageClick,
   batchGenerating,
@@ -1467,6 +1515,22 @@ function ImageCard({
               >
                 <RefreshCw className="mr-1.5 h-4 w-4" />
                 Regenerate
+              </Button>
+            )}
+            {isGenerated && state.previousImageId && (
+              <Button
+                variant="outline"
+                size={isExpanded ? "default" : "sm"}
+                className={`${isExpanded ? "text-sm" : "h-7 text-xs"} text-orange-400 border-orange-500/30 hover:bg-orange-500/10`}
+                onClick={() => onRevert(ip.id)}
+                disabled={state.isReverting}
+              >
+                {state.isReverting ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Undo2 className="mr-1.5 h-4 w-4" />
+                )}
+                Revert
               </Button>
             )}
             {isGenerated && (

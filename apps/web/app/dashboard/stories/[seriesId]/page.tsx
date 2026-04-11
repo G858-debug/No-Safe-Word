@@ -54,6 +54,7 @@ interface SeriesData {
       character_id: string | null;
       prompt: string;
       image_id: string | null;
+      previous_image_id: string | null;
       status: string;
     }[];
   })[];
