@@ -160,7 +160,7 @@ export async function POST(
               attemptNumber: 1,
               compositionType: result.profile.compositionType,
               contentMode: result.profile.contentMode,
-              profile: result.profile,
+              profile: JSON.parse(JSON.stringify(result.profile)),
             },
             mode: result.mode,
           })

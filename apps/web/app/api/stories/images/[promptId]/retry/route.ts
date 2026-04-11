@@ -114,7 +114,7 @@ export async function POST(
             attemptNumber: attemptNumber || 1,
             compositionType: result.profile.compositionType,
             contentMode: result.profile.contentMode,
-            profile: result.profile,
+            profile: JSON.parse(JSON.stringify(result.profile)),
           },
         })
         .eq("id", imgPrompt.image_id);
