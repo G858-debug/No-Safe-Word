@@ -230,6 +230,15 @@ download_to_volume \
     "4x_NMKD-Siax_200k.pth" \
     "${UPSCALE_DIR}"
 
+# ---- ControlNet: OpenPose SDXL (two-character pose guidance) ----
+# HuggingFace: thibaud/controlnet-openpose-sdxl-1.0
+CONTROLNET_DIR="${VOLUME_MODELS}/controlnet"
+mkdir -p "${CONTROLNET_DIR}" 2>/dev/null
+download_to_volume \
+    "https://huggingface.co/thibaud/controlnet-openpose-sdxl-1.0/resolve/main/OpenPoseXL2.safetensors" \
+    "OpenPoseXL2.safetensors" \
+    "${CONTROLNET_DIR}"
+
 # ---- Body shape slider LoRAs (female characters, portrait + dataset only) ----
 
 # Body Weight Slider (ILXL) — CivitAI 1348692, version 1523317
