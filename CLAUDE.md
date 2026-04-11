@@ -226,6 +226,46 @@ Output format:
 
 Enhancement via `claude-haiku-4-5-20251001`.
 
+## Image Generation Iteration Learnings
+
+### LoRA Strength Tuning
+- Default LoRA strengths of 0.8 model / 0.55 clip overwhelm scene details
+- For scene-heavy prompts: reduce to model 0.5-0.65, clip 0.25-0.4
+- When pose/setting repeatedly fails: LOWER LoRA strength, don't raise it
+- Only raise LoRA strength when character identity is the problem
+- Current defaults: solo (0.65/0.4), dual (0.6/0.35)
+
+### Dual-Character Interaction Scenes
+- Regional conditioning (left/right regions) should ONLY be used for scenes where characters occupy separate space
+- For interaction scenes (kissing, embracing, sex): use UNIFIED prompt — both characters + their interaction in one prompt
+- LoRA model weights still carry character identity even without regional conditioning
+- The `classifyScene()` function detects interaction type automatically — `intimate` and `romantic` types trigger unified mode
+
+### Prompt Structure for Better Adherence
+- For interaction scenes: put the ACTION/POSE first, before quality prefix
+- CLIP weights tokens by position — earlier = stronger influence
+- Complex sex positions need decomposed anatomical tags, not just the position name
+- "three people" and "group" in negative prompt helps maintain person count
+
+### Characters Without LoRAs
+- Scene image generation is BLOCKED for characters without a deployed LoRA
+- Inline descriptions consume ~25 CLIP tokens, starving scene details
+- Train LoRAs for all characters BEFORE generating scene images
+
+### Resource LoRAs
+- Pose/style LoRAs from the resource library are auto-selected based on prompt keywords
+- Resource LoRAs are injected alongside character LoRAs (max 8 total in the ComfyUI chain)
+- Available: French Kiss LoRA XL (kissing scenes)
+- The pipeline can discover and download new LoRAs from CivitAI at runtime when evaluation detects gaps
+
+### Evaluate-and-Retry Pipeline
+- Max 8 attempts (was 6), escalating from seed-only to full Sonnet rewrite
+- Intent matching is the most heavily weighted evaluation dimension (0.25)
+- On scene/pose failures: LoRA strength is DECREASED (frees CLIP headroom for scene tags)
+- On identity failures: LoRA strength is INCREASED (correct direction)
+- Attempts 7-8 use aggressive LoRA reduction (0.45/0.2 then 0.4/0.15) for maximum prompt adherence
+- Deep LoRA discovery runs on attempt 3+ failures using Sonnet to analyze intent gaps
+
 ## Database
 
 Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prompts`, `images`, `character_loras`, `lora_dataset_images`
@@ -243,6 +283,7 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 
 ## General
 
+- **API keys live in `.env.local`** — CivitAI, RunPod, Supabase, Replicate, and Hugging Face tokens are all there. Read `.env.local` first before asking the user to provide keys or do things manually. Only ask if you've already tried and failed.
 - Don't ask me to check the Railway logs — you have access, check them yourself
 - `apps/web` is the ONLY app. Never create files in `apps/dashboard`
 - All image generation goes through `/api/stories/[seriesId]/generate-images-v4/`

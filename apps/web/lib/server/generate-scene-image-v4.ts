@@ -119,6 +119,8 @@ interface V4GenerateSceneParams {
   profileOverrides?: Partial<SceneProfile>;
   /** Pre-rewritten booru tags (bypasses convertProseToPrompt on retries) */
   overrideTags?: string;
+  /** Force-disable ControlNet (used when RunPod worker lacks the model) */
+  disableControlNet?: boolean;
 }
 
 // ── Character LoRA Fetching ──
@@ -391,11 +393,13 @@ export async function buildV4SceneGenerationPayload(
   // Run prose-to-tags conversion and pose classification in parallel.
   // Pose classification determines whether ControlNet OpenPose conditioning
   // should guide the spatial composition of the generated image.
+  // ControlNet requires OpenPoseXL2.safetensors on the RunPod endpoint — skip if not deployed.
+  const controlNetEnabled = process.env.ENABLE_CONTROLNET === "true" && !params.disableControlNet;
   const [sceneTags, selectedPose] = await Promise.all([
     overrideTags
       ? Promise.resolve(overrideTags)
       : convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw, tokenBudget: sceneTokenBudget }),
-    classifyPose(imgPrompt.prompt, classification),
+    controlNetEnabled ? classifyPose(imgPrompt.prompt, classification) : Promise.resolve(null),
   ]);
   console.log(`[V4][${promptId}] Scene tags (budget=${sceneTokenBudget}): ${sceneTags}`);
   if (selectedPose) {

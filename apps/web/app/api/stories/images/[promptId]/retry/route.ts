@@ -22,12 +22,14 @@ export async function POST(
       profileOverrides,
       overrideTags,
       attemptNumber,
+      disableControlNet,
     } = body as {
       newSeed: number;
       jobId: string;
       profileOverrides?: Partial<SceneProfile>;
       overrideTags?: string;
       attemptNumber?: number;
+      disableControlNet?: boolean;
     };
 
     if (!newSeed || !oldJobId) {
@@ -76,6 +78,7 @@ export async function POST(
       seed: newSeed,
       profileOverrides,
       overrideTags,
+      disableControlNet,
     });
 
     // 5. Submit to RunPod
@@ -109,6 +112,9 @@ export async function POST(
             seed: newSeed,
             engine: "runpod-v4-juggernaut-ragnarok",
             attemptNumber: attemptNumber || 1,
+            compositionType: result.profile.compositionType,
+            contentMode: result.profile.contentMode,
+            profile: result.profile,
           },
         })
         .eq("id", imgPrompt.image_id);

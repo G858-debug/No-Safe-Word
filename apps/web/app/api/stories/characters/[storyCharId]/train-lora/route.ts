@@ -51,35 +51,63 @@ export async function POST(
       );
     }
 
-    // 4. Check if a LoRA is already training or deployed for this character
-    // Check for existing in-progress LoRA
-    const existingLoraQuery = await (supabase as any)
+    // 4. Delete ALL existing LoRAs for this character (clean slate).
+    // The user explicitly clicked "Train" — they want to start over.
+    // Clear the active_lora_id first (no cascade on this FK).
+    await (supabase as any)
+      .from('story_characters')
+      .update({ active_lora_id: null })
+      .eq('id', storyCharId);
+
+    const { data: existingLoras } = await (supabase as any)
       .from("character_loras")
-      .select("id, status")
-      .eq("character_id", storyChar.character_id)
-      .not("status", "in", '("failed","archived")')
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single() as { data: { id: string; status: string } | null; error: any };
+      .select("id, status, storage_url, filename")
+      .eq("character_id", storyChar.character_id) as { data: Array<{ id: string; status: string; storage_url: string | null; filename: string | null }> | null };
 
-    const existingProgress = existingLoraQuery.data
-      ? { loraId: existingLoraQuery.data.id, status: existingLoraQuery.data.status }
-      : null;
+    if (existingLoras && existingLoras.length > 0) {
+      // Collect storage paths for cleanup
+      const storagePaths: string[] = [];
+      for (const lora of existingLoras) {
+        if (lora.storage_url) {
+          const parts = lora.storage_url.split('/lora-training-datasets/');
+          if (parts.length === 2) storagePaths.push(parts[1]);
+        }
+      }
 
-    if (existingProgress) {
-      // Archive the existing LoRA so a fresh training can start.
-      // The user explicitly clicked "Train" or "Regenerate Dataset" — they want to start over.
-      console.log(`[LoRA Train] Archiving existing LoRA ${existingProgress.loraId} (status: ${existingProgress.status})`);
-      await (supabase as any)
-        .from('character_loras')
-        .update({ status: 'archived', updated_at: new Date().toISOString() })
-        .eq('id', existingProgress.loraId);
+      // Collect dataset image storage paths
+      const loraIds = existingLoras.map(l => l.id);
+      const { data: datasetImages } = await (supabase as any)
+        .from("lora_dataset_images")
+        .select("storage_path")
+        .in("lora_id", loraIds) as { data: Array<{ storage_path: string | null }> | null };
 
-      // Clear the active_lora_id so it doesn't reference the archived one
-      await (supabase as any)
-        .from('story_characters')
-        .update({ active_lora_id: null })
-        .eq('id', storyCharId);
+      if (datasetImages) {
+        for (const img of datasetImages) {
+          if (img.storage_path) storagePaths.push(img.storage_path);
+        }
+      }
+
+      // Delete LoRA records (cascades to lora_dataset_images)
+      const { error: deleteError } = await (supabase as any)
+        .from("character_loras")
+        .delete()
+        .eq("character_id", storyChar.character_id);
+
+      if (deleteError) {
+        console.error(`[LoRA Train] Failed to delete old LoRAs:`, deleteError.message);
+      } else {
+        console.log(`[LoRA Train] Deleted ${existingLoras.length} old LoRA(s) for ${storyChar.characters.name}`);
+      }
+
+      // Clean up storage files (non-blocking)
+      if (storagePaths.length > 0) {
+        const BATCH = 100;
+        for (let i = 0; i < storagePaths.length; i += BATCH) {
+          const batch = storagePaths.slice(i, i + BATCH);
+          supabase.storage.from("lora-training-datasets").remove(batch).catch(() => {});
+        }
+        console.log(`[LoRA Train] Queued deletion of ${storagePaths.length} storage file(s)`);
+      }
     }
 
     // 5. Check series image engine

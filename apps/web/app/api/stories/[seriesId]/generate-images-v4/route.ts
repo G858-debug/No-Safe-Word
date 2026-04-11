@@ -160,6 +160,7 @@ export async function POST(
               attemptNumber: 1,
               compositionType: result.profile.compositionType,
               contentMode: result.profile.contentMode,
+              profile: result.profile,
             },
             mode: result.mode,
           })

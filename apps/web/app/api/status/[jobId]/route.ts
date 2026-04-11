@@ -11,6 +11,13 @@ import {
   requestStructuralDiagnosis,
   MAX_EVAL_RETRY_ATTEMPTS,
 } from "@no-safe-word/image-gen";
+import {
+  recommendResourceLoras,
+  getRegisteredResourceLoras,
+  getResourceLoraById,
+  registerResourceLora,
+  searchAndDownloadLora,
+} from "@no-safe-word/image-gen";
 import type { FailureCategory, EvaluationResult, SceneProfile } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
 import type { Json } from "@no-safe-word/shared";
@@ -226,6 +233,7 @@ export async function GET(
           lighting_score: evalResult.scores.lighting || null,
           composition_score: evalResult.scores.composition || null,
           character_distinction_score: evalResult.scores.characterDistinction || null,
+          intent_score: evalResult.scores.intentMatch || null,
           overall_score: evalResult.overallScore,
           passed: evalResult.passed,
           failure_categories: evalResult.failureCategories,
@@ -252,15 +260,18 @@ export async function GET(
             (e: any) => (e.failure_categories || []) as FailureCategory[],
           );
 
-          // Build the current profile from settings (best effort reconstruction)
+          // Reconstruct the profile from stored generation settings.
+          // The profile is stored in images.settings.profile by generate-scene-image-v4.ts.
+          // Falls back to new lower defaults if profile is missing (old images).
+          const storedProfile = (settings as any).profile as Record<string, number> | undefined;
           const currentProfile: SceneProfile = {
             compositionType,
             contentMode,
-            charLoraStrengthModel: 0.75,
-            charLoraStrengthClip: 0.5,
-            cfg: (settings.cfg as number) || 6.5,
-            steps: (settings.steps as number) || 30,
-            regionalOverlap: 64,
+            charLoraStrengthModel: storedProfile?.charLoraStrengthModel ?? 0.65,
+            charLoraStrengthClip: storedProfile?.charLoraStrengthClip ?? 0.4,
+            cfg: storedProfile?.cfg ?? (settings.cfg as number) ?? 5.0,
+            steps: storedProfile?.steps ?? (settings.steps as number) ?? 30,
+            regionalOverlap: storedProfile?.regionalOverlap ?? 64,
             regionalStrength: 1.0,
             loraOverrides: {},
           };
@@ -271,6 +282,61 @@ export async function GET(
             currentProfile,
             failureHistory,
           );
+
+          // ── Deep LoRA Discovery (Tier 3) ──
+          // On failed evaluations, use Sonnet to analyze the intent gap and recommend
+          // resource LoRAs. Downloads new ones from CivitAI if needed.
+          if (attemptNumber >= 3) {
+            try {
+              const loraRecs = await recommendResourceLoras(
+                {
+                  imageBase64: base64Data,
+                  originalProse: promptResult.prompt,
+                  booruTags: booruTags,
+                  compositionType,
+                  contentMode,
+                  expectedPersonCount,
+                  characterNames,
+                },
+                evalResult,
+                getRegisteredResourceLoras(),
+              );
+
+              if (!correction.resourceLoras) correction.resourceLoras = [];
+
+              for (const rec of loraRecs) {
+                if (rec.existingLoraId) {
+                  const existing = getResourceLoraById(rec.existingLoraId);
+                  if (existing) {
+                    correction.resourceLoras.push({
+                      filename: existing.filename,
+                      storageUrl: existing.storageUrl,
+                      strengthModel: existing.defaultStrengthModel,
+                      strengthClip: existing.defaultStrengthClip,
+                      triggerWord: existing.triggerWord,
+                    });
+                    console.log(`[Evaluator] LoRA discovery: using existing "${existing.id}" — ${rec.reasoning}`);
+                  }
+                } else if (rec.needed && !rec.existingLoraId) {
+                  console.log(`[Evaluator] LoRA discovery: searching CivitAI for "${rec.searchQuery}" — ${rec.reasoning}`);
+                  const found = await searchAndDownloadLora(rec.searchQuery, rec.category);
+                  if (found) {
+                    registerResourceLora(found);
+                    correction.resourceLoras.push({
+                      filename: found.filename,
+                      storageUrl: found.storageUrl,
+                      strengthModel: found.defaultStrengthModel,
+                      strengthClip: found.defaultStrengthClip,
+                      triggerWord: found.triggerWord,
+                    });
+                    console.log(`[Evaluator] LoRA discovery: downloaded and registered "${found.id}"`);
+                  }
+                }
+              }
+            } catch (discoveryErr) {
+              console.error('[Evaluator] LoRA discovery failed (non-fatal):', discoveryErr instanceof Error ? discoveryErr.message : discoveryErr);
+            }
+          }
 
           // Update evaluation record with the correction plan
           await (supabase as any)
@@ -329,7 +395,9 @@ export async function GET(
           );
 
           try {
-            const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+            const host = request.headers.get("host");
+            const proto = request.headers.get("x-forwarded-proto") || "http";
+            const siteUrl = host ? `${proto}://${host}` : (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
             const retryRes = await fetch(`${siteUrl}/api/stories/images/${promptId}/retry`, {
               method: "POST",
               headers: {
@@ -483,6 +551,60 @@ export async function GET(
       });
 
     } else if (status.status === "FAILED") {
+      const errorMsg = status.error || JSON.stringify(status.output || '');
+
+      // ── ControlNet model missing — retry without pose conditioning ──
+      // The RunPod worker may lack OpenPoseXL2.safetensors. Instead of failing
+      // the entire image, retry the same prompt without ControlNet.
+      const isControlNetMissing = errorMsg.includes("ControlNetLoader") &&
+        errorMsg.includes("value_not_in_list");
+
+      if (isControlNetMissing && imageId) {
+        const { data: failedPrompt } = await supabase
+          .from("story_image_prompts")
+          .select("id")
+          .eq("image_id", imageId)
+          .single();
+
+        if (failedPrompt) {
+          console.warn(
+            `[Status][${jobId}] ControlNet model missing on RunPod worker — ` +
+            `retrying prompt ${failedPrompt.id} without pose conditioning`,
+          );
+
+          try {
+            const host = request.headers.get("host");
+            const proto = request.headers.get("x-forwarded-proto") || "http";
+            const siteUrl = host ? `${proto}://${host}` : (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
+            const retryRes = await fetch(`${siteUrl}/api/stories/images/${failedPrompt.id}/retry`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Cookie": request.headers.get("cookie") || "",
+              },
+              body: JSON.stringify({
+                newSeed: Math.floor(Math.random() * 2_147_483_647) + 1,
+                jobId,
+                attemptNumber: 1,
+                disableControlNet: true,
+              }),
+            });
+
+            if (retryRes.ok) {
+              const retryData = await retryRes.json();
+              return NextResponse.json({
+                jobId: retryData.jobId,
+                completed: false,
+                status: "RETRYING",
+                retryReason: "ControlNet model missing — retrying without pose conditioning",
+              });
+            }
+          } catch (retryErr) {
+            console.error("[Status] ControlNet retry failed:", retryErr);
+          }
+        }
+      }
+
       await supabase
         .from("generation_jobs")
         .update({ status: "failed" })
