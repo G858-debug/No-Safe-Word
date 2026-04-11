@@ -1093,18 +1093,18 @@ function AdvancedControlsPanel({
     !lockSeed;
 
   return (
-    <div className="space-y-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
-      {/* Raw prompt toggle */}
+    <div className="space-y-5 rounded-lg border border-blue-500/20 bg-blue-500/5 p-5">
+      {/* Header row: raw prompt toggle + reset */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Switch
             id="raw-prompt"
             checked={useRawPrompt}
             onCheckedChange={(checked) => onChange({ useRawPrompt: checked })}
-            className="h-4 w-7 data-[state=checked]:bg-blue-500"
+            className="h-5 w-9 data-[state=checked]:bg-blue-500"
             disabled={disabled}
           />
-          <Label htmlFor="raw-prompt" className="text-[11px] text-muted-foreground cursor-pointer">
+          <Label htmlFor="raw-prompt" className="text-sm text-muted-foreground cursor-pointer">
             Raw prompt (skip AI conversion)
           </Label>
         </div>
@@ -1112,7 +1112,7 @@ function AdvancedControlsPanel({
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+            className="h-7 px-3 text-xs text-muted-foreground hover:text-foreground"
             onClick={() =>
               onChange({
                 charLoraStrengthModel: DEFAULT_LORA_MODEL,
@@ -1132,66 +1132,66 @@ function AdvancedControlsPanel({
 
       {/* Negative prompt */}
       <div>
-        <p className="mb-1 text-[10px] font-medium text-muted-foreground">Negative Prompt</p>
+        <p className="mb-1.5 text-xs font-medium text-muted-foreground">Negative Prompt</p>
         <Textarea
           value={negativePrompt}
           onChange={(e) => onChange({ negativePrompt: e.target.value })}
           placeholder={defaultNeg}
-          rows={2}
-          className="text-[11px] font-mono leading-relaxed bg-muted/30 resize-y"
+          rows={3}
+          className="text-sm font-mono leading-relaxed bg-muted/30 resize-y"
           disabled={disabled}
         />
       </div>
 
-      {/* Generation parameter sliders */}
+      {/* Generation parameter sliders — 4 across on wide, 2 on narrow */}
       <div>
-        <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">Generation Parameters</p>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Generation Parameters</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
           <div>
-            <label className="text-[10px] text-muted-foreground block mb-0.5">
-              LoRA Model {charLoraStrengthModel.toFixed(2)}
+            <label className="text-xs text-muted-foreground block mb-1">
+              LoRA Model <span className="text-blue-400 font-medium">{charLoraStrengthModel.toFixed(2)}</span>
             </label>
             <input
               type="range" min="0" max="1" step="0.05"
               value={charLoraStrengthModel}
               onChange={(e) => onChange({ charLoraStrengthModel: parseFloat(e.target.value) })}
-              className="w-full h-1.5 accent-blue-500"
+              className="w-full h-2 accent-blue-500"
               disabled={disabled}
             />
           </div>
           <div>
-            <label className="text-[10px] text-muted-foreground block mb-0.5">
-              LoRA CLIP {charLoraStrengthClip.toFixed(2)}
+            <label className="text-xs text-muted-foreground block mb-1">
+              LoRA CLIP <span className="text-blue-400 font-medium">{charLoraStrengthClip.toFixed(2)}</span>
             </label>
             <input
               type="range" min="0" max="1" step="0.05"
               value={charLoraStrengthClip}
               onChange={(e) => onChange({ charLoraStrengthClip: parseFloat(e.target.value) })}
-              className="w-full h-1.5 accent-blue-500"
+              className="w-full h-2 accent-blue-500"
               disabled={disabled}
             />
           </div>
           <div>
-            <label className="text-[10px] text-muted-foreground block mb-0.5">
-              CFG {cfg.toFixed(1)}
+            <label className="text-xs text-muted-foreground block mb-1">
+              CFG <span className="text-blue-400 font-medium">{cfg.toFixed(1)}</span>
             </label>
             <input
               type="range" min="2" max="10" step="0.5"
               value={cfg}
               onChange={(e) => onChange({ cfg: parseFloat(e.target.value) })}
-              className="w-full h-1.5 accent-blue-500"
+              className="w-full h-2 accent-blue-500"
               disabled={disabled}
             />
           </div>
           <div>
-            <label className="text-[10px] text-muted-foreground block mb-0.5">
-              Steps {steps}
+            <label className="text-xs text-muted-foreground block mb-1">
+              Steps <span className="text-blue-400 font-medium">{steps}</span>
             </label>
             <input
               type="range" min="10" max="50" step="5"
               value={steps}
               onChange={(e) => onChange({ steps: parseInt(e.target.value) })}
-              className="w-full h-1.5 accent-blue-500"
+              className="w-full h-2 accent-blue-500"
               disabled={disabled}
             />
           </div>
@@ -1200,12 +1200,12 @@ function AdvancedControlsPanel({
 
       {/* Seed lock */}
       {lastSeed && (
-        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
           <input
             type="checkbox"
             checked={lockSeed}
             onChange={(e) => onChange({ lockSeed: e.target.checked })}
-            className="rounded"
+            className="rounded h-4 w-4"
             disabled={disabled}
           />
           Lock seed ({lastSeed})
@@ -1275,9 +1275,13 @@ function ImageCard({
       ? state.promptText.slice(0, 100) + "..."
       : state.promptText;
 
+  const isExpanded = state.showAdvanced;
+
   return (
     <Card
       className={`overflow-hidden transition-colors ${
+        isExpanded ? "col-span-full" : ""
+      } ${
         isApproved
           ? "border-green-500/30"
           : isGenerated
@@ -1287,218 +1291,221 @@ function ImageCard({
               : ""
       }`}
     >
-      {/* Image area */}
-      <div className="relative aspect-[2/3] bg-muted/30">
-        {isGenerating ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <Loader2 className="mb-2 h-8 w-8 animate-spin text-blue-400" />
-            <p className="text-xs text-blue-400">Generating...</p>
-          </div>
-        ) : hasImage ? (
-          <div
-            className="relative h-full w-full cursor-pointer"
-            onClick={() => onImageClick(state.imageUrl!)}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={state.imageUrl!}
-              alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
-              className="h-full w-full object-contain"
-              style={{ aspectRatio: "2/3" }}
-            />
-            {isApproved && (
-              <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-[10px] font-medium text-white shadow backdrop-blur-sm">
-                <Check className="h-3 w-3" />
-                Approved
+      <div className={isExpanded ? "flex flex-col md:flex-row" : ""}>
+        {/* Image area */}
+        <div className={`relative bg-muted/30 ${isExpanded ? "md:w-72 md:shrink-0" : "aspect-[2/3]"}`}>
+          {isGenerating ? (
+            <div className={`flex flex-col items-center justify-center ${isExpanded ? "h-72 md:h-full" : "absolute inset-0"}`}>
+              <Loader2 className="mb-2 h-8 w-8 animate-spin text-blue-400" />
+              <p className="text-xs text-blue-400">Generating...</p>
+            </div>
+          ) : hasImage ? (
+            <div
+              className="relative h-full w-full cursor-pointer"
+              onClick={() => onImageClick(state.imageUrl!)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={state.imageUrl!}
+                alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
+                className={`w-full object-contain ${isExpanded ? "md:h-full md:object-cover" : "h-full"}`}
+                style={isExpanded ? undefined : { aspectRatio: "2/3" }}
+              />
+              {isApproved && (
+                <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-[10px] font-medium text-white shadow backdrop-blur-sm">
+                  <Check className="h-3 w-3" />
+                  Approved
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className={`flex flex-col items-center justify-center ${isExpanded ? "h-48 md:h-full" : "absolute inset-0"}`}>
+              <div className="mb-2 h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-muted-foreground/50" />
               </div>
+              <p className="text-xs text-muted-foreground">Not generated</p>
+            </div>
+          )}
+        </div>
+
+        {/* Controls area */}
+        <CardContent className={`space-y-2.5 ${isExpanded ? "flex-1 p-5 space-y-4" : "p-3"}`}>
+          {/* Status + meta row */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className={`text-[10px] px-1.5 py-0 ${statusStyle.className}`}
+            >
+              {statusStyle.label}
+            </Badge>
+            {ip.character_name && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30"
+              >
+                {ip.character_name}
+              </Badge>
+            )}
+            {metaLabel && (
+              <span className="text-[10px] text-muted-foreground">
+                {metaLabel}
+              </span>
+            )}
+            {state.diagnosticFlags && Object.values(state.diagnosticFlags).some((v) => !v) && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30"
+              >
+                Diagnostic
+              </Badge>
             )}
           </div>
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="mb-2 h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
-              <Sparkles className="h-5 w-5 text-muted-foreground/50" />
+
+          {/* Error */}
+          {state.error && (
+            <div className="flex items-start gap-1.5 rounded bg-red-500/10 p-2 text-[11px] text-red-400">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+              {state.error}
             </div>
-            <p className="text-xs text-muted-foreground">Not generated</p>
-          </div>
-        )}
-      </div>
-
-      <CardContent className="space-y-2.5 p-3">
-        {/* Status + meta row */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge
-            variant="outline"
-            className={`text-[10px] px-1.5 py-0 ${statusStyle.className}`}
-          >
-            {statusStyle.label}
-          </Badge>
-          {ip.character_name && (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30"
-            >
-              {ip.character_name}
-            </Badge>
           )}
-          {metaLabel && (
-            <span className="text-[10px] text-muted-foreground">
-              {metaLabel}
-            </span>
-          )}
-          {state.diagnosticFlags && Object.values(state.diagnosticFlags).some((v) => !v) && (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30"
-            >
-              Diagnostic
-            </Badge>
-          )}
-        </div>
 
-        {/* Error */}
-        {state.error && (
-          <div className="flex items-start gap-1.5 rounded bg-red-500/10 p-2 text-[11px] text-red-400">
-            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-            {state.error}
-          </div>
-        )}
-
-        {/* Collapsible prompt */}
-        <div>
-          <button
-            onClick={() =>
-              onUpdatePrompt(ip.id, { showPrompt: !state.showPrompt })
-            }
-            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {state.showPrompt ? "Hide prompt" : truncatedPrompt}
-          </button>
-          {state.showPrompt && (
-            <Textarea
-              value={state.promptText}
-              onChange={(e) =>
-                onUpdatePrompt(ip.id, { promptText: e.target.value })
-              }
-              rows={4}
-              className="mt-1.5 text-[11px] leading-relaxed resize-y bg-muted/30"
-              disabled={isGenerating || isApproved}
-            />
-          )}
-        </div>
-
-        {/* Diagnostic toggles */}
-        <div>
-          <button
+          {/* Collapsible prompt */}
+          <div>
+            <button
               onClick={() =>
-                onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
+                onUpdatePrompt(ip.id, { showPrompt: !state.showPrompt })
               }
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-amber-400 transition-colors"
+              className={`text-muted-foreground hover:text-foreground transition-colors ${isExpanded ? "text-sm" : "text-[11px]"}`}
             >
-              <Settings2 className="h-3 w-3" />
-              {state.showDiagnostic ? "Hide diagnostics" : "Diagnostics"}
+              {state.showPrompt ? "Hide prompt" : truncatedPrompt}
             </button>
-            {state.showDiagnostic && (
-              <div className="mt-1.5">
-                <DiagnosticPanel
-                  flags={state.diagnosticFlags}
-                  onChange={(newFlags) =>
-                    onUpdatePrompt(ip.id, { diagnosticFlags: newFlags })
-                  }
+            {state.showPrompt && (
+              <Textarea
+                value={state.promptText}
+                onChange={(e) =>
+                  onUpdatePrompt(ip.id, { promptText: e.target.value })
+                }
+                rows={isExpanded ? 3 : 4}
+                className={`mt-1.5 leading-relaxed resize-y bg-muted/30 ${isExpanded ? "text-sm" : "text-[11px]"}`}
+                disabled={isGenerating || isApproved}
+              />
+            )}
+          </div>
+
+          {/* Diagnostic toggles */}
+          <div>
+            <button
+                onClick={() =>
+                  onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
+                }
+                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-amber-400 transition-colors"
+              >
+                <Settings2 className="h-3 w-3" />
+                {state.showDiagnostic ? "Hide diagnostics" : "Diagnostics"}
+              </button>
+              {state.showDiagnostic && (
+                <div className="mt-1.5">
+                  <DiagnosticPanel
+                    flags={state.diagnosticFlags}
+                    onChange={(newFlags) =>
+                      onUpdatePrompt(ip.id, { diagnosticFlags: newFlags })
+                    }
+                  />
+                </div>
+              )}
+          </div>
+
+          {/* Advanced controls toggle */}
+          <div>
+            <button
+              onClick={() =>
+                onUpdatePrompt(ip.id, { showAdvanced: !state.showAdvanced })
+              }
+              className={`flex items-center gap-1.5 text-muted-foreground hover:text-blue-400 transition-colors ${isExpanded ? "text-sm font-medium" : "text-[11px]"}`}
+            >
+              <SlidersHorizontal className={isExpanded ? "h-4 w-4" : "h-3 w-3"} />
+              {state.showAdvanced ? "Hide advanced" : "Advanced"}
+            </button>
+            {state.showAdvanced && (
+              <div className="mt-2">
+                <AdvancedControlsPanel
+                  negativePrompt={state.negativePrompt}
+                  useRawPrompt={state.useRawPrompt}
+                  lastSeed={state.lastSeed}
+                  lockSeed={state.lockSeed}
+                  charLoraStrengthModel={state.charLoraStrengthModel}
+                  charLoraStrengthClip={state.charLoraStrengthClip}
+                  cfg={state.cfg}
+                  steps={state.steps}
+                  imageType={imageType}
+                  disabled={isGenerating || isApproved}
+                  onChange={(updates) => onUpdatePrompt(ip.id, updates)}
                 />
               </div>
             )}
-        </div>
+          </div>
 
-        {/* Advanced controls */}
-        <div>
-          <button
-            onClick={() =>
-              onUpdatePrompt(ip.id, { showAdvanced: !state.showAdvanced })
-            }
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-blue-400 transition-colors"
-          >
-            <SlidersHorizontal className="h-3 w-3" />
-            {state.showAdvanced ? "Hide advanced" : "Advanced"}
-          </button>
-          {state.showAdvanced && (
-            <div className="mt-1.5">
-              <AdvancedControlsPanel
-                negativePrompt={state.negativePrompt}
-                useRawPrompt={state.useRawPrompt}
-                lastSeed={state.lastSeed}
-                lockSeed={state.lockSeed}
-                charLoraStrengthModel={state.charLoraStrengthModel}
-                charLoraStrengthClip={state.charLoraStrengthClip}
-                cfg={state.cfg}
-                steps={state.steps}
-                imageType={imageType}
-                disabled={isGenerating || isApproved}
-                onChange={(updates) => onUpdatePrompt(ip.id, updates)}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-1.5">
-          {(isPending || isFailed) && (
-            <Button
-              size="sm"
-              className="h-7 text-xs"
-              onClick={onGenerate}
-              disabled={batchGenerating}
+          {/* Actions */}
+          <div className="flex items-center gap-2 pt-1">
+            {(isPending || isFailed) && (
+              <Button
+                size={isExpanded ? "default" : "sm"}
+                className={isExpanded ? "text-sm" : "h-7 text-xs"}
+                onClick={onGenerate}
+                disabled={batchGenerating}
+              >
+                <Sparkles className="mr-1.5 h-4 w-4" />
+                {isFailed ? "Retry" : "Generate"}
+              </Button>
+            )}
+            {(isGenerated) && (
+              <Button
+                variant="outline"
+                size={isExpanded ? "default" : "sm"}
+                className={isExpanded ? "text-sm" : "h-7 text-xs"}
+                onClick={() => onRegenerate(ip.id)}
+              >
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+                Regenerate
+              </Button>
+            )}
+            {isGenerated && (
+              <Button
+                size={isExpanded ? "default" : "sm"}
+                className={`bg-green-600 hover:bg-green-700 ${isExpanded ? "text-sm" : "h-7 text-xs"}`}
+                onClick={() => onApprove(ip.id)}
+              >
+                <Check className="mr-1.5 h-4 w-4" />
+                Approve
+              </Button>
+            )}
+            {isApproved && (
+              <Button
+                variant="outline"
+                size={isExpanded ? "default" : "sm"}
+                className={`text-green-400 border-green-500/30 ${isExpanded ? "text-sm" : "h-7 text-xs"}`}
+                disabled
+              >
+                <Check className="mr-1.5 h-4 w-4" />
+                Approved
+              </Button>
+            )}
+            <Link
+              href={`/dashboard/stories/${seriesId}/debug/${ip.id}`}
+              className="ml-auto"
             >
-              <Sparkles className="mr-1 h-3 w-3" />
-              {isFailed ? "Retry" : "Generate"}
-            </Button>
-          )}
-          {(isGenerated) && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => onRegenerate(ip.id)}
-            >
-              <RefreshCw className="mr-1 h-3 w-3" />
-              Regenerate
-            </Button>
-          )}
-          {isGenerated && (
-            <Button
-              size="sm"
-              className="h-7 text-xs bg-green-600 hover:bg-green-700"
-              onClick={() => onApprove(ip.id)}
-            >
-              <Check className="mr-1 h-3 w-3" />
-              Approve
-            </Button>
-          )}
-          {isApproved && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs text-green-400 border-green-500/30"
-              disabled
-            >
-              <Check className="mr-1 h-3 w-3" />
-              Approved
-            </Button>
-          )}
-          <Link
-            href={`/dashboard/stories/${seriesId}/debug/${ip.id}`}
-            className="ml-auto"
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 text-zinc-600 hover:text-zinc-400"
-              title="Debug"
-            >
-              <Bug className="h-3.5 w-3.5" />
-            </Button>
-          </Link>
-        </div>
-      </CardContent>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-zinc-600 hover:text-zinc-400"
+                title="Debug"
+              >
+                <Bug className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          </div>
+        </CardContent>
+      </div>
     </Card>
   );
 }
