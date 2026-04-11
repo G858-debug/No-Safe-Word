@@ -15,6 +15,17 @@ const DEFAULT_STEPS = 35;
 const DEFAULT_SAMPLER = 'dpmpp_2m_sde';
 const DEFAULT_SCHEDULER = 'karras';
 
+export interface ControlNetConfig {
+  /** Image name for the pose skeleton (must match an entry in the job's images array) */
+  poseImageName: string;
+  /** Conditioning strength (0.0–1.0, default 0.5) */
+  strength?: number;
+  /** Start applying ControlNet at this % of sampling steps (default 0.0) */
+  startPercent?: number;
+  /** Stop applying ControlNet at this % of sampling steps (default 1.0) */
+  endPercent?: number;
+}
+
 export interface WorkflowConfig {
   positivePrompt: string;
   negativePrompt: string;
@@ -44,6 +55,8 @@ export interface WorkflowConfig {
   };
   /** Regional overlap in pixels for dual-character scenes (default 64) */
   regionalOverlap?: number;
+  /** ControlNet OpenPose conditioning for two-character pose guidance */
+  controlNet?: ControlNetConfig;
 }
 
 /**
@@ -185,6 +198,46 @@ export function buildWorkflow(config: WorkflowConfig): Record<string, any> {
     positiveRef = ['101', 0];
   }
 
+  // ── ControlNet OpenPose conditioning (nodes 300–302) ──
+  // Inserts between the text conditioning chain and the KSampler.
+  // ControlNetApplyAdvanced modifies both positive and negative conditioning
+  // so the pose skeleton guides spatial composition during sampling.
+  let negativeRef: [string, number] = ['102', 0];
+
+  if (config.controlNet) {
+    const cn = config.controlNet;
+
+    // Node 300: LoadImage — pose skeleton PNG (referenced by name from job images)
+    workflow['300'] = {
+      class_type: 'LoadImage',
+      inputs: { image: cn.poseImageName },
+    };
+
+    // Node 301: ControlNetLoader — OpenPose SDXL model
+    workflow['301'] = {
+      class_type: 'ControlNetLoader',
+      inputs: { control_net_name: 'OpenPoseXL2.safetensors' },
+    };
+
+    // Node 302: ControlNetApplyAdvanced — merge pose conditioning into the prompt chain
+    workflow['302'] = {
+      class_type: 'ControlNetApplyAdvanced',
+      inputs: {
+        positive: positiveRef,
+        negative: negativeRef,
+        control_net: ['301', 0],
+        image: ['300', 0],
+        strength: cn.strength ?? 0.5,
+        start_percent: cn.startPercent ?? 0.0,
+        end_percent: cn.endPercent ?? 1.0,
+      },
+    };
+
+    // Redirect KSampler inputs through the ControlNet-modified conditioning
+    positiveRef = ['302', 0];
+    negativeRef = ['302', 1];
+  }
+
   // Node 103: EmptyLatentImage
   workflow['103'] = {
     class_type: 'EmptyLatentImage',
@@ -201,7 +254,7 @@ export function buildWorkflow(config: WorkflowConfig): Record<string, any> {
     inputs: {
       model: modelRef,
       positive: positiveRef,
-      negative: ['102', 0],
+      negative: negativeRef,
       latent_image: ['103', 0],
       seed: config.seed,
       steps: config.steps ?? DEFAULT_STEPS,

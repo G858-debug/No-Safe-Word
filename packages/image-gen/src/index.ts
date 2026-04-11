@@ -53,8 +53,8 @@ export { getDefaultProfile, deriveCompositionType, deriveContentMode, applyProfi
 export type { SceneProfile, CompositionType } from './scene-profiles';
 
 // Scene evaluator — tiered image evaluation pipeline
-export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull, detectCorruptedImage } from './scene-evaluator';
-export type { EvaluationResult, EvaluationContext, EvaluationScores, FailureCategory, PreflightResult } from './scene-evaluator';
+export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull, detectCorruptedImage, recommendResourceLoras } from './scene-evaluator';
+export type { EvaluationResult, EvaluationContext, EvaluationScores, FailureCategory, PreflightResult, LoraRecommendation } from './scene-evaluator';
 
 // Retry strategy — correction logic and escalation
 export { computeCorrectionPlan, canRetry, generateRetrySeed as generateRetrySeedV2, selectBestAttempt, MAX_EVAL_RETRY_ATTEMPTS } from './retry-strategy';
@@ -67,9 +67,16 @@ export { rewriteTagsForFailure } from './tag-rewriter';
 export { ARCHITECTURAL_LESSONS, checkArchitecturalLessons, requestStructuralDiagnosis } from './architectural-lessons';
 export type { ArchitecturalLesson } from './architectural-lessons';
 
+// Resource LoRA registry — pose/style/composition LoRA catalog
+export { selectResourceLoras, getResourceLoraById, getRegisteredResourceLoras, registerResourceLora } from './resource-lora-registry';
+export type { ResourceLora } from './resource-lora-registry';
+
+// Resource LoRA discovery — CivitAI search/download pipeline
+export { searchAndDownloadLora } from './resource-lora-discovery';
+
 // Juggernaut Ragnarok Workflow Builder
 export { buildWorkflow, buildInpaintWorkflow, buildImg2ImgWorkflow, buildUpscaleWorkflow } from './workflow-builder';
-export type { WorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig } from './workflow-builder';
+export type { WorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig, ControlNetConfig } from './workflow-builder';
 
 // Dataset generation for LoRA training
 export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset, buildTopUpPrompts, generateTopUpImages } from './dataset-generator';

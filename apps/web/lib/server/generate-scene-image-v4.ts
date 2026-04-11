@@ -27,8 +27,10 @@ import {
   deriveCompositionType,
   deriveContentMode,
   estimateClipTokens,
+  classifyScene,
 } from "@no-safe-word/image-gen";
-// selectResources removed — Juggernaut Ragnarok uses no style LoRAs
+import { selectResourceLoras } from "@no-safe-word/image-gen";
+import { classifyPose, renderPose } from "@no-safe-word/image-gen/controlnet";
 import type { CharacterLoraDownload, SceneProfile } from "@no-safe-word/image-gen";
 
 /** Fetch character data from the characters table for the given IDs */
@@ -261,6 +263,23 @@ export async function buildV4SceneGenerationPayload(
   const hasFemale =
     primaryCharData?.gender === "female" || secondaryCharData?.gender === "female";
 
+  // ── LoRA Requirement — hard block ──
+  // Characters without deployed LoRAs produce inconsistent identity and waste
+  // CLIP tokens on inline descriptions. Block generation until LoRAs are trained.
+  const missingLoraCharacters: string[] = [];
+  if (imgPrompt.character_id && !hasLoraForPrimaryChar) {
+    missingLoraCharacters.push(primaryCharData?.name || imgPrompt.character_id);
+  }
+  if (imgPrompt.secondary_character_id && !hasLoraForSecondaryChar) {
+    missingLoraCharacters.push(secondaryCharData?.name || imgPrompt.secondary_character_id);
+  }
+  if (missingLoraCharacters.length > 0) {
+    throw new Error(
+      `Cannot generate scene image: characters [${missingLoraCharacters.join(', ')}] ` +
+      `have no deployed LoRA. Train and deploy LoRAs before generating scene images.`,
+    );
+  }
+
   // ── Scene profile ──
   const primaryGender = primaryCharData?.gender === "male" ? "male" as const : "female" as const;
   const secondaryGenderVal = secondaryCharData
@@ -274,6 +293,45 @@ export async function buildV4SceneGenerationPayload(
     : baseProfile;
 
   console.log(`[V4][${promptId}] Profile: ${profile.compositionType}/${profile.contentMode} (loraModel=${profile.charLoraStrengthModel}, loraClip=${profile.charLoraStrengthClip}, cfg=${profile.cfg}, steps=${profile.steps})`);
+
+  // ── Interaction detection for dual-character scenes ──
+  // Classify the scene to detect interaction type. For intimate/romantic scenes,
+  // unified prompting (no regional conditioning) produces better physical interactions.
+  const classification = classifyScene(
+    imgPrompt.prompt,
+    imgPrompt.image_type as any,
+    isDualCharacter ? 2 : 1,
+  );
+  const isInteractionScene = isDualCharacter && (
+    classification.interactionType === 'intimate' ||
+    classification.interactionType === 'romantic' ||
+    classification.hasIntimateContent
+  );
+  if (isInteractionScene) {
+    console.log(`[V4][${promptId}] INTERACTION SCENE detected (type: ${classification.interactionType}) — will use unified prompt`);
+  }
+
+  // ── Resource LoRA injection ──
+  // Auto-select pose/style LoRAs from the resource library based on prompt keywords.
+  const maxResourceSlots = 8 - loraStack.length;
+  if (maxResourceSlots > 0) {
+    const resourceLoras = selectResourceLoras(imgPrompt.prompt, contentMode, maxResourceSlots, isDualCharacter);
+    for (const rl of resourceLoras) {
+      loraStack.push({
+        filename: rl.filename,
+        strengthModel: rl.defaultStrengthModel,
+        strengthClip: rl.defaultStrengthClip,
+      });
+      characterLoraDownloads.push({
+        filename: rl.filename,
+        url: rl.storageUrl,
+      });
+      if (rl.triggerWord) {
+        triggerWords.push(rl.triggerWord);
+      }
+      console.log(`[V4][${promptId}] Resource LoRA: ${rl.filename} (${rl.category}, trigger: ${rl.triggerWord || 'none'})`);
+    }
+  }
 
   // Apply profile-driven LoRA strengths to character LoRAs already in the stack
   // Model strength controls visual identity; CLIP strength controls text encoder influence.
@@ -330,9 +388,19 @@ export async function buildV4SceneGenerationPayload(
   const charTagTokenEstimate = estimateClipTokens(characterTags) + (secondaryCharacterTags ? estimateClipTokens(secondaryCharacterTags) : 0);
   const sceneTokenBudget = Math.max(20, 75 - prefixTokenEstimate - triggerTokenEstimate - charTagTokenEstimate - 2);
 
-  // Convert prose scene prompt to booru tags (or use pre-rewritten tags from retry)
-  const sceneTags = overrideTags || await convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw, tokenBudget: sceneTokenBudget });
+  // Run prose-to-tags conversion and pose classification in parallel.
+  // Pose classification determines whether ControlNet OpenPose conditioning
+  // should guide the spatial composition of the generated image.
+  const [sceneTags, selectedPose] = await Promise.all([
+    overrideTags
+      ? Promise.resolve(overrideTags)
+      : convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw, tokenBudget: sceneTokenBudget }),
+    classifyPose(imgPrompt.prompt, classification),
+  ]);
   console.log(`[V4][${promptId}] Scene tags (budget=${sceneTokenBudget}): ${sceneTags}`);
+  if (selectedPose) {
+    console.log(`[V4][${promptId}] ControlNet pose: ${selectedPose.id} (${selectedPose.name})`);
+  }
 
   // Style LoRA stack removed — Juggernaut Ragnarok handles photorealism natively.
   // Character LoRAs (already in loraStack) are the only LoRAs injected at inference time.
@@ -349,11 +417,10 @@ export async function buildV4SceneGenerationPayload(
   let positivePrompt: string;
   let dualCharacterPrompts: { char1Prompt: string; char2Prompt: string } | undefined;
 
-  if (isDualCharacter && secondaryCharacterTags) {
-    // Regional conditioning for ALL dual-character scenes (SFW and NSFW).
+  if (isDualCharacter && secondaryCharacterTags && !isInteractionScene) {
+    // Regional conditioning for NON-INTERACTION dual-character scenes.
     // Each character gets area-constrained conditioning (left/right regions).
-    // NSFW scenes use a much larger overlap (200px vs 64px) so characters
-    // can physically interact while still maintaining spatial identity guidance.
+    // Only used when characters occupy separate space (side-by-side, observing, etc.)
     const sharedParts = [qualityPrefix, sceneTags].filter(Boolean);
     positivePrompt = sharedParts.join(', ');
 
@@ -371,6 +438,21 @@ export async function buildV4SceneGenerationPayload(
     console.log(`[V4][${promptId}] Shared: ${positivePrompt}`);
     console.log(`[V4][${promptId}] Char1 (left): ${dualCharacterPrompts.char1Prompt}`);
     console.log(`[V4][${promptId}] Char2 (right): ${dualCharacterPrompts.char2Prompt}`);
+  } else if (isDualCharacter && secondaryCharacterTags && isInteractionScene) {
+    // UNIFIED prompt for interaction scenes — characters must physically interact.
+    // Regional conditioning separates characters spatially, which prevents the model
+    // from generating physical contact (kissing, embracing, sex positions).
+    // Both character LoRAs still load (identity via LoRA weights), but the prompt
+    // is unified so the model understands the characters should interact.
+    positivePrompt = buildPositivePrompt({
+      qualityPrefix,
+      characterTags,
+      secondaryCharacterTags,
+      sceneTags,
+      triggerWords,
+      mode,
+    });
+    console.log(`[V4][${promptId}] INTERACTION SCENE — unified prompt (no regional conditioning)`);
   } else {
     // Single character: all in one prompt
     positivePrompt = buildPositivePrompt({
@@ -381,6 +463,16 @@ export async function buildV4SceneGenerationPayload(
       triggerWords,
       mode,
     });
+  }
+
+  // ── Render ControlNet pose skeleton if a pose was selected ──
+  const poseImages: Array<{ name: string; image: string }> = [];
+  let controlNetConfig: { poseImageName: string; strength?: number } | undefined;
+  if (selectedPose) {
+    const { buffer } = await renderPose(selectedPose, width, height);
+    const poseImageName = `pose_${selectedPose.id}.png`;
+    poseImages.push({ name: poseImageName, image: buffer.toString('base64') });
+    controlNetConfig = { poseImageName, strength: 0.5 };
   }
 
   const workflow = buildWorkflow({
@@ -395,6 +487,7 @@ export async function buildV4SceneGenerationPayload(
     loras: loraStack.length > 0 ? loraStack : undefined,
     dualCharacterPrompts,
     regionalOverlap: profile.regionalOverlap,
+    controlNet: controlNetConfig,
   });
 
   // ── Assembled prompt for storage (includes all parts) ──
@@ -420,6 +513,7 @@ export async function buildV4SceneGenerationPayload(
       dualCharacterRegional: !!dualCharacterPrompts,
       loraCount: loraStack.length,
       characterLoraCount: characterLoraDownloads.length,
+      controlNetPose: selectedPose?.id ?? null,
       promptLength: assembledPrompt.length,
       dimensions: `${width}x${height}`,
       profile: `${profile.compositionType}/${profile.contentMode}`,
@@ -428,7 +522,7 @@ export async function buildV4SceneGenerationPayload(
 
   return {
     workflow,
-    images: [], // No reference images needed — identity from LoRAs
+    images: poseImages, // Pose skeleton PNGs for ControlNet (empty if no pose)
     characterLoraDownloads,
     assembledPrompt,
     negativePrompt,
