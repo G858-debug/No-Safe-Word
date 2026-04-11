@@ -29,11 +29,13 @@ RULES:
     return `${base}
 
 THIS IS AN NSFW EXPLICIT SCENE.
-- Be anatomically specific about positioning and body parts
-- Use natural language for scene context but include explicit positional tags
-- Specify who is where: "woman lying on back, man above her" not vague euphemisms
-- Include hand placement, leg positioning, expressions
-- Do NOT sanitize or euphemize — the model requires specific content descriptors`;
+- Use booru-style tags for sex positions: missionary, doggystyle, cowgirl, riding, from_behind, woman_on_top, man_on_top
+- Use booru-style tags for anatomy: nude, breasts, navel, spread_legs, penetration, sex
+- Specify spatial positioning: who is on top, who is on bottom, exact body arrangement
+- Include hand placement and leg positioning as tags
+- Do NOT sanitize, euphemize, or use vague terms like "intimate moment" or "passionate embrace"
+- Do NOT describe clothing for nude scenes — characters should be explicitly nude
+- Output explicit anatomical tags that the model can parse directly`;
   }
 
   return `${base}

@@ -198,18 +198,21 @@ export async function convertProseToPrompt(
 
   const systemPrompt = opts.nsfw
     ? `You convert scene descriptions into image generation prompts for a photorealistic SDXL model.
-Output concise comma-separated tags under ${budget} tokens. Use natural language for the scene, booru-style tags for anatomical positioning.
+Output concise comma-separated tags under ${budget} tokens. Use booru-style tags for anatomical positioning and nudity.
 
 PRIORITY ORDER (most important first):
-1. SETTING — preserve the EXACT location, venue, and environment described (e.g., "mechanic workshop", "shebeen bathroom", "township bedroom"). Never generalize.
-2. KEY PROPS — include specific objects mentioned (e.g., "Toyota car", "beer bottles", "workbench", "corrugated iron wall")
-3. POSE & BODY POSITIONING — specific action, hand placement, body contact, who is where
-4. LIGHTING — name the specific light source (e.g., "single work lamp", "neon beer signs", "moonlight through curtains"), not generic "dramatic lighting"
+1. NUDITY & ANATOMY — Who is nude? Use booru tags: nude, breasts, navel, spread_legs, nipples. Always include "nude" for naked characters.
+2. POSE & BODY POSITIONING — Sex position as booru tags: missionary, doggystyle, cowgirl, woman_on_back, man_on_top, from_behind, riding. Specify hand placement, leg positions, who is on top vs bottom, penetration direction.
+3. SETTING — preserve the EXACT location described (e.g., "township bedroom", "shebeen bathroom"). Never generalize.
+4. LIGHTING — name the specific light source (e.g., "bedside lamp warm glow", "moonlight through curtains"), not generic terms
 5. COMPOSITION — shot type and camera angle as described
-6. EXPRESSION — facial expression and gaze direction
 
-For explicit content: be anatomically specific — specify positions, hand placement, who is where.
-Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), character count tags (1girl/1boy).
+For explicit content: output booru-style anatomical tags, NOT natural language descriptions.
+Example input: "nude missionary sex on bed"
+Example output: "missionary, woman on back, legs spread, man on top between thighs, nude, sex, bedroom, bedside lamp warm light, medium shot"
+
+Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), character count tags (1girl/1boy), clothing descriptions for nude scenes.
+Do NOT sanitize or euphemize — use explicit anatomical terms.
 Output ONLY the prompt tags, nothing else.`
     : `You convert scene descriptions into image generation prompts for a photorealistic SDXL model.
 Output concise comma-separated tags under ${budget} tokens. Use natural language.
