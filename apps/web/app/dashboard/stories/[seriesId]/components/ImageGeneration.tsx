@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   Bug,
   Settings2,
+  SlidersHorizontal,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -91,6 +92,17 @@ interface ImageGenerationProps {
   allCharactersApproved: boolean;
 }
 
+// Default negative prompts (mirrors buildNegativePrompt in prompt-builder.ts)
+const DEFAULT_NEGATIVE_BASE = 'bad anatomy, bad hands, extra limbs, extra fingers, mutated hands, watermark, blurry, text, cartoon, illustration, painting, drawing, low quality, worst quality, deformed, disfigured';
+const DEFAULT_NEGATIVE_SFW = `nudity, naked, nsfw, topless, nude, exposed breasts, nipples, ${DEFAULT_NEGATIVE_BASE}`;
+const DEFAULT_NEGATIVE_NSFW = DEFAULT_NEGATIVE_BASE;
+
+// Default profile values (solo defaults from scene-profiles.ts)
+const DEFAULT_LORA_MODEL = 0.65;
+const DEFAULT_LORA_CLIP = 0.4;
+const DEFAULT_CFG = 5.0;
+const DEFAULT_STEPS = 30;
+
 interface PromptState {
   status: string;
   imageUrl: string | null;
@@ -99,6 +111,16 @@ interface PromptState {
   error: string | null;
   diagnosticFlags: DiagnosticFlags;
   showDiagnostic: boolean;
+  // Advanced controls
+  showAdvanced: boolean;
+  negativePrompt: string;
+  useRawPrompt: boolean;
+  lastSeed: number | null;
+  lockSeed: boolean;
+  charLoraStrengthModel: number;
+  charLoraStrengthClip: number;
+  cfg: number;
+  steps: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +223,15 @@ export default function ImageGeneration({
           error: null,
           diagnosticFlags: { ...DEFAULT_DIAGNOSTIC_FLAGS },
           showDiagnostic: false,
+          showAdvanced: false,
+          negativePrompt: "",
+          useRawPrompt: false,
+          lastSeed: null,
+          lockSeed: false,
+          charLoraStrengthModel: DEFAULT_LORA_MODEL,
+          charLoraStrengthClip: DEFAULT_LORA_CLIP,
+          cfg: DEFAULT_CFG,
+          steps: DEFAULT_STEPS,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -233,6 +264,8 @@ export default function ImageGeneration({
                   status: data.status,
                   imageUrl: data.storedUrl || data.blobUrl || prev[promptId]?.imageUrl || null,
                   error: null,
+                  lastSeed: data.settings?.seed ?? prev[promptId]?.lastSeed ?? null,
+                  negativePrompt: data.negativePrompt || prev[promptId]?.negativePrompt || "",
                 },
               }));
             } else if (data.status === "failed") {
@@ -336,6 +369,8 @@ export default function ImageGeneration({
                 status: "generated",
                 imageUrl: statusData.storedUrl || statusData.blobUrl || data.imageUrl || null,
                 error: null,
+                lastSeed: statusData.settings?.seed ?? null,
+                negativePrompt: statusData.negativePrompt || "",
               });
             } else {
               updatePrompt(promptId, {
@@ -432,6 +467,41 @@ export default function ImageGeneration({
     [seriesId, updatePrompt]
   );
 
+  /** Build the request body for regeneration, including advanced overrides */
+  const buildRegenerateBody = useCallback((state: PromptState) => {
+    const reqBody: Record<string, unknown> = {};
+
+    // Diagnostic flags
+    const diagFlags = state.diagnosticFlags;
+    const hasCustomFlags = Object.entries(diagFlags).some(
+      ([k, v]) => v !== DEFAULT_DIAGNOSTIC_FLAGS[k as keyof DiagnosticFlags]
+    );
+    if (hasCustomFlags) reqBody.diagnosticFlags = diagFlags;
+
+    // Seed lock
+    if (state.lockSeed && state.lastSeed) reqBody.seed = state.lastSeed;
+
+    // Raw prompt mode — send edited prompt text directly as booru tags
+    if (state.useRawPrompt && state.promptText) {
+      reqBody.overrideTags = state.promptText;
+    }
+
+    // Negative prompt override (only if user entered something)
+    if (state.negativePrompt) {
+      reqBody.negativePromptOverride = state.negativePrompt;
+    }
+
+    // Profile overrides (only include values that differ from defaults)
+    const profileOverrides: Record<string, number> = {};
+    if (state.charLoraStrengthModel !== DEFAULT_LORA_MODEL) profileOverrides.charLoraStrengthModel = state.charLoraStrengthModel;
+    if (state.charLoraStrengthClip !== DEFAULT_LORA_CLIP) profileOverrides.charLoraStrengthClip = state.charLoraStrengthClip;
+    if (state.cfg !== DEFAULT_CFG) profileOverrides.cfg = state.cfg;
+    if (state.steps !== DEFAULT_STEPS) profileOverrides.steps = state.steps;
+    if (Object.keys(profileOverrides).length > 0) reqBody.profileOverrides = profileOverrides;
+
+    return reqBody;
+  }, []);
+
   const handleRegenerate = useCallback(
     async (promptId: string) => {
       const state = promptStates[promptId];
@@ -453,11 +523,7 @@ export default function ImageGeneration({
         error: null,
       });
 
-      // Include diagnostic flags if any are non-default
-      const diagFlags = state.diagnosticFlags;
-      const hasCustomFlags = Object.entries(diagFlags).some(
-        ([k, v]) => v !== DEFAULT_DIAGNOSTIC_FLAGS[k as keyof DiagnosticFlags]
-      );
+      const reqBody = buildRegenerateBody(state);
 
       try {
         const res = await fetch(
@@ -465,7 +531,7 @@ export default function ImageGeneration({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(hasCustomFlags ? { diagnosticFlags: diagFlags } : {}),
+            body: JSON.stringify(reqBody),
           }
         );
 
@@ -488,7 +554,7 @@ export default function ImageGeneration({
         });
       }
     },
-    [promptStates, updatePrompt]
+    [promptStates, updatePrompt, buildRegenerateBody]
   );
 
   const handleApprove = useCallback(
@@ -814,22 +880,19 @@ export default function ImageGeneration({
                             onRegenerate={handleRegenerate}
                             onApprove={handleApprove}
                             onGenerate={async () => {
+                              const pState = promptStates[ip.id];
                               updatePrompt(ip.id, {
                                 status: "generating",
                                 error: null,
                               });
                               try {
-                                const pState = promptStates[ip.id];
-                                const dFlags = pState?.diagnosticFlags;
-                                const hasCustom = dFlags && Object.entries(dFlags).some(
-                                  ([k, v]) => v !== DEFAULT_DIAGNOSTIC_FLAGS[k as keyof DiagnosticFlags]
-                                );
+                                const reqBody = pState ? buildRegenerateBody(pState) : {};
                                 const res = await fetch(
                                   `/api/stories/images/${ip.id}/regenerate`,
                                   {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify(hasCustom ? { diagnosticFlags: dFlags } : {}),
+                                    body: JSON.stringify(reqBody),
                                   }
                                 );
                                 if (!res.ok) {
@@ -982,6 +1045,172 @@ function DiagnosticPanel({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AdvancedControlsPanel sub-component
+// ---------------------------------------------------------------------------
+
+interface AdvancedControlsProps {
+  negativePrompt: string;
+  useRawPrompt: boolean;
+  lastSeed: number | null;
+  lockSeed: boolean;
+  charLoraStrengthModel: number;
+  charLoraStrengthClip: number;
+  cfg: number;
+  steps: number;
+  imageType: string;
+  disabled: boolean;
+  onChange: (updates: Partial<PromptState>) => void;
+}
+
+function AdvancedControlsPanel({
+  negativePrompt,
+  useRawPrompt,
+  lastSeed,
+  lockSeed,
+  charLoraStrengthModel,
+  charLoraStrengthClip,
+  cfg,
+  steps,
+  imageType,
+  disabled,
+  onChange,
+}: AdvancedControlsProps) {
+  const isSfw = imageType === "facebook_sfw";
+  const defaultNeg = isSfw ? DEFAULT_NEGATIVE_SFW : DEFAULT_NEGATIVE_NSFW;
+
+  const isDefault =
+    charLoraStrengthModel === DEFAULT_LORA_MODEL &&
+    charLoraStrengthClip === DEFAULT_LORA_CLIP &&
+    cfg === DEFAULT_CFG &&
+    steps === DEFAULT_STEPS &&
+    !negativePrompt &&
+    !useRawPrompt &&
+    !lockSeed;
+
+  return (
+    <div className="space-y-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+      {/* Raw prompt toggle */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Switch
+            id="raw-prompt"
+            checked={useRawPrompt}
+            onCheckedChange={(checked) => onChange({ useRawPrompt: checked })}
+            className="h-4 w-7 data-[state=checked]:bg-blue-500"
+            disabled={disabled}
+          />
+          <Label htmlFor="raw-prompt" className="text-[11px] text-muted-foreground cursor-pointer">
+            Raw prompt (skip AI conversion)
+          </Label>
+        </div>
+        {!isDefault && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={() =>
+              onChange({
+                charLoraStrengthModel: DEFAULT_LORA_MODEL,
+                charLoraStrengthClip: DEFAULT_LORA_CLIP,
+                cfg: DEFAULT_CFG,
+                steps: DEFAULT_STEPS,
+                negativePrompt: "",
+                useRawPrompt: false,
+                lockSeed: false,
+              })
+            }
+          >
+            Reset defaults
+          </Button>
+        )}
+      </div>
+
+      {/* Negative prompt */}
+      <div>
+        <p className="mb-1 text-[10px] font-medium text-muted-foreground">Negative Prompt</p>
+        <Textarea
+          value={negativePrompt}
+          onChange={(e) => onChange({ negativePrompt: e.target.value })}
+          placeholder={defaultNeg}
+          rows={2}
+          className="text-[11px] font-mono leading-relaxed bg-muted/30 resize-y"
+          disabled={disabled}
+        />
+      </div>
+
+      {/* Generation parameter sliders */}
+      <div>
+        <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">Generation Parameters</p>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-0.5">
+              LoRA Model {charLoraStrengthModel.toFixed(2)}
+            </label>
+            <input
+              type="range" min="0" max="1" step="0.05"
+              value={charLoraStrengthModel}
+              onChange={(e) => onChange({ charLoraStrengthModel: parseFloat(e.target.value) })}
+              className="w-full h-1.5 accent-blue-500"
+              disabled={disabled}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-0.5">
+              LoRA CLIP {charLoraStrengthClip.toFixed(2)}
+            </label>
+            <input
+              type="range" min="0" max="1" step="0.05"
+              value={charLoraStrengthClip}
+              onChange={(e) => onChange({ charLoraStrengthClip: parseFloat(e.target.value) })}
+              className="w-full h-1.5 accent-blue-500"
+              disabled={disabled}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-0.5">
+              CFG {cfg.toFixed(1)}
+            </label>
+            <input
+              type="range" min="2" max="10" step="0.5"
+              value={cfg}
+              onChange={(e) => onChange({ cfg: parseFloat(e.target.value) })}
+              className="w-full h-1.5 accent-blue-500"
+              disabled={disabled}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-0.5">
+              Steps {steps}
+            </label>
+            <input
+              type="range" min="10" max="50" step="5"
+              value={steps}
+              onChange={(e) => onChange({ steps: parseInt(e.target.value) })}
+              className="w-full h-1.5 accent-blue-500"
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Seed lock */}
+      {lastSeed && (
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={lockSeed}
+            onChange={(e) => onChange({ lockSeed: e.target.checked })}
+            className="rounded"
+            disabled={disabled}
+          />
+          Lock seed ({lastSeed})
+        </label>
+      )}
     </div>
   );
 }
@@ -1178,6 +1407,36 @@ function ImageCard({
                 />
               </div>
             )}
+        </div>
+
+        {/* Advanced controls */}
+        <div>
+          <button
+            onClick={() =>
+              onUpdatePrompt(ip.id, { showAdvanced: !state.showAdvanced })
+            }
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-blue-400 transition-colors"
+          >
+            <SlidersHorizontal className="h-3 w-3" />
+            {state.showAdvanced ? "Hide advanced" : "Advanced"}
+          </button>
+          {state.showAdvanced && (
+            <div className="mt-1.5">
+              <AdvancedControlsPanel
+                negativePrompt={state.negativePrompt}
+                useRawPrompt={state.useRawPrompt}
+                lastSeed={state.lastSeed}
+                lockSeed={state.lockSeed}
+                charLoraStrengthModel={state.charLoraStrengthModel}
+                charLoraStrengthClip={state.charLoraStrengthClip}
+                cfg={state.cfg}
+                steps={state.steps}
+                imageType={imageType}
+                disabled={isGenerating || isApproved}
+                onChange={(updates) => onUpdatePrompt(ip.id, updates)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Actions */}

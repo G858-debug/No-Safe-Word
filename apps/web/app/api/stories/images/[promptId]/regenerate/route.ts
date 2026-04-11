@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { submitRunPodJob } from "@no-safe-word/image-gen";
+import type { SceneProfile } from "@no-safe-word/image-gen";
 import { buildV4SceneGenerationPayload, fetchCharacterDataMap } from "@/lib/server/generate-scene-image-v4";
+
+interface RegenerateBody {
+  diagnosticFlags?: Record<string, boolean>;
+  seed?: number;
+  overrideTags?: string;
+  negativePromptOverride?: string;
+  profileOverrides?: Partial<Pick<SceneProfile, 'charLoraStrengthModel' | 'charLoraStrengthClip' | 'cfg' | 'steps'>>;
+}
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
 export async function POST(
@@ -12,6 +21,8 @@ export async function POST(
   const { promptId } = params;
 
   try {
+    const body = (await request.json().catch(() => ({}))) as RegenerateBody;
+
     // 1. Fetch the image prompt
     const { data: imgPrompt, error: fetchError } = await supabase
       .from("story_image_prompts")
@@ -66,7 +77,7 @@ export async function POST(
     }
 
     const seriesId = post.series_id;
-    const seed = Math.floor(Math.random() * 2_147_483_647) + 1;
+    const seed = body.seed ?? Math.floor(Math.random() * 2_147_483_647) + 1;
 
     // 5. Build V4 scene generation payload
     const characterIds = [imgPrompt.character_id, imgPrompt.secondary_character_id].filter(
@@ -79,6 +90,9 @@ export async function POST(
       seriesId,
       characterDataMap,
       seed,
+      profileOverrides: body.profileOverrides,
+      overrideTags: body.overrideTags,
+      negativePromptOverride: body.negativePromptOverride,
     });
 
     console.log(
@@ -103,8 +117,8 @@ export async function POST(
         settings: {
           width: result.width,
           height: result.height,
-          steps: 30,
-          cfg: 6.5,
+          steps: result.profile.steps,
+          cfg: result.profile.cfg,
           seed: result.seed,
           engine: "runpod-v4-juggernaut-ragnarok",
         },

@@ -124,6 +124,8 @@ interface V4GenerateSceneParams {
   /** URL of a reference photo for pose extraction (overrides catalog poses).
    *  DWPose on the GPU extracts the skeleton from this image. */
   referenceImageUrl?: string;
+  /** Override the default negative prompt entirely (used by manual regeneration controls) */
+  negativePromptOverride?: string;
 }
 
 // ── Character LoRA Fetching ──
@@ -419,7 +421,7 @@ export async function buildV4SceneGenerationPayload(
 
   // Assemble prompts
   const qualityPrefix = buildQualityPrefix(mode);
-  const negativePrompt = buildNegativePrompt(mode);
+  const negativePrompt = params.negativePromptOverride ?? buildNegativePrompt(mode);
 
   // ── Dimensions ──
   const { width, height } = getDimensions("portrait", isDualCharacter);

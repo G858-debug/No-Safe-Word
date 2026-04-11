@@ -38,7 +38,7 @@ export async function GET(
     // 2. Fetch the image record
     const { data: image } = await supabase
       .from("images")
-      .select("id, sfw_url, nsfw_url, stored_url, settings")
+      .select("id, sfw_url, nsfw_url, stored_url, settings, negative_prompt")
       .eq("id", imgPrompt.image_id)
       .single();
 
@@ -108,6 +108,8 @@ export async function GET(
         jobId: job.job_id,
         blobUrl,
         storedUrl: finalStoredUrl,
+        settings: image?.settings ?? null,
+        negativePrompt: image?.negative_prompt ?? null,
       });
     }
 
@@ -117,6 +119,8 @@ export async function GET(
       jobId: job?.job_id || null,
       blobUrl,
       storedUrl,
+      settings: image?.settings ?? null,
+      negativePrompt: image?.negative_prompt ?? null,
     });
   } catch (err) {
     console.error("Failed to fetch image prompt status:", err);
