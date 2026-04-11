@@ -457,7 +457,7 @@ import type { ResourceLora } from './resource-lora-registry';
 
 export interface LoraRecommendation {
   needed: boolean;
-  category: 'pose' | 'kissing' | 'multi-person' | 'lighting' | 'style';
+  category: 'pose' | 'kissing' | 'multi-person' | 'lighting' | 'style' | 'anatomy';
   searchQuery: string;
   reasoning: string;
   existingLoraId?: string;
@@ -506,9 +506,10 @@ export async function recommendResourceLoras(
               `- Pose/position LoRAs (for specific body positions, sex positions, interactions)\n` +
               `- Kissing/embrace LoRAs (for physical contact between characters)\n` +
               `- Multi-person composition LoRAs (for correct person count and placement)\n` +
+              `- Anatomy LoRAs (for realistic male genitalia, penis detail, NSFW body parts)\n` +
               `- Style/lighting LoRAs (for specific visual styles)\n\n` +
               `Reply with JSON ONLY — an array of recommendations:\n` +
-              `[{ "needed": true/false, "category": "pose|kissing|multi-person|lighting|style", ` +
+              `[{ "needed": true/false, "category": "pose|kissing|multi-person|lighting|style|anatomy", ` +
               `"searchQuery": "CivitAI search terms for SDXL LoRA", ` +
               `"reasoning": "why this would help", ` +
               `"existingLoraId": "ID from available list or null" }]`,

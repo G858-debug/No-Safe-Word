@@ -29,7 +29,7 @@ import {
   estimateClipTokens,
   classifyScene,
 } from "@no-safe-word/image-gen";
-import { selectResourceLoras } from "@no-safe-word/image-gen";
+import { selectResourceLoras, imageUrlToBase64, resizeImageForPayload } from "@no-safe-word/image-gen";
 import { classifyPose, renderPose } from "@no-safe-word/image-gen/controlnet";
 import type { CharacterLoraDownload, SceneProfile } from "@no-safe-word/image-gen";
 
@@ -121,6 +121,9 @@ interface V4GenerateSceneParams {
   overrideTags?: string;
   /** Force-disable ControlNet (used when RunPod worker lacks the model) */
   disableControlNet?: boolean;
+  /** URL of a reference photo for pose extraction (overrides catalog poses).
+   *  DWPose on the GPU extracts the skeleton from this image. */
+  referenceImageUrl?: string;
 }
 
 // ── Character LoRA Fetching ──
@@ -395,14 +398,18 @@ export async function buildV4SceneGenerationPayload(
   // should guide the spatial composition of the generated image.
   // ControlNet requires OpenPoseXL2.safetensors on the RunPod endpoint — skip if not deployed.
   const controlNetEnabled = process.env.ENABLE_CONTROLNET === "true" && !params.disableControlNet;
+  // Skip catalog pose classification when a reference image is provided — DWPose extracts the skeleton.
+  const useReferenceImage = controlNetEnabled && !!params.referenceImageUrl;
   const [sceneTags, selectedPose] = await Promise.all([
     overrideTags
       ? Promise.resolve(overrideTags)
       : convertProseToPrompt(imgPrompt.prompt, { nsfw: isNsfw, tokenBudget: sceneTokenBudget }),
-    controlNetEnabled ? classifyPose(imgPrompt.prompt, classification) : Promise.resolve(null),
+    controlNetEnabled && !useReferenceImage ? classifyPose(imgPrompt.prompt, classification) : Promise.resolve(null),
   ]);
   console.log(`[V4][${promptId}] Scene tags (budget=${sceneTokenBudget}): ${sceneTags}`);
-  if (selectedPose) {
+  if (useReferenceImage) {
+    console.log(`[V4][${promptId}] ControlNet: reference image → DWPose extraction`);
+  } else if (selectedPose) {
     console.log(`[V4][${promptId}] ControlNet pose: ${selectedPose.id} (${selectedPose.name})`);
   }
 
@@ -469,10 +476,19 @@ export async function buildV4SceneGenerationPayload(
     });
   }
 
-  // ── Render ControlNet pose skeleton if a pose was selected ──
+  // ── ControlNet pose conditioning ──
   const poseImages: Array<{ name: string; image: string }> = [];
-  let controlNetConfig: { poseImageName: string; strength?: number } | undefined;
-  if (selectedPose) {
+  let controlNetConfig: { poseImageName: string; strength?: number; referenceImage?: boolean } | undefined;
+  if (useReferenceImage) {
+    // Reference image path — DWPose extracts skeleton on the GPU
+    const rawBase64 = await imageUrlToBase64(params.referenceImageUrl!);
+    const resized = await resizeImageForPayload(rawBase64, width, height);
+    console.log(`[V4][${promptId}] Reference image resized: ${(resized.length / 1024).toFixed(0)}KB base64`);
+    const refImageName = `ref_pose_${promptId}.png`;
+    poseImages.push({ name: refImageName, image: resized });
+    controlNetConfig = { poseImageName: refImageName, strength: 0.5, referenceImage: true };
+  } else if (selectedPose) {
+    // Catalog-based path — pre-rendered skeleton PNG
     const { buffer } = await renderPose(selectedPose, width, height);
     const poseImageName = `pose_${selectedPose.id}.png`;
     poseImages.push({ name: poseImageName, image: buffer.toString('base64') });

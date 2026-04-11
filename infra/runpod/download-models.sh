@@ -239,6 +239,20 @@ download_to_volume \
     "OpenPoseXL2.safetensors" \
     "${CONTROLNET_DIR}"
 
+# ---- DWPose models (reference image pose extraction) ----
+# Used by DWPreprocessor node from comfyui_controlnet_aux.
+# Extracts OpenPose skeletons from reference photos on the GPU.
+DWPOSE_DIR="/comfyui/custom_nodes/comfyui_controlnet_aux/ckpts/yzd-v/DWPose"
+mkdir -p "${DWPOSE_DIR}" 2>/dev/null
+download_to_volume \
+    "https://huggingface.co/yzd-v/DWPose/resolve/main/yolox_l.onnx" \
+    "yolox_l.onnx" \
+    "${DWPOSE_DIR}"
+download_to_volume \
+    "https://huggingface.co/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx" \
+    "dw-ll_ucoco_384.onnx" \
+    "${DWPOSE_DIR}"
+
 # ---- Body shape slider LoRAs (female characters, portrait + dataset only) ----
 
 # Body Weight Slider (ILXL) — CivitAI 1348692, version 1523317

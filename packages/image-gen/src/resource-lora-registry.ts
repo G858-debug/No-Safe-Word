@@ -15,7 +15,7 @@ export interface ResourceLora {
   id: string;
   filename: string;
   storageUrl: string;
-  category: 'pose' | 'style' | 'composition';
+  category: 'pose' | 'style' | 'composition' | 'anatomy';
   /** Keywords that trigger auto-selection (case-insensitive prompt matching) */
   triggerKeywords: string[];
   defaultStrengthModel: number;
@@ -56,6 +56,21 @@ const RESOURCE_LORAS: ResourceLora[] = [
     defaultStrengthClip: 0.25,
     nsfwOnly: false,
     autoDualCharacter: true,
+  },
+  {
+    id: 'bbc-penis',
+    filename: 'resources/bbc_blow_xl.safetensors',
+    storageUrl: 'https://mqemiteirxwscxtamdtj.supabase.co/storage/v1/object/public/lora-training-datasets/resources/bbc_blow_xl.safetensors',
+    category: 'anatomy',
+    triggerKeywords: [
+      'penis', 'cock', 'erect', 'erection', 'naked male', 'nude male',
+      'undressing', 'his pants', 'bulge', 'hard cock', 'huge cock',
+      'throbbing', 'male nudity', 'exposed',
+    ],
+    defaultStrengthModel: 0.55,
+    defaultStrengthClip: 0.3,
+    triggerWord: 'huge cock',
+    nsfwOnly: true,
   },
 ];
 

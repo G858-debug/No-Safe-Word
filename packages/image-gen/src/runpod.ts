@@ -275,6 +275,28 @@ export async function waitForRunPodResult(
 }
 
 /**
+ * Resize a base64-encoded image to fit within RunPod payload limits.
+ * Preserves aspect ratio, targets the generation resolution.
+ * Returns base64-encoded PNG string (no data URI prefix).
+ */
+export async function resizeImageForPayload(
+  base64Input: string,
+  targetWidth: number,
+  targetHeight: number,
+): Promise<string> {
+  const { default: sharp } = await import('sharp');
+  const inputBuffer = Buffer.from(base64Input, 'base64');
+
+  // Resize to generation resolution (keeps aspect ratio, won't enlarge)
+  const result = await sharp(inputBuffer)
+    .resize(targetWidth, targetHeight, { fit: 'inside', withoutEnlargement: true })
+    .png()
+    .toBuffer();
+
+  return result.toString('base64');
+}
+
+/**
  * Convert a Supabase image URL or buffer to base64 for RunPod input.
  */
 export async function imageUrlToBase64(url: string): Promise<string> {

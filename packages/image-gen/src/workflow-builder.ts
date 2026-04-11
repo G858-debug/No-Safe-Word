@@ -16,7 +16,7 @@ const DEFAULT_SAMPLER = 'dpmpp_2m_sde';
 const DEFAULT_SCHEDULER = 'karras';
 
 export interface ControlNetConfig {
-  /** Image name for the pose skeleton (must match an entry in the job's images array) */
+  /** Image name for the pose skeleton or reference photo (must match an entry in the job's images array) */
   poseImageName: string;
   /** Conditioning strength (0.0–1.0, default 0.5) */
   strength?: number;
@@ -24,6 +24,9 @@ export interface ControlNetConfig {
   startPercent?: number;
   /** Stop applying ControlNet at this % of sampling steps (default 1.0) */
   endPercent?: number;
+  /** When true, the image is a reference photo — DWPreprocessor extracts the skeleton on the GPU.
+   *  When false/undefined, the image is a pre-rendered skeleton PNG (existing behavior). */
+  referenceImage?: boolean;
 }
 
 export interface WorkflowConfig {
@@ -207,11 +210,30 @@ export function buildWorkflow(config: WorkflowConfig): Record<string, any> {
   if (config.controlNet) {
     const cn = config.controlNet;
 
-    // Node 300: LoadImage — pose skeleton PNG (referenced by name from job images)
+    // Node 300: LoadImage — pose skeleton PNG or reference photo
     workflow['300'] = {
       class_type: 'LoadImage',
       inputs: { image: cn.poseImageName },
     };
+
+    // When referenceImage=true, extract OpenPose skeleton from the photo via DWPose
+    let poseImageRef: [string, number] = ['300', 0];
+    if (cn.referenceImage) {
+      // Node 303: DWPreprocessor — extract skeleton from reference photo on GPU
+      workflow['303'] = {
+        class_type: 'DWPreprocessor',
+        inputs: {
+          image: ['300', 0],
+          detect_hand: 'enable',
+          detect_body: 'enable',
+          detect_face: 'enable',
+          resolution: Math.max(config.width, config.height),
+          bbox_detector: 'yolox_l.onnx',
+          pose_estimator: 'dw-ll_ucoco_384.onnx',
+        },
+      };
+      poseImageRef = ['303', 0];
+    }
 
     // Node 301: ControlNetLoader — OpenPose SDXL model
     workflow['301'] = {
@@ -226,7 +248,7 @@ export function buildWorkflow(config: WorkflowConfig): Record<string, any> {
         positive: positiveRef,
         negative: negativeRef,
         control_net: ['301', 0],
-        image: ['300', 0],
+        image: poseImageRef,
         strength: cn.strength ?? 0.5,
         start_percent: cn.startPercent ?? 0.0,
         end_percent: cn.endPercent ?? 1.0,

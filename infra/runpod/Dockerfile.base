@@ -44,6 +44,16 @@ RUN echo "=== buffalo_l verification ===" && \
     echo "=== buffalo_l OK ===" || \
     (echo "=== buffalo_l FAILED — aborting build ===" && exit 1)
 
+# ControlNet Preprocessors (DWPose for reference image pose extraction).
+# comfyui_controlnet_aux provides DWPreprocessor which extracts OpenPose-format
+# skeletons from reference photos on the GPU — more accurate than hand-crafted
+# COCO-18 keypoints. DWPose model files (yolox_l + dw-ll_ucoco_384) are
+# downloaded at runtime by download-models.sh.
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git && \
+    cd comfyui_controlnet_aux && git checkout 95a13e2 && \
+    pip install -r requirements.txt
+
 # ---- V2 Pipeline: Florence-2 + SAM2 custom nodes ----
 # Only installed when BUILD_V2_PIPELINE=true to avoid bloating existing image.
 # Florence-2: Phrase grounding for automated region detection.
