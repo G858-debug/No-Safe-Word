@@ -233,9 +233,9 @@ export async function POST(request: NextRequest) {
     // Compress image if it exceeds Claude's 5MB limit
     const compressed = await compressImageForAnalysis(imageBase64, mimeType);
 
-    // Step 1: Analyze the image
+    // Step 1: Analyze the image with Claude Sonnet
     const analysisResponse = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-6",
       max_tokens: 1500,
       system: ANALYSIS_PROMPT,
       messages: [
@@ -257,20 +257,47 @@ export async function POST(request: NextRequest) {
     });
 
     const textBlock = analysisResponse.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      return NextResponse.json({ error: "No text response from Claude" }, { status: 500 });
+    let analysis: any;
+    if (textBlock && textBlock.type === "text") {
+      try {
+        const cleaned = textBlock.text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
+        analysis = JSON.parse(cleaned);
+        console.log("[ImageGenerator] Analysis succeeded with claude-sonnet-4-6");
+      } catch {
+        console.log("[ImageGenerator] Claude returned non-JSON:", textBlock.text.slice(0, 200));
+      }
     }
 
-    let analysis: any;
-    try {
-      const cleaned = textBlock.text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
-      analysis = JSON.parse(cleaned);
-    } catch {
-      console.error("[ImageGenerator] Claude response was not JSON:", textBlock.text);
-      return NextResponse.json(
-        { error: `Claude returned non-JSON response: ${textBlock.text.slice(0, 200)}` },
-        { status: 500 }
-      );
+    if (!analysis) {
+      // Claude refused to analyze (likely explicit real-world content).
+      // Return defaults so the user can manually describe the image.
+      console.log("[ImageGenerator] All models refused — returning manual mode defaults");
+      const dimensions = ASPECT_DIMENSIONS["2:3"];
+      const fallback = STYLE_CHECKPOINTS.realistic;
+      return NextResponse.json({
+        prompt: "",
+        negativePrompt: "bad anatomy, bad hands, extra limbs, watermark, blurry, text, cartoon, illustration, painting, low quality, worst quality, deformed",
+        artStyle: "realistic",
+        aspectRatio: "2:3",
+        composition: "",
+        suggestedCheckpoint: {
+          name: fallback.name,
+          urn: buildCheckpointUrn(fallback),
+          modelId: fallback.modelId,
+          versionId: fallback.versionId,
+        },
+        suggestedLoras: [],
+        params: {
+          steps: 30,
+          cfgScale: 5,
+          scheduler: "DPMSDEKarras",
+          clipSkip: 1,
+          width: dimensions.width,
+          height: dimensions.height,
+          seed: -1,
+        },
+        manualMode: true,
+      });
     }
 
     const artStyle = analysis.artStyle || "realistic";
@@ -323,7 +350,7 @@ export async function POST(request: NextRequest) {
       // Checkpoint selection
       checkpointCandidates.length > 0
         ? anthropic.messages.create({
-            model: "claude-haiku-4-5-20251001",
+            model: "claude-sonnet-4-6",
             max_tokens: 400,
             system: CHECKPOINT_SELECTION_PROMPT,
             messages: [
@@ -361,7 +388,7 @@ export async function POST(request: NextRequest) {
       // LoRA selection (existing logic)
       loraCandidates.length > 0
         ? anthropic.messages.create({
-            model: "claude-haiku-4-5-20251001",
+            model: "claude-sonnet-4-6",
             max_tokens: 800,
             system: LORA_SELECTION_PROMPT,
             messages: [
