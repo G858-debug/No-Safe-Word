@@ -131,6 +131,74 @@ export type Database = {
         }
         Relationships: []
       }
+      art_director_jobs: {
+        Row: {
+          adapted_recipe: Json | null
+          best_iteration: number | null
+          best_score: number | null
+          created_at: string
+          current_iteration: number
+          error: string | null
+          final_image_id: string | null
+          final_image_url: string | null
+          id: string
+          intent_analysis: Json | null
+          iterations: Json
+          prompt_id: string
+          reference_images: Json | null
+          selected_reference_id: number | null
+          series_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          adapted_recipe?: Json | null
+          best_iteration?: number | null
+          best_score?: number | null
+          created_at?: string
+          current_iteration?: number
+          error?: string | null
+          final_image_id?: string | null
+          final_image_url?: string | null
+          id?: string
+          intent_analysis?: Json | null
+          iterations?: Json
+          prompt_id: string
+          reference_images?: Json | null
+          selected_reference_id?: number | null
+          series_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          adapted_recipe?: Json | null
+          best_iteration?: number | null
+          best_score?: number | null
+          created_at?: string
+          current_iteration?: number
+          error?: string | null
+          final_image_id?: string | null
+          final_image_url?: string | null
+          id?: string
+          intent_analysis?: Json | null
+          iterations?: Json
+          prompt_id?: string
+          reference_images?: Json | null
+          selected_reference_id?: number | null
+          series_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "art_director_jobs_final_image_id_fkey"
+            columns: ["final_image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assessment_access_tokens: {
         Row: {
           client_id: string | null
@@ -8442,6 +8510,8 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+
 // NSW User-related types
 export type NswUser = Database["public"]["Tables"]["nsw_users"]["Row"];
 export type NswUserInsert = Database["public"]["Tables"]["nsw_users"]["Insert"];
