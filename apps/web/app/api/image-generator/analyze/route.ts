@@ -141,31 +141,32 @@ async function searchCivitaiLoras(
   }
 }
 
-const MAX_IMAGE_BYTES = 4_800_000; // Stay under Claude's 5MB base64 limit with headroom
+// Claude's limit is 5MB on the base64 string, not the raw bytes
+const MAX_BASE64_LENGTH = 4_800_000;
 
 async function compressImageForAnalysis(
   base64: string,
   mimeType: string
 ): Promise<{ base64: string; mimeType: string }> {
-  const buf = Buffer.from(base64, "base64");
-  if (buf.length <= MAX_IMAGE_BYTES) {
+  if (base64.length <= MAX_BASE64_LENGTH) {
     return { base64, mimeType };
   }
 
-  // Resize down, converting to JPEG for smaller size
+  const buf = Buffer.from(base64, "base64");
   let img = sharp(buf);
   const meta = await img.metadata();
-  const maxDim = 2048;
 
-  if ((meta.width || 0) > maxDim || (meta.height || 0) > maxDim) {
-    img = img.resize(maxDim, maxDim, { fit: "inside", withoutEnlargement: true });
+  // Resize if very large
+  if ((meta.width || 0) > 2048 || (meta.height || 0) > 2048) {
+    img = img.resize(2048, 2048, { fit: "inside", withoutEnlargement: true });
   }
 
-  // Try quality levels until under limit
+  // Try quality levels until the base64 output is under limit
   for (const quality of [85, 70, 55, 40]) {
     const compressed = await img.jpeg({ quality }).toBuffer();
-    if (compressed.length <= MAX_IMAGE_BYTES) {
-      return { base64: compressed.toString("base64"), mimeType: "image/jpeg" };
+    const b64 = compressed.toString("base64");
+    if (b64.length <= MAX_BASE64_LENGTH) {
+      return { base64: b64, mimeType: "image/jpeg" };
     }
   }
 
