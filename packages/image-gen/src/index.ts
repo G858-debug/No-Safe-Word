@@ -76,8 +76,8 @@ export type { ResourceLora } from './resource-lora-registry';
 export { searchAndDownloadLora } from './resource-lora-discovery';
 
 // Juggernaut Ragnarok Workflow Builder
-export { buildWorkflow, buildInpaintWorkflow, buildImg2ImgWorkflow, buildUpscaleWorkflow } from './workflow-builder';
-export type { WorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig, ControlNetConfig } from './workflow-builder';
+export { buildWorkflow, buildTwoPassWorkflow, buildInpaintWorkflow, buildImg2ImgWorkflow, buildUpscaleWorkflow } from './workflow-builder';
+export type { WorkflowConfig, TwoPassWorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig, ControlNetConfig } from './workflow-builder';
 
 // Dataset generation for LoRA training
 export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset, buildTopUpPrompts, generateTopUpImages } from './dataset-generator';

@@ -10,6 +10,11 @@ interface RegenerateBody {
   overrideTags?: string;
   negativePromptOverride?: string;
   profileOverrides?: Partial<Pick<SceneProfile, 'charLoraStrengthModel' | 'charLoraStrengthClip' | 'cfg' | 'steps'>>;
+  /** Two-pass generation: scene composition without LoRAs → identity refinement with LoRAs.
+   *  'auto' enables for multi-person interaction scenes only. */
+  twoPassMode?: boolean | 'auto';
+  /** Denoise for two-pass refinement (0.3-0.5) */
+  twoPassDenoise?: number;
 }
 
 // POST /api/stories/images/[promptId]/regenerate — Regenerate a single story image
@@ -77,6 +82,8 @@ export async function POST(
       profileOverrides: body.profileOverrides,
       overrideTags: body.overrideTags,
       negativePromptOverride: body.negativePromptOverride,
+      twoPassMode: body.twoPassMode,
+      twoPassDenoise: body.twoPassDenoise,
     });
 
     console.log(

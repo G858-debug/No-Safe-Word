@@ -52,6 +52,8 @@ interface SeriesData {
       position_after_word: number | null;
       character_name: string | null;
       character_id: string | null;
+      secondary_character_id: string | null;
+      secondary_character_name: string | null;
       prompt: string;
       image_id: string | null;
       previous_image_id: string | null;

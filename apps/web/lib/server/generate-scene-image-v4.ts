@@ -23,6 +23,7 @@ import {
   convertProseToPrompt,
   getDimensions,
   buildWorkflow,
+  buildTwoPassWorkflow,
   getDefaultProfile,
   deriveCompositionType,
   deriveContentMode,
@@ -126,6 +127,13 @@ interface V4GenerateSceneParams {
   referenceImageUrl?: string;
   /** Override the default negative prompt entirely (used by manual regeneration controls) */
   negativePromptOverride?: string;
+  /** Force two-pass generation: scene composition without LoRAs → identity refinement with LoRAs.
+   *  When 'auto', two-pass is used for multi-person interaction scenes.
+   *  When true, always use two-pass. When false/undefined, never use two-pass. */
+  twoPassMode?: boolean | 'auto';
+  /** Denoise strength for two-pass refinement (0.3-0.5, default 0.35).
+   *  Higher = stronger identity but more composition drift. */
+  twoPassDenoise?: number;
 }
 
 // ── Character LoRA Fetching ──
@@ -426,11 +434,71 @@ export async function buildV4SceneGenerationPayload(
   // ── Dimensions ──
   const { width, height } = getDimensions("portrait", isDualCharacter);
 
+  // ── Determine generation mode ──
+  // Two-pass mode: scene composition without LoRAs → identity refinement with LoRAs.
+  // Solves the fundamental problem where character LoRAs compete for CLIP tokens
+  // and prevent multi-person scene composition from working.
+  const useTwoPass = params.twoPassMode === true ||
+    (params.twoPassMode === 'auto' && isInteractionScene && isDualCharacter);
+
   // ── Build workflow ──
   let positivePrompt: string;
   let dualCharacterPrompts: { char1Prompt: string; char2Prompt: string } | undefined;
 
-  if (isDualCharacter && secondaryCharacterTags && !isInteractionScene) {
+  // ── ControlNet pose conditioning ──
+  const poseImages: Array<{ name: string; image: string }> = [];
+  let controlNetConfig: { poseImageName: string; strength?: number; referenceImage?: boolean } | undefined;
+  if (useReferenceImage) {
+    const rawBase64 = await imageUrlToBase64(params.referenceImageUrl!);
+    const resized = await resizeImageForPayload(rawBase64, width, height);
+    console.log(`[V4][${promptId}] Reference image resized: ${(resized.length / 1024).toFixed(0)}KB base64`);
+    const refImageName = `ref_pose_${promptId}.png`;
+    poseImages.push({ name: refImageName, image: resized });
+    controlNetConfig = { poseImageName: refImageName, strength: 0.5, referenceImage: true };
+  } else if (selectedPose) {
+    const { buffer } = await renderPose(selectedPose, width, height);
+    const poseImageName = `pose_${selectedPose.id}.png`;
+    poseImages.push({ name: poseImageName, image: buffer.toString('base64') });
+    controlNetConfig = { poseImageName, strength: 0.5 };
+  }
+
+  let workflow: Record<string, any>;
+
+  if (useTwoPass) {
+    // ═══ TWO-PASS MODE ═══
+    // Pass 1: Full scene composition WITHOUT LoRAs (all CLIP tokens for pose/scene)
+    // Pass 2: img2img refinement WITH character LoRAs (identity injection at moderate denoise)
+    const scenePrompt = [qualityPrefix, sceneTags].filter(Boolean).join(', ');
+
+    // Refinement prompt includes trigger words so LoRAs activate on the right tokens
+    const refinementParts = [qualityPrefix, ...triggerWords, characterTags];
+    if (secondaryCharacterTags) refinementParts.push(secondaryCharacterTags);
+    refinementParts.push(sceneTags);
+    const refinementPrompt = refinementParts.filter(Boolean).join(', ');
+
+    positivePrompt = scenePrompt; // Store the scene prompt as primary
+    const refinementDenoise = params.twoPassDenoise ?? 0.35;
+
+    workflow = buildTwoPassWorkflow({
+      scenePrompt,
+      refinementPrompt,
+      negativePrompt,
+      width,
+      height,
+      seed,
+      cfg: profile.cfg,
+      steps: profile.steps,
+      refinementDenoise,
+      refinementSteps: Math.min(profile.steps, 20),
+      filenamePrefix: `v4_2pass_${promptId}`,
+      loras: loraStack.length > 0 ? loraStack : undefined,
+      controlNet: controlNetConfig,
+    });
+
+    console.log(`[V4][${promptId}] TWO-PASS MODE enabled (denoise=${refinementDenoise})`);
+    console.log(`[V4][${promptId}] Pass 1 (scene): ${scenePrompt}`);
+    console.log(`[V4][${promptId}] Pass 2 (identity): ${refinementPrompt}`);
+  } else if (isDualCharacter && secondaryCharacterTags && !isInteractionScene) {
     // Regional conditioning for NON-INTERACTION dual-character scenes.
     // Each character gets area-constrained conditioning (left/right regions).
     // Only used when characters occupy separate space (side-by-side, observing, etc.)
@@ -451,6 +519,21 @@ export async function buildV4SceneGenerationPayload(
     console.log(`[V4][${promptId}] Shared: ${positivePrompt}`);
     console.log(`[V4][${promptId}] Char1 (left): ${dualCharacterPrompts.char1Prompt}`);
     console.log(`[V4][${promptId}] Char2 (right): ${dualCharacterPrompts.char2Prompt}`);
+
+    workflow = buildWorkflow({
+      positivePrompt,
+      negativePrompt,
+      width,
+      height,
+      seed,
+      cfg: profile.cfg,
+      steps: profile.steps,
+      filenamePrefix: `v4_${promptId}`,
+      loras: loraStack.length > 0 ? loraStack : undefined,
+      dualCharacterPrompts,
+      regionalOverlap: profile.regionalOverlap,
+      controlNet: controlNetConfig,
+    });
   } else if (isDualCharacter && secondaryCharacterTags && isInteractionScene) {
     // UNIFIED prompt for interaction scenes — characters must physically interact.
     // Regional conditioning separates characters spatially, which prevents the model
@@ -466,6 +549,19 @@ export async function buildV4SceneGenerationPayload(
       mode,
     });
     console.log(`[V4][${promptId}] INTERACTION SCENE — unified prompt (no regional conditioning)`);
+
+    workflow = buildWorkflow({
+      positivePrompt,
+      negativePrompt,
+      width,
+      height,
+      seed,
+      cfg: profile.cfg,
+      steps: profile.steps,
+      filenamePrefix: `v4_${promptId}`,
+      loras: loraStack.length > 0 ? loraStack : undefined,
+      controlNet: controlNetConfig,
+    });
   } else {
     // Single character: all in one prompt
     positivePrompt = buildPositivePrompt({
@@ -476,41 +572,20 @@ export async function buildV4SceneGenerationPayload(
       triggerWords,
       mode,
     });
-  }
 
-  // ── ControlNet pose conditioning ──
-  const poseImages: Array<{ name: string; image: string }> = [];
-  let controlNetConfig: { poseImageName: string; strength?: number; referenceImage?: boolean } | undefined;
-  if (useReferenceImage) {
-    // Reference image path — DWPose extracts skeleton on the GPU
-    const rawBase64 = await imageUrlToBase64(params.referenceImageUrl!);
-    const resized = await resizeImageForPayload(rawBase64, width, height);
-    console.log(`[V4][${promptId}] Reference image resized: ${(resized.length / 1024).toFixed(0)}KB base64`);
-    const refImageName = `ref_pose_${promptId}.png`;
-    poseImages.push({ name: refImageName, image: resized });
-    controlNetConfig = { poseImageName: refImageName, strength: 0.5, referenceImage: true };
-  } else if (selectedPose) {
-    // Catalog-based path — pre-rendered skeleton PNG
-    const { buffer } = await renderPose(selectedPose, width, height);
-    const poseImageName = `pose_${selectedPose.id}.png`;
-    poseImages.push({ name: poseImageName, image: buffer.toString('base64') });
-    controlNetConfig = { poseImageName, strength: 0.5 };
+    workflow = buildWorkflow({
+      positivePrompt,
+      negativePrompt,
+      width,
+      height,
+      seed,
+      cfg: profile.cfg,
+      steps: profile.steps,
+      filenamePrefix: `v4_${promptId}`,
+      loras: loraStack.length > 0 ? loraStack : undefined,
+      controlNet: controlNetConfig,
+    });
   }
-
-  const workflow = buildWorkflow({
-    positivePrompt,
-    negativePrompt,
-    width,
-    height,
-    seed,
-    cfg: profile.cfg,
-    steps: profile.steps,
-    filenamePrefix: `v4_${promptId}`,
-    loras: loraStack.length > 0 ? loraStack : undefined,
-    dualCharacterPrompts,
-    regionalOverlap: profile.regionalOverlap,
-    controlNet: controlNetConfig,
-  });
 
   // ── Assembled prompt for storage (includes all parts) ──
   const assembledPrompt = dualCharacterPrompts
@@ -532,6 +607,7 @@ export async function buildV4SceneGenerationPayload(
       mode,
       seed,
       isDualCharacter,
+      twoPass: useTwoPass,
       dualCharacterRegional: !!dualCharacterPrompts,
       loraCount: loraStack.length,
       characterLoraCount: characterLoraDownloads.length,

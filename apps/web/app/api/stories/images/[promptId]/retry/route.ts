@@ -23,6 +23,8 @@ export async function POST(
       overrideTags,
       attemptNumber,
       disableControlNet,
+      twoPassMode,
+      twoPassDenoise,
     } = body as {
       newSeed: number;
       jobId: string;
@@ -30,6 +32,8 @@ export async function POST(
       overrideTags?: string;
       attemptNumber?: number;
       disableControlNet?: boolean;
+      twoPassMode?: boolean | 'auto';
+      twoPassDenoise?: number;
     };
 
     if (!newSeed || !oldJobId) {
@@ -79,6 +83,8 @@ export async function POST(
       profileOverrides,
       overrideTags,
       disableControlNet,
+      twoPassMode,
+      twoPassDenoise,
     });
 
     // 5. Submit to RunPod

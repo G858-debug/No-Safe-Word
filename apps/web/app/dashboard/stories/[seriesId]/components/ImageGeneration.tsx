@@ -74,6 +74,8 @@ export interface ImagePromptData {
   position_after_word: number | null;
   character_name: string | null;
   character_id: string | null;
+  secondary_character_id: string | null;
+  secondary_character_name: string | null;
   prompt: string;
   image_id: string | null;
   previous_image_id: string | null;
@@ -126,6 +128,9 @@ interface PromptState {
   charLoraStrengthClip: number;
   cfg: number;
   steps: number;
+  // Two-pass mode
+  twoPassMode: boolean | 'auto';
+  twoPassDenoise: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +244,8 @@ export default function ImageGeneration({
           charLoraStrengthClip: DEFAULT_LORA_CLIP,
           cfg: DEFAULT_CFG,
           steps: DEFAULT_STEPS,
+          twoPassMode: false,
+          twoPassDenoise: 0.35,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -505,6 +512,12 @@ export default function ImageGeneration({
     if (state.cfg !== DEFAULT_CFG) profileOverrides.cfg = state.cfg;
     if (state.steps !== DEFAULT_STEPS) profileOverrides.steps = state.steps;
     if (Object.keys(profileOverrides).length > 0) reqBody.profileOverrides = profileOverrides;
+
+    // Two-pass mode
+    if (state.twoPassMode) {
+      reqBody.twoPassMode = state.twoPassMode;
+      if (state.twoPassDenoise !== 0.35) reqBody.twoPassDenoise = state.twoPassDenoise;
+    }
 
     return reqBody;
   }, []);
@@ -1108,7 +1121,10 @@ interface AdvancedControlsProps {
   charLoraStrengthClip: number;
   cfg: number;
   steps: number;
+  twoPassMode: boolean | 'auto';
+  twoPassDenoise: number;
   imageType: string;
+  isDualCharacter: boolean;
   disabled: boolean;
   onChange: (updates: Partial<PromptState>) => void;
 }
@@ -1122,7 +1138,10 @@ function AdvancedControlsPanel({
   charLoraStrengthClip,
   cfg,
   steps,
+  twoPassMode,
+  twoPassDenoise,
   imageType,
+  isDualCharacter,
   disabled,
   onChange,
 }: AdvancedControlsProps) {
@@ -1136,7 +1155,8 @@ function AdvancedControlsPanel({
     steps === DEFAULT_STEPS &&
     !negativePrompt &&
     !useRawPrompt &&
-    !lockSeed;
+    !lockSeed &&
+    !twoPassMode;
 
   return (
     <div className="space-y-5 rounded-lg border border-blue-500/20 bg-blue-500/5 p-5">
@@ -1168,6 +1188,8 @@ function AdvancedControlsPanel({
                 negativePrompt: "",
                 useRawPrompt: false,
                 lockSeed: false,
+                twoPassMode: false,
+                twoPassDenoise: 0.35,
               })
             }
           >
@@ -1256,6 +1278,42 @@ function AdvancedControlsPanel({
           />
           Lock seed ({lastSeed})
         </label>
+      )}
+
+      {/* Two-pass mode — for multi-person interaction scenes */}
+      {isDualCharacter && (
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 space-y-3">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="two-pass"
+              checked={twoPassMode === true || twoPassMode === 'auto'}
+              onCheckedChange={(checked) => onChange({ twoPassMode: checked ? true : false })}
+              className="h-5 w-9 data-[state=checked]:bg-amber-500"
+              disabled={disabled}
+            />
+            <Label htmlFor="two-pass" className="text-sm text-muted-foreground cursor-pointer">
+              Two-pass mode
+            </Label>
+            <span className="text-[10px] text-amber-400/70 ml-auto">Scene first, then identity</span>
+          </div>
+          {(twoPassMode === true || twoPassMode === 'auto') && (
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Identity strength <span className="text-amber-400 font-medium">{twoPassDenoise.toFixed(2)}</span>
+              </label>
+              <input
+                type="range" min="0.2" max="0.5" step="0.05"
+                value={twoPassDenoise}
+                onChange={(e) => onChange({ twoPassDenoise: parseFloat(e.target.value) })}
+                className="w-full h-2 accent-amber-500"
+                disabled={disabled}
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Lower = better composition, higher = stronger character identity
+              </p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1485,7 +1543,10 @@ function ImageCard({
                   charLoraStrengthClip={state.charLoraStrengthClip}
                   cfg={state.cfg}
                   steps={state.steps}
+                  twoPassMode={state.twoPassMode}
+                  twoPassDenoise={state.twoPassDenoise}
                   imageType={imageType}
+                  isDualCharacter={!!ip.secondary_character_id}
                   disabled={isGenerating || isApproved}
                   onChange={(updates) => onUpdatePrompt(ip.id, updates)}
                 />

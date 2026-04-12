@@ -48,6 +48,16 @@ const INTIMATE_KEYWORDS = [
   'undress', 'undressing', 'naked', 'nude', 'intimate',
   'straddling', 'grinding', 'moaning', 'climax', 'orgasm',
   'penetrat', 'thrust', 'nipple', 'breast', 'erect',
+  // Sex positions & acts — critical for multi-person scene routing
+  'sex', 'doggystyle', 'doggy', 'cowgirl', 'reverse_cowgirl', 'reverse cowgirl',
+  'missionary', 'mating_press', 'mating press', 'prone_bone', 'prone bone',
+  'spooning', 'standing_sex', 'standing sex', 'from_behind', 'rear_entry',
+  'rear entry', 'riding', 'bent_over', 'bent over',
+  'face_sitting', 'face sitting', 'facesitting',
+  'oral', 'blowjob', 'cunnilingus', '69_position', '69 position',
+  'handjob', 'fingering',
+  // Multi-person booru tags
+  '1boy 1girl', '1girl 1boy', '2girls', '1boy 2girls',
 ];
 
 const INDOOR_KEYWORDS = [
@@ -167,6 +177,12 @@ const INTIMATE_INTERACTION_KEYWORDS = [
   'skin against', 'intertwined', 'wrapped around',
   'pressed together', 'pressed against', 'entwined',
   'straddling', 'on top of', 'beneath',
+  // Physical contact & positioning for multi-person scenes
+  'gripping her', 'gripping his', 'hands on her', 'hands on his',
+  'legs wrapped', 'arms around', 'behind her', 'behind him',
+  'lying on his back', 'lying on her back', 'kneeling behind',
+  'sitting on', 'mounted', 'between her legs', 'between his legs',
+  'both nude', 'both naked', 'woman on top', 'man on top',
 ];
 
 const ROMANTIC_INTERACTION_KEYWORDS = [
@@ -210,6 +226,9 @@ function countCharacterReferences(prompt: string): 0 | 1 | 2 {
     'two-shot', 'two shot',
     'a man and a woman', 'a woman and a man',
     'his .* her', 'her .* his',
+    // Booru tags for character count
+    '1boy 1girl', '1girl 1boy', '2girls', '1boy 2girls',
+    '1girl 2boys', '2boys', 'male and female',
   ];
 
   for (const pattern of dualPatterns) {

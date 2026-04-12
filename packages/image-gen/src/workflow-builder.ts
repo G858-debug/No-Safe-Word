@@ -308,6 +308,231 @@ export function buildWorkflow(config: WorkflowConfig): Record<string, any> {
   return workflow;
 }
 
+// ── Two-Pass Workflow (Scene Composition → Identity Refinement) ──
+
+export interface TwoPassWorkflowConfig {
+  /** Full scene composition prompt (no trigger words — all tokens for pose/scene) */
+  scenePrompt: string;
+  /** Identity refinement prompt (trigger words + scene context) */
+  refinementPrompt: string;
+  negativePrompt: string;
+  width: number;
+  height: number;
+  seed: number;
+  /** Pass 1 sampling params */
+  steps?: number;
+  cfg?: number;
+  /** Pass 2 denoise — how much to refine (0.3 = subtle identity, 0.45 = stronger identity).
+   *  Higher = more LoRA influence but more composition drift. */
+  refinementDenoise?: number;
+  /** Pass 2 steps (can be lower than pass 1 since we're refining, not generating) */
+  refinementSteps?: number;
+  filenamePrefix: string;
+  /** Character LoRAs for pass 2 only (identity refinement) */
+  loras?: Array<{
+    filename: string;
+    strengthModel: number;
+    strengthClip: number;
+  }>;
+  /** ControlNet for pass 1 scene composition (pose guidance) */
+  controlNet?: ControlNetConfig;
+}
+
+/**
+ * Build a two-pass ComfyUI workflow for multi-person scenes.
+ *
+ * Separates the two competing concerns that cause LoRA-based multi-person
+ * generation to fail:
+ *
+ * Pass 1 (Scene Composition): Generates the full scene WITHOUT character LoRAs.
+ *   The entire CLIP token budget goes to pose, position, interaction, lighting,
+ *   and setting. No LoRA weight competition.
+ *
+ * Pass 2 (Identity Refinement): Runs img2img on the Pass 1 output WITH character
+ *   LoRAs at moderate denoise. The LoRAs subtly shift faces/bodies toward the
+ *   trained character identity without destroying the scene composition.
+ *
+ * Both passes run as a single ComfyUI job (shared checkpoint, single GPU allocation).
+ */
+export function buildTwoPassWorkflow(config: TwoPassWorkflowConfig): Record<string, any> {
+  const workflow: Record<string, any> = {};
+
+  // ═══ SHARED: Checkpoint (loaded once, used by both passes) ═══
+  workflow['100'] = {
+    class_type: 'CheckpointLoaderSimple',
+    inputs: { ckpt_name: DEFAULT_CHECKPOINT },
+  };
+
+  // ═══ PASS 1: Scene Composition (no LoRAs) ═══
+
+  // Node 101: Scene prompt (full CLIP budget — no trigger words)
+  workflow['101'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: config.scenePrompt, clip: ['100', 1] },
+  };
+
+  // Node 102: Negative prompt
+  workflow['102'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: config.negativePrompt, clip: ['100', 1] },
+  };
+
+  // ── ControlNet for Pass 1 (pose guidance) ──
+  let pass1PositiveRef: [string, number] = ['101', 0];
+  let pass1NegativeRef: [string, number] = ['102', 0];
+
+  if (config.controlNet) {
+    const cn = config.controlNet;
+
+    workflow['300'] = {
+      class_type: 'LoadImage',
+      inputs: { image: cn.poseImageName },
+    };
+
+    let poseImageRef: [string, number] = ['300', 0];
+    if (cn.referenceImage) {
+      workflow['303'] = {
+        class_type: 'DWPreprocessor',
+        inputs: {
+          image: ['300', 0],
+          detect_hand: 'enable',
+          detect_body: 'enable',
+          detect_face: 'enable',
+          resolution: Math.max(config.width, config.height),
+          bbox_detector: 'yolox_l.onnx',
+          pose_estimator: 'dw-ll_ucoco_384.onnx',
+        },
+      };
+      poseImageRef = ['303', 0];
+    }
+
+    workflow['301'] = {
+      class_type: 'ControlNetLoader',
+      inputs: { control_net_name: 'OpenPoseXL2.safetensors' },
+    };
+
+    workflow['302'] = {
+      class_type: 'ControlNetApplyAdvanced',
+      inputs: {
+        positive: pass1PositiveRef,
+        negative: pass1NegativeRef,
+        control_net: ['301', 0],
+        image: poseImageRef,
+        strength: cn.strength ?? 0.5,
+        start_percent: cn.startPercent ?? 0.0,
+        end_percent: cn.endPercent ?? 1.0,
+      },
+    };
+
+    pass1PositiveRef = ['302', 0];
+    pass1NegativeRef = ['302', 1];
+  }
+
+  // Node 103: Empty latent
+  workflow['103'] = {
+    class_type: 'EmptyLatentImage',
+    inputs: { width: config.width, height: config.height, batch_size: 1 },
+  };
+
+  // Node 104: KSampler — Pass 1 (scene composition, raw model, no LoRAs)
+  workflow['104'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: ['100', 0], // Raw checkpoint — NO LoRAs
+      positive: pass1PositiveRef,
+      negative: pass1NegativeRef,
+      latent_image: ['103', 0],
+      seed: config.seed,
+      steps: config.steps ?? DEFAULT_STEPS,
+      cfg: config.cfg ?? DEFAULT_CFG,
+      sampler_name: DEFAULT_SAMPLER,
+      scheduler: DEFAULT_SCHEDULER,
+      denoise: 1.0,
+    },
+  };
+
+  // Node 105: VAEDecode — produce Pass 1 image (used as input for Pass 2)
+  workflow['105'] = {
+    class_type: 'VAEDecode',
+    inputs: { samples: ['104', 0], vae: ['100', 2] },
+  };
+
+  // ═══ PASS 2: Identity Refinement (with character LoRAs) ═══
+
+  // LoRA chain for Pass 2 — modifies the SAME base model with character identity
+  let pass2ModelRef: [string, number] = ['100', 0];
+  let pass2ClipRef: [string, number] = ['100', 1];
+
+  if (config.loras && config.loras.length > 0) {
+    const capped = config.loras.slice(0, 8);
+    for (let i = 0; i < capped.length; i++) {
+      const nodeId = String(410 + i);
+      const lora = capped[i];
+      workflow[nodeId] = {
+        class_type: 'LoraLoader',
+        inputs: {
+          lora_name: lora.filename,
+          strength_model: lora.strengthModel,
+          strength_clip: lora.strengthClip,
+          model: pass2ModelRef,
+          clip: pass2ClipRef,
+        },
+      };
+      pass2ModelRef = [nodeId, 0];
+      pass2ClipRef = [nodeId, 1];
+    }
+  }
+
+  // Node 401: Refinement prompt (includes trigger words for LoRA activation)
+  workflow['401'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: config.refinementPrompt, clip: pass2ClipRef },
+  };
+
+  // Node 402: Negative for Pass 2
+  workflow['402'] = {
+    class_type: 'CLIPTextEncode',
+    inputs: { text: config.negativePrompt, clip: pass2ClipRef },
+  };
+
+  // Node 403: VAEEncode — encode Pass 1 image into latent space for refinement
+  workflow['403'] = {
+    class_type: 'VAEEncode',
+    inputs: { pixels: ['105', 0], vae: ['100', 2] },
+  };
+
+  // Node 404: KSampler — Pass 2 (identity refinement, LoRA-modified model)
+  workflow['404'] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: pass2ModelRef,
+      positive: ['401', 0],
+      negative: ['402', 0],
+      latent_image: ['403', 0],
+      seed: config.seed + 1, // Different seed for variety in refinement
+      steps: config.refinementSteps ?? 20,
+      cfg: config.cfg ?? DEFAULT_CFG,
+      sampler_name: DEFAULT_SAMPLER,
+      scheduler: DEFAULT_SCHEDULER,
+      denoise: config.refinementDenoise ?? 0.35,
+    },
+  };
+
+  // Node 405: VAEDecode — final image
+  workflow['405'] = {
+    class_type: 'VAEDecode',
+    inputs: { samples: ['404', 0], vae: ['100', 2] },
+  };
+
+  // Node 406: SaveImage — output the final refined image
+  workflow['406'] = {
+    class_type: 'SaveImage',
+    inputs: { filename_prefix: config.filenamePrefix, images: ['405', 0] },
+  };
+
+  return workflow;
+}
+
 // ── Image Editing Workflow Builders ──
 // See docs/skills/image-editing-workflows/SKILL.md for details
 
