@@ -33,6 +33,14 @@ Order tags from most visually prominent to least. Include at least 25 tags for e
 
 "loraSearchTerms" — Array of 3–4 short CivitAI search strings that would find LoRAs useful for reproducing this image. Think about: skin tone/texture LoRAs, body type LoRAs, lighting style LoRAs, specific aesthetic LoRAs. Examples: ["dark skin", "oiled skin texture", "photorealistic body", "bedroom lighting"]. Be specific — avoid generic terms like "realistic" alone.
 
+"checkpointSearchTerms" — Array of 2–3 short CivitAI search strings to find the best SDXL base checkpoint model for reproducing this image. Think about the visual style: photorealistic skin detail, anime cel shading, semi-realistic 3D render, oil painting, etc. Examples: ["juggernaut photorealistic", "pony diffusion anime", "realistic vision SDXL"]. Be specific to the art style and quality you detected.
+
+"generationParams" — Object with recommended Stable Diffusion generation parameters tailored to the image:
+  "steps": integer 20-40 (higher for detailed/realistic, lower for stylized)
+  "cfgScale": number 3-12 (lower like 3-5 for artistic freedom/photorealism, higher like 7-12 for strict prompt adherence)
+  "scheduler": one of "EulerA", "DPM2MKarras", "DPMSDEKarras", "HeunKarras" (match the art style — DPMSDEKarras for realistic, EulerA for general, DPM2MKarras for anime)
+  "clipSkip": 1 or 2 (1 for realistic/photographic, 2 for anime/stylized)
+
 Return ONLY the JSON object.`;
 
 const LORA_SELECTION_PROMPT = `You are an expert Stable Diffusion LoRA selector. Given a target image description and a list of available CivitAI LoRAs, pick the ones that would most improve reproduction accuracy.
@@ -44,6 +52,17 @@ For each selected LoRA return:
 - "reason": one sentence why it helps
 
 Return ONLY a JSON array of selected LoRAs (empty array if none are useful). Max 4 LoRAs. No markdown, no explanation.`;
+
+const CHECKPOINT_SELECTION_PROMPT = `You are an expert Stable Diffusion checkpoint selector. Given a target image description and a list of available CivitAI checkpoint models, pick the single best checkpoint for reproducing this image.
+
+Consider: photorealism quality, art style match, skin texture rendering, lighting handling, NSFW capability if the image is explicit.
+
+Return ONLY a valid JSON object with:
+- "urn": the exact URN string provided
+- "name": the checkpoint name
+- "reason": one sentence why this is the best match
+
+No markdown, no explanation, no code fences.`;
 
 // Default checkpoint suggestions mapped from artStyle
 const STYLE_CHECKPOINTS: Record<string, { name: string; modelId: number; versionId: number }> = {
@@ -121,6 +140,44 @@ async function searchCivitaiLoras(
   }
 }
 
+async function searchCivitaiCheckpoints(
+  query: string,
+  civitaiKey: string
+): Promise<{ name: string; urn: string; thumbnailUrl: string | null; description: string; modelId: number; versionId: number }[]> {
+  try {
+    const url = new URL("https://civitai.com/api/v1/models");
+    url.searchParams.set("query", query);
+    url.searchParams.set("types", "Checkpoint");
+    url.searchParams.set("limit", "5");
+    url.searchParams.set("sort", "Highest Rated");
+    url.searchParams.set("nsfw", "true");
+    url.searchParams.append("baseModels", "SDXL 1.0");
+    url.searchParams.append("baseModels", "Pony");
+
+    const resp = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${civitaiKey}` },
+    });
+
+    if (!resp.ok) return [];
+
+    const data = await resp.json();
+    return (data.items || []).flatMap((item: any) => {
+      const v = item.modelVersions?.[0];
+      if (!v) return [];
+      return [{
+        name: item.name,
+        urn: `urn:air:sdxl:checkpoint:civitai:${item.id}@${v.id}`,
+        thumbnailUrl: v.images?.[0]?.url || null,
+        description: (item.description || "").replace(/<[^>]+>/g, "").slice(0, 200),
+        modelId: item.id,
+        versionId: v.id,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function POST(request: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
@@ -179,72 +236,147 @@ export async function POST(request: NextRequest) {
     }
 
     const artStyle = analysis.artStyle || "realistic";
-    const checkpoint = STYLE_CHECKPOINTS[artStyle] || STYLE_CHECKPOINTS.realistic;
+    const fallbackCheckpoint = STYLE_CHECKPOINTS[artStyle] || STYLE_CHECKPOINTS.realistic;
     const aspectRatio = analysis.aspectRatio || "1:1";
     const dimensions = ASPECT_DIMENSIONS[aspectRatio] || ASPECT_DIMENSIONS["1:1"];
-    const params = getDefaultParams(artStyle);
+    const fallbackParams = getDefaultParams(artStyle);
+    const claudeParams = analysis.generationParams || {};
 
-    // Step 2: Search CivitAI for LoRAs in parallel based on Claude's search terms
-    const searchTerms: string[] = Array.isArray(analysis.loraSearchTerms)
+    // Extract search terms
+    const loraSearchTerms: string[] = Array.isArray(analysis.loraSearchTerms)
       ? analysis.loraSearchTerms.slice(0, 4)
       : [];
+    const checkpointSearchTerms: string[] = Array.isArray(analysis.checkpointSearchTerms)
+      ? analysis.checkpointSearchTerms.slice(0, 3)
+      : [];
 
-    console.log("[ImageGenerator] LoRA search terms:", searchTerms);
+    console.log("[ImageGenerator] LoRA search terms:", loraSearchTerms);
+    console.log("[ImageGenerator] Checkpoint search terms:", checkpointSearchTerms);
 
-    let suggestedLoras: any[] = [];
+    // Step 2: Search CivitAI for checkpoints AND LoRAs in parallel
+    const [checkpointSearchResults, ...loraSearchResults] = await Promise.all([
+      checkpointSearchTerms.length > 0
+        ? Promise.all(checkpointSearchTerms.map((term) => searchCivitaiCheckpoints(term, process.env.CIVITAI_API_KEY!)))
+        : Promise.resolve([]),
+      ...loraSearchTerms.map((term) => searchCivitaiLoras(term, process.env.CIVITAI_API_KEY!)),
+    ]);
 
-    if (searchTerms.length > 0) {
-      const searchResults = await Promise.all(
-        searchTerms.map((term) => searchCivitaiLoras(term, process.env.CIVITAI_API_KEY!))
-      );
+    // Deduplicate checkpoint candidates by URN
+    const checkpointSeen = new Set<string>();
+    const checkpointCandidates = checkpointSearchResults.flat().filter((c) => {
+      if (checkpointSeen.has(c.urn)) return false;
+      checkpointSeen.add(c.urn);
+      return true;
+    });
 
-      // Deduplicate by URN
-      const seen = new Set<string>();
-      const candidates = searchResults.flat().filter((l) => {
-        if (seen.has(l.urn)) return false;
-        seen.add(l.urn);
-        return true;
-      });
+    // Deduplicate LoRA candidates by URN
+    const loraSeen = new Set<string>();
+    const loraCandidates = loraSearchResults.flat().filter((l) => {
+      if (loraSeen.has(l.urn)) return false;
+      loraSeen.add(l.urn);
+      return true;
+    });
 
-      console.log("[ImageGenerator] LoRA candidates found:", candidates.length, candidates.map(c => c.name));
+    console.log("[ImageGenerator] Checkpoint candidates found:", checkpointCandidates.length, checkpointCandidates.map(c => c.name));
+    console.log("[ImageGenerator] LoRA candidates found:", loraCandidates.length, loraCandidates.map(c => c.name));
 
-      // Step 3: Have Claude pick the most useful LoRAs from the candidates
-      if (candidates.length > 0) {
-        const selectionResponse = await anthropic.messages.create({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 800,
-          system: LORA_SELECTION_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: `Target image description: ${analysis.prompt}\n\nAvailable LoRAs:\n${candidates.map((c, i) => `${i + 1}. Name: "${c.name}" | URN: "${c.urn}" | Description: "${c.description}"`).join("\n")}\n\nReturn a JSON array of selected LoRAs.`,
-            },
-          ],
-        });
-
-        const selectionBlock = selectionResponse.content.find((b) => b.type === "text");
-        if (selectionBlock && selectionBlock.type === "text") {
-          try {
-            const cleaned = selectionBlock.text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
-            const selected: any[] = JSON.parse(cleaned);
-            suggestedLoras = selected.map((s) => {
-              const candidate = candidates.find((c) => c.urn === s.urn);
+    // Step 3: Have Claude pick the best checkpoint AND best LoRAs in parallel
+    const [selectedCheckpoint, suggestedLoras] = await Promise.all([
+      // Checkpoint selection
+      checkpointCandidates.length > 0
+        ? anthropic.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 400,
+            system: CHECKPOINT_SELECTION_PROMPT,
+            messages: [
+              {
+                role: "user",
+                content: `Target image description: ${analysis.prompt}\nArt style: ${artStyle}\n\nAvailable checkpoints:\n${checkpointCandidates.map((c, i) => `${i + 1}. Name: "${c.name}" | URN: "${c.urn}" | Description: "${c.description}"`).join("\n")}\n\nReturn a JSON object for the single best checkpoint.`,
+              },
+            ],
+          }).then((resp) => {
+            const block = resp.content.find((b) => b.type === "text");
+            if (!block || block.type !== "text") return null;
+            try {
+              const cleaned = block.text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
+              const selected = JSON.parse(cleaned);
+              const candidate = checkpointCandidates.find((c) => c.urn === selected.urn);
+              if (!candidate) return null;
+              console.log("[ImageGenerator] Checkpoint selected:", candidate.name, "—", selected.reason);
               return {
-                name: s.name,
-                urn: s.urn,
-                strength: Math.min(1.5, Math.max(0.1, s.strength ?? 0.7)),
-                thumbnailUrl: candidate?.thumbnailUrl ?? null,
-                reason: s.reason || "",
+                name: candidate.name,
+                urn: candidate.urn,
+                modelId: candidate.modelId,
+                versionId: candidate.versionId,
+                thumbnailUrl: candidate.thumbnailUrl,
               };
-            });
-          } catch {
-            // LoRA selection failed — proceed with no LoRAs rather than failing the whole request
-            console.error("[ImageGenerator] LoRA selection parse failed:", selectionBlock?.text);
-          }
-          console.log("[ImageGenerator] LoRAs selected:", suggestedLoras.map(l => l.name));
-        }
-      }
-    }
+            } catch {
+              console.error("[ImageGenerator] Checkpoint selection parse failed:", block.text);
+              return null;
+            }
+          }).catch((err) => {
+            console.error("[ImageGenerator] Checkpoint selection failed:", err);
+            return null;
+          })
+        : Promise.resolve(null),
+
+      // LoRA selection (existing logic)
+      loraCandidates.length > 0
+        ? anthropic.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 800,
+            system: LORA_SELECTION_PROMPT,
+            messages: [
+              {
+                role: "user",
+                content: `Target image description: ${analysis.prompt}\n\nAvailable LoRAs:\n${loraCandidates.map((c, i) => `${i + 1}. Name: "${c.name}" | URN: "${c.urn}" | Description: "${c.description}"`).join("\n")}\n\nReturn a JSON array of selected LoRAs.`,
+              },
+            ],
+          }).then((resp) => {
+            const block = resp.content.find((b) => b.type === "text");
+            if (!block || block.type !== "text") return [];
+            try {
+              const cleaned = block.text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
+              const selected: any[] = JSON.parse(cleaned);
+              const loras = selected.map((s) => {
+                const candidate = loraCandidates.find((c) => c.urn === s.urn);
+                return {
+                  name: s.name,
+                  urn: s.urn,
+                  strength: Math.min(1.5, Math.max(0.1, s.strength ?? 0.7)),
+                  thumbnailUrl: candidate?.thumbnailUrl ?? null,
+                  reason: s.reason || "",
+                };
+              });
+              console.log("[ImageGenerator] LoRAs selected:", loras.map(l => l.name));
+              return loras;
+            } catch {
+              console.error("[ImageGenerator] LoRA selection parse failed:", block.text);
+              return [];
+            }
+          }).catch((err) => {
+            console.error("[ImageGenerator] LoRA selection failed:", err);
+            return [];
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // Use Claude-selected checkpoint or fall back to hardcoded
+    const finalCheckpoint = selectedCheckpoint || {
+      name: fallbackCheckpoint.name,
+      urn: buildCheckpointUrn(fallbackCheckpoint),
+      modelId: fallbackCheckpoint.modelId,
+      versionId: fallbackCheckpoint.versionId,
+    };
+
+    // Merge Claude's generation params with defaults as fallback
+    const validSchedulers = ["EulerA", "DPM2MKarras", "DPMSDEKarras", "HeunKarras"];
+    const finalParams = {
+      steps: (typeof claudeParams.steps === "number" && claudeParams.steps >= 15 && claudeParams.steps <= 50) ? claudeParams.steps : fallbackParams.steps,
+      cfgScale: (typeof claudeParams.cfgScale === "number" && claudeParams.cfgScale >= 1 && claudeParams.cfgScale <= 15) ? claudeParams.cfgScale : fallbackParams.cfgScale,
+      scheduler: validSchedulers.includes(claudeParams.scheduler) ? claudeParams.scheduler : fallbackParams.scheduler,
+      clipSkip: (claudeParams.clipSkip === 1 || claudeParams.clipSkip === 2) ? claudeParams.clipSkip : fallbackParams.clipSkip,
+    };
 
     return NextResponse.json({
       prompt: analysis.prompt,
@@ -252,15 +384,10 @@ export async function POST(request: NextRequest) {
       artStyle,
       aspectRatio,
       composition: analysis.composition || "",
-      suggestedCheckpoint: {
-        name: checkpoint.name,
-        urn: buildCheckpointUrn(checkpoint),
-        modelId: checkpoint.modelId,
-        versionId: checkpoint.versionId,
-      },
-      suggestedLoras,
+      suggestedCheckpoint: finalCheckpoint,
+      suggestedLoras: suggestedLoras,
       params: {
-        ...params,
+        ...finalParams,
         width: dimensions.width,
         height: dimensions.height,
         seed: -1,
