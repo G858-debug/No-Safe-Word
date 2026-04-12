@@ -133,6 +133,7 @@ export async function POST(
           seriesId,
           characterDataMap,
           seed,
+          twoPassMode: 'auto',
         });
 
         // Submit to RunPod endpoint

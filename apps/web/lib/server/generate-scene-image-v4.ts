@@ -326,6 +326,16 @@ export async function buildV4SceneGenerationPayload(
     console.log(`[V4][${promptId}] INTERACTION SCENE detected (type: ${classification.interactionType}) — will use unified prompt`);
   }
 
+  // Apply profile-driven LoRA strengths to character LoRAs already in the stack.
+  // Model strength controls visual identity; CLIP strength controls text encoder influence.
+  // Lower CLIP strength improves prompt adherence while preserving character appearance.
+  // Must run BEFORE resource LoRA injection so resource LoRAs keep their own defaults.
+  const characterLoraCount = loraStack.length;
+  for (let i = 0; i < characterLoraCount; i++) {
+    loraStack[i].strengthModel = profile.charLoraStrengthModel;
+    loraStack[i].strengthClip = profile.charLoraStrengthClip;
+  }
+
   // ── Resource LoRA injection ──
   // Auto-select pose/style LoRAs from the resource library based on prompt keywords.
   const maxResourceSlots = 8 - loraStack.length;
@@ -346,14 +356,6 @@ export async function buildV4SceneGenerationPayload(
       }
       console.log(`[V4][${promptId}] Resource LoRA: ${rl.filename} (${rl.category}, trigger: ${rl.triggerWord || 'none'})`);
     }
-  }
-
-  // Apply profile-driven LoRA strengths to character LoRAs already in the stack
-  // Model strength controls visual identity; CLIP strength controls text encoder influence.
-  // Lower CLIP strength improves prompt adherence while preserving character appearance.
-  for (const lora of loraStack) {
-    lora.strengthModel = profile.charLoraStrengthModel;
-    lora.strengthClip = profile.charLoraStrengthClip;
   }
 
   // ── Build character identity tags FIRST so we know the token budget for scene tags ──
