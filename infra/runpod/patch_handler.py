@@ -189,6 +189,47 @@ def _nsw_patched_start(config):
             if not job_input.get("nsw_diagnostic"):
                 return results
 
+        # File download mode: download a file from a URL to the volume
+        download = job_input.get("nsw_download_file")
+        if download and isinstance(download, dict):
+            url = download.get("url", "")
+            dest = download.get("dest", "")
+            headers = download.get("headers", {})
+            if not dest.startswith("/runpod-volume/models/"):
+                return {"error": "dest must start with /runpod-volume/models/"}
+            dest_dir = _nsw_os.path.dirname(dest)
+            _nsw_os.makedirs(dest_dir, exist_ok=True)
+            tmp_path = dest + ".tmp"
+            try:
+                print(f"[NSW] Downloading {url[:80]}... -> {dest}")
+                import time as _dl_time
+                start = _dl_time.time()
+                resp = _nsw_requests.get(url, headers=headers, stream=True, timeout=1800)
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length", 0))
+                downloaded = 0
+                with open(tmp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=64 * 1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        mb = downloaded / (1024 * 1024)
+                        pct = (downloaded / total * 100) if total else 0
+                        print(f"[NSW] Downloaded {mb:.0f} MB / {total/1024/1024:.0f} MB ({pct:.1f}%)")
+                _nsw_os.rename(tmp_path, dest)
+                elapsed = _dl_time.time() - start
+                final_size = _nsw_os.path.getsize(dest)
+                return {
+                    "status": "OK",
+                    "dest": dest,
+                    "size_mb": round(final_size / (1024 * 1024), 1),
+                    "elapsed_s": round(elapsed, 1),
+                    "speed_mbps": round(final_size / (1024 * 1024) / elapsed, 1) if elapsed > 0 else 0,
+                }
+            except Exception as e:
+                if _nsw_os.path.exists(tmp_path):
+                    _nsw_os.remove(tmp_path)
+                return {"error": str(e)}
+
         # Diagnostic mode: return file listings of model directories + ComfyUI node info
         if job_input.get("nsw_diagnostic"):
             diag = {}

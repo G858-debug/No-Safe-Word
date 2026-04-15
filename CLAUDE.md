@@ -288,3 +288,4 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 - `apps/web` is the ONLY app. Never create files in `apps/dashboard`
 - All image generation goes through `/api/stories/[seriesId]/generate-images-v4/`
 - Character generation goes through `/api/stories/characters/[storyCharId]/generate`
+- **Never download large files (models, datasets, checkpoints) to the local machine.** The local machine is for code only. All model downloads must go directly to RunPod (network volume via S3 API or in-pod downloads). All heavy processing (inference, training) runs on RunPod or cloud services, never locally.
