@@ -96,6 +96,7 @@ export async function POST(req: Request) {
           status: "active",
           starts_at: new Date().toISOString(),
           ends_at: endsAt.toISOString(),
+          payfast_token: body.token,
         })
         .eq("id", body.custom_str4);
 

@@ -153,6 +153,7 @@ export function buildSubscriptionPayment(args: SubscriptionArgs): {
     amount: "55.00",
     item_name: "No Safe Word Inner Circle",
     item_description: "Monthly all-access subscription",
+    custom_str2: args.userId,
     custom_str3: "subscription",
     custom_str4: args.subscriptionId,
     subscription_type: "1",
