@@ -521,13 +521,17 @@ function buildPoseOnlyWorkflow(
 }
 
 /**
- * CHAINED — reference tile + pose skeleton, two ControlNet applies.
- * CLIPTextEncode → CN(ref tile) → CN(pose skeleton) → FluxGuidance → BasicGuider
+ * COMBINED — pose skeleton via control_image + reference via inpaint_image.
+ * Single Flux2FunControlNetApply with both inputs:
+ *   - control_image: pose skeleton (guides body positioning)
+ *   - inpaint_image: reference composite (provides character appearance context)
  *
- * Both CN applies share the same loaded ControlNet model (node 20) and VAE.
- * The model auto-detects control type: photo → tile, skeleton → pose.
+ * The ControlNet's internal architecture uses 260 channels:
+ *   128 (control signal from control_image) + 4 (mask) + 128 (inpaint context)
+ * This lets us pass both pose AND reference in a single apply, avoiding the
+ * HooksContainer clone error that occurs when chaining two applies.
  */
-function buildChainedWorkflow(
+function buildCombinedWorkflow(
   prompt: string,
   seed: number,
   refImageName: string,
@@ -551,45 +555,35 @@ function buildChainedWorkflow(
       class_type: "CLIPTextEncode",
       inputs: { text: prompt, clip: ["2", 0] },
     },
-    // Shared ControlNet model (loaded once, used twice)
     "20": {
       class_type: "Flux2FunControlNetLoader",
       inputs: { controlnet_name: CONTROLNET_MODEL },
     },
-    // ── Chain 1: Reference composite (tile mode) ──
-    "30": {
-      class_type: "LoadImage",
-      inputs: { image: refImageName },
-    },
-    "31": {
-      class_type: "Flux2FunControlNetApply",
-      inputs: {
-        conditioning: ["4", 0],       // text conditioning in
-        controlnet: ["20", 0],
-        vae: ["3", 0],
-        strength: REF_STRENGTH,
-        control_image: ["30", 0],      // reference photo → tile mode
-      },
-    },
-    // ── Chain 2: Pose skeleton (pose mode) ──
+    // Pose skeleton image
     "21": {
       class_type: "LoadImage",
       inputs: { image: poseImageName },
     },
-    "32": {
+    // Reference composite image
+    "30": {
+      class_type: "LoadImage",
+      inputs: { image: refImageName },
+    },
+    // Single apply: pose via control_image, reference via inpaint_image
+    "5": {
       class_type: "Flux2FunControlNetApply",
       inputs: {
-        conditioning: ["31", 0],       // ref-modified conditioning in
+        conditioning: ["4", 0],
         controlnet: ["20", 0],
         vae: ["3", 0],
         strength: poseStrength,
-        control_image: ["21", 0],      // skeleton → pose mode
+        control_image: ["21", 0],      // pose skeleton
+        inpaint_image: ["30", 0],      // reference composite (appearance context)
       },
     },
-    // ── Sampling ──
     "6": {
       class_type: "FluxGuidance",
-      inputs: { conditioning: ["32", 0], guidance: CFG },
+      inputs: { conditioning: ["5", 0], guidance: CFG },
     },
     "7": {
       class_type: "EmptyFlux2LatentImage",
@@ -1112,7 +1106,7 @@ async function main() {
         // Chained — reference + pose
         const poseData = await getOrRenderPose(test.poseId);
         poseFilename = poseData.filename;
-        workflow = buildChainedWorkflow(
+        workflow = buildCombinedWorkflow(
           test.prompt,
           seed,
           refImageName,
