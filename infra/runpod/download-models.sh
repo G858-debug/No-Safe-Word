@@ -239,6 +239,14 @@ download_to_volume \
     "OpenPoseXL2.safetensors" \
     "${CONTROLNET_DIR}"
 
+# ---- ControlNet: Flux2 Fun ControlNet Union (Flux 2 Dev pose guidance) ----
+# HuggingFace: alibaba-pai/FLUX.2-dev-Fun-ControlNet-Union
+# v2602 variant — improved per-layer control, more natural results (~8.2GB)
+download_to_volume \
+    "https://huggingface.co/alibaba-pai/FLUX.2-dev-Fun-ControlNet-Union/resolve/main/FLUX.2-dev-Fun-Controlnet-Union-2602.safetensors" \
+    "FLUX.2-dev-Fun-Controlnet-Union-2602.safetensors" \
+    "${CONTROLNET_DIR}"
+
 # ---- DWPose models (reference image pose extraction) ----
 # Used by DWPreprocessor node from comfyui_controlnet_aux.
 # Extracts OpenPose skeletons from reference photos on the GPU.

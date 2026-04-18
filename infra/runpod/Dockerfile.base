@@ -54,6 +54,13 @@ RUN cd /comfyui/custom_nodes && \
     cd comfyui_controlnet_aux && git checkout 95a13e2 && \
     pip install -r requirements.txt
 
+# Flux2 Fun ControlNet: Alibaba's unified ControlNet for Flux 2 Dev.
+# Provides Flux2FunControlNetLoader + Flux2FunControlNetApply nodes.
+# Handles pose/canny/depth/HED/MLSD/tile — auto-detects control type.
+# No pip install needed — only dependency is torch>=2.0.0 (already present).
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/bryanmcguire/comfyui-flux2fun-controlnet.git
+
 # ---- V2 Pipeline: Florence-2 + SAM2 custom nodes ----
 # Only installed when BUILD_V2_PIPELINE=true to avoid bloating existing image.
 # Florence-2: Phrase grounding for automated region detection.
