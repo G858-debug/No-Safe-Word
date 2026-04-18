@@ -247,6 +247,24 @@ download_to_volume \
     "FLUX.2-dev-Fun-Controlnet-Union-2602.safetensors" \
     "${CONTROLNET_DIR}"
 
+# ---- PuLID Flux: Face identity injection for Flux 2 Dev ----
+# HuggingFace: guozinan/PuLID — face identity embedding model (~1.1GB)
+PULID_DIR="${VOLUME_MODELS}/pulid"
+mkdir -p "${PULID_DIR}" 2>/dev/null
+download_to_volume \
+    "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors" \
+    "pulid_flux_v0.9.1.safetensors" \
+    "${PULID_DIR}"
+
+# ---- EVA-02 CLIP Vision (PuLID face embedding encoder) ----
+# HuggingFace: QuanSun/EVA-CLIP — vision encoder for face features (~856MB)
+CLIP_VISION_DIR="${VOLUME_MODELS}/clip_vision"
+mkdir -p "${CLIP_VISION_DIR}" 2>/dev/null
+download_to_volume \
+    "https://huggingface.co/QuanSun/EVA-CLIP/resolve/main/EVA02_CLIP_L_336_psz14_s6B.pt" \
+    "EVA02_CLIP_L_336_psz14_s6B.pt" \
+    "${CLIP_VISION_DIR}"
+
 # ---- DWPose models (reference image pose extraction) ----
 # Used by DWPreprocessor node from comfyui_controlnet_aux.
 # Extracts OpenPose skeletons from reference photos on the GPU.
