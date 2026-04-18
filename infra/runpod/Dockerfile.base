@@ -31,7 +31,9 @@ RUN pip install --upgrade "cython>=3.0" && \
     cd /comfyui/custom_nodes && \
     git clone https://github.com/lldacing/ComfyUI_PuLID_Flux_ll && \
     pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt && \
-    pip install facenet-pytorch --no-deps
+    pip install facenet-pytorch --no-deps && \
+    cd ComfyUI_PuLID_Flux_ll && \
+    sed -i 's/attn_mask: Tensor = None,/attn_mask: Tensor = None, **kwargs,/' PulidFluxHook.py
 
 # InsightFace buffalo_l — required by PulidFluxInsightFaceLoader at workflow runtime.
 # FaceAnalysis(name="buffalo_l") downloads ~230MB of ONNX models to ~/.insightface/models/buffalo_l/
