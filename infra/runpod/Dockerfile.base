@@ -1,4 +1,4 @@
-FROM runpod/worker-comfyui:5.8.0-base
+FROM runpod/worker-comfyui:5.8.4-base
 
 # ---- Custom Nodes ----
 # ComfyUI-ppm: FluxKontextImageScale node (Kontext-aware image scaling)
