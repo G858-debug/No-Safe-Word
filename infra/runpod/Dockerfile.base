@@ -1,4 +1,4 @@
-FROM runpod/worker-comfyui:5.7.0-base
+FROM runpod/worker-comfyui:5.8.5-base
 
 # ---- Custom Nodes ----
 # ComfyUI-ppm: FluxKontextImageScale node (Kontext-aware image scaling)
@@ -32,9 +32,14 @@ RUN pip install --upgrade "cython>=3.0" && \
     git clone https://github.com/lldacing/ComfyUI_PuLID_Flux_ll && \
     pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt && \
     pip install facenet-pytorch --no-deps && \
-    cd ComfyUI_PuLID_Flux_ll && \
-    sed -i 's/attn_mask: Tensor = None,/attn_mask: Tensor = None, \*\*kwargs,/' PulidFluxHook.py && \
-    grep -q 'kwargs' PulidFluxHook.py && echo "[NSW] PuLID kwargs patch applied" || (echo "[NSW] PuLID kwargs patch FAILED" && exit 1)
+    cd ComfyUI_PuLID_Flux_ll
+
+# Patch PuLID hook for ComfyUI 5.8.5 compatibility
+# Adds **kwargs to pulid_forward_orig and pulid_patch so they accept new
+# kwargs like timestep_zero_index that ComfyUI 5.8.5+ passes down.
+# Uses Python ast parsing for reliable in-place patching with verification.
+COPY patch_pulid.py /tmp/patch_pulid.py
+RUN python3 /tmp/patch_pulid.py /comfyui/custom_nodes/ComfyUI_PuLID_Flux_ll/PulidFluxHook.py
 
 # InsightFace buffalo_l — required by PulidFluxInsightFaceLoader at workflow runtime.
 # FaceAnalysis(name="buffalo_l") downloads ~230MB of ONNX models to ~/.insightface/models/buffalo_l/
