@@ -29,38 +29,44 @@ def patch_file(path: Path, label: str) -> None:
     content = path.read_text()
     original = content
 
-    # Pattern: function signature ending with `attn_mask: Tensor = None,\n) -> Tensor:`
-    # Add `    **kwargs,\n` before the closing paren.
+    # Patch 1: forward_orig signature — add **kwargs for timestep_zero_index
     patched = re.sub(
         r"(    attn_mask: Tensor = None,\n)(\) -> Tensor:)",
         r"\1    **kwargs,\n\2",
         content,
     )
+    kwargs_added = patched != original
+    if kwargs_added:
+        before = original.count("**kwargs")
+        after = patched.count("**kwargs")
+        if after - before != 1:
+            print(f"FAIL [{label}]: kwargs delta {after - before}")
+            sys.exit(1)
 
-    if patched == original:
-        print(f"FAIL [{label}]: pattern did not match — signature unchanged")
-        print("=== Searched lines ===")
-        for i, line in enumerate(content.split("\n"), 1):
-            if "attn_mask" in line and "Tensor" in line:
-                print(f"  {i}: {line!r}")
-        sys.exit(1)
+    # Patch 2: PuLID block replacement — fix extra_options["transformer_options"] KeyError
+    # Flux2Fun ControlNet puts transformer_options in input_args, not extra_options.
+    # Make PuLID's __call__ methods check both places.
+    after_kwargs = patched
+    patched = re.sub(
+        r'transformer_options = extra_options\["transformer_options"\]',
+        'transformer_options = extra_options.get("transformer_options") or input_args.get("transformer_options", {})',
+        patched,
+    )
+    fallback_added = patched != after_kwargs
 
-    before_count = original.count("**kwargs")
-    after_count = patched.count("**kwargs")
-    new_kwargs = after_count - before_count
-    if new_kwargs != 1:
-        print(f"FAIL [{label}]: expected to add 1 **kwargs, added {new_kwargs}")
+    if not kwargs_added and not fallback_added:
+        print(f"FAIL [{label}]: no patterns matched")
         sys.exit(1)
 
     path.write_text(patched)
-
-    # Re-read and verify
     verify = path.read_text()
-    if "**kwargs,\n) -> Tensor:" not in verify:
-        print(f"FAIL [{label}]: post-write verification failed")
+
+    if kwargs_added and "**kwargs,\n) -> Tensor:" not in verify:
+        print(f"FAIL [{label}]: post-write kwargs verification failed")
         sys.exit(1)
 
-    print(f"[NSW] {label} patched: **kwargs count {before_count} -> {after_count}")
+    fallback_count = verify.count("input_args.get(\"transformer_options\"")
+    print(f"[NSW] {label}: kwargs_added={kwargs_added} fallback_count={fallback_count}")
 
 
 if len(sys.argv) < 2:
