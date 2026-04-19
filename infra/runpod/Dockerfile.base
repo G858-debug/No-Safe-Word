@@ -34,12 +34,8 @@ RUN pip install --upgrade "cython>=3.0" && \
     pip install facenet-pytorch --no-deps && \
     cd ComfyUI_PuLID_Flux_ll
 
-# Patch PuLID hook for ComfyUI 5.8.5 compatibility
-# Adds **kwargs to pulid_forward_orig and pulid_patch so they accept new
-# kwargs like timestep_zero_index that ComfyUI 5.8.5+ passes down.
-# Uses Python ast parsing for reliable in-place patching with verification.
+# Stage the kwargs patch script (applied after all forward_orig-patching nodes are installed)
 COPY patch_pulid.py /tmp/patch_pulid.py
-RUN python3 /tmp/patch_pulid.py /comfyui/custom_nodes/ComfyUI_PuLID_Flux_ll/PulidFluxHook.py
 
 # InsightFace buffalo_l — required by PulidFluxInsightFaceLoader at workflow runtime.
 # FaceAnalysis(name="buffalo_l") downloads ~230MB of ONNX models to ~/.insightface/models/buffalo_l/
@@ -68,6 +64,14 @@ RUN cd /comfyui/custom_nodes && \
 # No pip install needed — only dependency is torch>=2.0.0 (already present).
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/bryanmcguire/comfyui-flux2fun-controlnet.git
+
+# Patch BOTH PuLID and Flux2Fun ControlNet for ComfyUI 5.8.5 compatibility.
+# Both packages monkey-patch Flux.forward_orig but neither accepts the new
+# timestep_zero_index kwarg that ComfyUI 5.8.x passes down. Add **kwargs
+# to both signatures. Build fails loudly if either patch doesn't apply.
+RUN python3 /tmp/patch_pulid.py \
+    /comfyui/custom_nodes/ComfyUI_PuLID_Flux_ll/PulidFluxHook.py \
+    /comfyui/custom_nodes/comfyui-flux2fun-controlnet/flux_patch.py
 
 # ---- V2 Pipeline: Florence-2 + SAM2 custom nodes ----
 # Only installed when BUILD_V2_PIPELINE=true to avoid bloating existing image.
