@@ -17,6 +17,7 @@ import {
   analyzeImage,
   analyzeMultipleImages,
   parseJsonResponse,
+  ensureArray,
 } from "./qwen-vl-client";
 import {
   searchMultipleQueries,
@@ -49,8 +50,8 @@ import type {
 
 // ── Constants ──
 
-const MAX_ITERATIONS = 8;
-const PASS_THRESHOLD = 90;
+const MAX_ITERATIONS = 4;
+const PASS_THRESHOLD = 80;
 const MAX_REFERENCES = 5;
 
 // ── Database Helpers ──
@@ -117,12 +118,19 @@ export async function getJob(jobId: string): Promise<ArtDirectorJob> {
 
 // ── Step 1-3: Analyze & Search & Rank ──
 
+export interface CharacterDataForArtDirector {
+  name: string;
+  structured: Record<string, string> | null;
+  portraitUrl: string | null;
+}
+
 export async function analyzeAndSearch(
   promptText: string,
   imageType: string,
   characterNames: string[],
   seriesId: string,
-  promptId: string
+  promptId: string,
+  characterData?: CharacterDataForArtDirector[]
 ): Promise<{
   jobId: string;
   intentAnalysis: IntentAnalysis;
@@ -136,8 +144,26 @@ export async function analyzeAndSearch(
     // ── Step 1: Analyze prompt intent ──
     console.log(`[Art Director] Step 1: Analyzing prompt intent...`);
 
+    // Build character context from real data if available
+    let characterContext = `Characters mentioned: ${characterNames.join(", ") || "none specified"}`;
+    if (characterData && characterData.length > 0) {
+      const charDescs = characterData.map((c) => {
+        const parts = [c.name];
+        if (c.structured) {
+          const s = c.structured;
+          if (s.skinTone) parts.push(`skin: ${s.skinTone}`);
+          if (s.bodyType) parts.push(`body: ${s.bodyType}`);
+          if (s.hairColor || s.hairStyle) parts.push(`hair: ${[s.hairColor, s.hairStyle].filter(Boolean).join(" ")}`);
+          if (s.ethnicity) parts.push(`ethnicity: ${s.ethnicity}`);
+          if (s.age) parts.push(`age: ${s.age}`);
+        }
+        return parts.join(", ");
+      });
+      characterContext = `Characters (with approved appearance data):\n${charDescs.join("\n")}`;
+    }
+
     const intentPrompt = `Scene description: "${promptText}"
-Characters mentioned: ${characterNames.join(", ") || "none specified"}
+${characterContext}
 Image type: ${imageType}
 
 Analyze this scene and return the structured intent JSON.`;
@@ -151,7 +177,12 @@ Analyze this scene and return the structured intent JSON.`;
     const intentAnalysis = parseJsonResponse<IntentAnalysis>(intentResponse, "intent analysis");
     console.log(`[Art Director] Intent: ${intentAnalysis.interactionType}, ${intentAnalysis.nsfwLevel}, queries: ${intentAnalysis.searchQueries.join(" | ")}`);
 
-    await updateJob(jobId, { intent_analysis: intentAnalysis });
+    // Store intent analysis + character data (portrait URLs for evaluation)
+    const intentWithCharData = {
+      ...intentAnalysis,
+      _characterData: characterData || [],
+    };
+    await updateJob(jobId, { intent_analysis: intentWithCharData });
 
     // ── Step 2: Search CivitAI ──
     console.log(`[Art Director] Step 2: Searching CivitAI with ${intentAnalysis.searchQueries.length} queries...`);
@@ -176,8 +207,8 @@ Analyze this scene and return the structured intent JSON.`;
       return { jobId, intentAnalysis, rankedReferences: [] };
     }
 
-    // Take top 10 for ranking (limit Qwen VL input)
-    const candidates = withMeta.slice(0, 10);
+    // Take top 5 for ranking (Qwen VL limit is 5 images per request)
+    const candidates = withMeta.slice(0, 5);
 
     // ── Step 3: Rank references with Qwen VL ──
     console.log(`[Art Director] Step 3: Ranking ${candidates.length} references with Qwen VL...`);
@@ -209,14 +240,17 @@ I'm showing you ${imageInputs.length} candidate reference images. Rank them by h
         maxTokens: 3000,
       });
 
-      const rankings = parseJsonResponse<Array<{
+      const rawRankings = parseJsonResponse<unknown>(rankResponse, "reference ranking");
+
+      // Qwen VL sometimes returns a single object instead of an array — normalize
+      const rankings = ensureArray(rawRankings) as Array<{
         imageIndex: number;
         rank: number;
         relevanceScore: number;
         whatMatches: string;
         whatDoesnt: string;
         explanation: string;
-      }>>(rankResponse, "reference ranking");
+      }>;
 
       // Build ranked references
       rankedReferences = rankings
@@ -451,21 +485,48 @@ export async function runIteration(jobId: string): Promise<IterationResult> {
     console.log(`[Art Director] Step 7: Evaluating attempt ${attempt}...`);
 
     const imageBase64 = await downloadImageAsBase64(imageResult.url);
-    iteration.imageBase64 = imageBase64;
+    // NOTE: Do NOT store imageBase64 on the iteration object — it's ~5MB and
+    // blows up the Supabase JSONB column when we persist iterations.
+
+    // Build character portrait context for evaluation
+    const charData = (job.intentAnalysis as any)?._characterData as CharacterDataForArtDirector[] | undefined;
+    const charPortraitContext = charData?.filter((c) => c.portraitUrl).length
+      ? `\n\nCHARACTER REFERENCE PORTRAITS: The following characters have approved portraits that the generated image should match for appearance consistency: ${charData.filter((c) => c.portraitUrl).map((c) => c.name).join(", ")}`
+      : "";
 
     const evalPrompt = `ORIGINAL SCENE INTENT:
 ${JSON.stringify(job.intentAnalysis, null, 2)}
 
 GENERATION PROMPT USED:
 ${recipe.prompt}
-
+${charPortraitContext}
 Evaluate how well this generated image matches the scene intent. Score each dimension 0-100.`;
 
-    const evalResponse = await analyzeImage(imageBase64, evalPrompt, {
-      systemPrompt: EVALUATION_SYSTEM,
-      jsonMode: true,
-      maxTokens: 1500,
-    });
+    // If character portraits are available, use multi-image evaluation for appearance comparison
+    let evalResponse: { content: string };
+    const portraitChars = charData?.filter((c) => c.portraitUrl) || [];
+    if (portraitChars.length > 0) {
+      const evalImages = [
+        { label: "Generated Image", base64OrUrl: imageBase64 },
+        ...await Promise.all(
+          portraitChars.map(async (c) => ({
+            label: `${c.name} Reference Portrait`,
+            base64OrUrl: await downloadImageAsBase64(c.portraitUrl!),
+          }))
+        ),
+      ];
+      evalResponse = await analyzeMultipleImages(evalImages, evalPrompt, {
+        systemPrompt: EVALUATION_SYSTEM,
+        jsonMode: true,
+        maxTokens: 1500,
+      });
+    } else {
+      evalResponse = await analyzeImage(imageBase64, evalPrompt, {
+        systemPrompt: EVALUATION_SYSTEM,
+        jsonMode: true,
+        maxTokens: 1500,
+      });
+    }
 
     const evaluation = parseJsonResponse<{
       scores: EvaluationScores;
@@ -545,15 +606,72 @@ Evaluate how well this generated image matches the scene intent. Score each dime
       return iteration;
     }
 
+    // ── Character count regression detection ──
+    // Wrong character count is a stochastic SDXL failure, not a prompt problem.
+    // Retrying with a new seed (same recipe) is more effective than rewriting the prompt.
+    const isCharCountFailure = evaluation.scores.characterCount < 50;
+    const otherDimensionsOk =
+      evaluation.scores.positionPose >= 60 &&
+      evaluation.scores.settingEnvironment >= 60 &&
+      evaluation.scores.characterAppearance >= 60;
+
+    // Count consecutive character count failures
+    let consecutiveCharCountFailures = 0;
+    for (let i = updatedIterations.length - 1; i >= 0; i--) {
+      if (updatedIterations[i].evaluation?.scores.characterCount != null &&
+          updatedIterations[i].evaluation!.scores.characterCount < 50) {
+        consecutiveCharCountFailures++;
+      } else {
+        break;
+      }
+    }
+
+    if (isCharCountFailure && otherDimensionsOk && consecutiveCharCountFailures < 3) {
+      // Seed-only retry — don't waste an iteration on prompt changes
+      console.log(
+        `[Art Director] Character count failure (${evaluation.scores.characterCount}/100) — ` +
+        `retrying with new seed (attempt ${consecutiveCharCountFailures}/3 before escalation)`
+      );
+
+      // Store a minimal "adjustment" that signals seed-only retry
+      iteration.recipeAdjustments = JSON.stringify({
+        diagnosis: "Character count failure — stochastic SDXL issue, not a prompt problem",
+        promptChanges: [],
+        loraChanges: [],
+        settingChanges: { cfgScale: null, steps: null, sampler: null, dimensions: null },
+        newPrompt: null,
+        newNegativePrompt: null,
+        confidence: 70,
+        reasoning: "Wrong character count is random SDXL failure. Same recipe with new seed.",
+      });
+
+      updatedIterations[updatedIterations.length - 1] = iteration;
+      await updateJob(jobId, { iterations: updatedIterations });
+
+      return iteration;
+    }
+
+    if (isCharCountFailure && consecutiveCharCountFailures >= 3) {
+      console.log(
+        `[Art Director] Character count failed ${consecutiveCharCountFailures}x in a row — escalating to full prompt rewrite`
+      );
+    }
+
     // Get iteration feedback from Qwen VL
     console.log(`[Art Director] Step 8: Getting iteration feedback...`);
 
-    const historyDesc = updatedIterations.map((iter, i) => ({
+    const historyDesc = updatedIterations.map((iter) => ({
       attempt: iter.attempt,
       score: iter.evaluation?.overall ?? 0,
       feedback: iter.evaluation?.feedback ?? "no evaluation",
+      scores: iter.evaluation?.scores ?? null,
       prompt: iter.recipe?.prompt?.slice(0, 100) ?? "",
     }));
+
+    // Add character count context to the feedback prompt if relevant
+    const charCountContext = isCharCountFailure
+      ? `\n\nCRITICAL: Character count has failed ${consecutiveCharCountFailures} times in a row. Seed-only retries didn't work. The prompt structure needs a fundamentally different approach to enforce character count — consider different character count tags, splitting the prompt, or a different composition strategy entirely.`
+      : "";
 
     const feedbackPrompt = `SCENE INTENT:
 ${JSON.stringify(job.intentAnalysis, null, 2)}
@@ -566,7 +684,7 @@ ${JSON.stringify(historyDesc, null, 2)}
 
 LATEST EVALUATION:
 ${JSON.stringify(evaluation, null, 2)}
-
+${charCountContext}
 This is attempt ${attempt} of ${MAX_ITERATIONS}. What specific changes should I make for the next attempt?`;
 
     const feedbackResponse = await analyzeImage(imageBase64, feedbackPrompt, {
@@ -623,9 +741,9 @@ export async function approveIteration(
   if (!imageRes.ok) throw new Error(`Failed to download final image`);
   const imageBuffer = Buffer.from(await imageRes.arrayBuffer());
 
-  const filename = `stories/art-director-${job.promptId}-${Date.now()}.jpeg`;
+  const filename = `art-director-${job.promptId}-${Date.now()}.jpeg`;
   const { error: uploadError } = await supabase.storage
-    .from("images")
+    .from("story-images")
     .upload(filename, imageBuffer, {
       contentType: "image/jpeg",
       upsert: true,
@@ -635,8 +753,17 @@ export async function approveIteration(
     throw new Error(`Failed to upload image: ${uploadError.message}`);
   }
 
-  const { data: urlData } = supabase.storage.from("images").getPublicUrl(filename);
+  const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(filename);
   const storedUrl = urlData.publicUrl;
+
+  // Determine SFW/NSFW mode from the image prompt record
+  const { data: promptRecord } = await supabase
+    .from("story_image_prompts")
+    .select("image_type")
+    .eq("id", job.promptId)
+    .single();
+
+  const imageMode = promptRecord?.image_type === "facebook_sfw" ? "sfw" : "nsfw";
 
   // Create an image record
   const { data: imageRecord, error: imageError } = await supabase
@@ -644,7 +771,7 @@ export async function approveIteration(
     .insert({
       prompt: iteration.recipe?.prompt || "art director generated",
       stored_url: storedUrl,
-      mode: "art_director",
+      mode: imageMode,
       settings: {
         source: "art_director",
         art_director_job_id: jobId,
@@ -658,12 +785,13 @@ export async function approveIteration(
 
   if (imageError) throw new Error(`Failed to create image record: ${imageError.message}`);
 
-  // Update the story_image_prompts record
+  // Update the story_image_prompts record — set to "approved" since user explicitly
+  // approved in the Art Director modal (no need for a second approval step)
   const { error: promptError } = await supabase
     .from("story_image_prompts")
     .update({
       image_id: imageRecord!.id,
-      status: "generated" as any,
+      status: "approved" as any,
     })
     .eq("id", job.promptId);
 

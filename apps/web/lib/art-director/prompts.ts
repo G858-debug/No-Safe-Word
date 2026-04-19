@@ -284,4 +284,5 @@ RULES:
 - If body type is wrong, add more explicit body tags and consider a body-type LoRA
 - NEVER suggest the same changes that were tried in a previous attempt
 - Be bold — if 4+ attempts have failed, make bigger changes (different sampler, dramatically different prompt structure, LoRA overhaul)
-- On attempt 5+, consider whether the base model simply can't handle this scene and suggest an alternative`;
+- On attempt 5+, consider whether the base model simply can't handle this scene and suggest an alternative
+- CHARACTER COUNT FAILURES are usually stochastic SDXL failures, NOT prompt problems. If the previous attempt failed ONLY on character count (other dimension scores were 60+), a new seed with the SAME recipe is the correct fix. Only suggest prompt/recipe changes for character count if it has failed 3+ times in a row — then suggest fundamentally different composition approaches (stronger "2people" front-loading, "couple" tags, removing conflicting tags from negative prompt)`;

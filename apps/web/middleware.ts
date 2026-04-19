@@ -48,6 +48,15 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next();
     }
 
+    // Allow API routes through directly (auth, pin, and auth callback)
+    if (
+      pathname.startsWith("/api/auth/") ||
+      pathname.startsWith("/api/pin/") ||
+      pathname.startsWith("/auth/")
+    ) {
+      return await updateSession(request);
+    }
+
     // Already under /access — pass through (no auth needed)
     if (pathname.startsWith("/access")) {
       return NextResponse.next();

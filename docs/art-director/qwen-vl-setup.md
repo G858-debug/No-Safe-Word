@@ -1,96 +1,78 @@
-# Qwen 2.5 VL 72B — RunPod Setup Guide
+# Qwen 2.5 VL 72B AWQ — RunPod Setup Guide
 
 ## Overview
 
-The Art Director system uses Qwen 2.5 VL 72B Instruct as a self-hosted vision-language model. It runs on a RunPod GPU pod with vLLM serving an OpenAI-compatible API.
+The Art Director uses **Qwen 2.5 VL 72B Instruct AWQ** as a self-hosted vision-language model for image analysis, reference ranking, recipe adaptation, and evaluation. It runs on a RunPod GPU pod with vLLM serving an OpenAI-compatible API.
 
-Self-hosting avoids NSFW content filtering from hosted API providers (OpenAI, Anthropic, Google).
+Self-hosting avoids NSFW content filtering from hosted API providers.
 
-## Prerequisites
+## Model & Infrastructure
 
-- RunPod account with `RUNPOD_API_KEY` configured in `.env.local`
-- Hugging Face token with access to `Qwen/Qwen2.5-VL-72B-Instruct` (set `HUGGINGFACE_TOKEN` in `.env.local`)
-- A100 80GB GPU availability on RunPod (the 72B VL model needs ~75GB VRAM in FP16)
+| Setting | Value |
+|---|---|
+| Model | `Qwen/Qwen2.5-VL-72B-Instruct-AWQ` |
+| Quantization | AWQ (4-bit, auto-detected by vLLM) |
+| Docker image | `vllm/vllm-openai:v0.8.5` (pinned — later versions have compatibility issues) |
+| GPU | NVIDIA A100 SXM 80GB (single GPU) |
+| VRAM usage | ~40GB for AWQ weights + KV cache |
+| Max model length | 32768 tokens |
+| GPU memory utilization | 0.90 |
+| Network volume | Mounted at `/runpod-volume`, `HF_HOME=/runpod-volume/huggingface` |
+| Boot time | ~160s from cached weights on network volume |
+| Pod name | `qwen-vl-72b-art-director` |
+| Cost | A100 80GB SXM hourly rate on RunPod (~$1.50-2.50/hr) |
 
-## Automatic Setup
+## vLLM Launch Args
 
-The Art Director can auto-create the pod via the API:
-
-```bash
-# Create a new pod
-curl -X POST http://localhost:3000/api/art-director/pod \
-  -H 'Content-Type: application/json' \
-  -d '{"action": "create"}'
-
-# Response: { "podId": "abc123", "endpoint": "https://abc123-8000.proxy.runpod.net" }
+```
+--model Qwen/Qwen2.5-VL-72B-Instruct-AWQ
+--max-model-len 32768
+--tensor-parallel-size 1
+--trust-remote-code
+--gpu-memory-utilization 0.90
+--enforce-eager
+--limit-mm-per-prompt image=5
 ```
 
-After creation, add the pod ID to `.env.local`:
-```
-QWEN_VL_POD_ID=abc123
-QWEN_VL_API_KEY=EMPTY
-```
-
-## Manual Setup (RunPod Dashboard)
-
-1. Go to RunPod → Pods → Deploy
-2. Select **A100 80GB** GPU (PCIe or SXM4)
-3. Docker image: `vllm/vllm-openai:latest`
-4. Docker command override:
-   ```
-   --model Qwen/Qwen2.5-VL-72B-Instruct --max-model-len 32768 --tensor-parallel-size 1 --trust-remote-code --dtype auto --gpu-memory-utilization 0.95
-   ```
-5. Container disk: 150 GB (model weights are ~140 GB)
-6. Volume: 150 GB (for Hugging Face cache)
-7. Expose port: 8000/http
-8. Environment variables:
-   - `HUGGING_FACE_HUB_TOKEN`: Your HF token
-9. Deploy and note the pod ID
+Key flags:
+- `--enforce-eager` — Prevents CUDA graph OOM during model loading
+- `--limit-mm-per-prompt image=5` — Allows up to 5 images per request (needed for reference ranking step)
+- `--max-model-len 32768` — Supports 5 images (~10K tokens) + system prompt + SD knowledge in a single call
 
 ## Environment Variables
 
-Add to `.env.local`:
+Add to `apps/web/.env.local`:
 ```bash
-# RunPod pod ID (from creation or dashboard)
 QWEN_VL_POD_ID=your_pod_id_here
-
-# API key for vLLM (default: EMPTY — vLLM doesn't require auth by default)
 QWEN_VL_API_KEY=EMPTY
+HUGGINGFACE_TOKEN=your_hf_token_here
 ```
 
-## Health Check
+## Automatic Setup
 
+Create a pod via the dashboard API:
 ```bash
-# Check if the model is loaded and ready
-curl https://{podId}-8000.proxy.runpod.net/health
-
-# Test inference
-curl https://{podId}-8000.proxy.runpod.net/v1/chat/completions \
+curl -X POST http://localhost:3000/api/art-director/pod \
   -H 'Content-Type: application/json' \
-  -d '{
-    "model": "Qwen/Qwen2.5-VL-72B-Instruct",
-    "messages": [{"role": "user", "content": "Hello, what model are you?"}],
-    "max_tokens": 100
-  }'
+  -d '{"action": "create"}'
 ```
 
-Or via the API:
+This calls `createQwenVLPod()` in `pod-manager.ts`, which tries A100 SXM 80GB on SECURE then COMMUNITY clouds.
+
+After creation, update `QWEN_VL_POD_ID` in `.env.local` with the returned pod ID.
+
+## Start / Stop via API
+
 ```bash
+# Check pod status
 curl http://localhost:3000/api/art-director/pod
-# Response: { "podId": "abc123", "status": "running", "endpoint": "...", ... }
-```
 
-## Cost Management
-
-The A100 80GB costs ~$1.50-2.50/hr on RunPod. To save costs:
-
-```bash
-# Stop the pod when not in use (preserves disk, stops GPU billing)
+# Stop (preserves disk, stops GPU billing)
 curl -X POST http://localhost:3000/api/art-director/pod \
   -H 'Content-Type: application/json' \
   -d '{"action": "stop"}'
 
-# Resume when needed (faster than creating — model weights are cached on disk)
+# Resume (fast restart — model weights cached on network volume)
 curl -X POST http://localhost:3000/api/art-director/pod \
   -H 'Content-Type: application/json' \
   -d '{"action": "start"}'
@@ -98,16 +80,41 @@ curl -X POST http://localhost:3000/api/art-director/pod \
 
 The dashboard's Art Director modal auto-starts the pod if it's stopped.
 
+## Health Check
+
+```bash
+# Check if vLLM is ready
+curl https://{podId}-8000.proxy.runpod.net/health
+
+# List loaded models (confirms max_model_len)
+curl https://{podId}-8000.proxy.runpod.net/v1/models
+
+# Test inference
+curl https://{podId}-8000.proxy.runpod.net/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+    "messages": [{"role": "user", "content": "Hello, what model are you?"}],
+    "max_tokens": 100
+  }'
+```
+
 ## Troubleshooting
 
-### Model takes long to load
-First boot downloads ~140 GB of model weights. This takes 5-15 minutes depending on network. Subsequent starts with cached weights take 3-5 minutes.
+### First boot is slow
+First deployment downloads ~40GB of AWQ weights. Subsequent starts from the network volume cache take ~160s.
 
 ### OOM errors
-The 72B model requires A100 80GB. It will NOT fit on A100 40GB, A40 (48GB), or RTX 4090 (24GB). Do not change the model — change the GPU.
+The AWQ model fits comfortably on A100 80GB (~40GB). If OOM occurs with `--max-model-len 32768`, fall back to `16384` — still enough for 3-4 images per call.
 
 ### 503 during startup
-vLLM returns 503 while loading the model. The health check endpoint distinguishes this from a genuine failure. Wait and retry.
+vLLM returns 503 while loading the model. The `healthCheck()` function in `qwen-vl-client.ts` distinguishes this from genuine failures. Wait and retry.
 
 ### Token limit errors
-`max-model-len 32768` supports images up to ~4K resolution. If you need higher resolution analysis, reduce `max-model-len` to free VRAM, but this is rarely needed.
+With `--max-model-len 32768`, the model supports ~5 images + full system prompt per call. If you need more images, batch them across multiple calls.
+
+### Why AWQ instead of FP16?
+The FP16 variant (`Qwen2.5-VL-72B-Instruct`) requires ~144GB VRAM — doesn't fit on a single A100 80GB. AWQ provides 4x memory savings with minimal quality loss for this use case (image analysis + structured JSON output).
+
+### Why pinned to v0.8.5?
+Later vLLM versions have compatibility issues with Qwen2.5-VL vision models. The v0.8.5 image is confirmed working.

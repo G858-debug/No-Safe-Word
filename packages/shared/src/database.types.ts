@@ -4732,28 +4732,40 @@ export type Database = {
       nsw_users: {
         Row: {
           auth_user_id: string | null
+          both_channels_bonus: boolean
           created_at: string
           display_name: string | null
           email: string
+          has_email: boolean
+          has_whatsapp: boolean
           id: string
+          phone: string | null
           role: string
           updated_at: string
         }
         Insert: {
           auth_user_id?: string | null
+          both_channels_bonus?: boolean
           created_at?: string
           display_name?: string | null
           email: string
+          has_email?: boolean
+          has_whatsapp?: boolean
           id?: string
+          phone?: string | null
           role?: string
           updated_at?: string
         }
         Update: {
           auth_user_id?: string | null
+          both_channels_bonus?: boolean
           created_at?: string
           display_name?: string | null
           email?: string
+          has_email?: boolean
+          has_whatsapp?: boolean
           id?: string
+          phone?: string | null
           role?: string
           updated_at?: string
         }
@@ -8048,6 +8060,45 @@ export type Database = {
           updated_at?: string | null
           user_id?: string | null
           user_type?: string
+        }
+        Relationships: []
+      }
+      whatsapp_pins: {
+        Row: {
+          attempts: number
+          chapter: number
+          created_at: string
+          expires_at: string
+          id: string
+          locked_until: string | null
+          phone: string
+          pin: string
+          story_slug: string
+          verified_at: string | null
+        }
+        Insert: {
+          attempts?: number
+          chapter: number
+          created_at?: string
+          expires_at: string
+          id?: string
+          locked_until?: string | null
+          phone: string
+          pin: string
+          story_slug: string
+          verified_at?: string | null
+        }
+        Update: {
+          attempts?: number
+          chapter?: number
+          created_at?: string
+          expires_at?: string
+          id?: string
+          locked_until?: string | null
+          phone?: string
+          pin?: string
+          story_slug?: string
+          verified_at?: string | null
         }
         Relationships: []
       }

@@ -32,6 +32,7 @@ import {
   SlidersHorizontal,
   Undo2,
 } from "lucide-react";
+import ArtDirectorModal from "./ArtDirectorModal";
 
 // ---------------------------------------------------------------------------
 // Diagnostic flags for isolating scene generation components
@@ -208,6 +209,14 @@ export default function ImageGeneration({
     new Set()
   );
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [artDirectorPromptId, setArtDirectorPromptId] = useState<string | null>(null);
+  // Sequential Art Director batch queue: list of prompt IDs to process one at a time
+  const [artDirectorQueue, setArtDirectorQueue] = useState<string[]>([]);
+  const [artDirectorQueueIndex, setArtDirectorQueueIndex] = useState(0);
+  // Pod status for cost awareness
+  const [podRunning, setPodRunning] = useState<boolean | null>(null);
+  const [podIdleMinutes, setPodIdleMinutes] = useState(0);
+  const [stoppingPod, setStoppingPod] = useState(false);
 
   // Build a lookup: promptId → position (for pairing indicators)
   const promptPositionMap = useRef<Record<string, number>>({});
@@ -319,6 +328,57 @@ export default function ImageGeneration({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---- Pod cost awareness: check pod status periodically ----
+  const lastGenerationTime = useRef(Date.now());
+  useEffect(() => {
+    async function checkPodStatus() {
+      try {
+        const res = await fetch("/api/art-director/pod");
+        if (!res.ok) return;
+        const data = await res.json();
+        const isRunning = data.status === "running";
+        setPodRunning(isRunning);
+        if (isRunning) {
+          const idleMs = Date.now() - lastGenerationTime.current;
+          setPodIdleMinutes(Math.floor(idleMs / 60000));
+        } else {
+          setPodIdleMinutes(0);
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+
+    checkPodStatus();
+    const interval = setInterval(checkPodStatus, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  // Track when generation activity happens (reset idle timer)
+  useEffect(() => {
+    if (artDirectorPromptId) {
+      lastGenerationTime.current = Date.now();
+      setPodIdleMinutes(0);
+    }
+  }, [artDirectorPromptId]);
+
+  const handleStopPod = useCallback(async () => {
+    setStoppingPod(true);
+    try {
+      await fetch("/api/art-director/pod", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+      });
+      setPodRunning(false);
+      setPodIdleMinutes(0);
+    } catch {
+      // Ignore
+    } finally {
+      setStoppingPod(false);
+    }
+  }, []);
+
   // ---- Helpers ----
 
   const updatePrompt = useCallback(
@@ -424,157 +484,78 @@ export default function ImageGeneration({
 
   // ---- Actions ----
 
+  // OLD PIPELINE — kept for reference. Art Director is now the default for story images.
+  // const handleBatchGenerate_OLD = useCallback(
+  //   async (postId?: string, regenerate?: boolean) => {
+  //     setBatchGenerating(true);
+  //     try {
+  //       const body: Record<string, string | boolean> = {};
+  //       if (postId) body.post_id = postId;
+  //       if (regenerate) body.regenerate = true;
+  //       const res = await fetch(`/api/stories/${seriesId}/generate-images-v4`, {
+  //         method: "POST",
+  //         headers: { "Content-Type": "application/json" },
+  //         body: JSON.stringify(body),
+  //       });
+  //       if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Batch generation failed"); }
+  //       const data = await res.json();
+  //       for (const job of data.jobs || []) {
+  //         if (job.jobId) promptToJobIdRef.current.set(job.promptId, job.jobId);
+  //         updatePrompt(job.promptId, { status: "generating", error: null });
+  //         pollingIdsRef.current.add(job.promptId);
+  //       }
+  //       for (const fail of data.errors || []) {
+  //         updatePrompt(fail.promptId, { status: "failed", error: fail.error });
+  //       }
+  //       if (pollingIdsRef.current.size > 0) setIsPolling(true);
+  //     } catch (err) { console.error("Batch generate error:", err); }
+  //     finally { setBatchGenerating(false); }
+  //   },
+  //   [seriesId, updatePrompt]
+  // );
+
+  /** Open Art Director modal for a batch of pending/failed prompts, one at a time */
   const handleBatchGenerate = useCallback(
-    async (postId?: string, regenerate?: boolean) => {
-      setBatchGenerating(true);
+    (postId?: string, regenerate?: boolean) => {
+      // Collect prompt IDs eligible for generation
+      const eligible: string[] = [];
+      const targetPosts = postId
+        ? posts.filter((p) => p.id === postId)
+        : posts;
 
-      try {
-        const body: Record<string, string | boolean> = {};
-        if (postId) body.post_id = postId;
-        if (regenerate) body.regenerate = true;
-
-        const res = await fetch(
-          `/api/stories/${seriesId}/generate-images-v4`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+      for (const post of targetPosts) {
+        for (const ip of post.story_image_prompts) {
+          const status = promptStates[ip.id]?.status || ip.status;
+          if (
+            status === "pending" ||
+            status === "failed" ||
+            (regenerate && status === "generated")
+          ) {
+            eligible.push(ip.id);
           }
-        );
-
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Batch generation failed");
         }
-
-        const data = await res.json();
-
-        // Async RunPod jobs — poll for completion
-        for (const job of data.jobs || []) {
-          if (job.jobId) {
-            promptToJobIdRef.current.set(job.promptId, job.jobId);
-          }
-          updatePrompt(job.promptId, {
-            status: "generating",
-            error: null,
-          });
-          pollingIdsRef.current.add(job.promptId);
-        }
-
-        // Mark any failures
-        for (const fail of data.errors || []) {
-          updatePrompt(fail.promptId, {
-            status: "failed",
-            error: fail.error,
-          });
-        }
-
-        if (pollingIdsRef.current.size > 0) {
-          setIsPolling(true);
-        }
-      } catch (err) {
-        console.error("Batch generate error:", err);
-      } finally {
-        setBatchGenerating(false);
       }
+
+      if (eligible.length === 0) return;
+
+      // Set up the queue and open the modal for the first one
+      setArtDirectorQueue(eligible);
+      setArtDirectorQueueIndex(0);
+      setArtDirectorPromptId(eligible[0]);
     },
-    [seriesId, updatePrompt]
+    [posts, promptStates]
   );
 
-  /** Build the request body for regeneration, including advanced overrides */
-  const buildRegenerateBody = useCallback((state: PromptState) => {
-    const reqBody: Record<string, unknown> = {};
+  // OLD PIPELINE — kept for reference. Art Director is now the default for story images.
+  // const buildRegenerateBody = useCallback((state: PromptState) => { ... }, []);
+  // const handleRegenerate = useCallback(async (promptId: string) => { ... }, [...]);
 
-    // Diagnostic flags
-    const diagFlags = state.diagnosticFlags;
-    const hasCustomFlags = Object.entries(diagFlags).some(
-      ([k, v]) => v !== DEFAULT_DIAGNOSTIC_FLAGS[k as keyof DiagnosticFlags]
-    );
-    if (hasCustomFlags) reqBody.diagnosticFlags = diagFlags;
-
-    // Seed lock
-    if (state.lockSeed && state.lastSeed) reqBody.seed = state.lastSeed;
-
-    // Raw prompt mode — send edited prompt text directly as booru tags
-    if (state.useRawPrompt && state.promptText) {
-      reqBody.overrideTags = state.promptText;
-    }
-
-    // Negative prompt override (only if user entered something)
-    if (state.negativePrompt) {
-      reqBody.negativePromptOverride = state.negativePrompt;
-    }
-
-    // Profile overrides (only include values that differ from defaults)
-    const profileOverrides: Record<string, number> = {};
-    if (state.charLoraStrengthModel !== DEFAULT_LORA_MODEL) profileOverrides.charLoraStrengthModel = state.charLoraStrengthModel;
-    if (state.charLoraStrengthClip !== DEFAULT_LORA_CLIP) profileOverrides.charLoraStrengthClip = state.charLoraStrengthClip;
-    if (state.cfg !== DEFAULT_CFG) profileOverrides.cfg = state.cfg;
-    if (state.steps !== DEFAULT_STEPS) profileOverrides.steps = state.steps;
-    if (Object.keys(profileOverrides).length > 0) reqBody.profileOverrides = profileOverrides;
-
-    // Two-pass mode
-    if (state.twoPassMode) {
-      reqBody.twoPassMode = state.twoPassMode;
-      if (state.twoPassDenoise !== 0.35) reqBody.twoPassDenoise = state.twoPassDenoise;
-    }
-
-    return reqBody;
-  }, []);
-
+  /** Regenerate now opens the Art Director modal */
   const handleRegenerate = useCallback(
-    async (promptId: string) => {
-      const state = promptStates[promptId];
-      if (!state) return;
-
-      // Save the edited prompt first
-      try {
-        await fetch(`/api/stories/images/${promptId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: state.promptText }),
-        });
-      } catch {
-        // Non-critical — regenerate will use the stored prompt
-      }
-
-      updatePrompt(promptId, {
-        status: "generating",
-        error: null,
-      });
-
-      const reqBody = buildRegenerateBody(state);
-
-      try {
-        const res = await fetch(
-          `/api/stories/images/${promptId}/regenerate`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(reqBody),
-          }
-        );
-
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Regeneration failed");
-        }
-
-        const data = await res.json();
-
-        if (data.jobId) {
-          promptToJobIdRef.current.set(promptId, data.jobId);
-        }
-        pollingIdsRef.current.add(promptId);
-        setIsPolling(true);
-      } catch (err) {
-        updatePrompt(promptId, {
-          status: "failed",
-          error: err instanceof Error ? err.message : "Regeneration failed",
-        });
-      }
+    (promptId: string) => {
+      setArtDirectorPromptId(promptId);
     },
-    [promptStates, updatePrompt, buildRegenerateBody]
+    []
   );
 
   const handleApprove = useCallback(
@@ -820,6 +801,36 @@ export default function ImageGeneration({
           )}
         </div>
 
+        {/* Pod status + cost awareness */}
+        {podRunning && (
+          <div className={`flex items-center gap-3 rounded-lg border px-4 py-2 text-sm ${
+            podIdleMinutes >= 30
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-green-500/20 bg-green-500/5"
+          }`}>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-green-500" />
+              <span className="text-green-400 text-xs font-medium">AI Model: Running</span>
+            </div>
+            {podIdleMinutes >= 30 && (
+              <>
+                <span className="text-xs text-amber-400">
+                  Idle for {podIdleMinutes}min — stop to save costs?
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                  onClick={handleStopPod}
+                  disabled={stoppingPod}
+                >
+                  {stoppingPod ? <Loader2 className="h-3 w-3 animate-spin" /> : "Stop"}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Progress summary */}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
@@ -938,45 +949,12 @@ export default function ImageGeneration({
                             onRegenerate={handleRegenerate}
                             onApprove={handleApprove}
                             onRevert={handleRevert}
-                            onGenerate={async () => {
-                              const pState = promptStates[ip.id];
-                              updatePrompt(ip.id, {
-                                status: "generating",
-                                error: null,
-                              });
-                              try {
-                                const reqBody = pState ? buildRegenerateBody(pState) : {};
-                                const res = await fetch(
-                                  `/api/stories/images/${ip.id}/regenerate`,
-                                  {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify(reqBody),
-                                  }
-                                );
-                                if (!res.ok) {
-                                  const err = await res.json();
-                                  throw new Error(
-                                    err.error || "Generation failed"
-                                  );
-                                }
-                                const data = await res.json();
-                                if (data.jobId) {
-                                  promptToJobIdRef.current.set(ip.id, data.jobId);
-                                }
-                                pollingIdsRef.current.add(ip.id);
-                                setIsPolling(true);
-                              } catch (err) {
-                                updatePrompt(ip.id, {
-                                  status: "failed",
-                                  error:
-                                    err instanceof Error
-                                      ? err.message
-                                      : "Generation failed",
-                                });
-                              }
+                            onGenerate={() => {
+                              // Art Director is now the default — open modal
+                              setArtDirectorPromptId(ip.id);
                             }}
                             onImageClick={setLightboxUrl}
+                            onArtDirector={setArtDirectorPromptId}
                             batchGenerating={batchGenerating}
                           />
                         ))}
@@ -1011,6 +989,64 @@ export default function ImageGeneration({
           />
         </div>
       )}
+
+      {/* ======== ART DIRECTOR MODAL ======== */}
+      {artDirectorPromptId && (() => {
+        // Find the prompt data for the Art Director modal
+        let targetPrompt: ImagePromptData | null = null;
+        for (const post of posts) {
+          for (const ip of post.story_image_prompts) {
+            if (ip.id === artDirectorPromptId) {
+              targetPrompt = ip;
+              break;
+            }
+          }
+          if (targetPrompt) break;
+        }
+
+        if (!targetPrompt) return null;
+
+        const charNames: string[] = [];
+        if (targetPrompt.character_name) charNames.push(targetPrompt.character_name);
+        if (targetPrompt.secondary_character_name) charNames.push(targetPrompt.secondary_character_name);
+
+        const isInBatchQueue = artDirectorQueue.length > 1;
+        const queueTotal = artDirectorQueue.length;
+        const queueCurrent = artDirectorQueueIndex + 1;
+
+        return (
+          <ArtDirectorModal
+            promptId={artDirectorPromptId}
+            promptText={promptStates[artDirectorPromptId]?.promptText || targetPrompt.prompt}
+            imageType={targetPrompt.image_type}
+            characterNames={charNames}
+            seriesId={seriesId}
+            batchProgress={isInBatchQueue ? { current: queueCurrent, total: queueTotal } : undefined}
+            onClose={() => {
+              setArtDirectorPromptId(null);
+              setArtDirectorQueue([]);
+              setArtDirectorQueueIndex(0);
+            }}
+            onComplete={(imageUrl) => {
+              updatePrompt(artDirectorPromptId, {
+                status: "approved",
+                imageUrl,
+              });
+
+              // Auto-advance to next in queue if batch generating
+              if (isInBatchQueue && artDirectorQueueIndex < queueTotal - 1) {
+                const nextIndex = artDirectorQueueIndex + 1;
+                setArtDirectorQueueIndex(nextIndex);
+                setArtDirectorPromptId(artDirectorQueue[nextIndex]);
+              } else {
+                setArtDirectorPromptId(null);
+                setArtDirectorQueue([]);
+                setArtDirectorQueueIndex(0);
+              }
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -1335,6 +1371,7 @@ interface ImageCardProps {
   onRevert: (id: string) => void;
   onGenerate: () => void;
   onImageClick: (url: string) => void;
+  onArtDirector: (promptId: string) => void;
   batchGenerating: boolean;
 }
 
@@ -1350,6 +1387,7 @@ function ImageCard({
   onRevert,
   onGenerate,
   onImageClick,
+  onArtDirector,
   batchGenerating,
 }: ImageCardProps) {
   if (!state) return null;
@@ -1556,11 +1594,12 @@ function ImageCard({
 
           {/* Actions */}
           <div className="flex items-center gap-2 pt-1">
+            {/* Generate / Regenerate — opens Art Director modal */}
             {(isPending || isFailed) && (
               <Button
                 size={isExpanded ? "default" : "sm"}
                 className={isExpanded ? "text-sm" : "h-7 text-xs"}
-                onClick={onGenerate}
+                onClick={() => onArtDirector(ip.id)}
                 disabled={batchGenerating}
               >
                 <Sparkles className="mr-1.5 h-4 w-4" />
@@ -1572,7 +1611,7 @@ function ImageCard({
                 variant="outline"
                 size={isExpanded ? "default" : "sm"}
                 className={isExpanded ? "text-sm" : "h-7 text-xs"}
-                onClick={() => onRegenerate(ip.id)}
+                onClick={() => onArtDirector(ip.id)}
               >
                 <RefreshCw className="mr-1.5 h-4 w-4" />
                 Regenerate

@@ -104,7 +104,7 @@ async function chatCompletion(
     : messages;
 
   const body: Record<string, unknown> = {
-    model: "Qwen/Qwen2.5-VL-72B-Instruct",
+    model: "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
     messages: fullMessages,
     temperature: options.temperature ?? 0.1,
     max_tokens: options.maxTokens ?? 4096,
@@ -243,6 +243,7 @@ export async function ensurePodRunning(): Promise<string> {
   if (!podId) {
     console.log("[Qwen VL] No pod ID set — creating new pod...");
     const { podId: newPodId, endpoint } = await createQwenVLPod();
+    process.env.QWEN_VL_POD_ID = newPodId;
     console.log(`[Qwen VL] Created pod ${newPodId}. Set QWEN_VL_POD_ID=${newPodId} in .env.local`);
     return endpoint;
   }
@@ -256,8 +257,20 @@ export async function ensurePodRunning(): Promise<string> {
 
     if (status.desiredStatus === "EXITED") {
       console.log(`[Qwen VL] Pod ${podId} is stopped — resuming...`);
-      await startPod(podId);
-      return getPodEndpoint(podId);
+      try {
+        await startPod(podId);
+        return getPodEndpoint(podId);
+      } catch (resumeErr) {
+        // If resume fails (e.g. "not enough free GPUs"), create a new pod
+        const msg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+        if (msg.includes("not enough free GPUs") || msg.includes("RUNPOD")) {
+          console.log(`[Qwen VL] Resume failed (${msg.slice(0, 80)}). Creating new pod...`);
+          const { podId: newPodId, endpoint } = await createQwenVLPod();
+          process.env.QWEN_VL_POD_ID = newPodId;
+          return endpoint;
+        }
+        throw resumeErr;
+      }
     }
 
     // Pod might be starting up
@@ -268,7 +281,8 @@ export async function ensurePodRunning(): Promise<string> {
 
     // Terminated or unknown — create a new one
     console.log(`[Qwen VL] Pod ${podId} is ${status.desiredStatus} — creating new pod...`);
-    const { endpoint } = await createQwenVLPod();
+    const { podId: newPodId, endpoint } = await createQwenVLPod();
+    process.env.QWEN_VL_POD_ID = newPodId;
     return endpoint;
   } catch (err) {
     console.error(`[Qwen VL] Error checking pod ${podId}:`, err);
@@ -277,24 +291,77 @@ export async function ensurePodRunning(): Promise<string> {
 }
 
 /**
- * Parse JSON from a Qwen VL response, stripping markdown fences if present.
- * Throws a descriptive error with the raw text if parsing fails.
+ * Parse JSON from a Qwen VL response.
+ *
+ * Handles common Qwen VL quirks:
+ * - Markdown code fences wrapping the JSON
+ * - Preamble text before the JSON object/array
+ * - Trailing text after the JSON
  */
 export function parseJsonResponse<T>(response: QwenVLResponse, label?: string): T {
   let text = response.content.trim();
 
   // Strip markdown code fences
-  if (text.startsWith("```")) {
-    text = text.replace(/^```(?:json)?\s*/m, "").replace(/\s*```\s*$/m, "").trim();
+  text = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+
+  // Find the first { or [ — skip any preamble text
+  const firstBrace = text.indexOf("{");
+  const firstBracket = text.indexOf("[");
+
+  let jsonStart: number;
+  if (firstBrace === -1 && firstBracket === -1) {
+    throw new Error(
+      `No JSON found in Qwen VL response${label ? ` (${label})` : ""}: ${text.slice(0, 200)}`
+    );
+  } else if (firstBrace === -1) {
+    jsonStart = firstBracket;
+  } else if (firstBracket === -1) {
+    jsonStart = firstBrace;
+  } else {
+    jsonStart = Math.min(firstBrace, firstBracket);
   }
 
-  try {
-    return JSON.parse(text) as T;
-  } catch (err) {
-    const preview = text.slice(0, 500);
-    const step = label ? ` (${label})` : "";
+  // Find the matching closing brace/bracket
+  const opener = text[jsonStart];
+  const closer = opener === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let jsonEnd = -1;
+
+  for (let i = jsonStart; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === opener) depth++;
+    if (ch === closer) depth--;
+    if (depth === 0) { jsonEnd = i + 1; break; }
+  }
+
+  if (jsonEnd === -1) {
     throw new Error(
-      `Failed to parse Qwen VL JSON response${step}: ${err instanceof Error ? err.message : "parse error"}. Raw text: ${preview}`
+      `Unclosed JSON in Qwen VL response${label ? ` (${label})` : ""}: ${text.slice(0, 300)}`
     );
   }
+
+  const jsonStr = text.substring(jsonStart, jsonEnd);
+
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch (err) {
+    throw new Error(
+      `Invalid JSON in Qwen VL response${label ? ` (${label})` : ""}: ${err instanceof Error ? err.message : "parse error"}. Raw: ${jsonStr.slice(0, 300)}`
+    );
+  }
+}
+
+/**
+ * Ensure a parsed value is an array. Wraps single objects in an array.
+ * Used for Qwen VL responses that should be arrays but sometimes come back
+ * as single objects (e.g., reference rankings).
+ */
+export function ensureArray<T>(value: T | T[]): T[] {
+  return Array.isArray(value) ? value : [value];
 }

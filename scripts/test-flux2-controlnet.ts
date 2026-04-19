@@ -163,6 +163,7 @@ function pulidNodes(thaboImg: string, nalediImg: string): Record<string, any> {
     "44": { class_type: "ApplyPulidFlux", inputs: { model: ["1", 0], pulid_flux: ["40", 0], eva_clip: ["41", 0], face_analysis: ["42", 0], image: ["43", 0], weight: PULID_WEIGHT, start_at: 0.0, end_at: 1.0 } },
     "45": { class_type: "LoadImage", inputs: { image: nalediImg } },
     "46": { class_type: "ApplyPulidFlux", inputs: { model: ["44", 0], pulid_flux: ["40", 0], eva_clip: ["41", 0], face_analysis: ["42", 0], image: ["45", 0], weight: PULID_WEIGHT, start_at: 0.0, end_at: 1.0 } },
+    "47": { class_type: "FixPulidFluxPatch", inputs: { model: ["46", 0] } },
   };
 }
 
@@ -171,8 +172,8 @@ function buildPulidOnlyWorkflow(prompt: string, seed: number, thaboImg: string, 
     ...buildBaselineWorkflow(prompt, seed),
     ...pulidNodes(thaboImg, nalediImg),
     // Override sampling to use PuLID-modified model
-    "9": { class_type: "BetaSamplingScheduler", inputs: { model: ["46", 0], steps: STEPS, alpha: 0.6, beta: 0.95 } },
-    "10": { class_type: "BasicGuider", inputs: { model: ["46", 0], conditioning: ["5", 0] } },
+    "9": { class_type: "BetaSamplingScheduler", inputs: { model: ["47", 0], steps: STEPS, alpha: 0.6, beta: 0.95 } },
+    "10": { class_type: "BasicGuider", inputs: { model: ["47", 0], conditioning: ["5", 0] } },
   };
 }
 
@@ -206,8 +207,8 @@ function buildPulidPoseWorkflow(prompt: string, seed: number, thaboImg: string, 
     "7": { class_type: "EmptyFlux2LatentImage", inputs: { width: WIDTH, height: HEIGHT, batch_size: 1 } },
     "8": { class_type: "RandomNoise", inputs: { noise_seed: seed } },
     "9": { class_type: "KSamplerSelect", inputs: { sampler_name: SAMPLER } },
-    "10": { class_type: "BetaSamplingScheduler", inputs: { model: ["46", 0], steps: STEPS, alpha: 0.6, beta: 0.95 } },
-    "11": { class_type: "BasicGuider", inputs: { model: ["46", 0], conditioning: ["6", 0] } },
+    "10": { class_type: "BetaSamplingScheduler", inputs: { model: ["47", 0], steps: STEPS, alpha: 0.6, beta: 0.95 } },
+    "11": { class_type: "BasicGuider", inputs: { model: ["47", 0], conditioning: ["6", 0] } },
     "12": { class_type: "SamplerCustomAdvanced", inputs: { noise: ["8", 0], guider: ["11", 0], sampler: ["9", 0], sigmas: ["10", 0], latent_image: ["7", 0] } },
     "13": { class_type: "VAEDecode", inputs: { samples: ["12", 0], vae: ["3", 0] } },
     "14": { class_type: "SaveImage", inputs: { images: ["13", 0], filename_prefix: "flux2" } },

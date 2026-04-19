@@ -9,12 +9,14 @@
 const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
 const GQL_URL = `https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}`;
 
-// vLLM Docker image with OpenAI-compatible API
-const VLLM_DOCKER_IMAGE = "vllm/vllm-openai:latest";
+// vLLM Docker image — pinned to v0.8.5 (confirmed working with Qwen2.5-VL vision models)
+const VLLM_DOCKER_IMAGE = "vllm/vllm-openai:v0.8.5";
 
-// Qwen 2.5 VL 72B needs ~75 GB VRAM in FP16
-const QWEN_MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct";
+// Qwen 2.5 VL 72B AWQ — 4-bit quantized, fits in ~40GB VRAM on a single A100 80GB.
+// The FP16 variant (144GB) OOMs on A100 80GB. AWQ preserves quality with 4x memory savings.
+const QWEN_MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct-AWQ";
 const REQUIRED_VRAM_GB = 80;
+const GPU_COUNT = 1;
 
 // GPU allow-list — only A100 80GB variants have enough VRAM
 const ALLOWED_GPU_IDS = [
@@ -102,7 +104,7 @@ export async function createQwenVLPod(): Promise<{ podId: string; endpoint: stri
               startSsh: false
               containerDiskInGb: 150
               ${volumeClause}
-              dockerArgs: "--model ${QWEN_MODEL_ID} --max-model-len 32768 --tensor-parallel-size 1 --trust-remote-code --dtype auto --gpu-memory-utilization 0.95"
+              dockerArgs: "--model ${QWEN_MODEL_ID} --max-model-len 32768 --tensor-parallel-size ${GPU_COUNT} --trust-remote-code --gpu-memory-utilization 0.90 --enforce-eager --limit-mm-per-prompt image=5"
               ports: "8000/http"
               env: [
                 { key: "HUGGING_FACE_HUB_TOKEN", value: "${process.env.HUGGINGFACE_TOKEN || ""}" }

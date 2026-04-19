@@ -79,6 +79,8 @@ interface ArtDirectorModalProps {
   imageType: string;
   characterNames: string[];
   seriesId: string;
+  /** When in batch mode, shows progress indicator */
+  batchProgress?: { current: number; total: number };
   onClose: () => void;
   onComplete: (imageUrl: string) => void;
 }
@@ -106,6 +108,7 @@ export default function ArtDirectorModal({
   imageType,
   characterNames,
   seriesId,
+  batchProgress,
   onClose,
   onComplete,
 }: ArtDirectorModalProps) {
@@ -121,37 +124,118 @@ export default function ArtDirectorModal({
   const [finalImageUrl, setFinalImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [podStatus, setPodStatus] = useState<"checking" | "running" | "starting" | "stopped" | "error">("checking");
+  const [podStartMessage, setPodStartMessage] = useState<string | null>(null);
   const [selectedIterationIdx, setSelectedIterationIdx] = useState<number | null>(null);
   const [approving, setApproving] = useState(false);
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const podPollRef = useRef<NodeJS.Timeout | null>(null);
+  const podReadyRef = useRef(false);
 
-  // ── Pod status check on mount ──
+  // ── Pod auto-start on mount ──
   useEffect(() => {
-    async function checkPod() {
+    let cancelled = false;
+    let pollCount = 0;
+    const MAX_POD_POLLS = 30; // 30 * 10s = 5 minutes
+
+    async function checkAndStartPod() {
       try {
         const res = await fetch("/api/art-director/pod");
         const data = await res.json();
+
         if (data.status === "running" && data.modelStatus === "ok") {
           setPodStatus("running");
-        } else if (data.status === "running") {
-          setPodStatus("starting"); // Pod running but model loading
-        } else if (data.podId) {
-          setPodStatus("stopped");
-        } else {
-          setPodStatus("stopped");
+          podReadyRef.current = true;
+          return; // Pod is ready — proceed to analysis
+        }
+
+        if (data.status === "running") {
+          // Pod running but model still loading
+          setPodStatus("starting");
+          setPodStartMessage("AI model is loading... Almost ready.");
+          startPodPolling();
+          return;
+        }
+
+        // Pod is stopped or doesn't exist — auto-start it
+        setPodStatus("starting");
+        setPodStartMessage("Starting AI model... This takes about 2-3 minutes on first use.");
+
+        try {
+          const startRes = await fetch("/api/art-director/pod", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: data.podId ? "start" : "create" }),
+          });
+
+          if (!startRes.ok) {
+            const err = await startRes.json();
+            throw new Error(err.error || "Failed to start pod");
+          }
+
+          startPodPolling();
+        } catch (err) {
+          if (!cancelled) {
+            setPodStatus("error");
+            setPodStartMessage(
+              err instanceof Error ? err.message : "Failed to start AI model"
+            );
+          }
         }
       } catch {
-        setPodStatus("error");
+        if (!cancelled) {
+          setPodStatus("error");
+          setPodStartMessage("Could not check AI model status");
+        }
       }
     }
-    checkPod();
+
+    function startPodPolling() {
+      podPollRef.current = setInterval(async () => {
+        if (cancelled || podReadyRef.current) {
+          if (podPollRef.current) clearInterval(podPollRef.current);
+          return;
+        }
+
+        pollCount++;
+        if (pollCount > MAX_POD_POLLS) {
+          if (podPollRef.current) clearInterval(podPollRef.current);
+          setPodStatus("error");
+          setPodStartMessage("AI model failed to start within 5 minutes. Click Retry to try again.");
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/art-director/pod");
+          const data = await res.json();
+
+          if (data.status === "running" && data.modelStatus === "ok") {
+            if (podPollRef.current) clearInterval(podPollRef.current);
+            setPodStatus("running");
+            setPodStartMessage(null);
+            podReadyRef.current = true;
+          } else if (data.status === "running") {
+            setPodStartMessage("AI model is loading... Almost ready.");
+          }
+        } catch {
+          // Non-fatal polling error — keep trying
+        }
+      }, 10000);
+    }
+
+    checkAndStartPod();
+
+    return () => {
+      cancelled = true;
+      if (podPollRef.current) clearInterval(podPollRef.current);
+    };
   }, []);
 
   // ── Cleanup polling on unmount ──
   useEffect(() => {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
+      if (podPollRef.current) clearInterval(podPollRef.current);
     };
   }, []);
 
@@ -189,10 +273,14 @@ export default function ArtDirectorModal({
     }
   }, [promptId, promptText, imageType, characterNames, seriesId]);
 
-  // Auto-start analysis on mount
+  // Auto-start analysis once pod is ready
+  const hasStartedAnalysis = useRef(false);
   useEffect(() => {
-    handleAnalyze();
-  }, [handleAnalyze]);
+    if (podStatus === "running" && !hasStartedAnalysis.current && step === "idle") {
+      hasStartedAnalysis.current = true;
+      handleAnalyze();
+    }
+  }, [podStatus, step, handleAnalyze]);
 
   // ── Step 4: Select reference ──
   const handleSelectReference = async () => {
@@ -338,7 +426,12 @@ export default function ArtDirectorModal({
         <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
           <div className="flex items-center gap-3">
             <Palette className="h-5 w-5 text-violet-400" />
-            <h2 className="text-lg font-semibold">Art Director</h2>
+            <h2 className="text-lg font-semibold">Generate Image</h2>
+            {batchProgress && (
+              <Badge variant="outline" className="text-xs text-violet-400 border-violet-500/30">
+                Image {batchProgress.current} of {batchProgress.total}
+              </Badge>
+            )}
             {/* Pod status indicator */}
             <div className="flex items-center gap-1.5">
               <div
@@ -354,12 +447,12 @@ export default function ArtDirectorModal({
               />
               <span className="text-xs text-muted-foreground">
                 {podStatus === "running"
-                  ? "Qwen VL Ready"
+                  ? "AI Ready"
                   : podStatus === "starting"
-                    ? "Model Loading..."
+                    ? "Starting..."
                     : podStatus === "checking"
                       ? "Checking..."
-                      : "Pod Offline"}
+                      : "Offline"}
               </span>
             </div>
           </div>
@@ -379,13 +472,50 @@ export default function ArtDirectorModal({
             <p className="text-sm text-zinc-300">{promptText}</p>
           </div>
 
+          {/* ── Pod Starting ── */}
+          {step === "idle" && (podStatus === "starting" || podStatus === "checking") && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="mb-4 h-10 w-10 animate-spin text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">Starting AI Model</h3>
+              <p className="text-sm text-muted-foreground max-w-md text-center">
+                {podStartMessage || "Starting AI model... This takes about 2-3 minutes on first use."}
+              </p>
+            </div>
+          )}
+
+          {/* ── Pod Error ── */}
+          {step === "idle" && podStatus === "error" && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <AlertCircle className="mb-4 h-10 w-10 text-red-400" />
+              <h3 className="mb-2 text-lg font-semibold">Failed to Start AI Model</h3>
+              <p className="text-sm text-red-400 max-w-md text-center">
+                {podStartMessage || "Could not start the AI model."}
+              </p>
+              <Button
+                variant="outline"
+                className="mt-6"
+                onClick={() => {
+                  setPodStatus("checking");
+                  setPodStartMessage("Retrying...");
+                  podReadyRef.current = false;
+                  hasStartedAnalysis.current = false;
+                  // Re-trigger the mount effect by forcing a state change
+                  window.location.reload();
+                }}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Retry
+              </Button>
+            </div>
+          )}
+
           {/* ── Analyzing ── */}
           {step === "analyzing" && (
             <div className="flex flex-col items-center justify-center py-16">
               <Loader2 className="mb-4 h-10 w-10 animate-spin text-violet-400" />
               <h3 className="mb-2 text-lg font-semibold">Analyzing Scene</h3>
               <p className="text-sm text-muted-foreground max-w-md text-center">
-                Qwen VL is analyzing the prompt intent and searching CivitAI for reference images.
+                Analyzing prompt intent and searching CivitAI for reference images.
                 This takes 30-60 seconds.
               </p>
             </div>

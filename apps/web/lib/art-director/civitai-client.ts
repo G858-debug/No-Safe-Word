@@ -74,20 +74,43 @@ export async function searchCivitAIImages(
   if (params.modelId) url.searchParams.set("modelId", String(params.modelId));
   if (params.modelVersionId) url.searchParams.set("modelVersionId", String(params.modelVersionId));
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
+  // Retry with backoff for 500/503/429 errors
+  const SEARCH_RETRY_DELAYS = [3000, 8000, 20000];
+  let lastSearchError: Error | null = null;
+  let data: any = null;
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`[CivitAI Images] Search failed: ${res.status}`, text);
-    throw new Error(`CivitAI image search failed: ${res.status}`);
+  for (let attempt = 0; attempt <= SEARCH_RETRY_DELAYS.length; attempt++) {
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        const isRetryable = res.status >= 500 || res.status === 429;
+        if (!isRetryable || attempt >= SEARCH_RETRY_DELAYS.length) {
+          console.error(`[CivitAI Images] Search failed: ${res.status}`, text);
+          throw new Error(`CivitAI image search failed: ${res.status}`);
+        }
+        throw new Error(`CivitAI ${res.status}: ${text.slice(0, 100)}`);
+      }
+
+      data = await res.json();
+      break; // Success
+    } catch (err) {
+      lastSearchError = err instanceof Error ? err : new Error(String(err));
+      if (attempt >= SEARCH_RETRY_DELAYS.length) throw lastSearchError;
+
+      const delay = SEARCH_RETRY_DELAYS[attempt];
+      console.warn(`[CivitAI Images] Search attempt ${attempt + 1} failed, retrying in ${delay / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
   }
 
-  const data = await res.json();
+  if (!data) throw lastSearchError || new Error("CivitAI search failed");
 
   return ((data.items || []) as any[]).map((item) => ({
     id: item.id,
@@ -162,6 +185,114 @@ export async function searchMultipleQueries(
   return allResults;
 }
 
+// ── Scheduler Normalization ──
+
+// CivitAI SDK expects its Scheduler enum values, but Qwen VL and CivitAI
+// image metadata use human-readable names. This map handles both directions.
+const SCHEDULER_MAP: Record<string, string> = {
+  // DPM++ variants (human-readable -> SDK enum)
+  "DPM++ 2M Karras": "DPM2MKarras",
+  "DPM++ 2M SDE Karras": "DPMSDEKarras",
+  "DPM++ SDE Karras": "DPMSDEKarras",
+  "DPM++ 2M": "DPM2M",
+  "DPM++ 2M SDE": "DPMSDE",
+  "DPM++ SDE": "DPMSDE",
+  "DPM++ 2S a Karras": "DPM2SAKarras",
+  "DPM++ 2S a": "DPM2SA",
+  "DPM++ 2 a Karras": "DPM2AKarras",
+  "DPM++ 2 a": "DPM2A",
+  "DPM2 Karras": "DPM2Karras",
+  "DPM2 a Karras": "DPM2AKarras",
+  "DPM adaptive": "DPMAdaptive",
+  "DPM fast": "DPMFast",
+  // Euler variants
+  "Euler a": "EulerA",
+  "Euler": "Euler",
+  // Others
+  "Heun": "Heun",
+  "Heun Karras": "Heun",
+  "LMS": "LMS",
+  "LMS Karras": "LMSKarras",
+  "DDIM": "DDIM",
+  "DDPM": "DDPM",
+  "PLMS": "PLMS",
+  "UniPC": "UniPC",
+  "LCM": "LCM",
+  "DEIS": "DEIS",
+};
+
+// All valid CivitAI Scheduler enum values for pass-through check
+const VALID_SCHEDULERS = new Set([
+  "EulerA", "Euler", "LMS", "Heun", "DPM2", "DPM2A", "DPM2SA", "DPM2M",
+  "DPMSDE", "DPMFast", "DPMAdaptive", "LMSKarras", "DPM2Karras",
+  "DPM2AKarras", "DPM2SAKarras", "DPM2MKarras", "DPMSDEKarras",
+  "DDIM", "PLMS", "UniPC", "Undefined", "LCM", "DDPM", "DEIS",
+]);
+
+/**
+ * Normalize a scheduler/sampler name to CivitAI's Scheduler enum value.
+ * Handles human-readable names from Qwen VL, CivitAI metadata, and A1111.
+ */
+export function normalizeScheduler(raw: string): string {
+  // Already a valid enum value — pass through
+  if (VALID_SCHEDULERS.has(raw)) return raw;
+
+  // Direct lookup
+  if (SCHEDULER_MAP[raw]) return SCHEDULER_MAP[raw];
+
+  // Case-insensitive match
+  const lower = raw.toLowerCase();
+  for (const [key, value] of Object.entries(SCHEDULER_MAP)) {
+    if (key.toLowerCase() === lower) return value;
+  }
+
+  // Fuzzy: strip non-alphanumeric and compare
+  const stripped = raw.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  for (const [key, value] of Object.entries(SCHEDULER_MAP)) {
+    if (key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() === stripped) return value;
+  }
+
+  console.warn(`[CivitAI] Unknown scheduler "${raw}" — defaulting to EulerA`);
+  return "EulerA";
+}
+
+// ── Dimension Validation ──
+
+// Valid SDXL resolutions accepted by CivitAI generation API
+const VALID_SDXL_DIMENSIONS: Array<[number, number]> = [
+  [1024, 1024],
+  [832, 1216], [1216, 832],
+  [768, 1344], [1344, 768],
+  [896, 1152], [1152, 896],
+];
+
+/**
+ * Clamp dimensions to the nearest valid SDXL resolution.
+ * Non-standard resolutions (e.g. 1328x1328 from Pony recipes) cause CivitAI 500 errors.
+ */
+function clampToValidDimensions(width: number, height: number): { width: number; height: number } {
+  // Check if already valid
+  if (VALID_SDXL_DIMENSIONS.some(([w, h]) => w === width && h === height)) {
+    return { width, height };
+  }
+
+  // Find closest by aspect ratio
+  const targetRatio = width / height;
+  let best = VALID_SDXL_DIMENSIONS[0];
+  let bestDiff = Infinity;
+
+  for (const [w, h] of VALID_SDXL_DIMENSIONS) {
+    const diff = Math.abs(w / h - targetRatio);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = [w, h];
+    }
+  }
+
+  console.log(`[CivitAI] Clamped non-standard ${width}x${height} to ${best[0]}x${best[1]}`);
+  return { width: best[0], height: best[1] };
+}
+
 // ── Part B: Image Generation ──
 
 export interface GenerationParams {
@@ -189,16 +320,19 @@ export async function generateViaCivitAI(
   const token = getCivitaiToken();
   const civitai = new Civitai({ auth: token });
 
+  // Clamp to valid SDXL dimensions
+  const dims = clampToValidDimensions(params.width || 832, params.height || 1216);
+
   const payload = {
     model: params.model,
     params: {
       prompt: params.prompt,
       negativePrompt: params.negativePrompt || "",
-      scheduler: (params.scheduler || "EulerA") as Scheduler,
+      scheduler: normalizeScheduler(params.scheduler || "EulerA") as Scheduler,
       steps: params.steps || 30,
       cfgScale: params.cfgScale || 7,
-      width: params.width || 832,
-      height: params.height || 1216,
+      width: dims.width,
+      height: dims.height,
       seed: params.seed ?? -1,
       clipSkip: params.clipSkip || 1,
     },
@@ -214,14 +348,44 @@ export async function generateViaCivitAI(
     size: `${payload.params.width}x${payload.params.height}`,
   }));
 
-  const result = await civitai.image.fromText(payload, false);
-  const jobResult = result as { token?: string; jobs?: any[] };
+  // Retry with exponential backoff for network/fetch failures
+  const RETRY_DELAYS = [5000, 15000, 45000]; // 5s, 15s, 45s
+  let lastError: Error | null = null;
 
-  if (!jobResult.token) {
-    throw new Error("No job token returned from CivitAI");
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      const result = await civitai.image.fromText(payload, false);
+      const jobResult = result as { token?: string; jobs?: any[] };
+
+      if (!jobResult.token) {
+        throw new Error("No job token returned from CivitAI");
+      }
+
+      return { token: jobResult.token, jobs: jobResult.jobs || [] };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const isRetryable =
+        lastError.message.includes("fetch failed") ||
+        lastError.message.includes("ECONNRESET") ||
+        lastError.message.includes("ETIMEDOUT") ||
+        lastError.message.includes("socket hang up") ||
+        lastError.message.includes("network") ||
+        lastError.message.includes("503") ||
+        lastError.message.includes("429");
+
+      if (!isRetryable || attempt >= RETRY_DELAYS.length) {
+        throw lastError;
+      }
+
+      const delay = RETRY_DELAYS[attempt];
+      console.warn(
+        `[Art Director CivitAI] Generation attempt ${attempt + 1} failed: ${lastError.message}. Retrying in ${delay / 1000}s...`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
   }
 
-  return { token: jobResult.token, jobs: jobResult.jobs || [] };
+  throw lastError || new Error("CivitAI generation failed after retries");
 }
 
 const FAILURE_EVENTS = new Set([
@@ -288,7 +452,7 @@ export async function pollCivitAIJob(jobToken: string): Promise<{
  */
 export async function waitForCivitAIJob(
   jobToken: string,
-  timeoutMs: number = 300_000, // 5 minutes
+  timeoutMs: number = 600_000, // 10 minutes — CivitAI queue can be slow
   pollIntervalMs: number = 4_000
 ): Promise<{ url: string; seed: number; cost: number }> {
   const startTime = Date.now();
