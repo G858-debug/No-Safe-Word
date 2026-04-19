@@ -59,7 +59,14 @@ export async function GET(
     }
 
     const runpodJobId = jobId.startsWith("runpod-") ? jobId.replace("runpod-", "") : jobId;
-    const status = await getRunPodJobStatus(runpodJobId);
+    // Flux 2 Dev jobs run on a separate RunPod serverless endpoint from
+    // the legacy Juggernaut endpoint. The image's settings.model tells
+    // us which — poll the matching endpoint or the status lookup 404s.
+    const modelSetting =
+      typeof settings.model === "string" ? (settings.model as string) : undefined;
+    const endpointOverride =
+      modelSetting === "flux2_dev" ? process.env.RUNPOD_FLUX2_ENDPOINT_ID : undefined;
+    const status = await getRunPodJobStatus(runpodJobId, endpointOverride);
 
     if (status.status === "COMPLETED") {
       console.log(`[StoryPublisher] RunPod job COMPLETED: ${runpodJobId}`);

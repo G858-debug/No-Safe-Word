@@ -99,3 +99,32 @@ export type { LoraTrainingConfig } from './lora-trainer';
 // RunPod Pod API (batch GPU jobs — LoRA training)
 export { createTrainingPod, getTrainingPodStatus, terminateTrainingPod } from './runpod-pods';
 export type { TrainingPodConfig, PodStatus, PodDesiredStatus } from './runpod-pods';
+
+// Replicate client (HunyuanImage 3.0)
+export { getReplicateClient } from './replicate-client';
+export {
+  generateHunyuanImage,
+  assembleHunyuanPrompt,
+  VISUAL_SIGNATURE,
+} from './hunyuan-generator';
+export type {
+  HunyuanGenerateOptions,
+  HunyuanGenerateResult,
+} from './hunyuan-generator';
+
+// Shared portrait prompt builder (both flux2_dev + hunyuan3)
+export { buildCharacterPortraitPrompt } from './portrait-prompt-builder';
+export type { PortraitCharacterDescription } from './portrait-prompt-builder';
+
+// Flux 2 Dev workflow + generator (ComfyUI on RunPod, separate endpoint)
+export { buildFlux2Workflow } from './flux2-workflow-builder';
+export type {
+  Flux2WorkflowOptions,
+  Flux2ReferenceImage,
+  Flux2ControlNetConfig,
+} from './flux2-workflow-builder';
+export { generateFlux2Image, assembleFlux2Prompt } from './flux2-generator';
+export type {
+  Flux2GenerateOptions,
+  Flux2GenerateResult,
+} from './flux2-generator';

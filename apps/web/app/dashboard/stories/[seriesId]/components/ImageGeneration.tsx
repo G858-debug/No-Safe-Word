@@ -32,7 +32,18 @@ import {
   SlidersHorizontal,
   Undo2,
 } from "lucide-react";
-import ArtDirectorModal from "./ArtDirectorModal";
+// ══════════════════════════════════════════════════════════════
+// ART DIRECTOR — DEACTIVATED 2026-04-19
+// The Art Director pipeline (Qwen VL + CivitAI search + iterative
+// generation) has been replaced by direct model generation (Flux 2
+// Dev / HunyuanImage 3.0) via /api/stories/[seriesId]/generate-image.
+// Code preserved for potential reactivation. See /api/art-director/*
+// routes and ./ArtDirectorModal for the original implementation.
+// To reactivate: restore the import below, restore the state +
+// handlers guarded by the "ART DIRECTOR" markers, and restore the
+// <ArtDirectorModal /> render block further down.
+// ══════════════════════════════════════════════════════════════
+// import ArtDirectorModal from "./ArtDirectorModal";
 
 // ---------------------------------------------------------------------------
 // Diagnostic flags for isolating scene generation components
@@ -209,14 +220,10 @@ export default function ImageGeneration({
     new Set()
   );
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-  const [artDirectorPromptId, setArtDirectorPromptId] = useState<string | null>(null);
-  // Sequential Art Director batch queue: list of prompt IDs to process one at a time
-  const [artDirectorQueue, setArtDirectorQueue] = useState<string[]>([]);
-  const [artDirectorQueueIndex, setArtDirectorQueueIndex] = useState(0);
-  // Pod status for cost awareness
-  const [podRunning, setPodRunning] = useState<boolean | null>(null);
-  const [podIdleMinutes, setPodIdleMinutes] = useState(0);
-  const [stoppingPod, setStoppingPod] = useState(false);
+  // ART DIRECTOR — DEACTIVATED 2026-04-19 (see header comment)
+  // Sequential batch progress tracked via `batchProgress` instead of the
+  // Art Director queue.
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Build a lookup: promptId → position (for pairing indicators)
   const promptPositionMap = useRef<Record<string, number>>({});
@@ -328,56 +335,11 @@ export default function ImageGeneration({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Pod cost awareness: check pod status periodically ----
-  const lastGenerationTime = useRef(Date.now());
-  useEffect(() => {
-    async function checkPodStatus() {
-      try {
-        const res = await fetch("/api/art-director/pod");
-        if (!res.ok) return;
-        const data = await res.json();
-        const isRunning = data.status === "running";
-        setPodRunning(isRunning);
-        if (isRunning) {
-          const idleMs = Date.now() - lastGenerationTime.current;
-          setPodIdleMinutes(Math.floor(idleMs / 60000));
-        } else {
-          setPodIdleMinutes(0);
-        }
-      } catch {
-        // Non-critical
-      }
-    }
-
-    checkPodStatus();
-    const interval = setInterval(checkPodStatus, 60000); // Check every minute
-    return () => clearInterval(interval);
-  }, []);
-
-  // Track when generation activity happens (reset idle timer)
-  useEffect(() => {
-    if (artDirectorPromptId) {
-      lastGenerationTime.current = Date.now();
-      setPodIdleMinutes(0);
-    }
-  }, [artDirectorPromptId]);
-
-  const handleStopPod = useCallback(async () => {
-    setStoppingPod(true);
-    try {
-      await fetch("/api/art-director/pod", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "stop" }),
-      });
-      setPodRunning(false);
-      setPodIdleMinutes(0);
-    } catch {
-      // Ignore
-    } finally {
-      setStoppingPod(false);
-    }
-  }, []);
+  // ART DIRECTOR POD MANAGEMENT — DEACTIVATED 2026-04-19
+  // The Qwen VL pod is no longer involved in image generation, so
+  // polling /api/art-director/pod and the idle-cost banner are gone.
+  // The pod route itself still works; use it manually if you need to
+  // stop a running pod (e.g. POST /api/art-director/pod { action: "stop" }).
 
   // ---- Helpers ----
 
@@ -514,15 +476,72 @@ export default function ImageGeneration({
   //   [seriesId, updatePrompt]
   // );
 
-  /** Open Art Director modal for a batch of pending/failed prompts, one at a time */
-  const handleBatchGenerate = useCallback(
-    (postId?: string, regenerate?: boolean) => {
-      // Collect prompt IDs eligible for generation
-      const eligible: string[] = [];
-      const targetPosts = postId
-        ? posts.filter((p) => p.id === postId)
-        : posts;
+  /**
+   * Generate a single image via the unified model-dispatching route.
+   * Works for both flux2_dev and hunyuan3 — the route handles model
+   * dispatch server-side based on story_series.image_model.
+   */
+  const generateOne = useCallback(
+    async (promptId: string): Promise<void> => {
+      updatePrompt(promptId, { status: "generating", error: null });
+      try {
+        const res = await fetch(
+          `/api/stories/${seriesId}/generate-image`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ promptId }),
+          }
+        );
+        const data = await res.json().catch(() => ({}));
 
+        if (!res.ok) {
+          const msg =
+            data?.error ??
+            (res.status === 501
+              ? "Generation backend not yet implemented"
+              : "Generation failed");
+          updatePrompt(promptId, { status: "failed", error: msg });
+          return;
+        }
+
+        // Sync success path (Replicate-style) — response includes image URL.
+        if (data?.imageUrl) {
+          updatePrompt(promptId, {
+            status: "generated",
+            imageUrl: data.imageUrl,
+            error: null,
+          });
+          return;
+        }
+
+        // Async success path (RunPod-style) — response includes jobId to poll.
+        if (data?.jobId) {
+          promptToJobIdRef.current.set(promptId, data.jobId);
+          pollingIdsRef.current.add(promptId);
+          setIsPolling(true);
+          return;
+        }
+
+        updatePrompt(promptId, {
+          status: "failed",
+          error: "Generation response missing imageUrl/jobId",
+        });
+      } catch (err) {
+        updatePrompt(promptId, {
+          status: "failed",
+          error: err instanceof Error ? err.message : "Generation failed",
+        });
+      }
+    },
+    [seriesId, updatePrompt]
+  );
+
+  /** Generate all eligible prompts sequentially. */
+  const handleBatchGenerate = useCallback(
+    async (postId?: string, regenerate?: boolean) => {
+      const eligible: string[] = [];
+      const targetPosts = postId ? posts.filter((p) => p.id === postId) : posts;
       for (const post of targetPosts) {
         for (const ip of post.story_image_prompts) {
           const status = promptStates[ip.id]?.status || ip.status;
@@ -538,24 +557,26 @@ export default function ImageGeneration({
 
       if (eligible.length === 0) return;
 
-      // Set up the queue and open the modal for the first one
-      setArtDirectorQueue(eligible);
-      setArtDirectorQueueIndex(0);
-      setArtDirectorPromptId(eligible[0]);
+      setBatchGenerating(true);
+      setBatchProgress({ current: 0, total: eligible.length });
+      try {
+        for (let i = 0; i < eligible.length; i++) {
+          setBatchProgress({ current: i + 1, total: eligible.length });
+          await generateOne(eligible[i]);
+        }
+      } finally {
+        setBatchGenerating(false);
+        setBatchProgress(null);
+      }
     },
-    [posts, promptStates]
+    [posts, promptStates, generateOne]
   );
 
-  // OLD PIPELINE — kept for reference. Art Director is now the default for story images.
-  // const buildRegenerateBody = useCallback((state: PromptState) => { ... }, []);
-  // const handleRegenerate = useCallback(async (promptId: string) => { ... }, [...]);
-
-  /** Regenerate now opens the Art Director modal */
   const handleRegenerate = useCallback(
     (promptId: string) => {
-      setArtDirectorPromptId(promptId);
+      void generateOne(promptId);
     },
-    []
+    [generateOne]
   );
 
   const handleApprove = useCallback(
@@ -801,33 +822,15 @@ export default function ImageGeneration({
           )}
         </div>
 
-        {/* Pod status + cost awareness */}
-        {podRunning && (
-          <div className={`flex items-center gap-3 rounded-lg border px-4 py-2 text-sm ${
-            podIdleMinutes >= 30
-              ? "border-amber-500/30 bg-amber-500/5"
-              : "border-green-500/20 bg-green-500/5"
-          }`}>
-            <div className="flex items-center gap-1.5">
-              <div className="h-2 w-2 rounded-full bg-green-500" />
-              <span className="text-green-400 text-xs font-medium">AI Model: Running</span>
-            </div>
-            {podIdleMinutes >= 30 && (
-              <>
-                <span className="text-xs text-amber-400">
-                  Idle for {podIdleMinutes}min — stop to save costs?
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-xs text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
-                  onClick={handleStopPod}
-                  disabled={stoppingPod}
-                >
-                  {stoppingPod ? <Loader2 className="h-3 w-3 animate-spin" /> : "Stop"}
-                </Button>
-              </>
-            )}
+        {/* ART DIRECTOR POD STATUS — DEACTIVATED 2026-04-19
+            Replaced by a simple batch-progress indicator. The Qwen VL pod
+            is no longer required for story image generation. */}
+        {batchProgress && (
+          <div className="flex items-center gap-3 rounded-lg border border-blue-500/20 bg-blue-500/5 px-4 py-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+            <span className="text-xs text-blue-400 font-medium">
+              Generating image {batchProgress.current} of {batchProgress.total}
+            </span>
           </div>
         )}
 
@@ -949,12 +952,9 @@ export default function ImageGeneration({
                             onRegenerate={handleRegenerate}
                             onApprove={handleApprove}
                             onRevert={handleRevert}
-                            onGenerate={() => {
-                              // Art Director is now the default — open modal
-                              setArtDirectorPromptId(ip.id);
-                            }}
+                            onGenerate={() => handleRegenerate(ip.id)}
                             onImageClick={setLightboxUrl}
-                            onArtDirector={setArtDirectorPromptId}
+                            onArtDirector={handleRegenerate}
                             batchGenerating={batchGenerating}
                           />
                         ))}
@@ -990,63 +990,14 @@ export default function ImageGeneration({
         </div>
       )}
 
-      {/* ======== ART DIRECTOR MODAL ======== */}
-      {artDirectorPromptId && (() => {
-        // Find the prompt data for the Art Director modal
-        let targetPrompt: ImagePromptData | null = null;
-        for (const post of posts) {
-          for (const ip of post.story_image_prompts) {
-            if (ip.id === artDirectorPromptId) {
-              targetPrompt = ip;
-              break;
-            }
-          }
-          if (targetPrompt) break;
-        }
-
-        if (!targetPrompt) return null;
-
-        const charNames: string[] = [];
-        if (targetPrompt.character_name) charNames.push(targetPrompt.character_name);
-        if (targetPrompt.secondary_character_name) charNames.push(targetPrompt.secondary_character_name);
-
-        const isInBatchQueue = artDirectorQueue.length > 1;
-        const queueTotal = artDirectorQueue.length;
-        const queueCurrent = artDirectorQueueIndex + 1;
-
-        return (
-          <ArtDirectorModal
-            promptId={artDirectorPromptId}
-            promptText={promptStates[artDirectorPromptId]?.promptText || targetPrompt.prompt}
-            imageType={targetPrompt.image_type}
-            characterNames={charNames}
-            seriesId={seriesId}
-            batchProgress={isInBatchQueue ? { current: queueCurrent, total: queueTotal } : undefined}
-            onClose={() => {
-              setArtDirectorPromptId(null);
-              setArtDirectorQueue([]);
-              setArtDirectorQueueIndex(0);
-            }}
-            onComplete={(imageUrl) => {
-              updatePrompt(artDirectorPromptId, {
-                status: "approved",
-                imageUrl,
-              });
-
-              // Auto-advance to next in queue if batch generating
-              if (isInBatchQueue && artDirectorQueueIndex < queueTotal - 1) {
-                const nextIndex = artDirectorQueueIndex + 1;
-                setArtDirectorQueueIndex(nextIndex);
-                setArtDirectorPromptId(artDirectorQueue[nextIndex]);
-              } else {
-                setArtDirectorPromptId(null);
-                setArtDirectorQueue([]);
-                setArtDirectorQueueIndex(0);
-              }
-            }}
-          />
-        );
-      })()}
+      {/* ======== ART DIRECTOR MODAL ========
+          DEACTIVATED 2026-04-19. The modal has been replaced by direct
+          generation via /api/stories/[seriesId]/generate-image, which
+          dispatches to the correct backend (Flux 2 Dev or HunyuanImage
+          3.0) based on story_series.image_model. The original modal
+          code lives in ./ArtDirectorModal and the /api/art-director/*
+          routes remain functional. To reactivate, restore the import
+          at the top of this file and the block below. */}
     </div>
   );
 }
@@ -1594,7 +1545,7 @@ function ImageCard({
 
           {/* Actions */}
           <div className="flex items-center gap-2 pt-1">
-            {/* Generate / Regenerate — opens Art Director modal */}
+            {/* Generate / Regenerate — calls the unified /generate-image route (dispatches on image_model) */}
             {(isPending || isFailed) && (
               <Button
                 size={isExpanded ? "default" : "sm"}

@@ -6218,6 +6218,7 @@ export type Database = {
           lora_file_url: string | null
           lora_training_status: string | null
           lora_trigger_word: string | null
+          portrait_prompt_locked: string | null
           prose_description: string | null
           regen_count: number
           role: string | null
@@ -6239,6 +6240,7 @@ export type Database = {
           lora_file_url?: string | null
           lora_training_status?: string | null
           lora_trigger_word?: string | null
+          portrait_prompt_locked?: string | null
           prose_description?: string | null
           regen_count?: number
           role?: string | null
@@ -6260,6 +6262,7 @@ export type Database = {
           lora_file_url?: string | null
           lora_training_status?: string | null
           lora_trigger_word?: string | null
+          portrait_prompt_locked?: string | null
           prose_description?: string | null
           regen_count?: number
           role?: string | null
@@ -6485,6 +6488,7 @@ export type Database = {
           hashtag: string | null
           id: string
           image_engine: string
+          image_model: string
           marketing: Json | null
           slug: string
           status: string
@@ -6498,6 +6502,7 @@ export type Database = {
           hashtag?: string | null
           id?: string
           image_engine?: string
+          image_model?: string
           marketing?: Json | null
           slug: string
           status?: string
@@ -6511,6 +6516,7 @@ export type Database = {
           hashtag?: string | null
           id?: string
           image_engine?: string
+          image_model?: string
           marketing?: Json | null
           slug?: string
           status?: string

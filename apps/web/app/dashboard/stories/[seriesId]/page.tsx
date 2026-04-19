@@ -17,7 +17,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-// Select components removed — engine selector no longer needed
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   BookOpen,
   Users,
@@ -26,6 +32,7 @@ import {
   Hash,
   FileText,
   ArrowLeft,
+  Lock,
 } from "lucide-react";
 import CharacterApproval, {
   type CharacterFromAPI,
@@ -35,7 +42,23 @@ import PublishPanel from "./components/PublishPanel";
 import type {
   StorySeriesRow,
   StoryPostRow,
+  ImageModel,
 } from "@no-safe-word/shared";
+
+const MODEL_OPTIONS: Array<{ value: ImageModel; label: string; helper: string }> = [
+  {
+    value: "flux2_dev",
+    label: "Flux 2 Dev (RunPod)",
+    helper:
+      "Best visual quality. Character consistency via reference images. ControlNet available for couple poses.",
+  },
+  {
+    value: "hunyuan3",
+    label: "HunyuanImage 3.0 (Replicate)",
+    helper:
+      "Stronger explicit anatomy. Character consistency via prompt descriptions. Pay-per-image via Replicate.",
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -224,6 +247,75 @@ export default function SeriesDetailPage() {
   // LoRAs are recommended but not required — pipeline falls back to inline descriptions
   const allReadyForImages = allCharsApproved;
 
+  // Model is locked once any portrait has been generated (approved or pending).
+  // Until then, the selector is a simple PATCH. After, switching requires the
+  // destructive /change-image-model route.
+  const modelLocked = characters.some(
+    (c) => Boolean(c.approved_image_id) || Boolean(c.pending_image_id)
+  );
+  const [modelUpdating, setModelUpdating] = useState(false);
+  const [modelChangeError, setModelChangeError] = useState<string | null>(null);
+
+  async function handleModelChange(newModel: ImageModel) {
+    if (!data || newModel === data.series.image_model) return;
+    setModelChangeError(null);
+
+    if (modelLocked) {
+      const ok = window.confirm(
+        "Changing the image model resets ALL character approvals and generated images for this story. Continue?"
+      );
+      if (!ok) return;
+      setModelUpdating(true);
+      try {
+        const res = await fetch(
+          `/api/stories/${seriesId}/change-image-model`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_model: newModel }),
+          }
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to change model");
+        }
+        // Reset state: force full refetch so character + prompt state is reloaded
+        window.location.reload();
+      } catch (err) {
+        setModelChangeError(
+          err instanceof Error ? err.message : "Failed to change model"
+        );
+      } finally {
+        setModelUpdating(false);
+      }
+      return;
+    }
+
+    // Unlocked — straight PATCH
+    setModelUpdating(true);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_model: newModel }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update model");
+      }
+      const json = await res.json();
+      setData((prev) =>
+        prev ? { ...prev, series: { ...prev.series, ...json.series } } : prev
+      );
+    } catch (err) {
+      setModelChangeError(
+        err instanceof Error ? err.message : "Failed to update model"
+      );
+    } finally {
+      setModelUpdating(false);
+    }
+  }
+
   // ------- Loading state -------
   if (loading) {
     return (
@@ -279,9 +371,22 @@ export default function SeriesDetailPage() {
         </Button>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">
-              {series.title}
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-bold tracking-tight">
+                {series.title}
+              </h2>
+              <Badge
+                variant="outline"
+                className="bg-zinc-500/10 text-zinc-300 border-zinc-500/30"
+                title={
+                  MODEL_OPTIONS.find((o) => o.value === series.image_model)
+                    ?.helper
+                }
+              >
+                {MODEL_OPTIONS.find((o) => o.value === series.image_model)
+                  ?.label ?? series.image_model}
+              </Badge>
+            </div>
             {series.description && (
               <p className="mt-1 text-muted-foreground">
                 {series.description}
@@ -393,14 +498,58 @@ export default function SeriesDetailPage() {
                   </div>
                 </dl>
 
-                {/* Image Engine */}
-                <div className="pt-3 border-t">
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm text-muted-foreground">
-                      <span className="font-medium text-foreground">Engine:</span>{" "}
-                      Juggernaut XL Ragnarok (SDXL) — photorealistic, character LoRAs
-                    </p>
+                {/* Image Model */}
+                <div className="pt-3 border-t space-y-2">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Image Generation Model</p>
+                    {modelLocked && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                        title="Model locked — changing requires regenerating all images"
+                      >
+                        <Lock className="h-3 w-3" />
+                        Locked
+                      </span>
+                    )}
                   </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Select
+                      value={series.image_model}
+                      onValueChange={(v) => handleModelChange(v as ImageModel)}
+                      disabled={modelUpdating}
+                    >
+                      <SelectTrigger className="w-full sm:w-80">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MODEL_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {modelUpdating && (
+                      <span className="text-xs text-muted-foreground">
+                        Updating…
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {MODEL_OPTIONS.find((o) => o.value === series.image_model)
+                      ?.helper}
+                  </p>
+                  {modelLocked && (
+                    <p className="text-xs text-amber-400/80">
+                      Selecting a different model will reset all character
+                      approvals and generated images for this story.
+                    </p>
+                  )}
+                  {modelChangeError && (
+                    <p className="text-xs text-destructive">
+                      {modelChangeError}
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>

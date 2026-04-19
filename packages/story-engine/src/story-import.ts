@@ -5,18 +5,26 @@ import {
   type StoryImportPayload,
   type ImportResult,
   type CharacterImport,
+  type ImageModel,
 } from "@no-safe-word/shared";
 import { cleanScenePrompt } from "@no-safe-word/image-gen";
 import { detectSecondaryCharacters } from "./detect-secondary-character";
+
+export interface ImportStoryOptions {
+  /** Image generation model for the new series. Defaults to 'flux2_dev'. */
+  imageModel?: ImageModel;
+}
 
 /**
  * Import a complete story payload into the database.
  * Used by both /api/stories/import and /api/webhook/story-import.
  */
 export async function importStory(
-  payload: StoryImportPayload
+  payload: StoryImportPayload,
+  options: ImportStoryOptions = {}
 ): Promise<ImportResult> {
   const slug = slugify(payload.series.title);
+  const imageModel: ImageModel = options.imageModel ?? 'flux2_dev';
 
   // Check for duplicate slug
   const { data: existingSeries } = await supabase
@@ -49,6 +57,7 @@ export async function importStory(
       total_parts: payload.series.total_parts,
       hashtag: payload.series.hashtag || null,
       status: "characters_pending",
+      image_model: imageModel,
       marketing: (payload.marketing ?? {}) as Json,
     })
     .select("id")

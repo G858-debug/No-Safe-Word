@@ -43,10 +43,10 @@ export async function POST(
       );
     }
 
-    // 2. Fetch the image to get its URL, stored_url, and seed
+    // 2. Fetch the image to get its URL, stored_url, prompt and seed
     const { data: image, error: imgError } = await supabase
       .from("images")
-      .select("id, sfw_url, stored_url, settings")
+      .select("id, sfw_url, stored_url, settings, prompt")
       .eq("id", image_id)
       .single();
 
@@ -124,6 +124,15 @@ export async function POST(
 
     // 5. Approve the story character (portrait or full body)
     console.log(`[StoryPublisher] Updating story_characters to mark ${isFullBody ? "full body" : "portrait"} as approved`);
+
+    // For portraits: lock the exact prompt text that produced this image.
+    // Injected verbatim into every scene prompt under hunyuan3; retained for
+    // provenance/debug under flux2_dev. Prefer client-supplied `prompt`,
+    // fall back to the images.prompt column.
+    const lockedPortraitPrompt = isFullBody
+      ? null
+      : (prompt ?? image.prompt ?? null);
+
     const updateFields = isFullBody
       ? {
           approved_fullbody: true,
@@ -136,6 +145,7 @@ export async function POST(
           approved_image_id: image_id,
           approved_seed: resolvedSeed,
           approved_prompt: prompt ?? null,
+          portrait_prompt_locked: lockedPortraitPrompt,
           // Save face URL separately for use in body generation (ReActor/Nano Banana ref)
           face_url: publicUrl,
         };

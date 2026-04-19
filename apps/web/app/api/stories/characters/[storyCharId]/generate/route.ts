@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { submitRunPodJob } from "@no-safe-word/image-gen";
+import {
+  submitRunPodJob,
+  generateHunyuanImage,
+  generateFlux2Image,
+  buildCharacterPortraitPrompt,
+  type PortraitCharacterDescription,
+} from "@no-safe-word/image-gen";
 import { buildCharacterGenerationPayload } from "@/lib/server/character-image";
+import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
+import type { ImageModel } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
 type GenerationStage = "face" | "body";
@@ -46,10 +54,10 @@ export async function POST(
       // No body or invalid JSON — use defaults
     }
 
-    // 1. Fetch the story_character row
+    // 1. Fetch the story_character row (including its series for model lookup)
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
-      .select("id, character_id")
+      .select("id, character_id, series_id")
       .eq("id", storyCharId)
       .single();
 
@@ -60,6 +68,27 @@ export async function POST(
         { status: 404 }
       );
     }
+
+    // 1b. Fetch the parent series to resolve the active image_model
+    const { data: series, error: seriesErr } = await supabase
+      .from("story_series")
+      .select("id, image_model")
+      .eq("id", storyChar.series_id)
+      .single();
+
+    if (seriesErr || !series) {
+      return NextResponse.json(
+        { error: "Parent series not found" },
+        { status: 404 }
+      );
+    }
+
+    const imageModel = series.image_model as ImageModel;
+
+    // flux2_dev → currently still uses the Juggernaut Ragnarok path on
+    // RunPod. Phase 4 swaps this for Flux 2 Dev once the new endpoint +
+    // Docker image are provisioned.
+    // hunyuan3 → synchronous Replicate call, handled below.
 
     // 2. Fetch the character's structured description
     const { data: character, error: charError } = await supabase
@@ -79,7 +108,120 @@ export async function POST(
     const desc = character.description as Record<string, string>;
     const isMale = desc.gender === 'male';
 
-    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} [v2-ragnarok]`);
+    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} [model=${imageModel}]`);
+
+    // ── hunyuan3 portrait path (synchronous Replicate) ──
+    if (imageModel === "hunyuan3") {
+      const promptText =
+        customPrompt ??
+        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription);
+
+      const result = await generateHunyuanImage({
+        scenePrompt: "",
+        characterBlock: promptText,
+        aspectRatio: "3:4",
+      });
+
+      const { data: imageRow, error: imgErr } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: result.prompt,
+          settings: {
+            model: "hunyuan3",
+            provider: "replicate",
+            replicate_model: result.model,
+            aspect_ratio: "3:4",
+            imageType,
+            stage,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgErr || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgErr?.message}`);
+      }
+
+      const imageId = imageRow.id;
+      const storagePath = `characters/${imageId}.jpeg`;
+      const storedUrl = await uploadRemoteImageToStorage(
+        result.imageUrl,
+        storagePath
+      );
+
+      await supabase
+        .from("images")
+        .update({ stored_url: storedUrl })
+        .eq("id", imageId);
+
+      return NextResponse.json({
+        jobId: `replicate-${imageId}`,
+        imageId,
+        imageUrl: storedUrl,
+        model: "hunyuan3",
+        promptUsed: result.prompt,
+      });
+    }
+
+    // ── flux2_dev portrait path (async RunPod on Flux 2 Dev endpoint) ──
+    // Generates the portrait that will itself become the reference image
+    // used for all subsequent scene generations. No references on input —
+    // this IS the reference being created.
+    if (imageModel === "flux2_dev") {
+      const promptText =
+        customPrompt ??
+        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription);
+
+      const flux2Result = await generateFlux2Image({
+        scenePrompt: promptText,
+        // Portraits are always 3:4 (768×1024) per the standard portrait framing.
+        width: 768,
+        height: 1024,
+        filenamePrefix: "flux2_portrait",
+      });
+
+      const { data: imageRow, error: imgErr } = await supabase
+        .from("images")
+        .insert({
+          character_id: character.id,
+          prompt: flux2Result.prompt,
+          settings: {
+            model: "flux2_dev",
+            provider: "runpod",
+            seed: flux2Result.seed,
+            width: 768,
+            height: 1024,
+            imageType,
+            stage,
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imgErr || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgErr?.message}`);
+      }
+
+      await supabase.from("generation_jobs").insert({
+        job_id: flux2Result.jobId,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+      });
+
+      return NextResponse.json({
+        jobId: flux2Result.jobId,
+        imageId: imageRow.id,
+        model: "flux2_dev",
+        promptUsed: flux2Result.prompt,
+      });
+    }
+
+    // ── Legacy Juggernaut Ragnarok path (no longer selectable as image_model,
+    //    kept only as a safety net if an old row sneaks through) ──
 
     // Build character generation payload
     const payload = buildCharacterGenerationPayload({

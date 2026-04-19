@@ -8,6 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowLeft,
   CheckCircle2,
   XCircle,
@@ -21,7 +28,27 @@ import {
 import {
   validateImportPayload,
   type StoryImportPayload,
+  type ImageModel,
 } from "@no-safe-word/shared";
+
+const MODEL_OPTIONS: Array<{
+  value: ImageModel;
+  label: string;
+  helper: string;
+}> = [
+  {
+    value: "flux2_dev",
+    label: "Flux 2 Dev (RunPod)",
+    helper:
+      "Best visual quality. Character consistency via reference images. ControlNet available for couple poses.",
+  },
+  {
+    value: "hunyuan3",
+    label: "HunyuanImage 3.0 (Replicate)",
+    helper:
+      "Stronger explicit anatomy. Character consistency via prompt descriptions. Pay-per-image via Replicate.",
+  },
+];
 
 interface ImportResultData {
   series_id: string;
@@ -43,6 +70,7 @@ export default function ImportPage() {
     null
   );
   const [importError, setImportError] = useState<string | null>(null);
+  const [imageModel, setImageModel] = useState<ImageModel>("flux2_dev");
 
   function handleValidate() {
     setValidationErrors([]);
@@ -78,7 +106,7 @@ export default function ImportPage() {
       const res = await fetch("/api/stories/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(validPayload),
+        body: JSON.stringify({ ...validPayload, image_model: imageModel }),
       });
 
       const data = await res.json();
@@ -172,6 +200,40 @@ export default function ImportPage() {
       {/* Input state — not yet imported */}
       {!importResult && (
         <div className="space-y-4">
+          {/* Model selector */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Image Generation Model
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Select
+                value={imageModel}
+                onValueChange={(v) => setImageModel(v as ImageModel)}
+              >
+                <SelectTrigger className="w-full sm:max-w-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {MODEL_OPTIONS.find((o) => o.value === imageModel)?.helper}
+              </p>
+              <p className="mt-3 text-xs text-muted-foreground">
+                This model will be used for all character portraits and story
+                images. It can be changed later, but changing it resets all
+                generated images for this story.
+              </p>
+            </CardContent>
+          </Card>
+
           {/* JSON Input */}
           <Card>
             <CardHeader>

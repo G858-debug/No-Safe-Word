@@ -98,6 +98,10 @@ export interface MarketingImport {
 // DATABASE ROW TYPES (what Supabase stores)
 // ============================================================
 
+/** Active image generation model for a story. Set at import time, locked after first portrait generation. */
+export type ImageModel = 'flux2_dev' | 'hunyuan3';
+
+/** @deprecated Legacy column retained for backward compat. Use `ImageModel` instead. */
 export type ImageEngine = 'juggernaut_ragnarok';
 
 export interface StorySeriesRow {
@@ -108,6 +112,9 @@ export interface StorySeriesRow {
   total_parts: number;
   hashtag: string | null;
   status: SeriesStatus;
+  /** Active generation model. Authoritative. */
+  image_model: ImageModel;
+  /** @deprecated Legacy. Retained for backward compat with the V4/Juggernaut pipeline. */
   image_engine: ImageEngine;
   marketing: Record<string, unknown>;
   created_at: string;
@@ -159,6 +166,8 @@ export interface StoryCharacterRow {
   approved_image_id: string | null;
   approved_seed: number | null;
   approved_prompt: string | null;
+  /** Exact prompt text that produced the approved portrait. Injected verbatim into scene prompts for hunyuan3. Null until portrait approved. */
+  portrait_prompt_locked: string | null;
 }
 
 export interface StoryImagePromptRow {

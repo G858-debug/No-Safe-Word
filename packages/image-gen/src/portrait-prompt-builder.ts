@@ -1,0 +1,91 @@
+import { VISUAL_SIGNATURE } from "./hunyuan-generator";
+
+/**
+ * Subset of the structured character description used to build a portrait
+ * prompt. Matches the fields stored on `characters.description` by the
+ * Story Publisher import pipeline (see CharacterStructured in @no-safe-word/shared).
+ */
+export interface PortraitCharacterDescription {
+  gender?: string;
+  age?: string;
+  ethnicity?: string;
+  bodyType?: string;
+  hairColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
+  skinTone?: string;
+  distinguishingFeatures?: string;
+  expression?: string;
+}
+
+/**
+ * Fixed framing/lighting clause appended to every portrait prompt so the
+ * approved portrait has a neutral, brief-like composition suitable for
+ * use as a reference image (Flux 2) or visual-signature seed (Hunyuan).
+ */
+const PORTRAIT_COMPOSITION =
+  "Portrait, looking directly at the camera with a confident expression. Warm side-lighting, dark background with soft bokeh. Medium close-up, eye-level.";
+
+/**
+ * Build a natural-language portrait prompt from structured character fields.
+ *
+ * Used by BOTH flux2_dev and hunyuan3 character-portrait generation. The
+ * output is a single paragraph that describes the character, then a fixed
+ * portrait framing, then the shared visual signature. Safe to pass directly
+ * to either backend.
+ */
+export function buildCharacterPortraitPrompt(
+  description: PortraitCharacterDescription
+): string {
+  const parts: string[] = [];
+
+  // Who — gender + age
+  const whoBits: string[] = [];
+  if (description.gender) whoBits.push(description.gender.trim());
+  if (description.age) whoBits.push(`age ${description.age.trim()}`);
+  if (whoBits.length > 0) {
+    parts.push(`A ${whoBits.join(", ")}.`);
+  }
+
+  if (description.ethnicity) {
+    parts.push(`${description.ethnicity.trim()}.`);
+  }
+
+  // Appearance sentence — skin, eyes, features
+  const appearance: string[] = [];
+  if (description.skinTone) appearance.push(`${description.skinTone.trim()} skin`);
+  if (description.eyeColor) appearance.push(`${description.eyeColor.trim()} eyes`);
+  if (description.distinguishingFeatures) {
+    appearance.push(description.distinguishingFeatures.trim());
+  }
+  if (appearance.length > 0) {
+    parts.push(`${capitalize(appearance.join(", "))}.`);
+  }
+
+  // Body
+  if (description.bodyType) {
+    parts.push(`${capitalize(description.bodyType.trim())}.`);
+  }
+
+  // Hair — combine colour + style when both present
+  const hair: string[] = [];
+  if (description.hairColor) hair.push(description.hairColor.trim());
+  if (description.hairStyle) hair.push(description.hairStyle.trim());
+  if (hair.length > 0) {
+    parts.push(`${capitalize(hair.join(" "))} hair.`);
+  }
+
+  if (description.expression) {
+    parts.push(`${capitalize(description.expression.trim())}.`);
+  }
+
+  parts.push(PORTRAIT_COMPOSITION);
+  parts.push(VISUAL_SIGNATURE);
+
+  return parts.join(" ");
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s[0].toUpperCase() + s.slice(1);
+}

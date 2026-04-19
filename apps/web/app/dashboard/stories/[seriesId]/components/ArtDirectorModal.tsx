@@ -132,7 +132,11 @@ export default function ArtDirectorModal({
   const podPollRef = useRef<NodeJS.Timeout | null>(null);
   const podReadyRef = useRef(false);
 
-  // ── Pod auto-start on mount ──
+  // ART DIRECTOR POD AUTO-START — DEACTIVATED 2026-04-19
+  // Pod can still be started manually via /api/art-director/pod if needed.
+  // The original auto-start useEffect is preserved below (commented) for
+  // potential reactivation alongside the rest of the Art Director pipeline.
+  /*
   useEffect(() => {
     let cancelled = false;
     let pollCount = 0;
@@ -146,18 +150,16 @@ export default function ArtDirectorModal({
         if (data.status === "running" && data.modelStatus === "ok") {
           setPodStatus("running");
           podReadyRef.current = true;
-          return; // Pod is ready — proceed to analysis
+          return;
         }
 
         if (data.status === "running") {
-          // Pod running but model still loading
           setPodStatus("starting");
           setPodStartMessage("AI model is loading... Almost ready.");
           startPodPolling();
           return;
         }
 
-        // Pod is stopped or doesn't exist — auto-start it
         setPodStatus("starting");
         setPodStartMessage("Starting AI model... This takes about 2-3 minutes on first use.");
 
@@ -230,6 +232,7 @@ export default function ArtDirectorModal({
       if (podPollRef.current) clearInterval(podPollRef.current);
     };
   }, []);
+  */
 
   // ── Cleanup polling on unmount ──
   useEffect(() => {
