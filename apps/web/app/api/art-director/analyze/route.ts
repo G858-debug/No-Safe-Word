@@ -68,33 +68,35 @@ async function fetchCharacterData(
   if (characterNames.length === 0) return [];
 
   try {
-    // Find story_characters for this series matching these names
+    // Find story_characters for this series whose joined character name matches
     const { data: storyChars, error } = await supabase
       .from("story_characters")
       .select(`
-        name,
         approved_image_id,
-        character:characters(description)
+        character:characters!inner(name, description)
       `)
-      .eq("series_id", seriesId)
-      .in("name", characterNames);
+      .eq("series_id", seriesId);
 
     if (error || !storyChars) {
       console.warn("[Art Director] Failed to fetch character data:", error?.message);
       return [];
     }
 
+    const wanted = new Set(characterNames.map((n) => n.toLowerCase()));
     const results: CharacterDataForArtDirector[] = [];
 
     for (const sc of storyChars) {
+      const charRel = sc.character as any;
+      const charName: string | undefined = charRel?.name;
+      if (!charName || !wanted.has(charName.toLowerCase())) continue;
+
       const charData: CharacterDataForArtDirector = {
-        name: sc.name,
+        name: charName,
         structured: null,
         portraitUrl: null,
       };
 
       // Extract structured data from the character description JSON
-      const charRel = sc.character as any;
       if (charRel?.description) {
         try {
           const desc = typeof charRel.description === "string"

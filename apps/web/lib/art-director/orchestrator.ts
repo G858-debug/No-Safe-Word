@@ -46,6 +46,7 @@ import type {
   ParsedRecipe,
   IterationResult,
   EvaluationScores,
+  QwenVLResponse,
 } from "./types";
 
 // ── Constants ──
@@ -503,15 +504,15 @@ ${charPortraitContext}
 Evaluate how well this generated image matches the scene intent. Score each dimension 0-100.`;
 
     // If character portraits are available, use multi-image evaluation for appearance comparison
-    let evalResponse: { content: string };
+    let evalResponse: QwenVLResponse;
     const portraitChars = charData?.filter((c) => c.portraitUrl) || [];
     if (portraitChars.length > 0) {
       const evalImages = [
-        { label: "Generated Image", base64OrUrl: imageBase64 },
+        { label: "Generated Image", url: imageBase64 },
         ...await Promise.all(
           portraitChars.map(async (c) => ({
             label: `${c.name} Reference Portrait`,
-            base64OrUrl: await downloadImageAsBase64(c.portraitUrl!),
+            url: await downloadImageAsBase64(c.portraitUrl!),
           }))
         ),
       ];

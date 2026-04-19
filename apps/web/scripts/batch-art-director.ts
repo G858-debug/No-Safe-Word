@@ -84,16 +84,18 @@ async function main() {
 
     const { data: storyChars } = await supabase
       .from("story_characters")
-      .select(`name, approved_image_id, character:characters(description)`)
-      .eq("series_id", SERIES_ID)
-      .in("name", characterNames);
+      .select(`approved_image_id, character:characters!inner(name, description)`)
+      .eq("series_id", SERIES_ID);
 
     if (!storyChars) return [];
 
+    const wanted = new Set(characterNames.map((n) => n.toLowerCase()));
     const out: CharacterDataForArtDirector[] = [];
     for (const sc of storyChars) {
-      const cd: CharacterDataForArtDirector = { name: sc.name, structured: null, portraitUrl: null };
       const charRel = sc.character as any;
+      const charName: string | undefined = charRel?.name;
+      if (!charName || !wanted.has(charName.toLowerCase())) continue;
+      const cd: CharacterDataForArtDirector = { name: charName, structured: null, portraitUrl: null };
       if (charRel?.description) {
         try {
           const desc = typeof charRel.description === "string" ? JSON.parse(charRel.description) : charRel.description;
