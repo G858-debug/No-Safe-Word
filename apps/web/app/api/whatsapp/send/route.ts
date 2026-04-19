@@ -30,7 +30,6 @@ export async function POST(request: NextRequest) {
     const result = await sendWhatsAppMessage({
       to: body.to,
       message: body.message,
-      media: body.media,
     });
 
     return NextResponse.json(result);

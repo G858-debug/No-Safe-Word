@@ -132,12 +132,12 @@ export async function sendWhatsAppMessage(
         reason?.length ? `: ${reason.toString()}` : ""
       }`,
     );
-    for (const [, entry] of pending) entry.reject(err);
+    pending.forEach((entry) => entry.reject(err));
     pending.clear();
   });
 
   ws.on("error", (err) => {
-    for (const [, entry] of pending) entry.reject(err);
+    pending.forEach((entry) => entry.reject(err));
     pending.clear();
   });
 
