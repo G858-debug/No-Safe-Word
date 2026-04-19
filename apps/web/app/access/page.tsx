@@ -134,6 +134,14 @@ export default function AccessHomePage() {
           >
             Explore Stories <span>&rarr;</span>
           </Link>
+          <div className="mt-6">
+            <Link
+              href="/enter"
+              className="text-sm text-amber-400 transition-colors hover:text-amber-300"
+            >
+              Already a reader? Sign in to keep reading &rarr;
+            </Link>
+          </div>
         </div>
       </section>
     </div>

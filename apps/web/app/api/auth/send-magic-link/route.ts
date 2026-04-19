@@ -32,7 +32,10 @@ export async function POST(request: NextRequest) {
     const storySlug = body.story_slug || "";
     const chapter = body.chapter || 1;
     const origin = process.env.NEXT_PUBLIC_SITE_URL || "https://nosafeword.co.za";
-    const redirectTo = `${origin}/auth/callback?story=${encodeURIComponent(storySlug)}&chapter=${chapter}`;
+    let redirectTo = `${origin}/auth/callback?story=${encodeURIComponent(storySlug)}&chapter=${chapter}`;
+    if (typeof body.next === "string" && body.next.startsWith("/")) {
+      redirectTo += `&next=${encodeURIComponent(body.next)}`;
+    }
 
     const supabase = await createClient();
     const { error } = await supabase.auth.signInWithOtp({
