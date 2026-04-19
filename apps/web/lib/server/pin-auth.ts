@@ -84,18 +84,12 @@ export function generatePin(): string {
 // Message templates (Nontsikelelo's voice)
 // ---------------------------------------------------------------------------
 
-const PIN_TEMPLATES = [
-  (pin: string) =>
-    `Hey babe! 👋\n\nHere's your code to continue reading: *${pin}*\n\nIt expires in 5 minutes, so don't take too long neh? 😏\n\n— Nontsikelelo`,
-  (pin: string) =>
-    `Yoh, someone's eager to read! 😏\n\nYour code: *${pin}*\n\nQuick quick, it expires in 5 mins!`,
-  (pin: string) =>
-    `Here you go, love ❤️\n\nCode: *${pin}*\n\n5 minutes before it expires — you know the drill!`,
-];
-
+// Transactional PIN message — literal, not conversational. Do not add
+// Nontsikelelo voice/persona to auth codes. Every PIN message must be
+// identical text so the digits are safe from any downstream rewriting
+// and the audit trail is uniform.
 export function formatPinMessage(pin: string): string {
-  const idx = Math.floor(Math.random() * PIN_TEMPLATES.length);
-  return PIN_TEMPLATES[idx](pin);
+  return `Your No Safe Word code is ${pin}. This code expires in 5 minutes.`;
 }
 
 // ---------------------------------------------------------------------------

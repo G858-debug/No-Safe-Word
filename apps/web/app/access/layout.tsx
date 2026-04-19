@@ -44,6 +44,14 @@ function AccessHeader() {
             </Link>
           ))}
         </nav>
+        <Link
+          href="/enter"
+          className="inline-flex items-center gap-1 text-sm font-medium text-amber-400 transition-colors hover:text-amber-300"
+        >
+          <span className="hidden sm:inline">Already a reader? Sign in</span>
+          <span className="sm:hidden">Sign in</span>
+          <span aria-hidden>&rarr;</span>
+        </Link>
       </div>
     </header>
   );
