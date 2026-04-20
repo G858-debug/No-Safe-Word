@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildPurchasePayment } from "@/lib/payfast";
 import { randomUUID } from "crypto";
+import { logEvent } from "@/lib/server/events";
 
 export async function POST(req: Request) {
   try {
@@ -83,6 +84,22 @@ export async function POST(req: Request) {
       email: nswUser.email,
       seriesId,
       userId: nswUser.id,
+    });
+
+    // Analytics: user initiated a purchase checkout. The ITN webhook
+    // will emit checkout.completed after PayFast confirms payment.
+    // Note: seriesId (UUID) logged instead of slug because this route
+    // doesn't receive the slug from the client — series_id is a valid
+    // join key against story_series for downstream analytics.
+    await logEvent({
+      eventType: "checkout.started",
+      userId: user.id,
+      metadata: {
+        type: "purchase",
+        series_id: seriesId,
+        series_title: seriesTitle,
+        amount_zar: 29,
+      },
     });
 
     return NextResponse.json({ data, actionUrl });

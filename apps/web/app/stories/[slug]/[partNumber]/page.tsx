@@ -13,6 +13,7 @@ import ReadingProgress from "@/components/ReadingProgress";
 import PaywallGate from "@/components/PaywallGate";
 import { createClient } from "@/lib/supabase/server";
 import { checkSeriesAccess, truncateToWords } from "@/lib/access";
+import { logEvent } from "@/lib/server/events";
 
 export const revalidate = 3600;
 
@@ -98,17 +99,19 @@ export default async function ChapterPage({ params }: PageProps) {
   const post = postData as StoryPostRow | null;
   if (!post) notFound();
 
-  // 3. Check access for Part 2+
+  // 3. Fetch user once — used for access check, analytics, and
+  //    downstream components. Hoisted above the `partNumber > 1`
+  //    guard so `reading.chapter_view` can record userId on Part 1
+  //    too when the reader is signed in.
+  const authSupabase = await createClient();
+  const {
+    data: { user },
+  } = await authSupabase.auth.getUser();
+  const isAuthenticated = !!user;
+
+  // 4. Check access for Part 2+ (Part 1 is always free)
   let hasAccess = true;
-  let isAuthenticated = false;
-
   if (partNumber > 1) {
-    const authSupabase = await createClient();
-    const {
-      data: { user },
-    } = await authSupabase.auth.getUser();
-    isAuthenticated = !!user;
-
     const access = await checkSeriesAccess(
       user?.id ?? null,
       series.id,
@@ -117,12 +120,34 @@ export default async function ChapterPage({ params }: PageProps) {
     hasAccess = access.hasAccess;
   }
 
-  // 4. Determine content to display
+  // Analytics: chapter view (always emitted). If the reader is paywalled,
+  // additionally emit paywall.hit — these are two separate facts, not one.
+  await logEvent({
+    eventType: "reading.chapter_view",
+    userId: user?.id ?? null,
+    metadata: {
+      series_slug: slug,
+      part_number: partNumber,
+      has_access: hasAccess,
+    },
+  });
+  if (!hasAccess) {
+    await logEvent({
+      eventType: "paywall.hit",
+      userId: user?.id ?? null,
+      metadata: {
+        series_slug: slug,
+        part_number: partNumber,
+      },
+    });
+  }
+
+  // 5. Determine content to display
   const displayContent = hasAccess
     ? post.website_content
     : truncateToWords(post.website_content, 300);
 
-  // 5. Fetch approved website images for this post (only if has access)
+  // 6. Fetch approved website images for this post (only if has access)
   let inlineImages: { url: string; afterWord: number; alt: string }[] = [];
 
   if (hasAccess) {
@@ -192,7 +217,7 @@ export default async function ChapterPage({ params }: PageProps) {
       .sort((a, b) => a.afterWord - b.afterWord);
   }
 
-  // 6. Check for adjacent chapters
+  // 7. Check for adjacent chapters
   const { data: adjacentPosts } = await supabase
     .from("story_posts")
     .select("part_number, title")

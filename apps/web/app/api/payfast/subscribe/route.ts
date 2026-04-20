@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { buildSubscriptionPayment } from "@/lib/payfast";
 import { randomUUID } from "crypto";
+import { logEvent } from "@/lib/server/events";
 
 export async function POST() {
   try {
@@ -94,6 +95,18 @@ export async function POST() {
       email: nswUser.email,
       userId: nswUser.id,
       subscriptionId,
+    });
+
+    // Analytics: user initiated a subscription checkout. The ITN webhook
+    // will emit subscription.started / subscription.renewed after PayFast
+    // confirms the charge, depending on the subscription's prior state.
+    await logEvent({
+      eventType: "checkout.started",
+      userId: user.id,
+      metadata: {
+        type: "subscription",
+        amount_zar: 55,
+      },
     });
 
     return NextResponse.json({ data, actionUrl });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendPin } from "@/lib/server/pin-auth";
+import { logEvent } from "@/lib/server/events";
 
 /**
  * POST /api/auth/send-pin
@@ -28,6 +29,12 @@ export async function POST(request: NextRequest) {
       const status = result.retry_after_seconds ? 429 : 400;
       return NextResponse.json(result, { status });
     }
+
+    // Analytics: PIN successfully queued/sent. Log last-4 digits only.
+    await logEvent({
+      eventType: "auth.pin_requested",
+      metadata: { phone_last4: body.phone.slice(-4) },
+    });
 
     return NextResponse.json(result);
   } catch (err) {

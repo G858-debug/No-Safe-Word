@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logEvent } from "@/lib/server/events";
 
 /**
  * POST /api/auth/send-magic-link
@@ -54,6 +55,12 @@ export async function POST(request: NextRequest) {
     // Mask the email for display
     const [local, domain] = email.split("@");
     const masked = local.slice(0, 2) + "***@" + domain;
+
+    // Analytics: magic link sent. Log domain only, not the full address.
+    await logEvent({
+      eventType: "auth.magic_link_requested",
+      metadata: { email_domain: domain ?? "unknown" },
+    });
 
     return NextResponse.json({
       success: true,

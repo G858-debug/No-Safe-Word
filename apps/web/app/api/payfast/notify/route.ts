@@ -1,6 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { validateITN } from "@/lib/payfast";
+import { logEvent } from "@/lib/server/events";
+
+/**
+ * Resolve a PayFast ITN's nsw_users.id (custom_str2) to auth.users.id
+ * so `events.user_id` (FK → auth.users) links correctly. Returns null
+ * on any lookup failure — logEvent's user_id column is nullable so a
+ * missing link is acceptable and the event still records.
+ */
+async function resolveAuthUserId(nswUserId: string | undefined): Promise<string | null> {
+  if (!nswUserId) return null;
+  const { data } = await supabase
+    .from("nsw_users")
+    .select("auth_user_id")
+    .eq("id", nswUserId)
+    .single();
+  return data?.auth_user_id ?? null;
+}
 
 export async function POST(req: Request) {
   try {
@@ -72,6 +89,19 @@ export async function POST(req: Request) {
       console.log(
         `Purchase completed: user=${body.custom_str2}, series=${body.custom_str1}, payment=${body.m_payment_id}`
       );
+
+      // Analytics: purchase payment completed end-to-end.
+      const purchaseAuthUserId = await resolveAuthUserId(body.custom_str2);
+      await logEvent({
+        eventType: "checkout.completed",
+        userId: purchaseAuthUserId,
+        metadata: {
+          m_payment_id: body.m_payment_id,
+          amount_gross_zar: parseFloat(body.amount_gross),
+          item_name: body.item_name ?? null,
+          payment_status: body.payment_status,
+        },
+      });
     } else if (paymentType === "subscription") {
       // Update payment record
       const { error: paymentError } = await supabase
@@ -85,6 +115,16 @@ export async function POST(req: Request) {
       if (paymentError) {
         console.error("Failed to update payment:", paymentError);
       }
+
+      // Fetch the subscription's current status BEFORE we update it —
+      // lets us tell first-time activation (`subscription.started`)
+      // apart from recurring billing (`subscription.renewed`).
+      const { data: preUpdateSub } = await supabase
+        .from("nsw_subscriptions")
+        .select("status")
+        .eq("id", body.custom_str4)
+        .single();
+      const wasAlreadyActive = preUpdateSub?.status === "active";
 
       // Update subscription to active
       const endsAt = new Date();
@@ -107,6 +147,18 @@ export async function POST(req: Request) {
       console.log(
         `Subscription activated: subscription=${body.custom_str4}, payment=${body.m_payment_id}`
       );
+
+      // Analytics: subscription billing succeeded.
+      const subAuthUserId = await resolveAuthUserId(body.custom_str2);
+      await logEvent({
+        eventType: wasAlreadyActive ? "subscription.renewed" : "subscription.started",
+        userId: subAuthUserId,
+        metadata: {
+          m_payment_id: body.m_payment_id,
+          amount_gross_zar: parseFloat(body.amount_gross),
+          payment_status: body.payment_status,
+        },
+      });
     } else {
       console.warn("Unknown payment type:", paymentType);
     }

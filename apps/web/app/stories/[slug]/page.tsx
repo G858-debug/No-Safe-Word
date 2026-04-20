@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@no-safe-word/story-engine";
 import type { StorySeriesRow } from "@no-safe-word/shared";
+import { createClient } from "@/lib/supabase/server";
+import { logEvent } from "@/lib/server/events";
 
 export const revalidate = 3600;
 
@@ -67,6 +69,18 @@ export default async function SeriesPage({ params }: PageProps) {
     "id" | "title" | "slug" | "description" | "total_parts" | "hashtag"
   > | null;
   if (!series) notFound();
+
+  // Analytics: series summary view. Log userId if the reader is signed in,
+  // else null (most summary-page visitors are anonymous).
+  const authSupabase = await createClient();
+  const {
+    data: { user: summaryUser },
+  } = await authSupabase.auth.getUser();
+  await logEvent({
+    eventType: "reading.story_view",
+    userId: summaryUser?.id ?? null,
+    metadata: { series_slug: slug },
+  });
 
   // 2. Fetch published chapters
   const { data: posts } = await supabase

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyPin, normalizePhone } from "@/lib/server/pin-auth";
 import { supabase as serviceClient } from "@no-safe-word/story-engine";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { logEvent } from "@/lib/server/events";
 
 /**
  * POST /api/auth/verify-pin
@@ -114,6 +115,12 @@ export async function POST(request: NextRequest) {
     if (!tokenHash) {
       throw new Error("No token hash in generated link");
     }
+
+    // Analytics: PIN verified + session token issued.
+    await logEvent({
+      eventType: "auth.pin_verified",
+      userId: authUserId,
+    });
 
     return NextResponse.json({
       success: true,

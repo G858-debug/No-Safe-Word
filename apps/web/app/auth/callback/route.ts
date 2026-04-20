@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { supabase as serviceClient } from "@no-safe-word/story-engine";
+import { logEvent } from "@/lib/server/events";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -30,6 +31,13 @@ export async function GET(request: Request) {
             { onConflict: "auth_user_id" }
           );
         }
+
+        // Analytics: successful sign-in via magic-link flow.
+        await logEvent({
+          eventType: "auth.sign_in_verified",
+          userId: authUserId,
+          metadata: { method: "magic_link" },
+        });
 
         // Deep link to story if params present
         if (storySlug && chapter) {
