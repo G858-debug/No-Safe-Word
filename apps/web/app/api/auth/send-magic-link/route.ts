@@ -47,7 +47,11 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("Magic link send failed:", error);
       return NextResponse.json(
-        { success: false, error: "Failed to send email. Please try again." },
+        {
+          success: false,
+          error:
+            "We couldn't send your sign-in email. Please check the address and try again in a moment.",
+        },
         { status: 500 }
       );
     }

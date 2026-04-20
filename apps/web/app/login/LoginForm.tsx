@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 
 export default function LoginForm() {
   const [email, setEmail] = useState("");
@@ -21,17 +20,20 @@ export default function LoginForm() {
     setStatus("loading");
     setErrorMsg("");
 
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-      },
+    const res = await fetch("/api/auth/send-magic-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), next }),
     });
 
-    if (error) {
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success) {
       setStatus("error");
-      setErrorMsg(error.message);
+      setErrorMsg(
+        data.error ||
+          "We couldn't send your sign-in email. Please check the address and try again in a moment."
+      );
     } else {
       setStatus("sent");
     }
