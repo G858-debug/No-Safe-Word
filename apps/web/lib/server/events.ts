@@ -1,4 +1,5 @@
 import { supabase } from "@no-safe-word/story-engine";
+import type { Json } from "@no-safe-word/shared";
 
 /**
  * Typed list of every event_type emitted by application code.
@@ -57,7 +58,10 @@ export async function logEvent({
     const { error } = await supabase.from("events").insert({
       event_type: eventType,
       user_id: userId,
-      metadata,
+      // Cast: call-site ergonomics prefer Record<string, unknown>; the
+      // runtime value is always JSON-serialisable because callers pass
+      // plain objects with primitive values.
+      metadata: metadata as Json,
     });
     if (error) {
       console.error("[logEvent] failed:", error.message, { eventType });
