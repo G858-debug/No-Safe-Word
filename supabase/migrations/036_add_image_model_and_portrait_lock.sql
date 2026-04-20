@@ -1,6 +1,10 @@
 -- ============================================================
 -- Image generation pivot: dual-model architecture
 -- ============================================================
+-- Rewritten idempotent 2026-04-19 (Phase 0.4): ADD COLUMN → ADD
+-- COLUMN IF NOT EXISTS so this migration is safe to re-run on any
+-- database where the columns may already exist. No semantic change.
+--
 -- Pivot from "Art Director + Juggernaut Ragnarok" to per-story
 -- model selection between:
 --   flux2_dev  -- Flux 2 Dev on RunPod via ComfyUI (reference-image consistency)
@@ -15,7 +19,7 @@
 -- ============================================================
 
 ALTER TABLE story_series
-  ADD COLUMN image_model TEXT NOT NULL DEFAULT 'flux2_dev'
+  ADD COLUMN IF NOT EXISTS image_model TEXT NOT NULL DEFAULT 'flux2_dev'
   CHECK (image_model IN ('flux2_dev', 'hunyuan3'));
 
 COMMENT ON COLUMN story_series.image_model IS
@@ -31,7 +35,7 @@ COMMENT ON COLUMN story_series.image_engine IS
 -- flux2_dev (which uses the image itself for consistency).
 -- Null until the character's portrait has been approved.
 ALTER TABLE story_characters
-  ADD COLUMN portrait_prompt_locked TEXT;
+  ADD COLUMN IF NOT EXISTS portrait_prompt_locked TEXT;
 
 COMMENT ON COLUMN story_characters.portrait_prompt_locked IS
   'Exact prompt text that produced the approved portrait. Injected into scene prompts for hunyuan3; retained for provenance under flux2_dev. Null until portrait approved.';
