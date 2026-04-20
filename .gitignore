@@ -31,3 +31,6 @@ flux2_dev_results/
 flux2_controlnet_results/
 hunyuan3_results/
 hunyuan_consistency/
+
+# Supabase CLI local cache (per-link, per-machine, should not be committed)
+supabase/.temp/
