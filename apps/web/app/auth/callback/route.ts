@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { supabase as serviceClient } from "@no-safe-word/story-engine";
 import { logEvent } from "@/lib/server/events";
+import { dispatchUserCreatedEvent } from "@/lib/server/resend-nurture";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -38,6 +39,31 @@ export async function GET(request: Request) {
           userId: authUserId,
           metadata: { method: "magic_link" },
         });
+
+        // Nurture first-time guard. Atomic UPDATE with WHERE nurture_started_at IS NULL
+        // returns the row only on the first matching call, so dispatch fires exactly once.
+        // WhatsApp PIN sign-ups are not instrumented (synthetic emails are not real inboxes).
+        if (email) {
+          const { data: guardRow } = await serviceClient
+            .from("nsw_users")
+            .update({ nurture_started_at: new Date().toISOString() })
+            .eq("auth_user_id", authUserId)
+            .is("nurture_started_at", null)
+            .select("id, display_name")
+            .maybeSingle();
+
+          if (guardRow) {
+            const host = request.headers.get("host") ?? "";
+            const source: "access" | "main" = host.startsWith("access.")
+              ? "access"
+              : "main";
+            await dispatchUserCreatedEvent({
+              email,
+              firstName: guardRow.display_name,
+              source,
+            });
+          }
+        }
 
         // Deep link to story if params present
         if (storySlug && chapter) {

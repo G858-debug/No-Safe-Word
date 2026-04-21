@@ -37,6 +37,7 @@
     "next": "^15.1.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "resend-preview": "npm:resend@6.10.0-preview-workflows.3",
     "sharp": "^0.34.5",
     "tailwind-merge": "^2.6.1",
     "ws": "^8.20.0"

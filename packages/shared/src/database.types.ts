@@ -819,6 +819,7 @@ export type Database = {
           has_email: boolean
           has_whatsapp: boolean
           id: string
+          nurture_started_at: string | null
           phone: string | null
           role: string
           updated_at: string
@@ -832,6 +833,7 @@ export type Database = {
           has_email?: boolean
           has_whatsapp?: boolean
           id?: string
+          nurture_started_at?: string | null
           phone?: string | null
           role?: string
           updated_at?: string
@@ -845,6 +847,7 @@ export type Database = {
           has_email?: boolean
           has_whatsapp?: boolean
           id?: string
+          nurture_started_at?: string | null
           phone?: string | null
           role?: string
           updated_at?: string

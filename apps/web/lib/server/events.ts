@@ -30,7 +30,9 @@ export type EventType =
   | "subscription.cancelled"
   // email (for Phase 0.5 Loops integration)
   | "email.sent"
-  | "email.bounced";
+  | "email.bounced"
+  // nurture (Phase 0.5b — dispatch failures from resend-nurture helper)
+  | "nurture.dispatch_failed";
 
 export interface LogEventParams {
   eventType: EventType;
