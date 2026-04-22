@@ -30,6 +30,24 @@ export default function Footer() {
             >
               About
             </Link>
+            <Link
+              href="/contact"
+              className="text-warm-300 transition-colors hover:text-amber-400"
+            >
+              Contact
+            </Link>
+            <Link
+              href="/privacy"
+              className="text-warm-300 transition-colors hover:text-amber-400"
+            >
+              Privacy
+            </Link>
+            <Link
+              href="/terms"
+              className="text-warm-300 transition-colors hover:text-amber-400"
+            >
+              Terms
+            </Link>
             <a
               href="https://www.facebook.com/nosafeword"
               target="_blank"

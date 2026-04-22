@@ -51,7 +51,50 @@ export async function POST(req: Request) {
       return new NextResponse("Invalid ITN", { status: 400 });
     }
 
-    // 5. Route based on payment type
+    // 5. Idempotency guard — must run before any business logic.
+    // Insert keyed on pf_payment_id; duplicate retries collide on the
+    // primary key, return 200 OK so PayFast stops retrying. The wrapping
+    // try/catch returns 200 on any unhandled error, so this branch
+    // explicitly returns 500 on unknown failures (the early return
+    // bypasses the catch and PayFast retries).
+    const { error: insertError } = await supabase
+      .from("payfast_itn_events")
+      .insert({
+        pf_payment_id: body.pf_payment_id,
+        m_payment_id: body.m_payment_id ?? null,
+        payment_status: body.payment_status ?? null,
+        raw_payload: body,
+      });
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        console.log(
+          `Duplicate ITN suppressed: pf_payment_id=${body.pf_payment_id}`
+        );
+        await logEvent({
+          eventType: "payfast.itn_duplicate",
+          metadata: {
+            pf_payment_id: body.pf_payment_id,
+            m_payment_id: body.m_payment_id ?? null,
+            payment_status: body.payment_status ?? null,
+          },
+        });
+        return new NextResponse("OK", { status: 200 });
+      }
+      console.error("Failed to record ITN event:", insertError);
+      await logEvent({
+        eventType: "payfast.itn_insert_failed",
+        metadata: {
+          pf_payment_id: body.pf_payment_id,
+          m_payment_id: body.m_payment_id ?? null,
+          error_code: insertError.code ?? null,
+          error_message: insertError.message,
+        },
+      });
+      return new NextResponse("Internal error", { status: 500 });
+    }
+
+    // 6. Route based on payment type
     const paymentType = body.custom_str3;
 
     if (paymentType === "purchase") {
@@ -163,7 +206,7 @@ export async function POST(req: Request) {
       console.warn("Unknown payment type:", paymentType);
     }
 
-    // 6. Always return 200 — Payfast requires it
+    // 7. Always return 200 — Payfast requires it
     return new NextResponse("OK", { status: 200 });
   } catch (err) {
     console.error("ITN handler error:", err);

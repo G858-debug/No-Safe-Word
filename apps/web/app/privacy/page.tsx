@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: "Privacy policy for No Safe Word.",
 };
 
-export default function AccessPrivacyPage() {
+export default function PrivacyPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <h1
@@ -15,7 +15,7 @@ export default function AccessPrivacyPage() {
         Privacy Policy
       </h1>
       <p className="mt-2 text-sm text-warm-400">
-        Last updated: February 2026
+        Last updated: April 2026
       </p>
 
       <div className="mt-8 space-y-8 text-base leading-relaxed text-warm-200">

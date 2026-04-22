@@ -854,6 +854,30 @@ export type Database = {
         }
         Relationships: []
       }
+      payfast_itn_events: {
+        Row: {
+          m_payment_id: string | null
+          payment_status: string | null
+          pf_payment_id: string
+          raw_payload: Json
+          received_at: string
+        }
+        Insert: {
+          m_payment_id?: string | null
+          payment_status?: string | null
+          pf_payment_id: string
+          raw_payload: Json
+          received_at?: string
+        }
+        Update: {
+          m_payment_id?: string | null
+          payment_status?: string | null
+          pf_payment_id?: string
+          raw_payload?: Json
+          received_at?: string
+        }
+        Relationships: []
+      }
       page_views: {
         Row: {
           browser: string | null

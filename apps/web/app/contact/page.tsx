@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     "Get in touch with No Safe Word and author Nontsikelelo Mabaso.",
 };
 
-export default function AccessContactPage() {
+export default function ContactPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <h1
@@ -17,8 +17,8 @@ export default function AccessContactPage() {
       </h1>
       <p className="mt-4 text-base leading-relaxed text-warm-200">
         We&apos;d love to hear from you. Whether you have a question about our
-        stories, need help with your account, or just want to say hello, feel
-        free to reach out.
+        stories, need help with your account, or want to cancel your
+        subscription, feel free to reach out.
       </p>
 
       <div className="mt-10 grid grid-cols-1 gap-8 sm:grid-cols-2">
@@ -31,7 +31,8 @@ export default function AccessContactPage() {
             Email
           </h2>
           <p className="mt-3 text-sm text-warm-300">
-            For general enquiries, support, or business matters:
+            For general enquiries, support, cancellations, and POPIA data
+            requests:
           </p>
           <a
             href="mailto:ntsiki@nosafeword.co.za"

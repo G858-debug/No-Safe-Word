@@ -32,7 +32,10 @@ export type EventType =
   | "email.sent"
   | "email.bounced"
   // nurture (Phase 0.5b — dispatch failures from resend-nurture helper)
-  | "nurture.dispatch_failed";
+  | "nurture.dispatch_failed"
+  // payfast (Phase 1 — ITN webhook idempotency guard)
+  | "payfast.itn_duplicate"
+  | "payfast.itn_insert_failed";
 
 export interface LogEventParams {
   eventType: EventType;
