@@ -11,6 +11,7 @@ import {
   requestStructuralDiagnosis,
   MAX_EVAL_RETRY_ATTEMPTS,
 } from "@no-safe-word/image-gen";
+import { handleCoverVariantCompletion } from "./cover-variant-handler";
 import {
   recommendResourceLoras,
   getRegisteredResourceLoras,
@@ -37,10 +38,10 @@ export async function GET(
       );
     }
 
-    // Find the image_id from generation_jobs
+    // Find the image_id (+ cover-variant discriminator) from generation_jobs
     const { data: jobRow } = await supabase
       .from("generation_jobs")
-      .select("image_id")
+      .select("image_id, job_type, variant_index, series_id")
       .eq("job_id", jobId)
       .single();
 
@@ -56,6 +57,25 @@ export async function GET(
       if (imageResult?.settings) {
         Object.assign(settings, imageResult.settings as Record<string, unknown>);
       }
+    }
+
+    // ── Cover-variant branch ──
+    // Covers skip the entire scene-evaluation pipeline (no Claude vision,
+    // no retry-with-reduced-LoRA, no LoRA discovery) and write back to
+    // story_series.cover_variants rather than story_image_prompts. The
+    // hard rule in CLAUDE.md mandates model-locked Flux 2 Dev for covers;
+    // the evaluator is built for scene-image semantics and would mutate
+    // cover state in ways the cover UI can't observe.
+    if (jobRow?.job_type === "cover_variant") {
+      return await handleCoverVariantCompletion({
+        jobId,
+        jobRow: {
+          image_id: jobRow.image_id,
+          variant_index: jobRow.variant_index ?? null,
+          series_id: jobRow.series_id ?? null,
+        },
+        settings,
+      });
     }
 
     const runpodJobId = jobId.startsWith("runpod-") ? jobId.replace("runpod-", "") : jobId;

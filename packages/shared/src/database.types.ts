@@ -405,7 +405,10 @@ export type Database = {
           id: string
           image_id: string | null
           job_id: string
+          job_type: string
+          series_id: string | null
           status: string
+          variant_index: number | null
         }
         Insert: {
           completed_at?: string | null
@@ -415,7 +418,10 @@ export type Database = {
           id?: string
           image_id?: string | null
           job_id: string
+          job_type?: string
+          series_id?: string | null
           status?: string
+          variant_index?: number | null
         }
         Update: {
           completed_at?: string | null
@@ -425,7 +431,10 @@ export type Database = {
           id?: string
           image_id?: string | null
           job_id?: string
+          job_type?: string
+          series_id?: string | null
           status?: string
+          variant_index?: number | null
         }
         Relationships: [
           {
@@ -433,6 +442,13 @@ export type Database = {
             columns: ["image_id"]
             isOneToOne: false
             referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generation_jobs_series_id_fkey"
+            columns: ["series_id"]
+            isOneToOne: false
+            referencedRelation: "story_series"
             referencedColumns: ["id"]
           },
         ]
@@ -1244,6 +1260,17 @@ export type Database = {
       }
       story_series: {
         Row: {
+          blurb_long_selected: number | null
+          blurb_long_variants: Json | null
+          blurb_short_selected: number | null
+          blurb_short_variants: Json | null
+          cover_base_url: string | null
+          cover_error: string | null
+          cover_prompt: string | null
+          cover_selected_variant: number | null
+          cover_sizes: Json | null
+          cover_status: string
+          cover_variants: Json | null
           created_at: string
           description: string | null
           hashtag: string | null
@@ -1258,6 +1285,17 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          blurb_long_selected?: number | null
+          blurb_long_variants?: Json | null
+          blurb_short_selected?: number | null
+          blurb_short_variants?: Json | null
+          cover_base_url?: string | null
+          cover_error?: string | null
+          cover_prompt?: string | null
+          cover_selected_variant?: number | null
+          cover_sizes?: Json | null
+          cover_status?: string
+          cover_variants?: Json | null
           created_at?: string
           description?: string | null
           hashtag?: string | null
@@ -1272,6 +1310,17 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          blurb_long_selected?: number | null
+          blurb_long_variants?: Json | null
+          blurb_short_selected?: number | null
+          blurb_short_variants?: Json | null
+          cover_base_url?: string | null
+          cover_error?: string | null
+          cover_prompt?: string | null
+          cover_selected_variant?: number | null
+          cover_sizes?: Json | null
+          cover_status?: string
+          cover_variants?: Json | null
           created_at?: string
           description?: string | null
           hashtag?: string | null

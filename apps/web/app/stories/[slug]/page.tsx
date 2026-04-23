@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@no-safe-word/story-engine";
-import type { StorySeriesRow } from "@no-safe-word/shared";
 import { createClient } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/server/events";
+import {
+  getPublishedSeriesBySlug,
+  resolveShortBlurb,
+  resolveLongBlurb,
+} from "@/lib/server/get-published-series";
 
 export const revalidate = 3600;
 
@@ -13,40 +17,53 @@ interface PageProps {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata
+// Metadata (shared helper ensures meta tags + page body see identical data)
 // ---------------------------------------------------------------------------
 
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-
-  const { data: seriesData } = await supabase
-    .from("story_series")
-    .select("title, description")
-    .eq("slug", slug)
-    .eq("status", "published")
-    .single();
-
-  const series = seriesData as Pick<
-    StorySeriesRow,
-    "title" | "description"
-  > | null;
+  const series = await getPublishedSeriesBySlug(slug);
   if (!series) return { title: "Not Found" };
 
-  return {
+  const shortBlurb = resolveShortBlurb(series);
+  const ogImage = series.cover_sizes?.og ?? series.cover_sizes?.card ?? null;
+  const description =
+    shortBlurb || `Read ${series.title} by Nontsikelelo on No Safe Word.`;
+
+  const metadata: Metadata = {
     title: series.title,
-    description:
-      series.description ||
-      `Read ${series.title} by Nontsikelelo on No Safe Word.`,
+    description,
     openGraph: {
       title: series.title,
-      description:
-        series.description ||
-        `Read ${series.title} by Nontsikelelo on No Safe Word.`,
+      description,
       type: "article",
+      ...(ogImage
+        ? {
+            images: [
+              {
+                url: ogImage,
+                // Dimensions match Prompt 3 composite sizes. Explicit
+                // width/height helps social scrapers avoid re-fetching
+                // for metadata discovery.
+                width: series.cover_sizes?.og ? 1200 : 600,
+                height: series.cover_sizes?.og ? 630 : 900,
+                alt: series.title,
+              },
+            ],
+          }
+        : {}),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: series.title,
+      description,
+      ...(ogImage ? { images: [ogImage] } : {}),
     },
   };
+
+  return metadata;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,18 +73,7 @@ export async function generateMetadata({
 export default async function SeriesPage({ params }: PageProps) {
   const { slug } = await params;
 
-  // 1. Fetch series
-  const { data: seriesData } = await supabase
-    .from("story_series")
-    .select("id, title, slug, description, total_parts, hashtag")
-    .eq("slug", slug)
-    .eq("status", "published")
-    .single();
-
-  const series = seriesData as Pick<
-    StorySeriesRow,
-    "id" | "title" | "slug" | "description" | "total_parts" | "hashtag"
-  > | null;
+  const series = await getPublishedSeriesBySlug(slug);
   if (!series) notFound();
 
   // Analytics: series summary view. Log userId if the reader is signed in,
@@ -82,7 +88,7 @@ export default async function SeriesPage({ params }: PageProps) {
     metadata: { series_slug: slug },
   });
 
-  // 2. Fetch published chapters
+  // Fetch published chapters
   const { data: posts } = await supabase
     .from("story_posts")
     .select("part_number, title")
@@ -90,7 +96,7 @@ export default async function SeriesPage({ params }: PageProps) {
     .eq("status", "published")
     .order("part_number", { ascending: true });
 
-  // 3. Fetch characters with portraits
+  // Fetch characters with portraits
   const { data: characters } = await supabase
     .from("story_characters")
     .select(
@@ -99,7 +105,7 @@ export default async function SeriesPage({ params }: PageProps) {
     .eq("series_id", series.id)
     .eq("approved", true);
 
-  // Fetch character names and portrait URLs
+  // Resolve character display metadata
   let characterDetails: {
     name: string;
     role: string;
@@ -141,30 +147,66 @@ export default async function SeriesPage({ params }: PageProps) {
     }));
   }
 
+  const heroUrl = series.cover_sizes?.hero ?? null;
+  const longBlurb = resolveLongBlurb(series);
+  const firstChapterHref =
+    posts && posts.length > 0
+      ? `/stories/${series.slug}/${posts[0].part_number}`
+      : null;
+
   return (
     <div>
-      {/* Series header */}
+      {/* ===== HERO ===== */}
+      {/* Desktop: two-column (cover left ~40%, text right ~60%).         */}
+      {/* Mobile: stacked, cover first, constrained max-height.           */}
       <header className="mb-12">
-        {series.hashtag && (
-          <p className="mb-3 text-xs uppercase tracking-[0.2em] text-amber-700">
-            #{series.hashtag}
-          </p>
-        )}
-        <h1
-          className="text-3xl font-bold text-amber-50 sm:text-4xl lg:text-5xl"
-          style={{ fontFamily: "var(--font-serif)" }}
-        >
-          {series.title}
-        </h1>
-        <p className="mt-3 text-sm italic text-warm-400">By Nontsikelelo</p>
-        {series.description && (
-          <p className="mt-6 max-w-2xl text-base leading-relaxed text-warm-200">
-            {series.description}
-          </p>
-        )}
-        <p className="mt-4 text-sm text-warm-500">
-          {series.total_parts} {series.total_parts === 1 ? "part" : "parts"}
-        </p>
+        <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-12">
+          {heroUrl && (
+            <div className="mx-auto w-full max-w-sm lg:mx-0 lg:w-[40%] lg:max-w-none lg:shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={heroUrl}
+                alt={`${series.title} cover`}
+                className="w-full rounded-lg border border-amber-900/20 shadow-[0_0_40px_-10px_rgba(217,119,6,0.25)]"
+                loading="eager"
+              />
+            </div>
+          )}
+          <div className={heroUrl ? "lg:w-[60%]" : "mx-auto w-full max-w-2xl text-center"}>
+            {series.hashtag && (
+              <p className="mb-3 text-xs uppercase tracking-[0.2em] text-amber-700">
+                #{series.hashtag}
+              </p>
+            )}
+            <h1
+              className="text-3xl font-bold text-amber-50 sm:text-4xl lg:text-5xl"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              {series.title}
+            </h1>
+            <p className="mt-3 text-sm italic text-warm-400">
+              By Nontsikelelo Mabaso
+            </p>
+            {longBlurb && (
+              <p className="mt-6 max-w-2xl whitespace-pre-line text-base leading-relaxed text-warm-200">
+                {longBlurb}
+              </p>
+            )}
+            <p className="mt-4 text-sm text-warm-500">
+              {series.total_parts}{" "}
+              {series.total_parts === 1 ? "part" : "parts"}
+            </p>
+            {firstChapterHref && (
+              <Link
+                href={firstChapterHref}
+                className="mt-8 inline-flex items-center gap-2 rounded-lg bg-amber-700 px-6 py-3 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600"
+              >
+                Start Reading
+                <span>&rarr;</span>
+              </Link>
+            )}
+          </div>
+        </div>
       </header>
 
       {/* Characters */}
@@ -212,18 +254,6 @@ export default async function SeriesPage({ params }: PageProps) {
           Chapters
         </h2>
 
-        {/* Start reading CTA */}
-        {posts && posts.length > 0 && (
-          <Link
-            href={`/stories/${series.slug}/${posts[0].part_number}`}
-            className="mb-8 inline-flex items-center gap-2 rounded-lg bg-amber-700 px-6 py-3 text-sm font-semibold text-amber-50 transition-colors hover:bg-amber-600"
-          >
-            Start Reading
-            <span>&rarr;</span>
-          </Link>
-        )}
-
-        {/* Chapter list */}
         <div className="mt-6 space-y-2">
           {(posts || []).map((post) => (
             <Link

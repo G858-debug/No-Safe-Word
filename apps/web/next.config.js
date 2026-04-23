@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['sharp', 'ws', '@supabase/supabase-js', '@supabase/postgrest-js', '@supabase/auth-js', '@supabase/realtime-js', '@supabase/storage-js', '@supabase/functions-js'],
+  serverExternalPackages: ['sharp', 'ws', '@resvg/resvg-js', 'satori', '@supabase/supabase-js', '@supabase/postgrest-js', '@supabase/auth-js', '@supabase/realtime-js', '@supabase/storage-js', '@supabase/functions-js'],
   images: {
     remotePatterns: [
       {

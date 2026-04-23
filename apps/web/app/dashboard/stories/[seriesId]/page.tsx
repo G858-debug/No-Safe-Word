@@ -37,12 +37,15 @@ import {
 import CharacterApproval, {
   type CharacterFromAPI,
 } from "./components/CharacterApproval";
+import CoverApproval from "./components/CoverApproval";
+import BlurbSelection from "./components/BlurbSelection";
 import ImageGeneration from "./components/ImageGeneration";
 import PublishPanel from "./components/PublishPanel";
 import type {
   StorySeriesRow,
   StoryPostRow,
   ImageModel,
+  CoverStatus,
 } from "@no-safe-word/shared";
 
 const MODEL_OPTIONS: Array<{ value: ImageModel; label: string; helper: string }> = [
@@ -247,6 +250,28 @@ export default function SeriesDetailPage() {
   // LoRAs are recommended but not required — pipeline falls back to inline descriptions
   const allReadyForImages = allCharsApproved;
 
+  // Cover approval gates the Blurbs tab (must be at least approved). The
+  // Images tab gates on cover readiness AND both blurbs being selected.
+  // UI-only checks against the series row.
+  const coverStatus = (data?.series.cover_status ?? "pending") as CoverStatus;
+  const coverAtLeastApproved =
+    coverStatus === "approved" || coverStatus === "complete" || coverStatus === "compositing";
+  const coverReady = coverStatus === "approved" || coverStatus === "complete";
+
+  const rawSeries = data?.series as
+    | (StorySeriesRow & {
+        blurb_short_selected?: number | null;
+        blurb_long_selected?: number | null;
+        blurb_short_variants?: string[] | null;
+        blurb_long_variants?: string[] | null;
+      })
+    | undefined;
+  const shortBlurbSelected =
+    rawSeries?.blurb_short_selected !== null && rawSeries?.blurb_short_selected !== undefined;
+  const longBlurbSelected =
+    rawSeries?.blurb_long_selected !== null && rawSeries?.blurb_long_selected !== undefined;
+  const blurbsReady = shortBlurbSelected && longBlurbSelected;
+
   // Model is locked once any portrait has been generated (approved or pending).
   // Until then, the selector is a simple PATCH. After, switching requires the
   // destructive /change-image-model route.
@@ -445,7 +470,7 @@ export default function SeriesDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="overview" className="gap-1.5">
             <FileText className="h-4 w-4" />
             Overview
@@ -453,6 +478,14 @@ export default function SeriesDetailPage() {
           <TabsTrigger value="characters" className="gap-1.5">
             <Users className="h-4 w-4" />
             Characters
+          </TabsTrigger>
+          <TabsTrigger value="cover" className="gap-1.5">
+            <ImageIcon className="h-4 w-4" />
+            Cover
+          </TabsTrigger>
+          <TabsTrigger value="blurbs" className="gap-1.5">
+            <FileText className="h-4 w-4" />
+            Blurbs
           </TabsTrigger>
           <TabsTrigger value="images" className="gap-1.5">
             <ImageIcon className="h-4 w-4" />
@@ -660,23 +693,94 @@ export default function SeriesDetailPage() {
         </div>
 
         {/* ===================== CHARACTERS TAB ===================== */}
-        {/* ===================== CHARACTERS TAB ===================== */}
         <div className={activeTab === "characters" ? "mt-6" : "hidden"}>
           <CharacterApproval
             seriesId={seriesId}
-            onAllReady={() => setActiveTab("images")}
+            onAllReady={() => setActiveTab("cover")}
           />
+        </div>
+
+        {/* ======================= COVER TAB ======================== */}
+        <div className={activeTab === "cover" ? "mt-6" : "hidden"}>
+          {allCharsApproved ? (
+            <CoverApproval seriesId={seriesId} />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Users className="mb-4 h-12 w-12 text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">
+                Approve Characters First
+              </h3>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Cover generation uses the approved protagonist portrait as a reference
+                image. Finish the Characters step before generating the cover.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ======================= BLURBS TAB ======================= */}
+        <div className={activeTab === "blurbs" ? "mt-6" : "hidden"}>
+          {coverAtLeastApproved ? (
+            <BlurbSelection
+              seriesId={seriesId}
+              onChange={() => {
+                // Refresh the series data so downstream tab gates see the
+                // new blurb_*_selected values. fetchData is an IIFE above,
+                // so we just reload — cheap and matches the existing
+                // model-change flow.
+                fetch(`/api/stories/${seriesId}`)
+                  .then((r) => r.json())
+                  .then((d) => setData(d))
+                  .catch(() => {
+                    /* non-fatal */
+                  });
+              }}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <FileText className="mb-4 h-12 w-12 text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">Approve the Cover First</h3>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Blurb selection unlocks once the cover is approved. The
+                short blurb also drives a cover re-composite, so the cover
+                needs to be in place first.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ====================== IMAGES TAB ======================== */}
         <div className={activeTab === "images" ? "mt-6" : "hidden"}>
-          <ImageGeneration
-            seriesId={seriesId}
-            posts={posts}
-            imageUrls={data.image_urls}
-            allCharactersApproved={allReadyForImages}
-          />
-          {allCharsApproved && !allLorasDeployed && loraCheckDone && (
+          {coverReady && blurbsReady ? (
+            <>
+              <ImageGeneration
+                seriesId={seriesId}
+                posts={posts}
+                imageUrls={data.image_urls}
+                allCharactersApproved={allReadyForImages}
+              />
+            </>
+          ) : !coverReady ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <ImageIcon className="mb-4 h-12 w-12 text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">Approve the Cover First</h3>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Scene image generation is gated on an approved cover. Go to the Cover
+                tab, generate variants, and approve one before generating scene images.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <FileText className="mb-4 h-12 w-12 text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">Select Blurbs First</h3>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Pick one short and one long blurb in the Blurbs tab before
+                generating scene images. Short blurb drives the OG/email
+                composites; long blurb renders on the website detail page.
+              </p>
+            </div>
+          )}
+          {coverReady && blurbsReady && allCharsApproved && !allLorasDeployed && loraCheckDone && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">
               <p className="text-sm font-medium text-amber-400 mb-2">
                 Some characters have no deployed LoRA — images will use generic descriptions

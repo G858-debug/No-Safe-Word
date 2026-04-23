@@ -6,7 +6,8 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "backfill-cache-headers": "npx tsx scripts/backfill-cache-headers.ts"
   },
   "engines": {
     "node": ">=20.0.0",
@@ -25,6 +26,7 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@resvg/resvg-js": "^2.6.2",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
     "@tiptap/extension-placeholder": "^2.27.2",
@@ -38,6 +40,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "resend-preview": "npm:resend@6.10.0-preview-workflows.3",
+    "satori": "^0.12.2",
     "sharp": "^0.34.5",
     "tailwind-merge": "^2.6.1",
     "ws": "^8.20.0"

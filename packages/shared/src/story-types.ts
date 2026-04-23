@@ -1,6 +1,21 @@
 // Story Publisher Types
 // These types define the JSON format Claude outputs at Stage 7
 // and the database models for the story publisher pipeline.
+//
+// Pipeline stages (for context; see the claude.ai Project system
+// prompt for the authoritative 10-stage definition):
+//
+//   Stage 7  — JSON import (this file's `StoryImportPayload`).
+//   Stage 8  — Character portrait generation + approval.
+//   Stage 8½ — COVER generation + approval. Runs AFTER character
+//              approval and BEFORE scene image generation. Covers
+//              always use Flux 2 Dev regardless of
+//              story_series.image_model; the dedicated endpoint
+//              /api/stories/[seriesId]/generate-cover bypasses the
+//              model-aware dispatcher (implemented in Prompt 2).
+//   Stage 9  — Scene image generation (model-aware:
+//              flux2_dev | hunyuan3).
+//   Stage 10 — Review & publish (cover + blurbs + posts together).
 
 // ============================================================
 // JSON IMPORT FORMAT (what Claude produces)
@@ -92,6 +107,12 @@ export interface MarketingImport {
   taglines?: string[];
   posting_schedule?: string;
   teaser_prompt?: string;
+  /** 3 short blurb variants (1–2 sentences each). User selects one in the Story Publisher. */
+  blurb_short_variants?: string[];
+  /** 3 long blurb variants (150–250 words each). User selects one in the Story Publisher. */
+  blurb_long_variants?: string[];
+  /** Cover image prompt (Five Layers Framework, two-character intimate composition, suggestive-not-explicit). Generated via Flux 2 Dev regardless of story image_model. */
+  cover_prompt?: string;
 }
 
 // ============================================================
@@ -103,6 +124,34 @@ export type ImageModel = 'flux2_dev' | 'hunyuan3';
 
 /** @deprecated Legacy column retained for backward compat. Use `ImageModel` instead. */
 export type ImageEngine = 'juggernaut_ragnarok';
+
+/**
+ * Cover generation state machine. Cover generation is model-locked to
+ * Flux 2 Dev regardless of story_series.image_model — see CLAUDE.md.
+ *
+ * Flow: pending → generating → variants_ready → approved → compositing → complete
+ * Any stage may transition to `failed`; retry resumes from the last checkpoint.
+ */
+export type CoverStatus =
+  | "pending"
+  | "generating"
+  | "variants_ready"
+  | "approved"
+  | "compositing"
+  | "complete"
+  | "failed";
+
+/** Composited cover output URLs, written after typography passes. */
+export interface CoverSizes {
+  /** Website story detail page. 1600×2400 JPEG. */
+  hero: string;
+  /** Library grid + story cards. 600×900 JPEG. */
+  card: string;
+  /** OG link previews (landscape layout). 1200×630 JPEG. */
+  og: string;
+  /** Email headers (landscape layout). 1200×600 JPEG. */
+  email: string;
+}
 
 export interface StorySeriesRow {
   id: string;
@@ -117,8 +166,68 @@ export interface StorySeriesRow {
   /** @deprecated Legacy. Retained for backward compat with the V4/Juggernaut pipeline. */
   image_engine: ImageEngine;
   marketing: Record<string, unknown>;
+
+  // --- Cover fields (added in migration 041) ---
+  /** Generation prompt for the cover. Editable in the UI. Fed into Flux 2 Dev. */
+  cover_prompt: string | null;
+  /** Public URL of the approved base image (no typography, 1024×1536). */
+  cover_base_url: string | null;
+  /** Up to 4 variant URLs produced during generation. */
+  cover_variants: string[] | null;
+  /** Index 0–3 of the user-selected variant. Null until approved. */
+  cover_selected_variant: number | null;
+  /** Composited output URLs keyed by size label. */
+  cover_sizes: CoverSizes | null;
+  cover_status: CoverStatus;
+
+  // --- Blurb fields (added in migration 041) ---
+  /** 3 short blurb variants (1–2 sentences). */
+  blurb_short_variants: string[] | null;
+  /** Index 0–2 of selected short blurb. */
+  blurb_short_selected: number | null;
+  /** 3 long blurb variants (150–250 words). */
+  blurb_long_variants: string[] | null;
+  /** Index 0–2 of selected long blurb. */
+  blurb_long_selected: number | null;
+
   created_at: string;
   updated_at: string;
+}
+
+// --- Derived getters (computed in TS; NOT DB columns) ---------
+
+/** Selected short blurb text, or null if not yet selected. */
+export function getSelectedShortBlurb(row: Pick<StorySeriesRow, "blurb_short_variants" | "blurb_short_selected">): string | null {
+  const { blurb_short_variants: vs, blurb_short_selected: i } = row;
+  if (!vs || i === null || i === undefined) return null;
+  return vs[i] ?? null;
+}
+
+/** Selected long blurb text, or null if not yet selected. */
+export function getSelectedLongBlurb(row: Pick<StorySeriesRow, "blurb_long_variants" | "blurb_long_selected">): string | null {
+  const { blurb_long_variants: vs, blurb_long_selected: i } = row;
+  if (!vs || i === null || i === undefined) return null;
+  return vs[i] ?? null;
+}
+
+/** Composited hero cover URL (website detail page), or null if not composited. */
+export function getCoverHeroUrl(row: Pick<StorySeriesRow, "cover_sizes">): string | null {
+  return row.cover_sizes?.hero ?? null;
+}
+
+/** Composited card cover URL (library grid), or null if not composited. */
+export function getCoverCardUrl(row: Pick<StorySeriesRow, "cover_sizes">): string | null {
+  return row.cover_sizes?.card ?? null;
+}
+
+/** Composited OG cover URL (link previews), or null if not composited. */
+export function getCoverOgUrl(row: Pick<StorySeriesRow, "cover_sizes">): string | null {
+  return row.cover_sizes?.og ?? null;
+}
+
+/** Composited email cover URL (email headers), or null if not composited. */
+export function getCoverEmailUrl(row: Pick<StorySeriesRow, "cover_sizes">): string | null {
+  return row.cover_sizes?.email ?? null;
 }
 
 export type SeriesStatus =
@@ -282,6 +391,36 @@ export function validateImportPayload(
           errors.push(`posts[${i}].images.website_only must be an array`);
       } else {
         errors.push(`posts[${i}].images is required`);
+      }
+    }
+  }
+
+  // Marketing validation (optional block — cover/blurbs are added post-import,
+  // but if present at import they must have the correct shape).
+  if (obj.marketing !== undefined && obj.marketing !== null) {
+    if (typeof obj.marketing !== "object") {
+      errors.push("'marketing' must be an object when provided");
+    } else {
+      const m = obj.marketing as Record<string, unknown>;
+
+      if (m.blurb_short_variants !== undefined) {
+        if (!Array.isArray(m.blurb_short_variants) || m.blurb_short_variants.length !== 3) {
+          errors.push("marketing.blurb_short_variants must be an array of exactly 3 strings");
+        } else if (!m.blurb_short_variants.every((v) => typeof v === "string" && v.length > 0)) {
+          errors.push("marketing.blurb_short_variants entries must all be non-empty strings");
+        }
+      }
+
+      if (m.blurb_long_variants !== undefined) {
+        if (!Array.isArray(m.blurb_long_variants) || m.blurb_long_variants.length !== 3) {
+          errors.push("marketing.blurb_long_variants must be an array of exactly 3 strings");
+        } else if (!m.blurb_long_variants.every((v) => typeof v === "string" && v.length > 0)) {
+          errors.push("marketing.blurb_long_variants entries must all be non-empty strings");
+        }
+      }
+
+      if (m.cover_prompt !== undefined && (typeof m.cover_prompt !== "string" || m.cover_prompt.length === 0)) {
+        errors.push("marketing.cover_prompt must be a non-empty string when provided");
       }
     }
   }

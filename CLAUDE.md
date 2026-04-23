@@ -26,15 +26,31 @@ scripts/               — Utility scripts (model downloads, LoRA uploads, data 
 
 ## Image Generation Pipeline
 
-**There is ONE image pipeline: Juggernaut Ragnarok (`juggernaut_ragnarok`).**
-No engine switching, no engine selector, no conditional paths.
+**Dual-model architecture.** Since Phase 0.4 (migration 036), every story picks one of two pipelines at import time, stored on `story_series.image_model`:
+
+- **`flux2_dev`** — Flux 2 Dev on RunPod via ComfyUI. Character consistency via reference-image injection: the approved portrait (`story_characters.approved_image_id` → `images.stored_url`) is base64-encoded and passed as a reference image to the generation job.
+- **`hunyuan3`** — HunyuanImage 3.0 on Replicate. Character consistency via prompt injection: `story_characters.portrait_prompt_locked` (the exact text that produced the approved portrait) is spliced verbatim into every scene prompt.
+
+Selection is set at import (defaults to `flux2_dev`) and switchable via `POST /api/stories/[seriesId]/change-image-model` — switching destructively resets downstream generation state for that series.
+
+The `story_series.image_engine` column (`juggernaut_ragnarok`) is **legacy**, retained for backward compatibility with the V4 pipeline only. All new code reads `image_model`; treat `image_engine` as read-only metadata.
+
+**Dispatcher:** `POST /api/stories/[seriesId]/generate-image` reads `image_model` and routes to `runFlux2Generation()` or `runHunyuanGeneration()`.
+
+### Hard rule — cover generation is model-locked
+
+**Cover generation always uses Flux 2 Dev regardless of the story's `image_model` setting.** The dedicated `POST /api/stories/[seriesId]/generate-cover` endpoint calls `generateFlux2Image()` directly, bypassing the model-aware dispatcher. This is intentional — do not "fix" the apparent inconsistency by routing covers through the dispatcher. Reasons: (1) cover composition needs reference-image conditioning against approved portraits, (2) covers are the public marketing artifact and need a single quality bar, (3) Hunyuan does not support reference-image consistency the same way.
+
+### Legacy (V4 / Juggernaut Ragnarok)
+
+Retained only for stories still on `image_engine = 'juggernaut_ragnarok'` via `/api/stories/[seriesId]/generate-images-v4/`:
 
 - **Checkpoint:** Juggernaut XL Ragnarok (SDXL architecture, photorealistic)
 - **Compute:** RunPod serverless → ComfyUI → character LoRAs → FaceDetailer
 - **Defaults:** DPM++ 2M SDE Karras, 30 steps, CFG 3-5, Clip Skip 1
 - **Resolutions:** 832×1216 (portrait), 1216×832 (landscape), 1024×1024 (square)
 
-Key files:
+Legacy key files:
 - `packages/image-gen/src/pony-workflow-builder.ts` — ComfyUI workflow construction
 - `packages/image-gen/src/pony-prompt-builder.ts` — Booru tag assembly
 - `packages/image-gen/src/pony-lora-registry.ts` — Style LoRA catalog
@@ -270,7 +286,10 @@ Enhancement via `claude-haiku-4-5-20251001`.
 
 Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prompts`, `images`, `character_loras`, `lora_dataset_images`
 
-- `story_series.image_engine` — always `juggernaut_ragnarok`
+- `story_series.image_model` — authoritative generation model: `flux2_dev` (Flux 2 Dev / RunPod) or `hunyuan3` (HunyuanImage 3.0 / Replicate). Default `flux2_dev`.
+- `story_series.image_engine` — legacy V4 column (`juggernaut_ragnarok`). Do not use for new code.
+- `story_series.cover_status` — cover generation state machine: pending → generating → variants_ready → approved → compositing → complete (or failed).
+- `story_characters.portrait_prompt_locked` — exact prompt text behind the approved portrait; injected verbatim into Hunyuan scene prompts; retained for provenance under Flux.
 - `character_loras.status` — pipeline stages: pending → generating_dataset → evaluating → awaiting_dataset_approval → captioning → training → validating → deployed
 - Migrations are append-only. Never delete migration files.
 
@@ -286,6 +305,7 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 - **API keys live in `.env.local`** — CivitAI, RunPod, Supabase, Replicate, and Hugging Face tokens are all there. Read `.env.local` first before asking the user to provide keys or do things manually. Only ask if you've already tried and failed.
 - Don't ask me to check the Railway logs — you have access, check them yourself
 - `apps/web` is the ONLY app. Never create files in `apps/dashboard`
-- All image generation goes through `/api/stories/[seriesId]/generate-images-v4/`
+- Scene image generation goes through `/api/stories/[seriesId]/generate-image` (model-aware dispatcher). Legacy V4 lives at `/api/stories/[seriesId]/generate-images-v4/` and is only used by stories still on `image_engine = 'juggernaut_ragnarok'`.
+- Cover generation goes through `/api/stories/[seriesId]/generate-cover` (always Flux 2 Dev, bypasses the dispatcher).
 - Character generation goes through `/api/stories/characters/[storyCharId]/generate`
 - **Never download large files (models, datasets, checkpoints) to the local machine.** The local machine is for code only. All model downloads must go directly to RunPod (network volume via S3 API or in-pod downloads). All heavy processing (inference, training) runs on RunPod or cloud services, never locally.

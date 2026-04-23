@@ -3,6 +3,13 @@ import { validateImportPayload } from "@no-safe-word/shared";
 import { importStory } from "@no-safe-word/story-engine";
 
 // POST /api/webhook/story-import — Webhook for receiving story JSON
+//
+// Pipeline entry point (Stage 7). The imported series starts with
+// cover_status='pending' and null blurb variants; cover generation
+// and blurb selection run in a dedicated post-import workflow
+// (Stage 8½) that sits between character approval (Stage 8) and
+// scene image generation (Stage 9). Covers always use Flux 2 Dev
+// regardless of the story's image_model — see CLAUDE.md.
 export async function POST(request: NextRequest) {
   try {
     // 1. Auth check

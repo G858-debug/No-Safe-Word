@@ -47,7 +47,60 @@ export async function importStory(
     characterMap.set(char.name, characterId);
   }
 
-  // 2. Create the story series
+  // 2. Extract blurb variants + cover_prompt from the marketing block
+  //    and write them to the dedicated top-level columns (added in
+  //    migration 041). The full marketing JSONB is ALSO preserved for
+  //    fields that don't have dedicated columns (taglines,
+  //    posting_schedule, teaser_prompt).
+  //
+  //    Defense-in-depth validation: validateImportPayload() already
+  //    enforces the exactly-3 rule at the webhook layer, but non-
+  //    webhook callers of importStory() could bypass it. Re-check
+  //    here so malformed payloads fail loudly instead of landing
+  //    null top-level columns while the marketing JSONB has
+  //    whatever-length arrays.
+  const marketing = payload.marketing;
+
+  const blurbShortVariants =
+    marketing?.blurb_short_variants !== undefined ? marketing.blurb_short_variants : null;
+  if (blurbShortVariants !== null) {
+    if (!Array.isArray(blurbShortVariants) || blurbShortVariants.length !== 3) {
+      throw new Error(
+        `marketing.blurb_short_variants must be an array of exactly 3 strings (got ${
+          Array.isArray(blurbShortVariants) ? blurbShortVariants.length : typeof blurbShortVariants
+        })`
+      );
+    }
+    if (!blurbShortVariants.every((v) => typeof v === "string" && v.length > 0)) {
+      throw new Error(
+        "marketing.blurb_short_variants entries must all be non-empty strings"
+      );
+    }
+  }
+
+  const blurbLongVariants =
+    marketing?.blurb_long_variants !== undefined ? marketing.blurb_long_variants : null;
+  if (blurbLongVariants !== null) {
+    if (!Array.isArray(blurbLongVariants) || blurbLongVariants.length !== 3) {
+      throw new Error(
+        `marketing.blurb_long_variants must be an array of exactly 3 strings (got ${
+          Array.isArray(blurbLongVariants) ? blurbLongVariants.length : typeof blurbLongVariants
+        })`
+      );
+    }
+    if (!blurbLongVariants.every((v) => typeof v === "string" && v.length > 0)) {
+      throw new Error(
+        "marketing.blurb_long_variants entries must all be non-empty strings"
+      );
+    }
+  }
+
+  const coverPrompt =
+    marketing?.cover_prompt !== undefined && marketing.cover_prompt !== null
+      ? String(marketing.cover_prompt).trim() || null
+      : null;
+
+  // 3. Create the story series
   const { data: series, error: seriesError } = await supabase
     .from("story_series")
     .insert({
@@ -59,6 +112,9 @@ export async function importStory(
       status: "characters_pending",
       image_model: imageModel,
       marketing: (payload.marketing ?? {}) as Json,
+      blurb_short_variants: (blurbShortVariants ?? null) as Json | null,
+      blurb_long_variants: (blurbLongVariants ?? null) as Json | null,
+      cover_prompt: coverPrompt,
     })
     .select("id")
     .single();
@@ -69,7 +125,7 @@ export async function importStory(
 
   const seriesId = series.id;
 
-  // 3. Link characters to series
+  // 4. Link characters to series
   const storyCharacterRows = payload.characters.map((char) => {
     return {
       series_id: seriesId,
@@ -88,7 +144,7 @@ export async function importStory(
     throw new Error(`Failed to link characters: ${linkError.message}`);
   }
 
-  // 4. Create posts and their image prompts
+  // 5. Create posts and their image prompts
   let totalImagePrompts = 0;
   const postIds: string[] = [];
 
@@ -226,7 +282,7 @@ export async function importStory(
     }
   }
 
-  // 5. Auto-detect secondary characters in prompts that don't have one linked
+  // 6. Auto-detect secondary characters in prompts that don't have one linked
   let autoDetectedSecondary = 0;
 
   if (postIds.length > 0) {

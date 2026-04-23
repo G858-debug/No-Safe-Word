@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
-import { supabase } from "@no-safe-word/story-engine";
 import StoryCard from "@/components/StoryCard";
+import {
+  getPublishedSeriesList,
+  resolveShortBlurb,
+} from "@/lib/server/get-published-series";
 
 export const revalidate = 3600;
 
@@ -10,56 +13,8 @@ export const metadata: Metadata = {
     "Browse all stories on No Safe Word. Erotic fiction by Nontsikelelo.",
 };
 
-async function getAllStories() {
-  const { data: series } = await supabase
-    .from("story_series")
-    .select("id, title, slug, description, total_parts, hashtag")
-    .eq("status", "published")
-    .order("updated_at", { ascending: false });
-
-  if (!series || series.length === 0) return [];
-
-  // Fetch cover images
-  const seriesIds = series.map((s) => s.id);
-  const { data: storyChars } = await supabase
-    .from("story_characters")
-    .select("series_id, approved_image_id")
-    .in("series_id", seriesIds)
-    .eq("approved", true);
-
-  const coverImageIds = new Map<string, string>();
-  for (const sc of storyChars || []) {
-    if (sc.approved_image_id && !coverImageIds.has(sc.series_id)) {
-      coverImageIds.set(sc.series_id, sc.approved_image_id);
-    }
-  }
-
-  const imgIds = Array.from(coverImageIds.values());
-  let imageUrlMap: Record<string, string> = {};
-  if (imgIds.length > 0) {
-    const { data: images } = await supabase
-      .from("images")
-      .select("id, stored_url")
-      .in("id", imgIds);
-    if (images) {
-      imageUrlMap = Object.fromEntries(
-        images
-          .filter((i) => i.stored_url)
-          .map((i) => [i.id, i.stored_url!])
-      );
-    }
-  }
-
-  return series.map((s) => ({
-    ...s,
-    coverImageUrl: coverImageIds.has(s.id)
-      ? imageUrlMap[coverImageIds.get(s.id)!] || null
-      : null,
-  }));
-}
-
 export default async function StoriesBrowsePage() {
-  const stories = await getAllStories();
+  const stories = await getPublishedSeriesList();
 
   return (
     <div>
@@ -82,10 +37,10 @@ export default async function StoriesBrowsePage() {
               key={story.id}
               slug={story.slug}
               title={story.title}
-              description={story.description}
+              shortBlurb={resolveShortBlurb(story)}
               totalParts={story.total_parts}
               hashtag={story.hashtag}
-              coverImageUrl={story.coverImageUrl}
+              coverCardUrl={story.cover_sizes?.card ?? null}
             />
           ))}
         </div>
