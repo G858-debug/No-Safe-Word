@@ -44,21 +44,12 @@ type GenerateCoverBody = {
   retryVariants?: number[];
 };
 
-// Default cover prompt template — documentation / reference only. The UI
-// has its own placeholder string. Next.js route files cannot export
-// non-route symbols, so this stays local.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const COVER_PROMPT_TEMPLATE =
-  "Two-character intimate composition. " +
-  "[Protagonist: reference image conditions appearance; describe her clothing, pose, and emotional register]. " +
-  "[Love interest: full physical description from his prose_description, plus his clothing, pose, and expression]. " +
-  "[Intimate physical contact: how their bodies relate in space — who is closer to the camera, where hands are, where eyes are directed]. " +
-  "[Lighting source: named specifically — candlelight, single amber lamp, window light, etc.]. " +
-  "[Setting: specific South African location detail]. " +
-  "[Brand colour motif woven naturally into wardrobe, lighting, or set dressing — crimson, burgundy, amber, or gold]. " +
-  "Subjects composed in the upper two-thirds of the frame with compositional breathing room in the lower third. " +
-  "Cinematic shallow depth of field. Rich shadows with luminous highlights. Soft skin glow. Intimate framing. " +
-  "Editorial photography quality. Photorealistic.";
+// The cover prompt template lives as the placeholder string in the
+// Cover tab's textarea (CoverApproval.tsx). Kept there, not here —
+// Next.js route files cannot export non-route symbols, so there's no
+// clean way to share a constant between the server and UI layers
+// without a dedicated constants module, which would be overkill for
+// one string.
 
 export async function POST(
   request: NextRequest,

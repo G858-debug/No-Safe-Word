@@ -172,7 +172,7 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
           <div>
             <p className="text-sm font-medium">Regenerate all blurbs with Claude</p>
             <p className="text-xs text-muted-foreground">
-              Overwrites both variant sets and clears selections. You'll
+              Overwrites both variant sets and clears selections. You&apos;ll
               reselect from the new variants.
             </p>
           </div>

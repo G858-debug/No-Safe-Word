@@ -369,8 +369,8 @@ export default function CoverApproval({ seriesId }: Props) {
             )}
             {promptRegenJustSucceeded && !promptDirty && (
               <p className="mt-1 text-xs text-green-400">
-                New prompt generated. Review it, then click "Generate 4
-                Variants" to spend RunPod time.
+                New prompt generated. Review it, then click &ldquo;Generate 4
+                Variants&rdquo; to spend RunPod time.
               </p>
             )}
           </div>
