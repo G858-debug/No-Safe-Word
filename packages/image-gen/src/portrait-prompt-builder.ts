@@ -19,12 +19,16 @@ export interface PortraitCharacterDescription {
 }
 
 /**
- * Fixed framing/lighting clause appended to every portrait prompt so the
- * approved portrait has a neutral, brief-like composition suitable for
- * use as a reference image (Flux 2) or visual-signature seed (Hunyuan).
+ * Framing/lighting clause for a face portrait (medium close-up, head and shoulders).
  */
 const PORTRAIT_COMPOSITION =
   "Portrait, looking directly at the camera with a confident expression. Warm side-lighting, dark background with soft bokeh. Medium close-up, eye-level.";
+
+/**
+ * Framing/lighting clause for a full-body shot (head to feet, complete figure).
+ */
+const FULLBODY_COMPOSITION =
+  "Full body shot, standing upright, looking directly at the camera with a confident expression. Warm side-lighting, plain dark background. Full-length from head to feet, showing entire figure including legs and feet.";
 
 /**
  * Build a natural-language portrait prompt from structured character fields.
@@ -33,9 +37,12 @@ const PORTRAIT_COMPOSITION =
  * output is a single paragraph that describes the character, then a fixed
  * portrait framing, then the shared visual signature. Safe to pass directly
  * to either backend.
+ *
+ * Pass `stage: "body"` to get a full-length framing instead of a close-up.
  */
 export function buildCharacterPortraitPrompt(
-  description: PortraitCharacterDescription
+  description: PortraitCharacterDescription,
+  stage: "face" | "body" = "face"
 ): string {
   const parts: string[] = [];
 
@@ -79,7 +86,7 @@ export function buildCharacterPortraitPrompt(
     parts.push(`${capitalize(description.expression.trim())}.`);
   }
 
-  parts.push(PORTRAIT_COMPOSITION);
+  parts.push(stage === "body" ? FULLBODY_COMPOSITION : PORTRAIT_COMPOSITION);
   parts.push(VISUAL_SIGNATURE);
 
   return parts.join(" ");

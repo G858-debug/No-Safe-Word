@@ -6,10 +6,11 @@ import {
 } from "@no-safe-word/image-gen";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
   const { storyCharId } = await props.params;
+  const stage = (request.nextUrl.searchParams.get("stage") ?? "face") as "face" | "body";
 
   const { data: storyChar } = await supabase
     .from("story_characters")
@@ -32,7 +33,8 @@ export async function GET(
   }
 
   const prompt = buildCharacterPortraitPrompt(
-    character.description as PortraitCharacterDescription
+    character.description as PortraitCharacterDescription,
+    stage
   );
 
   return NextResponse.json({ prompt });

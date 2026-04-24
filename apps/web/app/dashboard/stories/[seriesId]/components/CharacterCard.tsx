@@ -88,7 +88,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     }
     setIsLoadingPrompt(true);
     try {
-      const res = await fetch(`/api/stories/characters/${character.id}/default-prompt`);
+      const res = await fetch(`/api/stories/characters/${character.id}/default-prompt?stage=${stage}`);
       const data = (await res.json()) as { prompt?: string; error?: string };
       if (data.prompt) setCustomPrompt(data.prompt);
     } catch {

@@ -100,7 +100,7 @@ export async function POST(
     if (imageModel === "hunyuan3") {
       const promptText =
         customPrompt ??
-        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription);
+        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, stage);
 
       const result = await generateHunyuanImage({
         scenePrompt: "",
@@ -158,7 +158,7 @@ export async function POST(
     if (imageModel === "flux2_dev") {
       const promptText =
         customPrompt ??
-        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription);
+        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, stage);
 
       const flux2Result = await generateFlux2Image({
         scenePrompt: promptText,
