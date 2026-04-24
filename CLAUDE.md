@@ -6,34 +6,31 @@ No Safe Word is a serialized adult romance fiction platform targeting Black Sout
 - **Facebook** — SFW teaser images + story text (audience growth)
 - **Website** (nosafeword.co.za) — NSFW paired images + full story content (monetisation)
 
-Tech stack: Next.js 14 monorepo, Supabase (PostgreSQL + Storage), Railway deployment, RunPod (GPU inference + training), Anthropic Claude (prompt enhancement + image evaluation).
+Tech stack: Next.js 14 monorepo, Supabase (PostgreSQL + Storage), Railway deployment, RunPod (GPU inference for Flux 2 Dev), Replicate (HunyuanImage 3.0), Anthropic Claude (prompt enhancement + image evaluation).
 
 ## Repository Structure
 
 ```
 apps/web/              — Next.js app (dashboard + public site + API — ONE app for everything)
-packages/image-gen/    — Image generation pipeline (Juggernaut Ragnarok)
+packages/image-gen/    — Image generation pipeline (Flux 2 Dev + HunyuanImage 3.0)
 packages/shared/       — Types, constants, utilities
 packages/story-engine/ — Supabase client, story import logic
-infra/runpod/          — ComfyUI inference Docker image (serverless)
-infra/kohya-trainer/   — Kohya LoRA training Docker image (pods)
+infra/runpod/          — ComfyUI inference Docker image (serverless, Flux 2 Dev)
 supabase/migrations/   — Append-only migration history (never delete these)
-docs/skills/           — Prompting, training, and editing reference guides
-scripts/               — Utility scripts (model downloads, LoRA uploads, data management)
+docs/skills/           — Prompting reference guides
+scripts/               — Utility scripts (model downloads, test harnesses)
 ```
 
 **There is NO `apps/dashboard` directory. It was deleted. All code lives in `apps/web`.**
 
 ## Image Generation Pipeline
 
-**Dual-model architecture.** Since Phase 0.4 (migration 036), every story picks one of two pipelines at import time, stored on `story_series.image_model`:
+**Dual-model architecture.** Every story picks one of two pipelines at import time, stored on `story_series.image_model`:
 
-- **`flux2_dev`** — Flux 2 Dev on RunPod via ComfyUI. Character consistency via reference-image injection: the approved portrait (`story_characters.approved_image_id` → `images.stored_url`) is base64-encoded and passed as a reference image to the generation job.
-- **`hunyuan3`** — HunyuanImage 3.0 on Replicate. Character consistency via prompt injection: `story_characters.portrait_prompt_locked` (the exact text that produced the approved portrait) is spliced verbatim into every scene prompt.
+- **`flux2_dev`** — Flux 2 Dev on RunPod via ComfyUI. Character consistency via **reference-image injection**: the approved portrait on the base `characters.approved_image_id` → `images.stored_url` is base64-encoded and passed as a reference image to the generation job.
+- **`hunyuan3`** — HunyuanImage 3.0 on Replicate. Character consistency via **prompt injection**: `characters.portrait_prompt_locked` (the exact text that produced the approved portrait) is spliced verbatim into every scene prompt.
 
-Selection is set at import (defaults to `flux2_dev`) and switchable via `POST /api/stories/[seriesId]/change-image-model` — switching destructively resets downstream generation state for that series.
-
-The `story_series.image_engine` column (`juggernaut_ragnarok`) is **legacy**, retained for backward compatibility with the V4 pipeline only. All new code reads `image_model`; treat `image_engine` as read-only metadata.
+Selection is set at import (defaults to `flux2_dev`) and switchable via `POST /api/stories/[seriesId]/change-image-model`. **Switching does NOT reset portraits** — they live on the base `characters` table and serve both pipelines. Switching only resets in-flight scene prompts for that series.
 
 **Dispatcher:** `POST /api/stories/[seriesId]/generate-image` reads `image_model` and routes to `runFlux2Generation()` or `runHunyuanGeneration()`.
 
@@ -41,132 +38,57 @@ The `story_series.image_engine` column (`juggernaut_ragnarok`) is **legacy**, re
 
 **Cover generation always uses Flux 2 Dev regardless of the story's `image_model` setting.** The dedicated `POST /api/stories/[seriesId]/generate-cover` endpoint calls `generateFlux2Image()` directly, bypassing the model-aware dispatcher. This is intentional — do not "fix" the apparent inconsistency by routing covers through the dispatcher. Reasons: (1) cover composition needs reference-image conditioning against approved portraits, (2) covers are the public marketing artifact and need a single quality bar, (3) Hunyuan does not support reference-image consistency the same way.
 
-### Legacy (V4 / Juggernaut Ragnarok)
+### Legacy LoRA / Juggernaut Ragnarok pipelines — DELETED (2026-04-24)
 
-Retained only for stories still on `image_engine = 'juggernaut_ragnarok'` via `/api/stories/[seriesId]/generate-images-v4/`:
+The Juggernaut Ragnarok (V4) and character-LoRA training pipelines were removed:
 
-- **Checkpoint:** Juggernaut XL Ragnarok (SDXL architecture, photorealistic)
-- **Compute:** RunPod serverless → ComfyUI → character LoRAs → FaceDetailer
-- **Defaults:** DPM++ 2M SDE Karras, 30 steps, CFG 3-5, Clip Skip 1
-- **Resolutions:** 832×1216 (portrait), 1216×832 (landscape), 1024×1024 (square)
+- No character LoRAs are trained. No Kohya pods. No dataset generation or approval.
+- `character_loras`, `lora_dataset_images`, `nsw_lora_*` tables dropped.
+- `story_characters` no longer carries `active_lora_id` / `approved_*` / `face_url`; identity lives on base `characters`.
+- `/api/stories/[seriesId]/generate-images-v4/`, `/admin/lora-studio/*`, `/api/stories/characters/*/train-lora`, `/api/stories/characters/*/dataset-*` are all gone.
+- The `story_series.image_engine` column still exists but is unused; do not read it in new code.
 
-Legacy key files:
-- `packages/image-gen/src/pony-workflow-builder.ts` — ComfyUI workflow construction
-- `packages/image-gen/src/pony-prompt-builder.ts` — Booru tag assembly
-- `packages/image-gen/src/pony-lora-registry.ts` — Style LoRA catalog
-- `apps/web/lib/server/generate-scene-image-v4.ts` — Scene generation orchestration
-- `apps/web/lib/server/pony-character-image.ts` — Character portrait/body generation
+Never reintroduce a "use LoRAs" branch without first re-introducing the tables and training infra. The design now assumes one approved portrait per character identity, used as reference image (Flux 2) or locked text (Hunyuan).
 
-## Juggernaut Ragnarok Prompting Rules
+## Character Model (reusable across stories)
 
-**Read `docs/skills/juggernaut-ragnarok/SKILL.md` before writing ANY image prompt.**
+Identity and approved portraits are **canonical on the base `characters` table**. One row per unique identity; multiple `story_characters` rows (one per story) link to it via `character_id`.
 
-### Format: Natural Language + Booru Tags
+- `characters.id / name / description` — identity and structured JSON description.
+- `characters.approved_image_id` / `approved_fullbody_image_id` — FK to `images`. Set on portrait approval; used as reference image for Flux 2 scene generation.
+- `characters.portrait_prompt_locked` — exact prompt text behind the approved portrait; injected verbatim into every scene prompt under Hunyuan 3.
+- `characters.approved_seed / approved_prompt / approved_fullbody_*` — provenance metadata.
 
-Juggernaut Ragnarok supports BOTH natural language prompts AND Booru-style tags. Use natural language for SFW scenes and Booru tags for NSFW anatomical detail.
+**`story_characters` is now just a link table:** `id`, `series_id`, `character_id`, `role`, `prose_description`. Portrait state is NOT duplicated per series.
 
-### Quality Tags
+**Import dedupes by name.** `upsertCharacter()` in [packages/story-engine/src/story-import.ts](packages/story-engine/src/story-import.ts) looks up existing characters by `name`; re-importing "Lindiwe" across multiple stories links all series to the same base row. Her approved portrait is inherited automatically.
 
-For maximum photorealism, prepend to positive prompt:
-```
-masterpiece, 4k, ray tracing, intricate details, highly-detailed, hyper-realistic, 8k RAW Editorial Photo
-```
+## Character Approval
 
-For clean photographic look (simpler, often better):
-```
-photograph, high resolution, cinematic, skin textures
-```
+Stage 8 of the publishing pipeline. The dashboard character cards drive:
 
-Do NOT use Pony-specific tags (`score_9`, `score_8_up`, `score_7_up`, `rating_safe`, `rating_explicit`, `source_pony`). These are meaningless to Juggernaut Ragnarok.
+1. Generate portrait → preview → approve (stage = "face"). Writes to `characters.approved_image_id`, `portrait_prompt_locked`, `approved_seed`, `approved_prompt`.
+2. Generate full body → preview → approve (stage = "body"). Writes to `characters.approved_fullbody_*`.
+3. Once every character linked to the series has both `approved_image_id` and `approved_fullbody_image_id` set on the base row, series status advances to `images_pending`.
 
-### SFW/NSFW Control
+Routes:
+- `POST /api/stories/characters/[storyCharId]/generate` — generate portrait or fullbody. Branches on `image_model` (flux2_dev async via RunPod; hunyuan3 synchronous via Replicate).
+- `POST /api/stories/characters/[storyCharId]/approve` — promote an image to the base character row.
+- `POST /api/stories/characters/[storyCharId]/reset-portrait` — clear approved fields on the base row; `resetFace: true` clears portrait + body, `false` clears only body.
 
-Juggernaut Ragnarok has NSFW baked into training. Control content through prompts:
+**Changing the image model does NOT wipe portraits.** Because the approved image + locked prompt both exist, switching from flux2_dev to hunyuan3 (or vice versa) works without re-approval. `change-image-model` only resets in-flight scene prompts.
 
-**SFW (Facebook):** Always describe clothing explicitly. Add to negative prompt: `nudity, naked, nsfw, topless, nude`
+## Scene Image Generation
 
-**NSFW (Website):** Use Booru-style tags for anatomical precision. No special rating tag needed — the model generates NSFW content when prompted.
+`POST /api/stories/[seriesId]/generate-image` with `{ promptId }`:
 
-### Prompt Component Order (earlier = more weight)
+1. Read the `story_image_prompts` row + linked character IDs.
+2. Resolve `characters.portrait_prompt_locked` (hunyuan) or `characters.approved_image_id → images.stored_url` (flux2) for the primary + secondary characters.
+3. Block generation with a clear error if a referenced character has no approved portrait.
+4. Dispatch to `generateHunyuanImage()` or `generateFlux2Image()`.
+5. Upload result to Supabase Storage, link image to prompt, status → `generated`.
 
-```
-[subject], [action/pose], [clothing — REQUIRED for SFW],
-[expression/gaze], [setting], [props],
-[lighting source], [atmosphere], [composition],
-[quality boosters — optional]
-```
-
-### Negative Prompts
-
-**SFW standard:**
-```
-nudity, naked, nsfw, topless, nude, bad anatomy, bad hands, extra limbs, watermark, blurry, text, cartoon, illustration, painting, low quality, worst quality, deformed
-```
-
-**NSFW standard:**
-```
-bad anatomy, bad hands, extra limbs, watermark, blurry, text, cartoon, illustration, painting, low quality, worst quality, deformed
-```
-
-### What NOT to Do
-
-- **No Pony quality/rating tags** — `score_9`, `rating_safe`, `source_pony` etc. are Pony-specific
-- **No emphasis weights** — `(word:1.3)` syntax is not reliably supported in SDXL CLIP
-- **No missing clothing in SFW** — The model defaults toward nudity. Always describe clothing.
-- **No CFG above 7** — Causes waxy skin and oversaturation
-- **No prompts over 75 tokens** — Content is truncated beyond CLIP limit
-- **No physical descriptions for approved characters** — Identity comes from the LoRA trigger word
-
-## Character LoRA System
-
-Characters get SDXL identity LoRAs trained with Kohya sd-scripts on RunPod GPU pods. Read `docs/skills/sdxl-character-lora-training/SKILL.md` for the full two-pass training architecture.
-
-### Training Pipeline (8 stages)
-
-1. **Dataset generation** — 40-60 images (10-12 face, 6-8 head-shoulders, 6-8 waist-up, 8-10 full-body) via RunPod serverless with Juggernaut Ragnarok checkpoint
-2. **Claude Vision evaluation** — Auto-scores each image for face/skin/body/quality consistency
-3. **Curation** — `selectTrainingSet()` curates to best 30-50 meeting diversity requirements
-4. **Human approval** — Pipeline pauses; user reviews in dashboard
-5. **Captioning** — Natural language captions with identity tag stripping via `buildTrainingCaption()`
-6. **Packaging** — Images + captions → tar.gz → Supabase Storage
-7. **Training** — Kohya `sdxl_train_network.py` on RunPod GPU pod against SDXL 1.0 base (30-60 min)
-8. **Validation** — 6 test images scored by Claude Vision against reference portrait
-
-Training runs on RunPod **PODS** (batch jobs), NOT serverless. The orchestrator creates the pod and returns — a webhook handles completion.
-
-### Training Parameters
-
-- Network dim: 32, alpha: 16
-- Optimizer: Prodigy, LR: 1.0
-- Scheduler: cosine_with_restarts
-- Noise offset: 0.03
-- Resolution: 1024, Clip skip: 1
-- Epochs: 10-15, Save every 2 epochs, Batch size: 2
-- Trigger word format: `{firstname}_nsw` (e.g., `lindiwe_nsw`)
-
-### Key Files
-
-- `packages/image-gen/src/lora-trainer.ts` — Pipeline orchestrator
-- `packages/image-gen/src/dataset-generator.ts` — Training image generation
-- `packages/image-gen/src/character-lora-validator.ts` — Post-training validation
-- `packages/image-gen/src/character-lora/training-image-evaluator.ts` — Dataset curation
-- `packages/image-gen/src/character-lora/training-caption-builder.ts` — Caption generation
-
-### RunPod Interfaces
-
-Two separate clients — do not mix them up:
-- `packages/image-gen/src/runpod.ts` — **Serverless** endpoint API (inference jobs)
-- `packages/image-gen/src/runpod-pods.ts` — **Pod** API (batch training jobs)
-
-## Character Consistency Rules
-
-1. **Approved characters** get identity from their trained LoRA trigger word. Scene prompts include ONLY: action, pose, clothing, setting, lighting, composition, expression. **Never include physical descriptions** (skin tone, hair, build) for approved characters.
-
-2. **Non-character people** (background figures, unnamed extras): Describe inline with brief physical details — the pipeline has no LoRA data for them. Example: `older woman in floral dress in background`
-
-3. **Multi-character scenes:** Maximum 2 linked characters per image prompt. Use `character_name` + `secondary_character_name`. Additional characters must be described inline.
-
-4. **Character LoRA injection:** Deployed LoRA filename is fetched from `character_loras` table (status = 'deployed') and injected into the ComfyUI workflow. If a character has no deployed LoRA, scene generation throws.
+Flux 2 jobs are async — the client polls `/api/status/[jobId]` until the image is uploaded.
 
 ## Scene Image Prompt Rules
 
@@ -181,14 +103,22 @@ Every image prompt must be fully self-contained. Each image is generated indepen
 ### SFW/NSFW Paired Prompts
 
 - SFW (Facebook): Use the "moment before" technique — anticipation, tension, explicit clothing description
-- NSFW (Website): Same setting independently described, intimate action, Booru tags for anatomical precision
+- NSFW (Website): Same setting independently described, intimate action
 - Achieve visual continuity by describing the same setting details, not by saying "same"
 
 ### Image Categories
 
-- `shared` — images identical on both Facebook and website
-- `progression_pairs` — SFW + intimate versions, only where scenes build toward intimacy
-- `website_exclusive` — additional images for website reading experience
+The import schema uses these three arrays on each post (see `PostImagesImport` in `packages/shared/src/story-types.ts`):
+
+- `facebook_sfw` — SFW images shown on Facebook (and the website)
+- `website_nsfw_paired` — NSFW companion to a specific facebook_sfw image (linked via `pairs_with_facebook`)
+- `website_only` — extra website-only images, positioned by `position_after_word` in the story text
+
+### Character Linking in Scenes
+
+- Maximum 2 linked characters per image prompt. Use `character_name` + `secondary_character_name`.
+- Non-character people (background figures, unnamed extras) go inline in the prompt text. The pipeline has no identity data for them.
+- **No physical descriptions for linked characters** — their identity flows from the reference image (Flux 2) or locked prompt (Hunyuan).
 
 ### Composition Preferences
 
@@ -200,97 +130,26 @@ Every image prompt must be fully self-contained. Each image is generated indepen
 
 Settings must be specific: Middelburg, Soweto, Sandton — not generic "African". Include local details: shweshwe fabric, Amarula bottle, township bedroom, mechanic workshop.
 
-## LoRA Training Standards
-
-**Read `docs/skills/sdxl-character-lora-training/SKILL.md` before modifying any training code.**
-
-### Body Shape Requirements (Female Characters)
-
-All female characters: very large natural breasts, very wide hips, very large round ass, narrow defined waist, soft stomach, full thighs. Visible and consistent across ALL training images.
-
-### Dataset Diversity
-
-Training datasets must include varied backgrounds:
-- Indoor day (restaurant, cafe, office, home)
-- Indoor night (bedroom, lounge, artificial light)
-- Outdoor day (street, township, park)
-- Outdoor golden hour (sunset, warm light)
-- Close-up/detail shots (face only, waist up)
-
-Minimum 20% per category. Plain/neutral backgrounds must not exceed 20%.
-
-### Caption Format
-
-Trigger word first, then natural language description of the scene. Identity tags (hair, skin, body, ethnicity) are STRIPPED — the trigger word carries these.
-
-```
-lindiwe_nsw, a young woman smiling, fitted blazer and tailored trousers, warm expression looking at camera, modern office interior, soft window light
-```
-
 ## Prompt Enhancement
 
-All scene prompts route through Claude before generation (`prompt-enhancer.ts`). The enhancer converts Five Layers Framework descriptions into Juggernaut Ragnarok prompts:
+Scene prompts route through Claude before generation (`prompt-enhancer.ts`). The enhancer converts Five Layers Framework descriptions into final generation prompts:
 - Layer 1: Expression & Gaze
 - Layer 2: Narrative Moment (specific action/pose)
 - Layer 3: Lighting (named source, never generic)
 - Layer 4: Composition (shot type, angle)
 - Layer 5: South African Setting (specific location + props)
 
-Output format:
-- **SFW scenes:** Natural language prompt with explicit clothing descriptions + SFW negative prompt
-- **NSFW scenes:** Natural language scene description + Booru tags for anatomical precision + NSFW negative prompt
-
 Enhancement via `claude-haiku-4-5-20251001`.
-
-## Image Generation Iteration Learnings
-
-### LoRA Strength Tuning
-- Default LoRA strengths of 0.8 model / 0.55 clip overwhelm scene details
-- For scene-heavy prompts: reduce to model 0.5-0.65, clip 0.25-0.4
-- When pose/setting repeatedly fails: LOWER LoRA strength, don't raise it
-- Only raise LoRA strength when character identity is the problem
-- Current defaults: solo (0.65/0.4), dual (0.6/0.35)
-
-### Dual-Character Interaction Scenes
-- Regional conditioning (left/right regions) should ONLY be used for scenes where characters occupy separate space
-- For interaction scenes (kissing, embracing, sex): use UNIFIED prompt — both characters + their interaction in one prompt
-- LoRA model weights still carry character identity even without regional conditioning
-- The `classifyScene()` function detects interaction type automatically — `intimate` and `romantic` types trigger unified mode
-
-### Prompt Structure for Better Adherence
-- For interaction scenes: put the ACTION/POSE first, before quality prefix
-- CLIP weights tokens by position — earlier = stronger influence
-- Complex sex positions need decomposed anatomical tags, not just the position name
-- "three people" and "group" in negative prompt helps maintain person count
-
-### Characters Without LoRAs
-- Scene image generation is BLOCKED for characters without a deployed LoRA
-- Inline descriptions consume ~25 CLIP tokens, starving scene details
-- Train LoRAs for all characters BEFORE generating scene images
-
-### Resource LoRAs
-- Pose/style LoRAs from the resource library are auto-selected based on prompt keywords
-- Resource LoRAs are injected alongside character LoRAs (max 8 total in the ComfyUI chain)
-- Available: French Kiss LoRA XL (kissing scenes)
-- The pipeline can discover and download new LoRAs from CivitAI at runtime when evaluation detects gaps
-
-### Evaluate-and-Retry Pipeline
-- Max 8 attempts (was 6), escalating from seed-only to full Sonnet rewrite
-- Intent matching is the most heavily weighted evaluation dimension (0.25)
-- On scene/pose failures: LoRA strength is DECREASED (frees CLIP headroom for scene tags)
-- On identity failures: LoRA strength is INCREASED (correct direction)
-- Attempts 7-8 use aggressive LoRA reduction (0.45/0.2 then 0.4/0.15) for maximum prompt adherence
-- Deep LoRA discovery runs on attempt 3+ failures using Sonnet to analyze intent gaps
 
 ## Database
 
-Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prompts`, `images`, `character_loras`, `lora_dataset_images`
+Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prompts`, `images`, `characters`.
 
+- `characters` — base-roster identity. Holds `approved_image_id`, `approved_fullbody_image_id`, `portrait_prompt_locked`, seed/prompt provenance. Reused across every story that features the character.
+- `story_characters` — per-series link to a base character. Columns: `id`, `series_id`, `character_id`, `role`, `prose_description`. Unique `(series_id, character_id)`.
 - `story_series.image_model` — authoritative generation model: `flux2_dev` (Flux 2 Dev / RunPod) or `hunyuan3` (HunyuanImage 3.0 / Replicate). Default `flux2_dev`.
-- `story_series.image_engine` — legacy V4 column (`juggernaut_ragnarok`). Do not use for new code.
-- `story_series.cover_status` — cover generation state machine: pending → generating → variants_ready → approved → compositing → complete (or failed).
-- `story_characters.portrait_prompt_locked` — exact prompt text behind the approved portrait; injected verbatim into Hunyuan scene prompts; retained for provenance under Flux.
-- `character_loras.status` — pipeline stages: pending → generating_dataset → evaluating → awaiting_dataset_approval → captioning → training → validating → deployed
+- `story_series.image_engine` — legacy column, unused by new code.
+- `story_series.cover_status` — cover state machine: pending → generating → variants_ready → approved → compositing → complete (or failed).
 - Migrations are append-only. Never delete migration files.
 
 ## Error Handling
@@ -302,10 +161,10 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 
 ## General
 
-- **API keys live in `.env.local`** — CivitAI, RunPod, Supabase, Replicate, and Hugging Face tokens are all there. Read `.env.local` first before asking the user to provide keys or do things manually. Only ask if you've already tried and failed.
+- **API keys live in `.env.local`** — RunPod, Supabase, Replicate, and Anthropic tokens are all there. Read `.env.local` first before asking the user to provide keys or do things manually. Only ask if you've already tried and failed.
 - Don't ask me to check the Railway logs — you have access, check them yourself
 - `apps/web` is the ONLY app. Never create files in `apps/dashboard`
-- Scene image generation goes through `/api/stories/[seriesId]/generate-image` (model-aware dispatcher). Legacy V4 lives at `/api/stories/[seriesId]/generate-images-v4/` and is only used by stories still on `image_engine = 'juggernaut_ragnarok'`.
+- Scene image generation goes through `/api/stories/[seriesId]/generate-image` (model-aware dispatcher).
 - Cover generation goes through `/api/stories/[seriesId]/generate-cover` (always Flux 2 Dev, bypasses the dispatcher).
-- Character generation goes through `/api/stories/characters/[storyCharId]/generate`
-- **Never download large files (models, datasets, checkpoints) to the local machine.** The local machine is for code only. All model downloads must go directly to RunPod (network volume via S3 API or in-pod downloads). All heavy processing (inference, training) runs on RunPod or cloud services, never locally.
+- Character generation goes through `/api/stories/characters/[storyCharId]/generate`.
+- **Never download large files (models, datasets, checkpoints) to the local machine.** The local machine is for code only. All model downloads must go directly to RunPod (network volume via S3 API or in-pod downloads). All heavy processing (inference) runs on RunPod or Replicate, never locally.

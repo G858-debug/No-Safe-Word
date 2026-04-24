@@ -19,10 +19,11 @@ export async function POST(
       return NextResponse.json({ error: "body_image_url is required" }, { status: 400 });
     }
 
-    // 1. Fetch the story_character to get the approved face image
+    // 1. Resolve base character via the story_characters linkage, then read
+    //    the approved portrait from the base `characters` row.
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
-      .select("approved_image_id")
+      .select("character_id, characters:character_id ( approved_image_id )")
       .eq("id", storyCharId)
       .single();
 
@@ -30,7 +31,12 @@ export async function POST(
       return NextResponse.json({ error: "Story character not found" }, { status: 404 });
     }
 
-    if (!storyChar.approved_image_id) {
+    const baseRow = Array.isArray(storyChar.characters)
+      ? storyChar.characters[0]
+      : storyChar.characters;
+    const approvedImageId = baseRow?.approved_image_id ?? null;
+
+    if (!approvedImageId) {
       console.log(`[CharGen] No approved face for stitching — returning body only`);
       return NextResponse.json({ preview_url: null });
     }
@@ -39,7 +45,7 @@ export async function POST(
     const { data: faceImage, error: faceError } = await supabase
       .from("images")
       .select("stored_url, sfw_url")
-      .eq("id", storyChar.approved_image_id)
+      .eq("id", approvedImageId)
       .single();
 
     if (faceError || !faceImage) {

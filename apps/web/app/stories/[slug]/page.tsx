@@ -97,13 +97,14 @@ export default async function SeriesPage({ params }: PageProps) {
     .order("part_number", { ascending: true });
 
   // Fetch characters with portraits
+  // Portrait state (approved_image_id) now lives on the base `characters`
+  // row. Join to fetch it.
   const { data: characters } = await supabase
     .from("story_characters")
     .select(
-      "role, prose_description, character_id, approved_image_id, approved"
+      "role, prose_description, character_id, characters:character_id ( id, name, approved_image_id )"
     )
-    .eq("series_id", series.id)
-    .eq("approved", true);
+    .eq("series_id", series.id);
 
   // Resolve character display metadata
   let characterDetails: {
@@ -113,38 +114,53 @@ export default async function SeriesPage({ params }: PageProps) {
     imageUrl: string | null;
   }[] = [];
 
-  if (characters && characters.length > 0) {
-    const charIds = characters.map((c) => c.character_id);
-    const imgIds = characters
-      .map((c) => c.approved_image_id)
-      .filter((id): id is string => id !== null);
+  type Joined = {
+    role: string | null;
+    prose_description: string | null;
+    character_id: string;
+    characters:
+      | { id: string; name: string; approved_image_id: string | null }
+      | { id: string; name: string; approved_image_id: string | null }[]
+      | null;
+  };
+  const rows = (characters ?? []) as unknown as Joined[];
+  const baseOf = (r: Joined) =>
+    Array.isArray(r.characters) ? r.characters[0] ?? null : r.characters;
 
-    const [{ data: charData }, { data: imgData }] = await Promise.all([
-      supabase.from("characters").select("id, name").in("id", charIds),
+  // Filter to only characters with an approved portrait (old `approved`
+  // boolean is gone; use approved_image_id on the base row as the signal).
+  const approvedRows = rows.filter((r) => baseOf(r)?.approved_image_id);
+
+  if (approvedRows.length > 0) {
+    const imgIds = approvedRows
+      .map((r) => baseOf(r)?.approved_image_id)
+      .filter((id): id is string => Boolean(id));
+
+    const { data: imgData } =
       imgIds.length > 0
-        ? supabase.from("images").select("id, stored_url").in("id", imgIds)
-        : Promise.resolve({
-            data: [] as { id: string; stored_url: string | null }[],
-          }),
-    ]);
+        ? await supabase
+            .from("images")
+            .select("id, stored_url")
+            .in("id", imgIds)
+        : { data: [] as { id: string; stored_url: string | null }[] };
 
-    const nameMap = Object.fromEntries(
-      (charData || []).map((c) => [c.id, c.name])
-    );
     const urlMap = Object.fromEntries(
       (imgData || [])
         .filter((i) => i.stored_url)
         .map((i) => [i.id, i.stored_url!])
     );
 
-    characterDetails = characters.map((c) => ({
-      name: nameMap[c.character_id] || "Unknown",
-      role: c.role || "",
-      description: c.prose_description,
-      imageUrl: c.approved_image_id
-        ? urlMap[c.approved_image_id] || null
-        : null,
-    }));
+    characterDetails = approvedRows.map((r) => {
+      const base = baseOf(r);
+      return {
+        name: base?.name || "Unknown",
+        role: r.role || "",
+        description: r.prose_description,
+        imageUrl: base?.approved_image_id
+          ? urlMap[base.approved_image_id] || null
+          : null,
+      };
+    });
   }
 
   const heroUrl = series.cover_sizes?.hero ?? null;

@@ -60,10 +60,12 @@ export async function POST(
     );
   }
 
-  // Protagonist precondition
+  // Protagonist precondition — approval now lives on the base `characters` row
   const { data: storyChars, error: charsErr } = await supabase
     .from("story_characters")
-    .select("role, prose_description, character_id, approved")
+    .select(
+      "role, prose_description, character_id, characters:character_id ( approved_image_id )"
+    )
     .eq("series_id", seriesId);
 
   if (charsErr) {
@@ -73,9 +75,22 @@ export async function POST(
     );
   }
 
-  const chars = storyChars ?? [];
+  type Row = {
+    role: string | null;
+    prose_description: string | null;
+    character_id: string;
+    characters:
+      | { approved_image_id: string | null }
+      | { approved_image_id: string | null }[]
+      | null;
+  };
+  const isApproved = (c: Row) => {
+    const b = Array.isArray(c.characters) ? c.characters[0] : c.characters;
+    return Boolean(b?.approved_image_id);
+  };
+  const chars = (storyChars ?? []) as unknown as Row[];
   const approvedProtagonists = chars.filter(
-    (c) => c.role === "protagonist" && c.approved === true
+    (c) => c.role === "protagonist" && isApproved(c)
   );
   if (approvedProtagonists.length === 0) {
     return NextResponse.json(

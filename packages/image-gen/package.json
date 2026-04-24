@@ -7,11 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./controlnet": "./src/controlnet/index.ts",
-    "./runpod": "./src/runpod.ts",
-    "./runpod-pods": "./src/runpod-pods.ts",
-    "./server/lora-trainer": "./src/lora-trainer.ts",
-    "./server/character-lora/training-image-evaluator": "./src/character-lora/training-image-evaluator.ts",
-    "./server/character-lora/training-caption-builder": "./src/character-lora/training-caption-builder.ts"
+    "./runpod": "./src/runpod.ts"
   },
   "scripts": {
     "lint": "eslint . --ext .ts,.tsx"
@@ -19,8 +15,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.1",
     "@no-safe-word/shared": "*",
-    "@types/archiver": "^7.0.0",
-    "archiver": "^7.0.1",
     "replicate": "^1.4.0",
     "sharp": "^0.34.5"
   },

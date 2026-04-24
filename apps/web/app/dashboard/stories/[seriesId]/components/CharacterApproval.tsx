@@ -7,19 +7,22 @@ import { CharacterCard } from "./CharacterCard";
 
 export interface CharacterFromAPI {
   id: string;
-  character_id: string;
+  character_id: string | null;
+  name: string | null;
+  description: Record<string, unknown> | null;
+  role: string | null;
+  prose_description: string | null;
   approved: boolean;
   approved_image_id: string | null;
+  approved_image_url: string | null;
+  approved_seed: number | null;
+  approved_prompt: string | null;
   approved_fullbody: boolean;
   approved_fullbody_image_id: string | null;
-  active_lora_id: string | null;
-  approved_image_url: string | null;
   approved_fullbody_image_url: string | null;
-  pending_image_id: string | null;
-  pending_image_url: string | null;
-  pending_fullbody_image_id: string | null;
-  pending_fullbody_image_url: string | null;
-  characters: { id: string; name: string; description: Record<string, unknown> };
+  approved_fullbody_seed: number | null;
+  approved_fullbody_prompt: string | null;
+  portrait_prompt_locked: string | null;
 }
 
 interface Props {

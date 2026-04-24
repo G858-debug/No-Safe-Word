@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  submitRunPodJob,
   generateHunyuanImage,
   generateFlux2Image,
   buildCharacterPortraitPrompt,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
-import { buildCharacterGenerationPayload } from "@/lib/server/character-image";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
 import type { ImageModel } from "@no-safe-word/shared";
 
@@ -23,18 +21,12 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    // Parse optional seed, type, stage, and customPrompt from request body
-    let customSeed: number | undefined;
+    // Parse optional type, stage, and customPrompt from request body
     let imageType: ImageType = "portrait";
     let stage: GenerationStage = "face";
     let customPrompt: string | undefined;
-    let customNegativePrompt: string | undefined;
-    let loraStrengths: { bodyWeight?: number; bubbleButt?: number; breastSize?: number } | undefined;
     try {
       const body = await request.json();
-      if (typeof body.seed === "number" && body.seed > 0) {
-        customSeed = body.seed;
-      }
       if (body.type === "fullBody") {
         imageType = "fullBody";
       }
@@ -43,12 +35,6 @@ export async function POST(
       }
       if (typeof body.customPrompt === 'string' && body.customPrompt.trim().length > 20) {
         customPrompt = body.customPrompt.trim();
-      }
-      if (typeof body.customNegativePrompt === 'string' && body.customNegativePrompt.trim().length > 0) {
-        customNegativePrompt = body.customNegativePrompt.trim();
-      }
-      if (body.loraStrengths && typeof body.loraStrengths === 'object') {
-        loraStrengths = body.loraStrengths;
       }
     } catch {
       // No body or invalid JSON — use defaults
@@ -220,65 +206,10 @@ export async function POST(
       });
     }
 
-    // ── Legacy Juggernaut Ragnarok path (no longer selectable as image_model,
-    //    kept only as a safety net if an old row sneaks through) ──
-
-    // Build character generation payload
-    const payload = buildCharacterGenerationPayload({
-      character: {
-        id: character.id,
-        name: character.name,
-        description: desc,
-      },
-      imageType,
-      stage,
-      seed: customSeed,
-      customPrompt,
-      customNegativePrompt,
-      loraStrengths,
-    });
-
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID;
-    console.log(`[StoryPublisher] ${stage} generation: ${payload.positivePrompt.substring(0, 100)}...`);
-
-    const { jobId } = await submitRunPodJob(payload.workflow, undefined, undefined, endpointId);
-
-    const { data: imageRow, error: imgError } = await supabase
-      .from("images")
-      .insert({
-        character_id: character.id,
-        prompt: payload.positivePrompt,
-        negative_prompt: payload.negativePrompt,
-        settings: {
-          width: payload.width,
-          height: payload.height,
-          engine: "juggernaut-ragnarok",
-          imageType,
-          stage,
-          seed: payload.seed,
-        },
-        mode: "sfw",
-      })
-      .select("id")
-      .single();
-
-    if (imgError || !imageRow) {
-      throw new Error(`Failed to create image record: ${imgError?.message}`);
-    }
-
-    await supabase.from("generation_jobs").insert({
-      job_id: `runpod-${jobId}`,
-      image_id: imageRow.id,
-      status: "pending",
-      cost: 0,
-    });
-
-    console.log(`[StoryPublisher] ${stage} job submitted: runpod-${jobId}, imageId: ${imageRow.id}`);
-
-    return NextResponse.json({
-      jobId: `runpod-${jobId}`,
-      imageId: imageRow.id,
-    });
+    return NextResponse.json(
+      { error: `Unsupported image_model: ${imageModel}` },
+      { status: 400 }
+    );
   } catch (err) {
     console.error("Character portrait generation failed:", err);
     return NextResponse.json(

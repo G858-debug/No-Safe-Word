@@ -89,25 +89,24 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     .eq("id", promptId);
 
   try {
-    // 3. Resolve locked portrait prompts for linked characters
+    // 3. Resolve locked portrait prompts for linked characters from the
+    //    base `characters` table. Portrait approval is canonical per identity
+    //    (not per story), so any story using this character inherits it.
     const charIds = [
       prompt.character_id,
       prompt.secondary_character_id,
     ].filter((id): id is string => Boolean(id));
 
-    let charBlocks: Record<string, string> = {};
+    const charBlocks: Record<string, string> = {};
     if (charIds.length > 0) {
-      // story_characters.portrait_prompt_locked is keyed by character_id via
-      // the story_characters→characters join. Look up via the series.
-      const { data: storyChars } = await supabase
-        .from("story_characters")
-        .select("character_id, portrait_prompt_locked")
-        .eq("series_id", seriesId)
-        .in("character_id", charIds);
+      const { data: chars } = await supabase
+        .from("characters")
+        .select("id, portrait_prompt_locked")
+        .in("id", charIds);
 
-      for (const sc of storyChars ?? []) {
-        if (sc.portrait_prompt_locked) {
-          charBlocks[sc.character_id] = sc.portrait_prompt_locked;
+      for (const c of chars ?? []) {
+        if (c.portrait_prompt_locked) {
+          charBlocks[c.id] = c.portrait_prompt_locked;
         }
       }
     }
@@ -245,23 +244,23 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     .eq("id", promptId);
 
   try {
-    // 3. Resolve approved portrait URLs for each linked character. Flux 2
-    // uses these as reference images (character identity anchor).
+    // 3. Resolve approved portrait URLs for each linked character from the
+    //    base `characters` table. Flux 2 uses these as reference images
+    //    (character identity anchor); the approval is canonical per identity.
     const charIds = [
       prompt.character_id,
       prompt.secondary_character_id,
     ].filter((id): id is string => Boolean(id));
 
-    let portraitUrls: Record<string, string> = {};
+    const portraitUrls: Record<string, string> = {};
     if (charIds.length > 0) {
-      const { data: storyChars } = await supabase
-        .from("story_characters")
-        .select("character_id, approved_image_id")
-        .eq("series_id", seriesId)
-        .in("character_id", charIds);
+      const { data: chars } = await supabase
+        .from("characters")
+        .select("id, approved_image_id")
+        .in("id", charIds);
 
-      const approvedIds = (storyChars ?? [])
-        .map((sc) => sc.approved_image_id)
+      const approvedIds = (chars ?? [])
+        .map((c) => c.approved_image_id)
         .filter((id): id is string => Boolean(id));
 
       if (approvedIds.length > 0) {
@@ -276,11 +275,11 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
           if (url) urlById.set(img.id, url);
         }
 
-        for (const sc of storyChars ?? []) {
-          const url = sc.approved_image_id
-            ? urlById.get(sc.approved_image_id)
+        for (const c of chars ?? []) {
+          const url = c.approved_image_id
+            ? urlById.get(c.approved_image_id)
             : undefined;
-          if (url) portraitUrls[sc.character_id] = url;
+          if (url) portraitUrls[c.id] = url;
         }
       }
     }

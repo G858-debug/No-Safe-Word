@@ -110,7 +110,7 @@ export async function PATCH(
   // Note: `image_model` is editable here only while the series is unlocked
   // (no portraits generated yet). For locked series, use POST
   // /api/stories/[seriesId]/change-image-model which resets downstream state.
-  const allowedFields = ["title", "description", "hashtag", "status", "marketing", "image_engine", "image_model", "inpaint_prompt", "sfw_inpaint_prompt"];
+  const allowedFields = ["title", "description", "hashtag", "status", "marketing", "image_model", "inpaint_prompt", "sfw_inpaint_prompt"];
   const updates: Record<string, unknown> = {};
 
   for (const field of allowedFields) {

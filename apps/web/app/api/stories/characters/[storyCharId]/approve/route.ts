@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
-// POST /api/stories/characters/[storyCharId]/approve — Approve a character image
+// POST /api/stories/characters/[storyCharId]/approve — Approve a character
+// portrait or full-body image. Writes to the base `characters` table so the
+// approval persists across every story that features this character.
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
@@ -19,20 +21,17 @@ export async function POST(
     };
     const isFullBody = imageType === "fullBody";
 
-    console.log(`[StoryPublisher] Approving ${isFullBody ? "full body" : "portrait"} for character ${storyCharId}, image_id: ${image_id}, seed: ${seed}, prompt: ${prompt ? prompt.substring(0, 80) + '...' : 'NOT PROVIDED'}`);
-
     if (!image_id) {
-      console.error(`[StoryPublisher] Approval failed: no image_id provided`);
       return NextResponse.json(
         { error: "image_id is required" },
         { status: 400 }
       );
     }
 
-    // 1. Verify the story character exists
+    // 1. Resolve the base character via the story_characters linkage
     const { data: storyChar, error: scError } = await supabase
       .from("story_characters")
-      .select("id")
+      .select("id, character_id, series_id")
       .eq("id", storyCharId)
       .single();
 
@@ -43,7 +42,7 @@ export async function POST(
       );
     }
 
-    // 2. Fetch the image to get its URL, stored_url, prompt and seed
+    // 2. Fetch image URL, stored_url, prompt, seed
     const { data: image, error: imgError } = await supabase
       .from("images")
       .select("id, sfw_url, stored_url, settings, prompt")
@@ -64,24 +63,21 @@ export async function POST(
       );
     }
 
-    // If the client didn't send a seed, try to recover it from image settings
     const imgSettings = image.settings as Record<string, unknown> | null;
-    const resolvedSeed = seed ?? (imgSettings?.seed != null && imgSettings.seed !== -1 ? Number(imgSettings.seed) : null);
-    console.log(`[StoryPublisher] Resolved seed for approval: ${resolvedSeed} (from body: ${seed}, from settings: ${imgSettings?.seed})`);
+    const resolvedSeed =
+      seed ??
+      (imgSettings?.seed != null && imgSettings.seed !== -1
+        ? Number(imgSettings.seed)
+        : null);
 
     // 3. Ensure image is in Supabase Storage
     let publicUrl: string;
 
     if (image.stored_url) {
-      // Image already in Supabase Storage (RunPod stores during generation)
-      console.log(`[StoryPublisher] Image already stored, skipping re-upload: ${image.stored_url}`);
       publicUrl = image.stored_url;
     } else {
-      // Fallback — download from sfw_url and upload to storage
-      console.log(`[StoryPublisher] Downloading image from: ${image.sfw_url}`);
       const imageResponse = await fetch(image.sfw_url!);
       if (!imageResponse.ok) {
-        console.error(`[StoryPublisher] Failed to download image: ${imageResponse.statusText}`);
         return NextResponse.json(
           { error: `Failed to download image: ${imageResponse.statusText}` },
           { status: 502 }
@@ -94,7 +90,6 @@ export async function POST(
       const ext = contentType.includes("png") ? "png" : "jpeg";
       const storagePath = `characters/${image_id}.${ext}`;
 
-      console.log(`[StoryPublisher] Uploading to Supabase Storage: ${storagePath}`);
       const { error: uploadError } = await supabase.storage
         .from("story-images")
         .upload(storagePath, buffer, {
@@ -103,90 +98,85 @@ export async function POST(
         });
 
       if (uploadError) {
-        console.error(`[StoryPublisher] Storage upload failed:`, uploadError);
         return NextResponse.json(
           { error: `Storage upload failed: ${uploadError.message}` },
           { status: 500 }
         );
       }
 
-      const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(storagePath);
+      const { data: urlData } = supabase.storage
+        .from("story-images")
+        .getPublicUrl(storagePath);
       publicUrl = urlData.publicUrl;
 
-      // Update the image record with the stored URL
       await supabase
         .from("images")
         .update({ stored_url: publicUrl })
         .eq("id", image_id);
     }
 
-    console.log(`[StoryPublisher] Image stored at: ${publicUrl}`);
-
-    // 5. Approve the story character (portrait or full body)
-    console.log(`[StoryPublisher] Updating story_characters to mark ${isFullBody ? "full body" : "portrait"} as approved`);
-
-    // For portraits: lock the exact prompt text that produced this image.
-    // Injected verbatim into every scene prompt under hunyuan3; retained for
-    // provenance/debug under flux2_dev. Prefer client-supplied `prompt`,
-    // fall back to the images.prompt column.
+    // 4. Write portrait/fullbody state to the BASE `characters` row.
+    //    This makes the approved face reusable across every story.
     const lockedPortraitPrompt = isFullBody
       ? null
-      : (prompt ?? image.prompt ?? null);
+      : prompt ?? image.prompt ?? null;
 
     const updateFields = isFullBody
       ? {
-          approved_fullbody: true,
           approved_fullbody_image_id: image_id,
           approved_fullbody_seed: resolvedSeed,
           approved_fullbody_prompt: prompt ?? null,
         }
       : {
-          approved: true,
           approved_image_id: image_id,
           approved_seed: resolvedSeed,
           approved_prompt: prompt ?? null,
           portrait_prompt_locked: lockedPortraitPrompt,
-          // Save face URL separately for use in body generation (ReActor/Nano Banana ref)
-          face_url: publicUrl,
         };
-    const { data: updated, error: updateError } = await supabase
-      .from("story_characters")
+
+    const { error: updateError } = await supabase
+      .from("characters")
       .update(updateFields)
-      .eq("id", storyCharId)
-      .select("*, series_id")
-      .single();
+      .eq("id", storyChar.character_id);
 
     if (updateError) {
-      console.error(`[StoryPublisher] Failed to approve character:`, updateError);
       return NextResponse.json(
         { error: `Failed to approve character: ${updateError.message}` },
         { status: 500 }
       );
     }
 
-    console.log(`[StoryPublisher] Character approved successfully: ${storyCharId}`);
+    // 5. If every character in this series has both portrait + fullbody
+    //    approved on the base row, advance series to images_pending.
+    const { data: seriesChars } = await supabase
+      .from("story_characters")
+      .select(
+        "character_id, characters:character_id ( approved_image_id, approved_fullbody_image_id )"
+      )
+      .eq("series_id", storyChar.series_id);
 
-    // 6. Check if all characters are now fully approved (both portrait + full body) and update series status
-    if (updated) {
-      const { data: allChars } = await supabase
-        .from("story_characters")
-        .select("id, approved, approved_fullbody")
-        .eq("series_id", updated.series_id);
+    if (seriesChars && seriesChars.length > 0) {
+      const allReady = seriesChars.every((sc) => {
+        const base = sc.characters as
+          | { approved_image_id: string | null; approved_fullbody_image_id: string | null }
+          | { approved_image_id: string | null; approved_fullbody_image_id: string | null }[]
+          | null;
+        // PostgREST returns a single row here, but TS types it as array. Normalize.
+        const row = Array.isArray(base) ? base[0] : base;
+        return Boolean(row?.approved_image_id && row?.approved_fullbody_image_id);
+      });
 
-      if (allChars && allChars.length > 0) {
-        const allFullyApproved = allChars.every((ch) => ch.approved && ch.approved_fullbody);
-        if (allFullyApproved) {
-          console.log(`[StoryPublisher] All characters fully approved (portrait + full body) for series ${updated.series_id}, updating series status`);
-          await supabase
-            .from("story_series")
-            .update({ status: "images_pending" })
-            .eq("id", updated.series_id);
-        }
+      if (allReady) {
+        await supabase
+          .from("story_series")
+          .update({ status: "images_pending" })
+          .eq("id", storyChar.series_id);
       }
     }
 
     return NextResponse.json({
-      story_character: updated,
+      story_character_id: storyCharId,
+      character_id: storyChar.character_id,
       stored_url: publicUrl,
     });
   } catch (err) {

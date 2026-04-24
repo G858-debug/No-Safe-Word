@@ -7,11 +7,11 @@ const VALID_MODELS: ImageModel[] = ["flux2_dev", "hunyuan3"];
 /**
  * POST /api/stories/[seriesId]/change-image-model
  *
- * Destructive model switch. Updates story_series.image_model AND resets all
- * downstream generation state so the new model starts from a clean slate:
- *   - Clears every story_characters.approved / approved_fullbody / portrait_prompt_locked for this series
- *   - Resets every story_image_prompts.status to 'pending' and clears image_id
- *   - Resets series status to 'characters_pending'
+ * Switches the story's image_model between flux2_dev and hunyuan3 and resets
+ * any in-flight scene generations back to pending. Character portraits are
+ * canonical on the base `characters` table and serve BOTH pipelines (Flux 2
+ * uses the image as a reference, Hunyuan uses the locked portrait prompt), so
+ * switching models does NOT wipe portraits.
  *
  * Body: { image_model: 'flux2_dev' | 'hunyuan3' }
  */
@@ -24,7 +24,10 @@ export async function POST(
   let newModel: ImageModel;
   try {
     const body = await request.json();
-    if (typeof body?.image_model !== "string" || !VALID_MODELS.includes(body.image_model as ImageModel)) {
+    if (
+      typeof body?.image_model !== "string" ||
+      !VALID_MODELS.includes(body.image_model as ImageModel)
+    ) {
       return NextResponse.json(
         { error: `image_model must be one of: ${VALID_MODELS.join(", ")}` },
         { status: 400 }
@@ -54,32 +57,7 @@ export async function POST(
     });
   }
 
-  // 1. Reset all character approvals + locked prompts for this series
-  const { error: charResetErr } = await supabase
-    .from("story_characters")
-    .update({
-      approved: false,
-      approved_image_id: null,
-      approved_seed: null,
-      approved_prompt: null,
-      approved_fullbody: false,
-      approved_fullbody_image_id: null,
-      approved_fullbody_seed: null,
-      approved_fullbody_prompt: null,
-      face_url: null,
-      portrait_prompt_locked: null,
-    })
-    .eq("series_id", seriesId);
-
-  if (charResetErr) {
-    return NextResponse.json(
-      { error: `Failed to reset character approvals: ${charResetErr.message}` },
-      { status: 500 }
-    );
-  }
-
-  // 2. Reset every prompt status + clear image_id for all posts in this series.
-  // Supabase PostgREST can't .update() with a join, so resolve post_ids first.
+  // Reset every prompt status + clear image_id for all posts in this series.
   const { data: posts, error: postsErr } = await supabase
     .from("story_posts")
     .select("id")
@@ -107,10 +85,11 @@ export async function POST(
     }
   }
 
-  // 3. Switch the model and return series to characters_pending
+  // Flip the model and send the series back to images_pending. Characters
+  // already have their portraits on the base row; no reset needed.
   const { data: updated, error: updateErr } = await supabase
     .from("story_series")
-    .update({ image_model: newModel, status: "characters_pending" })
+    .update({ image_model: newModel, status: "images_pending" })
     .eq("id", seriesId)
     .select("id, image_model, status")
     .single();

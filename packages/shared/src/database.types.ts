@@ -7,35 +7,8 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "12.2.12 (cd3cf9e)"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
   }
   public: {
     Tables: {
@@ -140,109 +113,65 @@ export type Database = {
           },
         ]
       }
-      character_loras: {
-        Row: {
-          base_model: string
-          character_id: string
-          completed_stage: string | null
-          created_at: string
-          dataset_size: number
-          deployed_at: string | null
-          error: string | null
-          file_size_bytes: number | null
-          filename: string
-          id: string
-          pipeline_type: string
-          status: string
-          storage_path: string
-          storage_url: string | null
-          training_attempts: number
-          training_id: string | null
-          training_params: Json
-          training_provider: string
-          trigger_word: string
-          updated_at: string
-          validation_score: number | null
-        }
-        Insert: {
-          base_model?: string
-          character_id: string
-          completed_stage?: string | null
-          created_at?: string
-          dataset_size?: number
-          deployed_at?: string | null
-          error?: string | null
-          file_size_bytes?: number | null
-          filename: string
-          id?: string
-          pipeline_type?: string
-          status?: string
-          storage_path: string
-          storage_url?: string | null
-          training_attempts?: number
-          training_id?: string | null
-          training_params?: Json
-          training_provider?: string
-          trigger_word: string
-          updated_at?: string
-          validation_score?: number | null
-        }
-        Update: {
-          base_model?: string
-          character_id?: string
-          completed_stage?: string | null
-          created_at?: string
-          dataset_size?: number
-          deployed_at?: string | null
-          error?: string | null
-          file_size_bytes?: number | null
-          filename?: string
-          id?: string
-          pipeline_type?: string
-          status?: string
-          storage_path?: string
-          storage_url?: string | null
-          training_attempts?: number
-          training_id?: string | null
-          training_params?: Json
-          training_provider?: string
-          trigger_word?: string
-          updated_at?: string
-          validation_score?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "character_loras_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "characters"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       characters: {
         Row: {
+          approved_fullbody_image_id: string | null
+          approved_fullbody_prompt: string | null
+          approved_fullbody_seed: number | null
+          approved_image_id: string | null
+          approved_prompt: string | null
+          approved_seed: number | null
           created_at: string
           description: Json
           id: string
           name: string
+          portrait_prompt_locked: string | null
           updated_at: string
         }
         Insert: {
+          approved_fullbody_image_id?: string | null
+          approved_fullbody_prompt?: string | null
+          approved_fullbody_seed?: number | null
+          approved_image_id?: string | null
+          approved_prompt?: string | null
+          approved_seed?: number | null
           created_at?: string
           description?: Json
           id?: string
           name: string
+          portrait_prompt_locked?: string | null
           updated_at?: string
         }
         Update: {
+          approved_fullbody_image_id?: string | null
+          approved_fullbody_prompt?: string | null
+          approved_fullbody_seed?: number | null
+          approved_image_id?: string | null
+          approved_prompt?: string | null
+          approved_seed?: number | null
           created_at?: string
           description?: Json
           id?: string
           name?: string
+          portrait_prompt_locked?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "characters_approved_fullbody_image_id_fkey"
+            columns: ["approved_fullbody_image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "characters_approved_image_id_fkey"
+            columns: ["approved_image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       dashboard_tokens: {
         Row: {
@@ -500,178 +429,6 @@ export type Database = {
           },
         ]
       }
-      lora_dataset_images: {
-        Row: {
-          caption: string | null
-          category: string
-          created_at: string
-          eval_details: Json | null
-          eval_score: number | null
-          eval_status: string
-          human_approved: boolean | null
-          id: string
-          image_url: string
-          lora_id: string
-          prompt_template: string
-          source: string
-          storage_path: string
-          variation_type: string
-        }
-        Insert: {
-          caption?: string | null
-          category?: string
-          created_at?: string
-          eval_details?: Json | null
-          eval_score?: number | null
-          eval_status?: string
-          human_approved?: boolean | null
-          id?: string
-          image_url: string
-          lora_id: string
-          prompt_template: string
-          source?: string
-          storage_path: string
-          variation_type: string
-        }
-        Update: {
-          caption?: string | null
-          category?: string
-          created_at?: string
-          eval_details?: Json | null
-          eval_score?: number | null
-          eval_status?: string
-          human_approved?: boolean | null
-          id?: string
-          image_url?: string
-          lora_id?: string
-          prompt_template?: string
-          source?: string
-          storage_path?: string
-          variation_type?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "lora_dataset_images_lora_id_fkey"
-            columns: ["lora_id"]
-            isOneToOne: false
-            referencedRelation: "character_loras"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      nsw_lora_images: {
-        Row: {
-          ai_approved: boolean | null
-          ai_rejection_reason: string | null
-          angle_category: string | null
-          anime_image_url: string | null
-          anime_prompt: string | null
-          caption: string | null
-          clothing_state: string | null
-          converted_image_url: string | null
-          created_at: string
-          human_approved: boolean | null
-          id: string
-          lighting_category: string | null
-          pose_category: string | null
-          prompt_index: number | null
-          replicate_prediction_id: string | null
-          session_id: string
-          stage: string
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          ai_approved?: boolean | null
-          ai_rejection_reason?: string | null
-          angle_category?: string | null
-          anime_image_url?: string | null
-          anime_prompt?: string | null
-          caption?: string | null
-          clothing_state?: string | null
-          converted_image_url?: string | null
-          created_at?: string
-          human_approved?: boolean | null
-          id?: string
-          lighting_category?: string | null
-          pose_category?: string | null
-          prompt_index?: number | null
-          replicate_prediction_id?: string | null
-          session_id: string
-          stage: string
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          ai_approved?: boolean | null
-          ai_rejection_reason?: string | null
-          angle_category?: string | null
-          anime_image_url?: string | null
-          anime_prompt?: string | null
-          caption?: string | null
-          clothing_state?: string | null
-          converted_image_url?: string | null
-          created_at?: string
-          human_approved?: boolean | null
-          id?: string
-          lighting_category?: string | null
-          pose_category?: string | null
-          prompt_index?: number | null
-          replicate_prediction_id?: string | null
-          session_id?: string
-          stage?: string
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "nsw_lora_images_session_id_fkey"
-            columns: ["session_id"]
-            isOneToOne: false
-            referencedRelation: "nsw_lora_sessions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      nsw_lora_sessions: {
-        Row: {
-          created_at: string
-          dataset_zip_url: string | null
-          id: string
-          lora_output_url: string | null
-          name: string
-          replicate_training_id: string | null
-          replicate_training_url: string | null
-          status: string
-          target_approved_count: number
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          dataset_zip_url?: string | null
-          id?: string
-          lora_output_url?: string | null
-          name: string
-          replicate_training_id?: string | null
-          replicate_training_url?: string | null
-          status?: string
-          target_approved_count?: number
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          dataset_zip_url?: string | null
-          id?: string
-          lora_output_url?: string | null
-          name?: string
-          replicate_training_id?: string | null
-          replicate_training_url?: string | null
-          status?: string
-          target_approved_count?: number
-          updated_at?: string
-        }
-        Relationships: []
-      }
       nsw_payments: {
         Row: {
           amount: number
@@ -827,7 +584,7 @@ export type Database = {
       }
       nsw_users: {
         Row: {
-          auth_user_id: string | null
+          auth_user_id: string
           both_channels_bonus: boolean
           created_at: string
           display_name: string | null
@@ -841,7 +598,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          auth_user_id?: string | null
+          auth_user_id: string
           both_channels_bonus?: boolean
           created_at?: string
           display_name?: string | null
@@ -855,7 +612,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          auth_user_id?: string | null
+          auth_user_id?: string
           both_channels_bonus?: boolean
           created_at?: string
           display_name?: string | null
@@ -867,30 +624,6 @@ export type Database = {
           phone?: string | null
           role?: string
           updated_at?: string
-        }
-        Relationships: []
-      }
-      payfast_itn_events: {
-        Row: {
-          m_payment_id: string | null
-          payment_status: string | null
-          pf_payment_id: string
-          raw_payload: Json
-          received_at: string
-        }
-        Insert: {
-          m_payment_id?: string | null
-          payment_status?: string | null
-          pf_payment_id: string
-          raw_payload: Json
-          received_at?: string
-        }
-        Update: {
-          m_payment_id?: string | null
-          payment_status?: string | null
-          pf_payment_id?: string
-          raw_payload?: Json
-          received_at?: string
         }
         Relationships: []
       }
@@ -945,6 +678,30 @@ export type Database = {
         }
         Relationships: []
       }
+      payfast_itn_events: {
+        Row: {
+          m_payment_id: string | null
+          payment_status: string | null
+          pf_payment_id: string
+          raw_payload: Json
+          received_at: string
+        }
+        Insert: {
+          m_payment_id?: string | null
+          payment_status?: string | null
+          pf_payment_id: string
+          raw_payload: Json
+          received_at?: string
+        }
+        Update: {
+          m_payment_id?: string | null
+          payment_status?: string | null
+          pf_payment_id?: string
+          raw_payload?: Json
+          received_at?: string
+        }
+        Relationships: []
+      }
       sessions: {
         Row: {
           browser: string | null
@@ -980,93 +737,27 @@ export type Database = {
       }
       story_characters: {
         Row: {
-          active_lora_id: string | null
-          approved: boolean
-          approved_fullbody: boolean
-          approved_fullbody_image_id: string | null
-          approved_fullbody_prompt: string | null
-          approved_fullbody_seed: number | null
-          approved_image_id: string | null
-          approved_prompt: string | null
-          approved_seed: number | null
           character_id: string
-          face_url: string | null
           id: string
-          lora_file_url: string | null
-          lora_training_status: string | null
-          lora_trigger_word: string | null
-          portrait_prompt_locked: string | null
           prose_description: string | null
-          regen_count: number
           role: string | null
           series_id: string
         }
         Insert: {
-          active_lora_id?: string | null
-          approved?: boolean
-          approved_fullbody?: boolean
-          approved_fullbody_image_id?: string | null
-          approved_fullbody_prompt?: string | null
-          approved_fullbody_seed?: number | null
-          approved_image_id?: string | null
-          approved_prompt?: string | null
-          approved_seed?: number | null
           character_id: string
-          face_url?: string | null
           id?: string
-          lora_file_url?: string | null
-          lora_training_status?: string | null
-          lora_trigger_word?: string | null
-          portrait_prompt_locked?: string | null
           prose_description?: string | null
-          regen_count?: number
           role?: string | null
           series_id: string
         }
         Update: {
-          active_lora_id?: string | null
-          approved?: boolean
-          approved_fullbody?: boolean
-          approved_fullbody_image_id?: string | null
-          approved_fullbody_prompt?: string | null
-          approved_fullbody_seed?: number | null
-          approved_image_id?: string | null
-          approved_prompt?: string | null
-          approved_seed?: number | null
           character_id?: string
-          face_url?: string | null
           id?: string
-          lora_file_url?: string | null
-          lora_training_status?: string | null
-          lora_trigger_word?: string | null
-          portrait_prompt_locked?: string | null
           prose_description?: string | null
-          regen_count?: number
           role?: string | null
           series_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "story_characters_active_lora_id_fkey"
-            columns: ["active_lora_id"]
-            isOneToOne: false
-            referencedRelation: "character_loras"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "story_characters_approved_fullbody_image_id_fkey"
-            columns: ["approved_fullbody_image_id"]
-            isOneToOne: false
-            referencedRelation: "images"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "story_characters_approved_image_id_fkey"
-            columns: ["approved_image_id"]
-            isOneToOne: false
-            referencedRelation: "images"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "story_characters_character_id_fkey"
             columns: ["character_id"]
@@ -1377,139 +1068,10 @@ export type Database = {
       }
     }
     Views: {
-      current_blocked_users: {
-        Row: {
-          blocked_at: string | null
-          minutes_remaining: number | null
-          phone_number: string | null
-          reason: string | null
-          status: string | null
-          unblock_at: string | null
-        }
-        Insert: {
-          blocked_at?: string | null
-          minutes_remaining?: never
-          phone_number?: string | null
-          reason?: string | null
-          status?: never
-          unblock_at?: string | null
-        }
-        Update: {
-          blocked_at?: string | null
-          minutes_remaining?: never
-          phone_number?: string | null
-          reason?: string | null
-          status?: never
-          unblock_at?: string | null
-        }
-        Relationships: []
-      }
-      daily_active_users: {
-        Row: {
-          active_users: number | null
-          avg_time_on_page: number | null
-          date: string | null
-          total_events: number | null
-        }
-        Relationships: []
-      }
-      feature_popularity: {
-        Row: {
-          avg_minutes_used: number | null
-          feature_name: string | null
-          last_used: string | null
-          total_uses: number | null
-          unique_users: number | null
-        }
-        Relationships: []
-      }
-      pricing_by_gateway: {
-        Row: {
-          billing_currency_code: string | null
-          country_count: number | null
-          max_professional: number | null
-          max_starter: number | null
-          min_professional: number | null
-          min_starter: number | null
-          payment_gateway: string | null
-        }
-        Relationships: []
-      }
-      recent_security_threats: {
-        Row: {
-          blocked_messages: number | null
-          command_attempts: number | null
-          critical_threats: number | null
-          date: string | null
-          script_attempts: number | null
-          sql_attempts: number | null
-          unique_attackers: number | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
-      calculate_net_amount: {
-        Args: {
-          gross_amount: number
-          payfast_fee?: number
-          platform_fee?: number
-        }
-        Returns: number
-      }
-      calculate_payfast_fee: { Args: { amount: number }; Returns: number }
-      calculate_video_performance_score: {
-        Args: {
-          p_completion_rate: number
-          p_engagement_rate: number
-          p_share_count: number
-          p_view_count: number
-        }
-        Returns: number
-      }
-      can_auto_approve: {
-        Args: { p_amount: number; p_client_id: string; p_trainer_id: string }
-        Returns: boolean
-      }
-      check_token_limits: {
-        Args: { p_amount: number; p_token_id: string }
-        Returns: boolean
-      }
-      cleanup_abandoned_links: { Args: never; Returns: number }
-      cleanup_expired_assessment_tokens: { Args: never; Returns: undefined }
-      cleanup_expired_dashboard_tokens: { Args: never; Returns: undefined }
-      cleanup_expired_flow_tokens: { Args: never; Returns: undefined }
-      cleanup_expired_pending_bookings: { Args: never; Returns: undefined }
-      cleanup_expired_registrations: { Args: never; Returns: undefined }
-      cleanup_expired_token_setup: { Args: never; Returns: undefined }
-      cleanup_old_processed_messages: { Args: never; Returns: undefined }
-      cleanup_old_verifications: { Args: never; Returns: undefined }
-      expire_old_registration_sessions: { Args: never; Returns: undefined }
-      get_country_pricing: {
-        Args: { p_country_code: string }
-        Returns: {
-          billing_currency_code: string
-          country_name: string
-          payment_gateway: string
-          professional_annual: number
-          professional_monthly: number
-          starter_annual: number
-          starter_monthly: number
-          studio_annual: number
-          studio_monthly: number
-        }[]
-      }
-      get_next_reminder_date: {
-        Args: { reminder_day: number }
-        Returns: string
-      }
-      get_payment_gateway: { Args: { p_country_code: string }; Returns: string }
-      increment: { Args: { row_id: string; x: number }; Returns: number }
-      mask_account_number: { Args: { account_number: string }; Returns: string }
-      verify_trainer_client_relationship: {
-        Args: { p_client_id: string; p_trainer_id: string }
-        Returns: boolean
-      }
+      [_ in never]: never
     }
     Enums: {
       [_ in never]: never
@@ -1519,129 +1081,3 @@ export type Database = {
     }
   }
 }
-
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
-
-type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
-
-export type Tables<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
-      Row: infer R
-    }
-    ? R
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-        Row: infer R
-      }
-      ? R
-      : never
-    : never
-
-export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Insert: infer I
-    }
-    ? I
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Insert: infer I
-      }
-      ? I
-      : never
-    : never
-
-export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Update: infer U
-    }
-    ? U
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Update: infer U
-      }
-      ? U
-      : never
-    : never
-
-export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
-  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never
-
-export type CompositeTypes<
-  PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
-> = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
-  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never
-
-export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
-  public: {
-    Enums: {},
-  },
-} as const

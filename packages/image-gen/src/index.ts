@@ -28,77 +28,35 @@ export type { PersonValidationResult } from './person-validator';
 // Claude prompt enhancement
 export { enhancePromptForScene } from './prompt-enhancer';
 
-// Anthropic API retry wrapper — exponential backoff on 500/502/503/529
+// Anthropic API retry wrapper
 export { anthropicCreateWithRetry } from './anthropic-retry';
 
 // Diagnostic flags for isolating scene generation components
 export { DEFAULT_DIAGNOSTIC_FLAGS } from './diagnostic-flags';
 export type { DiagnosticFlags } from './diagnostic-flags';
 
-// Character LoRA pipeline types & config
-export { PIPELINE_CONFIG } from './character-lora/types';
-export type {
-  CharacterInput,
-  CharacterStructured,
-  CharacterLoraRow,
-  PipelineProgress,
-  PipelineStatus,
-  PipelineType,
-  ImageSource,
-  ImageCategory,
-  VariationType,
-} from './character-lora/types';
-
-// Scene profiles — composition-aware generation parameter profiles
+// Scene profiles
 export { getDefaultProfile, deriveCompositionType, deriveContentMode, applyProfileOverrides } from './scene-profiles';
 export type { SceneProfile, CompositionType } from './scene-profiles';
 
-// Scene evaluator — tiered image evaluation pipeline
-export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull, detectCorruptedImage, recommendResourceLoras } from './scene-evaluator';
-export type { EvaluationResult, EvaluationContext, EvaluationScores, FailureCategory, PreflightResult, LoraRecommendation } from './scene-evaluator';
+// Scene evaluator
+export { validateTagsPreflight, validatePersonCount as validatePersonCountV2, evaluateSceneFull, detectCorruptedImage } from './scene-evaluator';
+export type { EvaluationResult, EvaluationContext, EvaluationScores, FailureCategory, PreflightResult } from './scene-evaluator';
 
-// Retry strategy — correction logic and escalation
+// Retry strategy
 export { computeCorrectionPlan, canRetry, generateRetrySeed as generateRetrySeedV2, selectBestAttempt, MAX_EVAL_RETRY_ATTEMPTS } from './retry-strategy';
 export type { CorrectionPlan } from './retry-strategy';
 
-// Tag rewriter — failure-aware booru tag rewriting
+// Tag rewriter
 export { rewriteTagsForFailure } from './tag-rewriter';
 
-// Architectural lessons — known structural solutions
+// Architectural lessons
 export { ARCHITECTURAL_LESSONS, checkArchitecturalLessons, requestStructuralDiagnosis } from './architectural-lessons';
 export type { ArchitecturalLesson } from './architectural-lessons';
 
-// Resource LoRA registry — pose/style/composition LoRA catalog
-export { selectResourceLoras, getResourceLoraById, getRegisteredResourceLoras, registerResourceLora } from './resource-lora-registry';
-export type { ResourceLora } from './resource-lora-registry';
-
-// Resource LoRA discovery — CivitAI search/download pipeline
-export { searchAndDownloadLora } from './resource-lora-discovery';
-
-// Juggernaut Ragnarok Workflow Builder
+// Legacy ComfyUI workflow builder (retained for character portrait generation)
 export { buildWorkflow, buildTwoPassWorkflow, buildInpaintWorkflow, buildImg2ImgWorkflow, buildUpscaleWorkflow } from './workflow-builder';
 export type { WorkflowConfig, TwoPassWorkflowConfig, InpaintWorkflowConfig, Img2ImgWorkflowConfig, UpscaleWorkflowConfig, ControlNetConfig } from './workflow-builder';
-
-// Dataset generation for LoRA training
-export { buildDatasetPrompts, buildDatasetWorkflow, generateDataset, buildTopUpPrompts, generateTopUpImages } from './dataset-generator';
-
-// Category minimums for LoRA dataset validation
-export { MIN_CATEGORY_COUNTS } from './character-lora/category-minimums';
-export type { DatasetPrompt, DatasetCharacter } from './dataset-generator';
-
-// LoRA validation
-export { validateLora, toPipelineValidationResult } from './character-lora-validator';
-export type { ValidationResultDetail } from './character-lora-validator';
-
-// LoRA training pipeline + helpers
-export { getRecommendedTrainingConfig, getIdentityTagsToRemove } from './lora-trainer';
-export type { LoraTrainingConfig } from './lora-trainer';
-// Pipeline orchestrator is server-only (uses archiver, streams) — import directly:
-//   import { runTrainingPipeline, resumeTrainingPipeline, completeTrainingPipeline } from '@no-safe-word/image-gen/server/lora-trainer'
-
-// RunPod Pod API (batch GPU jobs — LoRA training)
-export { createTrainingPod, getTrainingPodStatus, terminateTrainingPod } from './runpod-pods';
-export type { TrainingPodConfig, PodStatus, PodDesiredStatus } from './runpod-pods';
 
 // Replicate client (HunyuanImage 3.0)
 export { getReplicateClient } from './replicate-client';
@@ -116,7 +74,7 @@ export type {
 export { buildCharacterPortraitPrompt } from './portrait-prompt-builder';
 export type { PortraitCharacterDescription } from './portrait-prompt-builder';
 
-// Flux 2 Dev workflow + generator (ComfyUI on RunPod, separate endpoint)
+// Flux 2 Dev workflow + generator
 export { buildFlux2Workflow } from './flux2-workflow-builder';
 export type {
   Flux2WorkflowOptions,

@@ -4,12 +4,13 @@ import { supabase } from "@no-safe-word/story-engine";
 /**
  * POST /api/stories/characters/[storyCharId]/reset-portrait
  *
- * Reset a character back to portrait stage so the user can regenerate
- * their appearance. Archives any active LoRA and clears approval fields.
+ * Clear approved portrait / full-body state on the base `characters` row so
+ * the user can regenerate. Because portraits are canonical per identity, this
+ * affects every story that features this character.
  *
  * Body: { resetFace?: boolean }
- *   - resetFace: true  → clear both portrait AND full-body (full reset)
- *   - resetFace: false → clear only full-body, keep portrait (default)
+ *   - resetFace: true  → clear BOTH portrait AND full-body (default)
+ *   - resetFace: false → clear only full-body, keep portrait
  */
 export async function POST(
   request: NextRequest,
@@ -21,59 +22,44 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const { resetFace = true } = body as { resetFace?: boolean };
 
-    // Verify story character exists
-    const { data: storyChar, error: scErr } = await (supabase as any)
+    const { data: storyChar, error: scErr } = await supabase
       .from("story_characters")
-      .select("id, character_id, active_lora_id")
+      .select("id, character_id")
       .eq("id", storyCharId)
       .single();
 
     if (scErr || !storyChar) {
-      return NextResponse.json({ error: "Story character not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Story character not found" },
+        { status: 404 }
+      );
     }
 
-    // Archive any non-archived LoRA records for this character
-    if (storyChar.character_id) {
-      const { error: archiveErr } = await (supabase as any)
-        .from("character_loras")
-        .update({ status: "archived", updated_at: new Date().toISOString() })
-        .eq("character_id", storyChar.character_id)
-        .not("status", "eq", "archived");
-
-      if (archiveErr) {
-        console.error(`[ResetPortrait] Failed to archive LoRAs:`, archiveErr);
-        return NextResponse.json({ error: `Failed to archive existing LoRAs: ${archiveErr.message}` }, { status: 500 });
-      }
-    }
-
-    // Build the update — always clear full-body + LoRA link
     const updateFields: Record<string, unknown> = {
-      approved_fullbody: false,
       approved_fullbody_image_id: null,
       approved_fullbody_seed: null,
       approved_fullbody_prompt: null,
-      active_lora_id: null,
     };
 
-    // If resetting face too, clear portrait fields
     if (resetFace) {
-      updateFields.approved = false;
       updateFields.approved_image_id = null;
       updateFields.approved_seed = null;
       updateFields.approved_prompt = null;
-      updateFields.face_url = null;
+      updateFields.portrait_prompt_locked = null;
     }
 
-    const { error: updateErr } = await (supabase as any)
-      .from("story_characters")
+    const { error: updateErr } = await supabase
+      .from("characters")
       .update(updateFields)
-      .eq("id", storyCharId);
+      .eq("id", storyChar.character_id);
 
     if (updateErr) {
-      return NextResponse.json({ error: `Update failed: ${updateErr.message}` }, { status: 500 });
+      return NextResponse.json(
+        { error: `Update failed: ${updateErr.message}` },
+        { status: 500 }
+      );
     }
 
-    console.log(`[ResetPortrait] Reset ${storyCharId} to portrait stage (resetFace: ${resetFace})`);
     return NextResponse.json({ ok: true, resetFace });
   } catch (err) {
     console.error("[ResetPortrait] Error:", err);

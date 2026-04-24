@@ -1,5 +1,0 @@
-# Kohya training dependencies (beyond what sd-scripts installs)
-prodigyopt>=1.0
-lion-pytorch>=0.2.2
-dadaptation>=3.2
-requests>=2.31.0

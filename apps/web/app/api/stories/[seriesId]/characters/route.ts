@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
-// GET /api/stories/[seriesId]/characters — List characters linked to this series
+// GET /api/stories/[seriesId]/characters — List characters linked to this
+// series. Portrait state is canonical on the base `characters` row and is
+// returned alongside the story-specific linkage.
 export async function GET(
   _request: NextRequest,
   props: { params: Promise<{ seriesId: string }> }
@@ -9,75 +11,96 @@ export async function GET(
   const params = await props.params;
   const { seriesId } = params;
 
-  console.log(`[StoryPublisher] Loading characters for series: ${seriesId}`);
-
   const { data: storyCharacters, error } = await supabase
     .from("story_characters")
     .select(
       `
-      id, role, prose_description, approved, approved_image_id, approved_seed,
-      approved_fullbody, approved_fullbody_image_id, approved_fullbody_seed,
-      face_url, active_lora_id,
-      characters:character_id (id, name, description)
-`
+      id, role, prose_description,
+      characters:character_id (
+        id, name, description,
+        approved_image_id, approved_seed, approved_prompt, portrait_prompt_locked,
+        approved_fullbody_image_id, approved_fullbody_seed, approved_fullbody_prompt
+      )
+    `
     )
     .eq("series_id", seriesId);
 
   if (error) {
-    console.error(`[StoryPublisher] Failed to load characters:`, error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   if (!storyCharacters || storyCharacters.length === 0) {
-    console.log(`[StoryPublisher] No characters found for series ${seriesId}`);
     return NextResponse.json({ characters: [] });
   }
 
-  console.log(`[StoryPublisher] Found ${storyCharacters.length} characters`);
+  // PostgREST types the joined row as an array — normalize.
+  type BaseChar = {
+    id: string;
+    name: string;
+    description: unknown;
+    approved_image_id: string | null;
+    approved_seed: number | null;
+    approved_prompt: string | null;
+    portrait_prompt_locked: string | null;
+    approved_fullbody_image_id: string | null;
+    approved_fullbody_seed: number | null;
+    approved_fullbody_prompt: string | null;
+  };
 
-  // Fetch stored_url for any approved images (portrait + full body)
-  const allImageIds = storyCharacters
-    .flatMap((sc) => [sc.approved_image_id, sc.approved_fullbody_image_id])
-    .filter((id): id is string => id !== null);
+  const baseOf = (row: unknown): BaseChar | null => {
+    if (!row) return null;
+    return Array.isArray(row) ? (row[0] as BaseChar) ?? null : (row as BaseChar);
+  };
 
-  console.log(`[StoryPublisher] Fetching image URLs for ${allImageIds.length} approved images`);
+  // Collect image ids to resolve URLs in one query
+  const imageIds = storyCharacters
+    .flatMap((sc) => {
+      const base = baseOf(sc.characters);
+      return [base?.approved_image_id, base?.approved_fullbody_image_id];
+    })
+    .filter((id): id is string => Boolean(id));
 
   let imageUrls: Record<string, string> = {};
-  if (allImageIds.length > 0) {
+  if (imageIds.length > 0) {
     const { data: images } = await supabase
       .from("images")
       .select("id, stored_url, sfw_url")
-      .in("id", allImageIds);
+      .in("id", imageIds);
 
     if (images) {
       imageUrls = Object.fromEntries(
         images.map((img) => [img.id, img.sfw_url || img.stored_url || ""])
       );
-      console.log(`[StoryPublisher] Loaded ${images.length} image URLs:`, imageUrls);
     }
   }
 
   const characters = storyCharacters.map((sc) => {
-    // Check for pending image in prose_description metadata
-    const meta = typeof sc.prose_description === "object" && sc.prose_description !== null
-      ? sc.prose_description as Record<string, unknown>
-      : {} as Record<string, unknown>;
-
+    const base = baseOf(sc.characters);
     return {
-      ...sc,
-      approved_image_url: sc.approved_image_id
-        ? imageUrls[sc.approved_image_id] || null
+      id: sc.id,
+      role: sc.role,
+      prose_description: sc.prose_description,
+      character_id: base?.id ?? null,
+      name: base?.name ?? null,
+      description: base?.description ?? null,
+      approved_image_id: base?.approved_image_id ?? null,
+      approved_seed: base?.approved_seed ?? null,
+      approved_prompt: base?.approved_prompt ?? null,
+      approved_image_url: base?.approved_image_id
+        ? imageUrls[base.approved_image_id] || null
         : null,
-      approved_fullbody_image_url: sc.approved_fullbody_image_id
-        ? imageUrls[sc.approved_fullbody_image_id] || null
+      approved_fullbody_image_id: base?.approved_fullbody_image_id ?? null,
+      approved_fullbody_seed: base?.approved_fullbody_seed ?? null,
+      approved_fullbody_prompt: base?.approved_fullbody_prompt ?? null,
+      approved_fullbody_image_url: base?.approved_fullbody_image_id
+        ? imageUrls[base.approved_fullbody_image_id] || null
         : null,
-      pending_image_id: (meta._pending_image_id as string) || null,
-      pending_image_url: (meta._pending_image_url as string) || null,
-      pending_fullbody_image_id: (meta._pending_fullbody_image_id as string) || null,
-      pending_fullbody_image_url: (meta._pending_fullbody_image_url as string) || null,
+      portrait_prompt_locked: base?.portrait_prompt_locked ?? null,
+      // Derived flags — the UI previously read `approved` / `approved_fullbody`.
+      approved: Boolean(base?.approved_image_id),
+      approved_fullbody: Boolean(base?.approved_fullbody_image_id),
     };
   });
 
-  console.log(`[StoryPublisher] Returning ${characters.length} characters with image data`);
   return NextResponse.json({ characters });
 }

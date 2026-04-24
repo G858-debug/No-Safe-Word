@@ -68,12 +68,12 @@ async function fetchCharacterData(
   if (characterNames.length === 0) return [];
 
   try {
-    // Find story_characters for this series whose joined character name matches
+    // Find story_characters for this series whose joined character name matches.
+    // approved_image_id lives on the base `characters` row now.
     const { data: storyChars, error } = await supabase
       .from("story_characters")
       .select(`
-        approved_image_id,
-        character:characters!inner(name, description)
+        character:characters!inner(name, description, approved_image_id)
       `)
       .eq("series_id", seriesId);
 
@@ -117,12 +117,13 @@ async function fetchCharacterData(
         }
       }
 
-      // Get approved portrait URL
-      if (sc.approved_image_id) {
+      // Get approved portrait URL from the base `characters` row
+      const approvedImageId: string | null = charRel?.approved_image_id ?? null;
+      if (approvedImageId) {
         const { data: imgData } = await supabase
           .from("images")
           .select("stored_url")
-          .eq("id", sc.approved_image_id)
+          .eq("id", approvedImageId)
           .single();
 
         if (imgData?.stored_url) {

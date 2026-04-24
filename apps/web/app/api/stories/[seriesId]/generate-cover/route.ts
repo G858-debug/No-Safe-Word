@@ -132,11 +132,12 @@ export async function POST(
   //    approved") would silently pick a supporting character as the cover
   //    reference. Covers are always compositions of the protagonist +
   //    (optionally) the love interest, so we match those exact role strings.
-  const { data: approvedChars, error: charsErr } = await supabase
+  const { data: seriesChars, error: charsErr } = await supabase
     .from("story_characters")
-    .select("id, character_id, role, approved_image_id")
-    .eq("series_id", seriesId)
-    .eq("approved", true);
+    .select(
+      "id, character_id, role, characters:character_id ( approved_image_id )"
+    )
+    .eq("series_id", seriesId);
 
   if (charsErr) {
     return NextResponse.json(
@@ -145,8 +146,26 @@ export async function POST(
     );
   }
 
-  const protagonists = (approvedChars ?? []).filter((c) => c.role === "protagonist");
-  const loveInterests = (approvedChars ?? []).filter((c) => c.role === "love_interest");
+  type RowWithBase = {
+    id: string;
+    character_id: string;
+    role: string | null;
+    characters:
+      | { approved_image_id: string | null }
+      | { approved_image_id: string | null }[]
+      | null;
+  };
+  const baseImageId = (c: RowWithBase): string | null => {
+    const b = Array.isArray(c.characters) ? c.characters[0] : c.characters;
+    return b?.approved_image_id ?? null;
+  };
+
+  const approvedChars = ((seriesChars ?? []) as unknown as RowWithBase[]).filter(
+    (c) => baseImageId(c) !== null
+  );
+
+  const protagonists = approvedChars.filter((c) => c.role === "protagonist");
+  const loveInterests = approvedChars.filter((c) => c.role === "love_interest");
 
   if (protagonists.length === 0) {
     return NextResponse.json(
@@ -177,11 +196,14 @@ export async function POST(
   const protagonist = protagonists[0];
   const loveInterest = loveInterests[0];
 
+  const protagonistImageId = baseImageId(protagonist);
+  const loveInterestImageId = loveInterest ? baseImageId(loveInterest) : null;
+
   // 6. Resolve portrait URLs
-  const portraitIds = [protagonist.approved_image_id, loveInterest?.approved_image_id].filter(
+  const portraitIds = [protagonistImageId, loveInterestImageId].filter(
     (id): id is string => Boolean(id)
   );
-  if (portraitIds.length === 0 || !protagonist.approved_image_id) {
+  if (portraitIds.length === 0 || !protagonistImageId) {
     return NextResponse.json(
       {
         error:
@@ -209,7 +231,7 @@ export async function POST(
     if (url) urlById.set(img.id, url);
   }
 
-  const protagonistUrl = urlById.get(protagonist.approved_image_id);
+  const protagonistUrl = urlById.get(protagonistImageId);
   if (!protagonistUrl) {
     return NextResponse.json(
       { error: "Protagonist portrait image URL is missing. Re-approve the portrait and retry." },
@@ -217,8 +239,8 @@ export async function POST(
     );
   }
 
-  const loveInterestUrl = loveInterest?.approved_image_id
-    ? urlById.get(loveInterest.approved_image_id)
+  const loveInterestUrl = loveInterestImageId
+    ? urlById.get(loveInterestImageId)
     : undefined;
 
   // Observability: when love_interest is absent, log so we can spot

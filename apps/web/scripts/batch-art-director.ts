@@ -84,7 +84,9 @@ async function main() {
 
     const { data: storyChars } = await supabase
       .from("story_characters")
-      .select(`approved_image_id, character:characters!inner(name, description)`)
+      .select(
+        `character:characters!inner(name, description, approved_image_id)`
+      )
       .eq("series_id", SERIES_ID);
 
     if (!storyChars) return [];
@@ -110,11 +112,12 @@ async function main() {
           };
         } catch {}
       }
-      if (sc.approved_image_id) {
+      const approvedImageId: string | null = charRel?.approved_image_id ?? null;
+      if (approvedImageId) {
         const { data: imgData } = await supabase
           .from("images")
           .select("stored_url")
-          .eq("id", sc.approved_image_id)
+          .eq("id", approvedImageId)
           .single();
         if (imgData?.stored_url) cd.portraitUrl = imgData.stored_url;
       }

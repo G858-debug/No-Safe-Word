@@ -209,45 +209,9 @@ export default function SeriesDetailPage() {
     fetchData();
   }, [seriesId]);
 
-  // LoRA readiness state for all characters
-  const [loraStatus, setLoraStatus] = useState<Record<string, { name: string; deployed: boolean }>>({});
-  const [loraCheckDone, setLoraCheckDone] = useState(false);
-
-  // Check LoRA deployment status for all characters
-  useEffect(() => {
-    if (characters.length === 0) return;
-
-    async function checkLoras() {
-      const statuses: Record<string, { name: string; deployed: boolean }> = {};
-      for (const ch of characters) {
-        try {
-          const res = await fetch(`/api/stories/characters/${ch.id}/lora-progress`);
-          if (res.ok) {
-            const data = await res.json();
-            statuses[ch.id] = {
-              name: ch.characters.name,
-              deployed: data?.status === "deployed",
-            };
-          } else {
-            statuses[ch.id] = { name: ch.characters.name, deployed: false };
-          }
-        } catch {
-          statuses[ch.id] = { name: ch.characters.name, deployed: false };
-        }
-      }
-      setLoraStatus(statuses);
-      setLoraCheckDone(true);
-    }
-
-    checkLoras();
-  }, [characters]);
-
   // Derived state
   const allCharsApproved =
     characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
-  const allLorasDeployed =
-    loraCheckDone && characters.length > 0 && characters.every((c) => loraStatus[c.id]?.deployed);
-  // LoRAs are recommended but not required — pipeline falls back to inline descriptions
   const allReadyForImages = allCharsApproved;
 
   // Cover approval gates the Blurbs tab (must be at least approved). The
@@ -272,12 +236,10 @@ export default function SeriesDetailPage() {
     rawSeries?.blurb_long_selected !== null && rawSeries?.blurb_long_selected !== undefined;
   const blurbsReady = shortBlurbSelected && longBlurbSelected;
 
-  // Model is locked once any portrait has been generated (approved or pending).
-  // Until then, the selector is a simple PATCH. After, switching requires the
-  // destructive /change-image-model route.
-  const modelLocked = characters.some(
-    (c) => Boolean(c.approved_image_id) || Boolean(c.pending_image_id)
-  );
+  // Model is locked once any portrait has been approved. Until then, the
+  // selector is a simple PATCH. After, switching requires the /change-image-model
+  // route (which resets in-flight scene prompts but keeps the portrait).
+  const modelLocked = characters.some((c) => Boolean(c.approved_image_id));
   const [modelUpdating, setModelUpdating] = useState(false);
   const [modelChangeError, setModelChangeError] = useState<string | null>(null);
 
@@ -777,25 +739,6 @@ export default function SeriesDetailPage() {
                 Pick one short and one long blurb in the Blurbs tab before
                 generating scene images. Short blurb drives the OG/email
                 composites; long blurb renders on the website detail page.
-              </p>
-            </div>
-          )}
-          {coverReady && blurbsReady && allCharsApproved && !allLorasDeployed && loraCheckDone && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 mt-4">
-              <p className="text-sm font-medium text-amber-400 mb-2">
-                Some characters have no deployed LoRA — images will use generic descriptions
-              </p>
-              <ul className="text-sm text-amber-400/80 space-y-1">
-                {characters
-                  .filter((c) => !loraStatus[c.id]?.deployed)
-                  .map((c) => (
-                    <li key={c.id}>
-                      {c.characters.name} — no LoRA (will use inline description)
-                    </li>
-                  ))}
-              </ul>
-              <p className="mt-2 text-xs text-amber-400/60">
-                Train a LoRA for consistent character identity. Without one, the character will look different across images.
               </p>
             </div>
           )}
