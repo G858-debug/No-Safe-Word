@@ -74,10 +74,13 @@ export function assembleFlux2Prompt(
 export async function generateFlux2Image(
   options: Flux2GenerateOptions
 ): Promise<Flux2GenerateResult> {
-  const endpointId = options.endpointId ?? process.env.RUNPOD_FLUX2_ENDPOINT_ID;
+  const endpointId =
+    options.endpointId ??
+    process.env.RUNPOD_FLUX2_ENDPOINT_ID ??
+    process.env.RUNPOD_ENDPOINT_ID;
   if (!endpointId) {
     throw new Error(
-      "RUNPOD_FLUX2_ENDPOINT_ID is not set — required for Flux 2 Dev generation"
+      "RUNPOD_FLUX2_ENDPOINT_ID (or RUNPOD_ENDPOINT_ID) is not set — required for Flux 2 Dev generation"
     );
   }
 
