@@ -28,6 +28,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     character.approved ? "body" : "face"
   );
   const [customPrompt, setCustomPrompt] = useState("");
+  const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +80,23 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     },
     [stopPolling]
   );
+
+  const handleLoadPrompt = useCallback(async () => {
+    if (pendingPrompt) {
+      setCustomPrompt(pendingPrompt);
+      return;
+    }
+    setIsLoadingPrompt(true);
+    try {
+      const res = await fetch(`/api/stories/characters/${character.id}/default-prompt`);
+      const data = (await res.json()) as { prompt?: string; error?: string };
+      if (data.prompt) setCustomPrompt(data.prompt);
+    } catch {
+      // silently ignore — user can still type manually
+    } finally {
+      setIsLoadingPrompt(false);
+    }
+  }, [character.id, pendingPrompt]);
 
   const handleGenerate = useCallback(async () => {
     setError(null);
@@ -275,6 +293,18 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
               className="text-sm"
               rows={3}
             />
+            <button
+              type="button"
+              onClick={handleLoadPrompt}
+              disabled={isLoadingPrompt}
+              className="text-xs text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+            >
+              {isLoadingPrompt
+                ? "Loading…"
+                : pendingPrompt
+                ? "Edit last prompt"
+                : "Load default prompt"}
+            </button>
             <div className="flex gap-2">
               <Button
                 onClick={handleGenerate}
