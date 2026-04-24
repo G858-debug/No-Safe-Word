@@ -86,6 +86,7 @@ export async function generateHunyuanImage(
       input: {
         prompt,
         aspect_ratio: aspectRatio,
+        disable_safety_checker: true,
       },
     });
   } catch (err) {
