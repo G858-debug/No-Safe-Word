@@ -6,20 +6,22 @@
  *   - Own VAE (loaded separately, not bundled in the checkpoint)
  *   - No negative prompt (Flux doesn't use them effectively)
  *   - euler/normal sampler, ~25 steps, low CFG (3.5-4.5)
- *   - Character consistency via reference images (not LoRAs)
+ *   - Character consistency via PuLID face injection (not LoRAs)
  *
  * Node architecture (base path):
  *   CheckpointLoaderSimple (UNET) → ModelSamplingFlux
  *   DualCLIPLoader → CLIPTextEncode(pos) + CLIPTextEncode(neg=empty)
  *   VAELoader
- *   [optional] Reference image(s) via LoadImage → FluxReferenceApply
+ *   [optional] PulidFluxInsightFaceLoader + PulidFluxEvaClipLoader + PulidFluxModelLoader
+ *              → LoadImage → ApplyPulidFlux (chained per reference)
  *   [optional] ControlNet (Flux2Fun Controlnet Union) → ControlNetApplyAdvanced
  *   EmptyLatentImage → KSampler → VAEDecode → SaveImage
  *
- * Custom-node names assumed (adjust to match the real base image):
+ * Custom nodes required (all installed in the base Docker image):
  *   - "DualCLIPLoader" (built-in to modern ComfyUI)
  *   - "ModelSamplingFlux" (built-in)
- *   - "FluxReferenceApply" (placeholder — swap to the real reference node)
+ *   - "PulidFluxInsightFaceLoader" / "PulidFluxEvaClipLoader" /
+ *     "PulidFluxModelLoader" / "ApplyPulidFlux"  — ComfyUI_PuLID_Flux_ll
  *   - "ControlNetApplyAdvanced" (built-in)
  */
 
@@ -151,12 +153,32 @@ export function buildFlux2Workflow(
   let positiveRef: [string, number] = ['200', 0];
   let negativeRef: [string, number] = ['201', 0];
 
-  // ── Reference image conditioning (character consistency) ──
-  // Up to 2 references (primary + secondary character portraits). Each
-  // reference is loaded as an image, then fed through FluxReferenceApply,
-  // which modifies the model in place. Chain multiple calls by feeding the
-  // previous apply's output model back in.
+  // ── PuLID face identity conditioning (character consistency) ──
+  // PuLID injects face identity from approved character portraits into the
+  // model without LoRAs. Three shared loader nodes are added once, then
+  // ApplyPulidFlux is chained per reference portrait (up to 2).
+  //
+  // Models on the network volume (mapped in extra_model_paths.yaml):
+  //   pulid/pulid_flux_v0.9.1.safetensors
+  //   clip_vision/EVA02_CLIP_L_336_psz14_s6B.pt
+  //   InsightFace buffalo_l — pre-downloaded at image build time
   if (options.references && options.references.length > 0) {
+    // Node 290: InsightFace loader (face detection)
+    workflow['290'] = {
+      class_type: 'PulidFluxInsightFaceLoader',
+      inputs: { provider: 'CUDA' },
+    };
+    // Node 291: EVA-02 CLIP vision encoder
+    workflow['291'] = {
+      class_type: 'PulidFluxEvaClipLoader',
+      inputs: { model: 'EVA02_CLIP_L_336_psz14_s6B.pt' },
+    };
+    // Node 292: PuLID model weights
+    workflow['292'] = {
+      class_type: 'PulidFluxModelLoader',
+      inputs: { pulid_file: 'pulid_flux_v0.9.1.safetensors' },
+    };
+
     const refs = options.references.slice(0, 2);
     for (let i = 0; i < refs.length; i++) {
       const ref = refs[i];
@@ -167,11 +189,16 @@ export function buildFlux2Workflow(
         inputs: { image: ref.name },
       };
       workflow[applyId] = {
-        class_type: 'FluxReferenceApply',
+        class_type: 'ApplyPulidFlux',
         inputs: {
           model: modelRef,
-          image: [loadId, 0],
-          strength: ref.strength ?? 1.0,
+          pulid: ['292', 0],
+          eva_clip: ['291', 0],
+          face_cond_image: [loadId, 0],
+          insightface: ['290', 0],
+          weight: ref.strength ?? 0.85,
+          start_at: 0.0,
+          end_at: 1.0,
         },
       };
       modelRef = [applyId, 0];
