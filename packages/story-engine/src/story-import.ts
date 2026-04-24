@@ -125,6 +125,29 @@ export async function importStory(
 
   const seriesId = series.id;
 
+  // From here on out, anything that throws leaves a zombie series row
+  // (blocking future imports with the same slug because the orphan still
+  // owns it). Wrap the rest of the import in try/catch — on failure, drop
+  // the series (CASCADE clears posts/characters/prompts) and rethrow.
+  try {
+    return await finishImport(
+      seriesId,
+      slug,
+      payload,
+      characterMap
+    );
+  } catch (err) {
+    await supabase.from("story_series").delete().eq("id", seriesId);
+    throw err;
+  }
+}
+
+async function finishImport(
+  seriesId: string,
+  slug: string,
+  payload: StoryImportPayload,
+  characterMap: Map<string, string>
+): Promise<ImportResult> {
   // 4. Link characters to series. Portrait state (approved_image_id, etc.)
   //    lives on the base `characters` row and is populated via the approval
   //    route — not set here at import time.
