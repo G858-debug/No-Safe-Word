@@ -125,14 +125,15 @@ export async function importStory(
 
   const seriesId = series.id;
 
-  // 4. Link characters to series
+  // 4. Link characters to series. Portrait state (approved_image_id, etc.)
+  //    lives on the base `characters` row and is populated via the approval
+  //    route — not set here at import time.
   const storyCharacterRows = payload.characters.map((char) => {
     return {
       series_id: seriesId,
       character_id: characterMap.get(char.name)!,
       role: char.role,
       prose_description: char.prose_description || null,
-      approved: false,
     };
   });
 
