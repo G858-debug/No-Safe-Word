@@ -5,9 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 
-// Narrow shape of the blurb-relevant fields returned by
-// GET /api/stories/[seriesId] (which uses select("*") on story_series).
 interface BlurbState {
   blurb_short_variants: string[] | null;
   blurb_short_selected: number | null;
@@ -17,7 +16,6 @@ interface BlurbState {
 
 interface Props {
   seriesId: string;
-  /** Called after a selection succeeds so the parent can re-evaluate tab gating. */
   onChange?: () => void;
 }
 
@@ -30,13 +28,18 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
   const [busyKind, setBusyKind] = useState<"short" | "long" | null>(null);
   const [regenerating, setRegenerating] = useState(false);
 
+  // Editing state — at most one variant being edited at a time
+  const [editingKey, setEditingKey] = useState<{
+    kind: "short" | "long";
+    index: number;
+  } | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
   const fetchState = useCallback(async () => {
     try {
       const res = await fetch(`/api/stories/${seriesId}`);
-      if (!res.ok) {
-        setError("Failed to load blurb state");
-        return;
-      }
+      if (!res.ok) { setError("Failed to load blurb state"); return; }
       const data = await res.json();
       setState(data.series as BlurbState);
     } catch {
@@ -46,28 +49,23 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
     }
   }, [seriesId]);
 
-  useEffect(() => {
-    fetchState();
-  }, [fetchState]);
+  useEffect(() => { fetchState(); }, [fetchState]);
 
   async function regenerateAll() {
     const ok = window.confirm(
       "Regenerate will overwrite all 6 current blurb variants (3 short, 3 long) and clear your selections. Continue?"
     );
     if (!ok) return;
-
     setRegenerating(true);
     setError(null);
+    setEditingKey(null);
     try {
       const res = await fetch(`/api/stories/${seriesId}/regenerate-blurbs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Blurb regeneration failed");
-        return;
-      }
+      if (!res.ok) { setError(data.error || "Blurb regeneration failed"); return; }
       await fetchState();
       onChange?.();
     } catch (err) {
@@ -87,16 +85,51 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
         body: JSON.stringify({ kind, selectedIndex }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Selection failed");
-        return;
-      }
+      if (!res.ok) { setError(data.error || "Selection failed"); return; }
       await fetchState();
       onChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Selection failed");
     } finally {
       setBusyKind(null);
+    }
+  }
+
+  function startEdit(kind: "short" | "long", index: number, currentText: string) {
+    setEditingKey({ kind, index });
+    setEditDraft(currentText);
+    setError(null);
+  }
+
+  function cancelEdit() {
+    setEditingKey(null);
+    setEditDraft("");
+  }
+
+  async function saveEdit() {
+    if (!editingKey) return;
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/update-blurb`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: editingKey.kind,
+          index: editingKey.index,
+          text: editDraft,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Failed to save blurb"); return; }
+      setEditingKey(null);
+      setEditDraft("");
+      await fetchState();
+      onChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save blurb");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -126,27 +159,17 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
           </div>
         )}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Blurbs</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">Blurbs</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              No blurb variants exist for this story yet. You can either
-              re-import with{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                marketing.blurb_short_variants
-              </code>{" "}
+              No blurb variants exist for this story yet. You can either re-import with{" "}
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">marketing.blurb_short_variants</code>{" "}
               and{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                marketing.blurb_long_variants
-              </code>{" "}
-              populated in the Stage 7 payload, or generate a full set with
-              Claude.
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">marketing.blurb_long_variants</code>{" "}
+              populated in the Stage 7 payload, or generate a full set with Claude.
             </p>
             <p className="text-xs text-muted-foreground">
-              Each set is 3 short blurbs (1–2 sentences, for story cards and OG
-              previews) plus 3 long blurbs (150–250 words, for the website
-              detail page).
+              Each set is 3 short blurbs (1–2 sentences, for story cards and OG previews) plus 3 long blurbs (150–250 words, for the website detail page).
             </p>
             <div>
               <Button onClick={regenerateAll} disabled={regenerating}>
@@ -158,6 +181,8 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
       </div>
     );
   }
+
+  const busy = busyKind !== null || savingEdit;
 
   return (
     <div className="space-y-6">
@@ -172,14 +197,13 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
           <div>
             <p className="text-sm font-medium">Regenerate all blurbs with Claude</p>
             <p className="text-xs text-muted-foreground">
-              Overwrites both variant sets and clears selections. You&apos;ll
-              reselect from the new variants.
+              Overwrites both variant sets and clears selections.
             </p>
           </div>
           <Button
             variant="outline"
             onClick={regenerateAll}
-            disabled={regenerating || busyKind !== null}
+            disabled={regenerating || busy}
           >
             {regenerating ? "Generating..." : "Regenerate all blurbs"}
           </Button>
@@ -192,19 +216,33 @@ export default function BlurbSelection({ seriesId, onChange }: Props) {
         helper="Used on story cards, OG link previews, and email subject lines."
         variants={shortVariants}
         selectedIndex={state.blurb_short_selected}
-        disabled={busyKind !== null}
+        disabled={busy}
         onSelect={(idx) => select("short", idx)}
+        onStartEdit={(idx, text) => startEdit("short", idx, text)}
+        editingIndex={editingKey?.kind === "short" ? editingKey.index : null}
+        editDraft={editDraft}
+        onChangeDraft={setEditDraft}
+        onSaveEdit={saveEdit}
+        onCancelEdit={cancelEdit}
+        savingEdit={savingEdit}
         prose={false}
       />
 
       <BlurbSection
         kind="long"
         title="Long blurb"
-        helper="Used on the website story detail page. 150–250 words. Will not re-composite the cover."
+        helper="Used on the website story detail page. 150–250 words."
         variants={longVariants}
         selectedIndex={state.blurb_long_selected}
-        disabled={busyKind !== null}
+        disabled={busy}
         onSelect={(idx) => select("long", idx)}
+        onStartEdit={(idx, text) => startEdit("long", idx, text)}
+        editingIndex={editingKey?.kind === "long" ? editingKey.index : null}
+        editDraft={editDraft}
+        onChangeDraft={setEditDraft}
+        onSaveEdit={saveEdit}
+        onCancelEdit={cancelEdit}
+        savingEdit={savingEdit}
         prose
       />
     </div>
@@ -219,6 +257,13 @@ interface BlurbSectionProps {
   selectedIndex: number | null;
   disabled: boolean;
   onSelect: (index: number) => void;
+  onStartEdit: (index: number, text: string) => void;
+  editingIndex: number | null;
+  editDraft: string;
+  onChangeDraft: (text: string) => void;
+  onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  savingEdit: boolean;
   prose: boolean;
 }
 
@@ -230,18 +275,22 @@ function BlurbSection({
   selectedIndex,
   disabled,
   onSelect,
+  onStartEdit,
+  editingIndex,
+  editDraft,
+  onChangeDraft,
+  onSaveEdit,
+  onCancelEdit,
+  savingEdit,
   prose,
 }: BlurbSectionProps) {
   if (!variants || variants.length !== VARIANT_COUNT) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{title}</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            No {kind} blurb variants were imported. Re-import with 3 entries to
-            enable selection.
+            No {kind} blurb variants were imported.
           </p>
         </CardContent>
       </Card>
@@ -265,27 +314,85 @@ function BlurbSection({
         <div className="space-y-3">
           {variants.map((text, i) => {
             const isSelected = selectedIndex === i;
+            const isEditing = editingIndex === i;
+
+            if (isEditing) {
+              return (
+                <div
+                  key={i}
+                  className="rounded-md border border-blue-500 bg-blue-500/5 p-4 space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Variant {i + 1} — editing
+                    </span>
+                    {isSelected && (
+                      <span className="text-xs font-medium text-blue-400">Selected</span>
+                    )}
+                  </div>
+                  <Textarea
+                    value={editDraft}
+                    onChange={(e) => onChangeDraft(e.target.value)}
+                    className={`text-sm ${prose ? "min-h-[180px]" : "min-h-[80px]"}`}
+                    disabled={savingEdit}
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={onSaveEdit}
+                      disabled={savingEdit || !editDraft.trim()}
+                    >
+                      {savingEdit ? "Saving…" : "Save"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={onCancelEdit}
+                      disabled={savingEdit}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              );
+            }
+
             return (
-              <button
+              <div
                 key={i}
-                type="button"
-                onClick={() => onSelect(i)}
-                disabled={disabled}
-                className={`block w-full rounded-md border p-4 text-left transition ${
+                className={`group rounded-md border p-4 transition ${
                   isSelected
                     ? "border-blue-500 bg-blue-500/5 ring-2 ring-blue-500/30"
-                    : "border-border bg-muted/20 hover:border-muted-foreground/40"
-                } ${disabled ? "cursor-default opacity-70" : "cursor-pointer"}`}
+                    : "border-border bg-muted/20"
+                }`}
               >
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-muted-foreground">
                     Variant {i + 1}
                   </span>
-                  {isSelected ? (
-                    <span className="text-xs font-medium text-blue-400">Selected</span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Click to select</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {isSelected ? (
+                      <span className="text-xs font-medium text-blue-400">Selected</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => !disabled && onSelect(i)}
+                        disabled={disabled}
+                        className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                      >
+                        Select
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => !disabled && onStartEdit(i, text)}
+                      disabled={disabled}
+                      className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      Edit
+                    </button>
+                  </div>
                 </div>
                 <p
                   className={
@@ -296,14 +403,13 @@ function BlurbSection({
                 >
                   {text}
                 </p>
-              </button>
+              </div>
             );
           })}
         </div>
         {selectedIndex !== null && kind === "short" && (
           <p className="mt-3 text-xs text-muted-foreground">
-            Selecting a different short blurb will trigger a cover re-composite
-            if the cover is already complete.
+            Selecting a different short blurb will trigger a cover re-composite if the cover is already complete.
           </p>
         )}
       </CardContent>
@@ -311,6 +417,4 @@ function BlurbSection({
   );
 }
 
-// Also exported as a named member so callers can either default-import
-// or named-import, consistent with how CoverApproval is consumed.
 export { BlurbSelection };
