@@ -71,12 +71,10 @@ export async function POST(
   }
 
   // Server-side copy inside the story-covers bucket. Source path is
-  // the variant's storage key; destination is base.png for this slug.
-  // The status endpoint wrote variants at:
-  //   story-covers/{slug}/variants/variant-{N}.png
-  // so we copy that to:
-  //   story-covers/{slug}/base.png
-  const sourcePath = `${series.slug}/variants/variant-${idx}.png`;
+  // derived from the variant URL so the extension matches what was
+  // actually uploaded (.png for Flux 2 Dev, .jpeg for HunyuanImage).
+  const variantExt = /\.(jpeg|jpg|png|webp)(\?.*)?$/i.exec(variantUrl)?.[1] ?? "png";
+  const sourcePath = `${series.slug}/variants/variant-${idx}.${variantExt}`;
   const destPath = `${series.slug}/base.png`;
 
   const { error: copyErr } = await supabase.storage
