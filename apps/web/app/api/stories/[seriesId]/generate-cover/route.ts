@@ -112,15 +112,33 @@ export async function POST(
 
   // 2. Guard in-flight states
   if (series.cover_status === "generating" || series.cover_status === "compositing") {
-    return NextResponse.json(
-      {
-        error:
-          series.cover_status === "generating"
-            ? "Cover is currently generating. Wait for variants to complete before regenerating."
-            : "Cover is currently compositing. Wait for compositing to finish before regenerating.",
-      },
-      { status: 400 }
-    );
+    if (series.cover_status === "compositing") {
+      return NextResponse.json(
+        { error: "Cover is currently compositing. Wait for compositing to finish before regenerating." },
+        { status: 400 }
+      );
+    }
+
+    // For 'generating': allow retrying if there are no pending RunPod jobs
+    // for this series. Hunyuan never creates generation_jobs rows, so a
+    // stuck Hunyuan request leaves cover_status='generating' forever.
+    // Flux jobs that time out have the same problem once their jobs expire.
+    const { count: pendingJobCount } = await supabase
+      .from("generation_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("series_id", seriesId)
+      .eq("job_type", "cover_variant")
+      .in("status", ["pending"]);
+
+    if ((pendingJobCount ?? 0) > 0) {
+      return NextResponse.json(
+        { error: "Cover is currently generating. Wait for variants to complete before regenerating." },
+        { status: 400 }
+      );
+    }
+
+    // No pending jobs — state is stale. Auto-reset and fall through.
+    console.log(`[generate-cover] auto-recovering stuck 'generating' state for series ${seriesId}`);
   }
 
   // 3. Resolve effective prompt
