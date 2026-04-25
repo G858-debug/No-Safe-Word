@@ -178,10 +178,10 @@ export async function handleCoverVariantCompletion(args: {
   });
 }
 
-async function markJobFailed(jobId: string, _error: string): Promise<void> {
+async function markJobFailed(jobId: string, error: string): Promise<void> {
   await supabase
     .from("generation_jobs")
-    .update({ status: "failed", completed_at: new Date().toISOString() })
+    .update({ status: "failed", completed_at: new Date().toISOString(), error })
     .eq("job_id", jobId);
 }
 
