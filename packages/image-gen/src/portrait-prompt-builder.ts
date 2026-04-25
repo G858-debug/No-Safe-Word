@@ -123,9 +123,16 @@ export function buildSceneCharacterBlock(
   if (description.eyeColor) appearance.push(`${description.eyeColor.trim()} eyes`);
   if (appearance.length > 0) parts.push(capitalize(appearance.join(", ")) + ".");
 
-  // Face / distinguishing features (no body shape)
+  // Face / distinguishing features
   if (description.distinguishingFeatures) {
     parts.push(capitalize(description.distinguishingFeatures.trim()) + ".");
+  }
+
+  // Body shape — included for character consistency. Portrait framing text
+  // (which was in portrait_prompt_locked and caused clothing overrides) is
+  // intentionally absent; the scene prompt controls clothing and composition.
+  if (description.bodyType) {
+    parts.push(capitalize(description.bodyType.trim()) + ".");
   }
 
   return parts.join(" ");
