@@ -3,28 +3,22 @@
  *
  * Architecture (confirmed against the live RunPod volume):
  *   - UNETLoader — flux2-dev-fp8_scaled.safetensors (diffusion_models/)
- *   - DualCLIPLoader — t5xxl_fp8_e4m3fn_scaled.safetensors + clip_l.safetensors, type="flux"
+ *   - CLIPLoader — mistral_3_small_flux2_fp8.safetensors, type="flux2"
  *   - VAELoader — flux2-vae.safetensors
  *   - ModelSamplingFlux — configures Flux sampling schedule (max_shift/base_shift)
  *   - PuLID face injection (ComfyUI_PuLID_Flux_ll) — compatible with KSampler path
  *   - KSampler — cfg=1.0, scheduler=simple, sampler=euler
  *
- * PuLID notes:
- *   ApplyPulidFlux works with the KSampler path. SamplerCustomAdvanced causes
- *   'NoneType' object is not callable at runtime — do not use it here.
- *
  * Models on the network volume (extra_model_paths.yaml):
  *   diffusion_models/flux2-dev-fp8_scaled.safetensors
- *   clip/t5xxl_fp8_e4m3fn_scaled.safetensors
- *   clip/clip_l.safetensors
+ *   clip/mistral_3_small_flux2_fp8.safetensors
  *   vae/flux2-vae.safetensors
  *   pulid/pulid_flux_v0.9.1.safetensors
  *   clip_vision/EVA02_CLIP_L_336_psz14_s6B.pt
  */
 
 const DEFAULT_UNET = 'flux2-dev-fp8_scaled.safetensors';
-const DEFAULT_T5 = 't5xxl_fp8_e4m3fn_scaled.safetensors';
-const DEFAULT_CLIP_L = 'clip_l.safetensors';
+const DEFAULT_CLIP = 'mistral_3_small_flux2_fp8.safetensors';
 const DEFAULT_VAE = 'flux2-vae.safetensors';
 const DEFAULT_CFG = 1.0;
 const DEFAULT_STEPS = 28;
@@ -71,8 +65,7 @@ export interface Flux2WorkflowOptions {
   filenamePrefix: string;
   /** Model filename overrides. */
   unetName?: string;
-  t5Name?: string;
-  clipLName?: string;
+  clipName?: string;
   vaeName?: string;
 }
 
@@ -82,8 +75,7 @@ export function buildFlux2Workflow(
   const workflow: Record<string, any> = {};
 
   const unetName   = options.unetName   || DEFAULT_UNET;
-  const t5Name     = options.t5Name     || DEFAULT_T5;
-  const clipLName  = options.clipLName  || DEFAULT_CLIP_L;
+  const clipName   = options.clipName   || DEFAULT_CLIP;
   const vaeName    = options.vaeName    || DEFAULT_VAE;
 
   // ── Model loaders ──
@@ -93,12 +85,8 @@ export function buildFlux2Workflow(
   };
 
   workflow['101'] = {
-    class_type: 'DualCLIPLoader',
-    inputs: {
-      clip_name1: t5Name,
-      clip_name2: clipLName,
-      type: 'flux',
-    },
+    class_type: 'CLIPLoader',
+    inputs: { clip_name: clipName, type: 'flux2' },
   };
 
   workflow['102'] = {
@@ -163,6 +151,13 @@ export function buildFlux2Workflow(
       };
       modelRef = [applyId, 0];
     }
+    // FixPulidFluxPatch finalises PuLID's ComfyUI 5.x forward-pass hooks.
+    // Without it, ApplyPulidFlux returns a broken model in ComfyUI 5.8.x.
+    workflow['310'] = {
+      class_type: 'FixPulidFluxPatch',
+      inputs: { model: modelRef },
+    };
+    modelRef = ['310', 0];
   }
 
   // ── Text encoding ──

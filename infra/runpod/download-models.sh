@@ -298,6 +298,59 @@ download_to_volume "${BREASTSIZE_URL}" "Breast Slider - SDXL_alpha1.0_rank4_noxa
 
 # Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).
 
+# ---- PuLID ComfyUI 5.x compatibility patch ----
+# Patches are applied every startup (idempotent — re.sub with no-match is a no-op).
+# Fixes two regressions introduced in ComfyUI 5.8.x that cause
+#   'NoneType' object is not callable  (ApplyPulidFlux returns None)
+#   KeyError: 'timesteps'              (hook accesses key that moved)
+# in the KSampler when PuLID is active.
+PULID_DIR="${COMFY_DIR}/custom_nodes/ComfyUI_PuLID_Flux_ll"
+if [ -d "${PULID_DIR}" ]; then
+    python3 - <<'PYEOF'
+import re, pathlib, sys
+
+PULID_DIR = pathlib.Path("/comfyui/custom_nodes/ComfyUI_PuLID_Flux_ll")
+patched_files = []
+
+for pyfile in sorted(PULID_DIR.rglob("*.py")):
+    txt = pyfile.read_text(errors="replace")
+    orig = txt
+
+    # Patch 1: forward_orig — accept **kwargs for timestep_zero_index et al.
+    txt = re.sub(
+        r"(    attn_mask: Tensor = None,\n)(\) -> Tensor:)",
+        r"\1    **kwargs,\n\2",
+        txt,
+    )
+
+    # Patch 2: transformer_options — use .get() so missing key returns {} not KeyError.
+    txt = re.sub(
+        r'transformer_options = extra_options\["transformer_options"\]',
+        'transformer_options = extra_options.get("transformer_options") or (input_args or {}).get("transformer_options", {})',
+        txt,
+    )
+
+    # Patch 3: timesteps — replace direct dict key access with safe .get() fallback.
+    # In ComfyUI 5.x the key moved; .get() returns None instead of raising KeyError.
+    for pattern in [
+        (r'input_args\["timesteps"\]',   'input_args.get("timesteps")'),
+        (r'extra_options\["timesteps"\]', 'extra_options.get("timesteps")'),
+    ]:
+        txt = re.sub(pattern[0], pattern[1], txt)
+
+    if txt != orig:
+        pyfile.write_text(txt)
+        patched_files.append(str(pyfile.relative_to(PULID_DIR)))
+
+if patched_files:
+    print(f"[NSW] PuLID patched: {', '.join(patched_files)}")
+else:
+    print("[NSW] PuLID: no patterns matched (already patched or source changed)")
+PYEOF
+else
+    echo "[NSW] PuLID custom node not found at ${PULID_DIR} — skipping patch"
+fi
+
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then
     echo "[NSW] WARNING: ${FAILED} model(s) failed to download."
