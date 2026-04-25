@@ -1595,15 +1595,27 @@ function ImageCard({
               </Button>
             )}
             {isApproved && (
-              <Button
-                variant="outline"
-                size={isExpanded ? "default" : "sm"}
-                className={`text-green-400 border-green-500/30 ${isExpanded ? "text-sm" : "h-7 text-xs"}`}
-                disabled
-              >
-                <Check className="mr-1.5 h-4 w-4" />
-                Approved
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size={isExpanded ? "default" : "sm"}
+                  className={`text-green-400 border-green-500/30 ${isExpanded ? "text-sm" : "h-7 text-xs"}`}
+                  disabled
+                >
+                  <Check className="mr-1.5 h-4 w-4" />
+                  Approved
+                </Button>
+                <Button
+                  variant="outline"
+                  size={isExpanded ? "default" : "sm"}
+                  className={isExpanded ? "text-sm" : "h-7 text-xs"}
+                  onClick={() => onArtDirector(ip.id)}
+                  disabled={batchGenerating}
+                >
+                  <RefreshCw className="mr-1.5 h-4 w-4" />
+                  Regenerate
+                </Button>
+              </>
             )}
             <Link
               href={`/dashboard/stories/${seriesId}/debug/${ip.id}`}
