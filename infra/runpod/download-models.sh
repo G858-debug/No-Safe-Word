@@ -330,17 +330,22 @@ for pyfile in sorted(PULID_DIR.rglob("*.py")):
         txt,
     )
 
-    # Patch 3: timesteps — replace direct dict key access with safe .get() fallback.
-    # In ComfyUI 5.x the key moved; .get() returns None instead of raising KeyError.
-    for pattern in [
-        (r'input_args\["timesteps"\]',   'input_args.get("timesteps")'),
-        (r'extra_options\["timesteps"\]', 'extra_options.get("timesteps")'),
-    ]:
-        txt = re.sub(pattern[0], pattern[1], txt)
+    # Patch 3: timesteps — broad replacement of any subscript access to 'timesteps'
+    # or 'timestep' keys. KeyError: 'timesteps' means some dict['timesteps'] fails.
+    txt = re.sub(r'\[(["\'])timesteps\1\]', r'.get(\1timesteps\1)', txt)
+    txt = re.sub(r'\[(["\'])timestep\1\]',  r'.get(\1timestep\1)',  txt)
 
     if txt != orig:
         pyfile.write_text(txt)
         patched_files.append(str(pyfile.relative_to(PULID_DIR)))
+
+# Diagnostic: log every line in PuLID source that references 'timestep'
+# so we can confirm the patches landed on the right lines.
+print("[NSW] PuLID timestep lines (pre-patch snapshot on first run):")
+for pyfile in sorted(PULID_DIR.rglob("*.py")):
+    for lineno, line in enumerate(pyfile.read_text(errors="replace").splitlines(), 1):
+        if "timestep" in line.lower():
+            print(f"  {pyfile.name}:{lineno}: {line.rstrip()}")
 
 if patched_files:
     print(f"[NSW] PuLID patched: {', '.join(patched_files)}")
