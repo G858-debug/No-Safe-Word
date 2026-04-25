@@ -137,7 +137,29 @@ export async function POST(
       );
     }
 
-    // No pending jobs — state is stale. Auto-reset and fall through.
+    // No pending jobs — state is stale. Recover:
+    // If any variants already exist and this is a full regeneration request,
+    // restore to variants_ready so the user can retry only the missing slots
+    // instead of discarding existing results.
+    const existingVariants = (series.cover_variants as (string | null)[] | null) ?? [];
+    const hasAnyVariant = existingVariants.some(Boolean);
+
+    if (hasAnyVariant && !isPartialRetry) {
+      await supabase
+        .from("story_series")
+        .update({ cover_status: "variants_ready", cover_error: null })
+        .eq("id", seriesId);
+      return NextResponse.json(
+        {
+          error:
+            "Previous generation was interrupted. Existing variants have been restored — hover over a variant to regenerate individual slots, or click Generate 4 Variants to start fresh.",
+          coverStatus: "variants_ready",
+        },
+        { status: 409 }
+      );
+    }
+
+    // No variants at all (or explicit partial retry) — fall through.
     console.log(`[generate-cover] auto-recovering stuck 'generating' state for series ${seriesId}`);
   }
 

@@ -160,7 +160,13 @@ export default function CoverApproval({ seriesId }: Props) {
       });
       const data = (await res.json()) as GenerateCoverResponse;
       if (!res.ok) {
-        setError(data.error || "Generation failed");
+        // 409 means the server recovered a stuck state — refresh to show what's there.
+        if (res.status === 409) {
+          await fetchCover();
+          setError(data.error || "Generation recovered");
+        } else {
+          setError(data.error || "Generation failed");
+        }
         return;
       }
       setOutstandingJobs(data.jobIds ?? []);
