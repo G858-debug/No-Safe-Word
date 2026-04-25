@@ -54,7 +54,30 @@ def patch_file(path: Path, label: str) -> None:
     )
     fallback_added = patched != after_kwargs
 
-    if not kwargs_added and not fallback_added:
+    # Patch 3a: DitDoubleBlockReplace — sigma is read BEFORE original_block executes.
+    # If pulid_enter() was not called (e.g. ComfyUI 5.8.x hook ordering), "timesteps"
+    # is absent from pulid_temp_attrs and raises KeyError. Guard: run original_block
+    # unmodified and return, skipping PuLID conditioning for this step.
+    after_p2 = patched
+    patched = re.sub(
+        r'([ \t]+)(sigma = pulid_temp_attrs\[["\'](timesteps)["\']\]\[0\]\.detach\(\)\.cpu\(\)\.item\(\)\n)([ \t]+out = extra_options\["original_block"\]\(input_args\))',
+        r'\1if "timesteps" not in pulid_temp_attrs:\n\1    return extra_options["original_block"](input_args)\n\1\2\4',
+        patched,
+    )
+    guard_double_added = patched != after_p2
+
+    # Patch 3b: DitSingleBlockReplace — sigma is read AFTER original_block executes.
+    # Same KeyError risk, plus pulid_temp_attrs['double_blocks_txt'] would also fail.
+    # Guard: return the already-computed out unmodified, skipping PuLID conditioning.
+    after_p3a = patched
+    patched = re.sub(
+        r'(\n\n)([ \t]+)(sigma = pulid_temp_attrs\[["\'](timesteps)["\']\]\[0\]\.detach\(\)\.cpu\(\)\.item\(\)\n)([ \t]+img = out\[\'img\'\])',
+        r'\1\2if "timesteps" not in pulid_temp_attrs:\n\2    return out\n\2\3\5',
+        patched,
+    )
+    guard_single_added = patched != after_p3a
+
+    if not kwargs_added and not fallback_added and not guard_double_added and not guard_single_added:
         print(f"FAIL [{label}]: no patterns matched")
         sys.exit(1)
 
@@ -66,7 +89,7 @@ def patch_file(path: Path, label: str) -> None:
         sys.exit(1)
 
     fallback_count = verify.count("input_args.get(\"transformer_options\"")
-    print(f"[NSW] {label}: kwargs_added={kwargs_added} fallback_count={fallback_count}")
+    print(f"[NSW] {label}: kwargs_added={kwargs_added} fallback_count={fallback_count} guard_double={guard_double_added} guard_single={guard_single_added}")
 
 
 if len(sys.argv) < 2:
