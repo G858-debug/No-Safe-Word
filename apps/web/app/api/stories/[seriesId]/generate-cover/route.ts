@@ -2,54 +2,80 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
   generateFlux2Image,
+  generateHunyuanImage,
   imageUrlToBase64,
+  buildCharacterPortraitPrompt,
+  type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
+import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
 
-// Node.js runtime. imageUrlToBase64 uses Buffer, and the Flux 2 Dev
-// client imports native modules transitively. No behavioural change —
-// this matches the implicit runtime the route was already running on.
 export const runtime = "nodejs";
 
 // ============================================================
 // POST /api/stories/[seriesId]/generate-cover
 // ============================================================
-// Cover-image generation. Model-locked to Flux 2 Dev regardless of
-// story_series.image_model — this bypasses the model-aware dispatcher
-// in /api/stories/[seriesId]/generate-image on purpose (see
-// CLAUDE.md's "Hard rule — cover generation is model-locked"). Do not
-// route covers through the dispatcher.
+// Generates 4 cover variants. Model selection mirrors the story's
+// image_model setting:
+//   flux2_dev  → 4 async RunPod jobs (ComfyUI + PuLID reference images)
+//   hunyuan3   → 4 synchronous Replicate calls (portrait_prompt_locked injection)
 //
-// Default behavior: fires 4 parallel Flux 2 Dev jobs producing
-// 4 variants at 1024×1536. Resets any previous cover state.
-//
-// Partial retry: if the body provides `retryVariants: [N, ...]`, only
-// those indices are regenerated. Other slots in cover_variants are
-// preserved. This is how the UI's per-slot "Retry missing variants"
-// affordance works.
-//
-// Reference images: we match on role name (protagonist, love_interest)
-// rather than positional/order-based selection, because covers are
-// always compositions of those two roles specifically — a `supporting`
-// character approved second should not silently become the cover
-// reference. See docs/data-integrity-debt.md for the related structural
-// hardening note.
+// Partial retry: body.retryVariants: number[] regenerates only those slots.
 // ============================================================
 
 const COVER_WIDTH = 1024;
 const COVER_HEIGHT = 1536;
 const VARIANT_COUNT = 4;
+const COVER_BUCKET = "story-covers";
 
 type GenerateCoverBody = {
   prompt?: string;
   retryVariants?: number[];
 };
 
-// The cover prompt template lives as the placeholder string in the
-// Cover tab's textarea (CoverApproval.tsx). Kept there, not here —
-// Next.js route files cannot export non-route symbols, so there's no
-// clean way to share a constant between the server and UI layers
-// without a dedicated constants module, which would be overkill for
-// one string.
+// ── Shared character type (both pipelines use the same DB query) ──
+type CharWithBase = {
+  id: string;
+  character_id: string;
+  role: string | null;
+  characters:
+    | {
+        approved_image_id: string | null;
+        portrait_prompt_locked: string | null;
+        description: unknown;
+      }
+    | {
+        approved_image_id: string | null;
+        portrait_prompt_locked: string | null;
+        description: unknown;
+      }[]
+    | null;
+};
+
+function baseChar(c: CharWithBase) {
+  return Array.isArray(c.characters) ? c.characters[0] : c.characters;
+}
+function approvedImageId(c: CharWithBase) {
+  return baseChar(c)?.approved_image_id ?? null;
+}
+function portraitPromptLocked(c: CharWithBase): string | null {
+  return baseChar(c)?.portrait_prompt_locked ?? null;
+}
+function charDescription(c: CharWithBase): PortraitCharacterDescription {
+  const d = baseChar(c)?.description;
+  return (d && typeof d === "object" ? d : {}) as PortraitCharacterDescription;
+}
+
+// Resolve the character's text prompt for Hunyuan injection.
+// Prefer portrait_prompt_locked (exact text that produced the approved
+// portrait). Fall back to buildCharacterPortraitPrompt if not set yet
+// (e.g. the character was approved via Flux before the locked prompt
+// was persisted).
+function resolveCharacterBlock(c: CharWithBase): string {
+  return (
+    portraitPromptLocked(c) ||
+    buildCharacterPortraitPrompt(charDescription(c))
+  );
+}
 
 export async function POST(
   request: NextRequest,
@@ -61,7 +87,7 @@ export async function POST(
   try {
     body = (await request.json()) as GenerateCoverBody;
   } catch {
-    // Empty body is allowed (means: full regenerate, use persisted prompt)
+    // Empty body → full regenerate, use persisted prompt
   }
 
   const retryVariants = Array.isArray(body.retryVariants)
@@ -71,11 +97,11 @@ export async function POST(
     : undefined;
   const isPartialRetry = retryVariants !== undefined && retryVariants.length > 0;
 
-  // 1. Load series
+  // 1. Load series (include image_model for pipeline branching)
   const { data: series, error: seriesErr } = await supabase
     .from("story_series")
     .select(
-      "id, slug, cover_prompt, cover_status, cover_variants, cover_base_url, cover_selected_variant, cover_sizes"
+      "id, slug, cover_prompt, cover_status, cover_variants, cover_base_url, cover_selected_variant, cover_sizes, image_model"
     )
     .eq("id", seriesId)
     .single();
@@ -84,13 +110,13 @@ export async function POST(
     return NextResponse.json({ error: "Series not found" }, { status: 404 });
   }
 
-  // 2. Precondition: cover_status must not be in an in-flight state
+  // 2. Guard in-flight states
   if (series.cover_status === "generating" || series.cover_status === "compositing") {
     return NextResponse.json(
       {
         error:
           series.cover_status === "generating"
-            ? "Cover is currently generating. Wait for variants to complete or cancel the job before regenerating."
+            ? "Cover is currently generating. Wait for variants to complete before regenerating."
             : "Cover is currently compositing. Wait for compositing to finish before regenerating.",
       },
       { status: 400 }
@@ -100,7 +126,7 @@ export async function POST(
   // 3. Resolve effective prompt
   if (body.prompt !== undefined && body.prompt.trim().length === 0) {
     return NextResponse.json(
-      { error: "Prompt override is empty. Omit it to use the persisted cover_prompt, or provide a non-empty string." },
+      { error: "Prompt override is empty. Omit it to use the persisted cover_prompt." },
       { status: 400 }
     );
   }
@@ -116,8 +142,7 @@ export async function POST(
     );
   }
 
-  // 4. Persist the prompt override (full regenerate only — partial retries
-  //    reuse the already-persisted prompt as-is)
+  // 4. Persist prompt override on full regenerate
   if (body.prompt && !isPartialRetry) {
     await supabase
       .from("story_series")
@@ -125,17 +150,11 @@ export async function POST(
       .eq("id", seriesId);
   }
 
-  // 5. Resolve references by canonical role name
-  //
-  //    Role matching rationale: approved characters in a series can include
-  //    supporting and antagonist roles; order-based selection ("first two
-  //    approved") would silently pick a supporting character as the cover
-  //    reference. Covers are always compositions of the protagonist +
-  //    (optionally) the love interest, so we match those exact role strings.
+  // 5. Resolve protagonist + love_interest with portraits
   const { data: seriesChars, error: charsErr } = await supabase
     .from("story_characters")
     .select(
-      "id, character_id, role, characters:character_id ( approved_image_id )"
+      "id, character_id, role, characters:character_id ( approved_image_id, portrait_prompt_locked, description )"
     )
     .eq("series_id", seriesId);
 
@@ -146,49 +165,27 @@ export async function POST(
     );
   }
 
-  type RowWithBase = {
-    id: string;
-    character_id: string;
-    role: string | null;
-    characters:
-      | { approved_image_id: string | null }
-      | { approved_image_id: string | null }[]
-      | null;
-  };
-  const baseImageId = (c: RowWithBase): string | null => {
-    const b = Array.isArray(c.characters) ? c.characters[0] : c.characters;
-    return b?.approved_image_id ?? null;
-  };
-
-  const approvedChars = ((seriesChars ?? []) as unknown as RowWithBase[]).filter(
-    (c) => baseImageId(c) !== null
+  const approvedChars = ((seriesChars ?? []) as unknown as CharWithBase[]).filter(
+    (c) => approvedImageId(c) !== null
   );
-
   const protagonists = approvedChars.filter((c) => c.role === "protagonist");
   const loveInterests = approvedChars.filter((c) => c.role === "love_interest");
 
   if (protagonists.length === 0) {
     return NextResponse.json(
-      {
-        error:
-          "Cover generation requires an approved protagonist portrait. Complete character approval first.",
-      },
+      { error: "Cover generation requires an approved protagonist portrait. Complete character approval first." },
       { status: 400 }
     );
   }
   if (protagonists.length >= 2) {
     return NextResponse.json(
-      {
-        error: `Series has ${protagonists.length} approved protagonists. Cover generation requires exactly one. Check the import data or the characters tab.`,
-      },
+      { error: `Series has ${protagonists.length} approved protagonists. Cover generation requires exactly one.` },
       { status: 400 }
     );
   }
   if (loveInterests.length >= 2) {
     return NextResponse.json(
-      {
-        error: `Series has ${loveInterests.length} approved love interests. Cover generation supports at most one. Check the import data.`,
-      },
+      { error: `Series has ${loveInterests.length} approved love interests. Cover generation supports at most one.` },
       { status: 400 }
     );
   }
@@ -196,22 +193,66 @@ export async function POST(
   const protagonist = protagonists[0];
   const loveInterest = loveInterests[0];
 
-  const protagonistImageId = baseImageId(protagonist);
-  const loveInterestImageId = loveInterest ? baseImageId(loveInterest) : null;
+  // 6. Determine variant indices
+  const variantIndices: number[] = isPartialRetry
+    ? retryVariants!.slice().sort((a, b) => a - b)
+    : Array.from({ length: VARIANT_COUNT }, (_, i) => i);
 
-  // 6. Resolve portrait URLs
-  const portraitIds = [protagonistImageId, loveInterestImageId].filter(
-    (id): id is string => Boolean(id)
-  );
-  if (portraitIds.length === 0 || !protagonistImageId) {
+  // 7. Reset cover state
+  let newCoverVariants: (string | null)[];
+  if (isPartialRetry) {
+    const existing = (series.cover_variants as (string | null)[] | null) ?? Array(VARIANT_COUNT).fill(null);
+    newCoverVariants = Array.from({ length: VARIANT_COUNT }, (_, i) =>
+      variantIndices.includes(i) ? null : existing[i] ?? null
+    );
+  } else {
+    newCoverVariants = Array(VARIANT_COUNT).fill(null);
+  }
+
+  const resetPayload: Record<string, unknown> = {
+    cover_variants: newCoverVariants,
+    cover_status: "generating",
+    cover_error: null,
+  };
+  if (!isPartialRetry) {
+    resetPayload.cover_base_url = null;
+    resetPayload.cover_selected_variant = null;
+    resetPayload.cover_sizes = null;
+  }
+
+  const { error: updErr } = await supabase
+    .from("story_series")
+    .update(resetPayload)
+    .eq("id", seriesId);
+
+  if (updErr) {
     return NextResponse.json(
-      {
-        error:
-          "Cover generation requires an approved protagonist portrait. Complete character approval first.",
-      },
-      { status: 400 }
+      { error: `Failed to reset cover state: ${updErr.message}` },
+      { status: 500 }
     );
   }
+
+  // 8. Branch on image model
+  const imageModel = (series.image_model as string | null) ?? "flux2_dev";
+
+  if (imageModel === "hunyuan3") {
+    return generateHunyuanCover({
+      seriesId,
+      slug: series.slug as string,
+      effectivePrompt,
+      protagonist,
+      loveInterest,
+      variantIndices,
+      existingVariants: newCoverVariants,
+    });
+  }
+
+  // ── Flux 2 Dev path (async RunPod) ──────────────────────────────
+
+  // Resolve portrait URLs for reference images
+  const portraitIds = [approvedImageId(protagonist), loveInterest ? approvedImageId(loveInterest) : null].filter(
+    (id): id is string => Boolean(id)
+  );
 
   const { data: portraitImages, error: imagesErr } = await supabase
     .from("images")
@@ -231,7 +272,7 @@ export async function POST(
     if (url) urlById.set(img.id, url);
   }
 
-  const protagonistUrl = urlById.get(protagonistImageId);
+  const protagonistUrl = urlById.get(approvedImageId(protagonist)!);
   if (!protagonistUrl) {
     return NextResponse.json(
       { error: "Protagonist portrait image URL is missing. Re-approve the portrait and retry." },
@@ -239,24 +280,14 @@ export async function POST(
     );
   }
 
-  const loveInterestUrl = loveInterestImageId
-    ? urlById.get(loveInterestImageId)
+  const loveInterestUrl = loveInterest && approvedImageId(loveInterest)
+    ? urlById.get(approvedImageId(loveInterest)!)
     : undefined;
 
-  // Observability: when love_interest is absent, log so we can spot
-  // covers that silently went single-reference.
   if (!loveInterestUrl) {
-    console.log(
-      "[generate-cover] protagonist_only mode",
-      JSON.stringify({
-        seriesId,
-        coverGenerationMode: "protagonist_only",
-        approvedCharacterCount: approvedChars?.length ?? 0,
-      })
-    );
+    console.log("[generate-cover] protagonist_only mode", { seriesId });
   }
 
-  // 7. Base64-encode references (matches scene generator pattern)
   const references: Array<{ name: string; base64: string }> = [
     {
       name: `ref_protagonist_${protagonist.character_id}.jpeg`,
@@ -270,56 +301,12 @@ export async function POST(
     });
   }
 
-  // 8. Determine which variant indices to generate
-  const variantIndices: number[] = isPartialRetry
-    ? retryVariants!.slice().sort((a, b) => a - b)
-    : Array.from({ length: VARIANT_COUNT }, (_, i) => i);
-
-  // 9. Reset / update cover state
-  //    - Full regenerate: null out everything downstream of generation
-  //    - Partial retry: null out only the retry slots; keep the rest
-  let newCoverVariants: (string | null)[];
-  if (isPartialRetry) {
-    const existing = (series.cover_variants as (string | null)[] | null) ?? Array(VARIANT_COUNT).fill(null);
-    newCoverVariants = Array.from({ length: VARIANT_COUNT }, (_, i) =>
-      variantIndices.includes(i) ? null : existing[i] ?? null
-    );
-  } else {
-    newCoverVariants = Array(VARIANT_COUNT).fill(null);
-  }
-
-  const updatePayload: Record<string, unknown> = {
-    cover_variants: newCoverVariants,
-    cover_status: "generating",
-    cover_error: null,
-  };
-  if (!isPartialRetry) {
-    updatePayload.cover_base_url = null;
-    updatePayload.cover_selected_variant = null;
-    updatePayload.cover_sizes = null;
-  }
-
-  const { error: updErr } = await supabase
-    .from("story_series")
-    .update(updatePayload)
-    .eq("id", seriesId);
-
-  if (updErr) {
-    return NextResponse.json(
-      { error: `Failed to reset cover state: ${updErr.message}` },
-      { status: 500 }
-    );
-  }
-
-  // 10. Fire N parallel Flux 2 Dev jobs (ComfyUI batch_size is hardcoded
-  //     to 1 in the workflow builder, so 4 variants = 4 jobs).
   const jobIds: string[] = [];
   const failures: Array<{ variantIndex: number; message: string }> = [];
 
   for (const variantIndex of variantIndices) {
     try {
       const seed = Math.floor(Math.random() * 2 ** 31);
-
       const result = await generateFlux2Image({
         scenePrompt: effectivePrompt,
         references,
@@ -329,7 +316,6 @@ export async function POST(
         filenamePrefix: `cover_${series.slug}_v${variantIndex}`,
       });
 
-      // Create the images row with cover-variant provenance settings.
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
@@ -375,9 +361,6 @@ export async function POST(
     }
   }
 
-  // 11. If every requested variant failed to submit, set cover_status=failed.
-  //     Partial submission failures are tolerated — the status endpoint will
-  //     resolve the final state when the remaining jobs complete.
   if (failures.length === variantIndices.length) {
     await supabase
       .from("story_series")
@@ -388,10 +371,7 @@ export async function POST(
       .eq("id", seriesId);
 
     return NextResponse.json(
-      {
-        error: "All cover variant submissions failed",
-        details: failures,
-      },
+      { error: "All cover variant submissions failed", details: failures },
       { status: 500 }
     );
   }
@@ -401,8 +381,133 @@ export async function POST(
       jobIds,
       coverStatus: "generating",
       variantIndices,
+      model: "flux2_dev",
       ...(failures.length > 0 ? { submissionFailures: failures } : {}),
     },
     { status: 202 }
   );
+}
+
+// ── Hunyuan cover generation (synchronous Replicate) ────────────
+
+async function generateHunyuanCover(args: {
+  seriesId: string;
+  slug: string;
+  effectivePrompt: string;
+  protagonist: CharWithBase;
+  loveInterest: CharWithBase | undefined;
+  variantIndices: number[];
+  existingVariants: (string | null)[];
+}): Promise<NextResponse> {
+  const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices, existingVariants } = args;
+
+  const protagonistBlock = resolveCharacterBlock(protagonist);
+  const loveInterestBlock = loveInterest ? resolveCharacterBlock(loveInterest) : undefined;
+
+  console.log("[generate-cover:hunyuan] starting", {
+    seriesId,
+    variants: variantIndices,
+    protagonistBlock: protagonistBlock.slice(0, 80),
+    hasLoveInterest: Boolean(loveInterestBlock),
+  });
+
+  // Generate all requested variants in parallel
+  const results = await Promise.allSettled(
+    variantIndices.map(async (variantIndex) => {
+      const result = await generateHunyuanImage({
+        scenePrompt: effectivePrompt,
+        characterBlock: protagonistBlock,
+        secondaryCharacterBlock: loveInterestBlock,
+        aspectRatio: "2:3",
+      });
+
+      const storagePath = `${slug}/variants/variant-${variantIndex}.jpeg`;
+      const variantUrl = await uploadRemoteImageToStorage(
+        result.imageUrl,
+        storagePath,
+        COVER_BUCKET,
+        { cacheControl: "public, max-age=60" }
+      );
+
+      // Provenance row
+      const { data: imageRow } = await supabase
+        .from("images")
+        .insert({
+          prompt: result.prompt,
+          settings: {
+            model: "hunyuan3",
+            provider: "replicate",
+            replicate_model: result.model,
+            purpose: "cover_variant",
+            series_id: seriesId,
+            variant_index: variantIndex,
+            aspect_ratio: "2:3",
+          },
+          mode: "sfw",
+        })
+        .select("id")
+        .single();
+
+      if (imageRow) {
+        await supabase
+          .from("images")
+          .update({ stored_url: variantUrl, sfw_url: variantUrl })
+          .eq("id", imageRow.id);
+      }
+
+      console.log(`[generate-cover:hunyuan] variant ${variantIndex} done: ${variantUrl}`);
+      return { variantIndex, url: variantUrl };
+    })
+  );
+
+  // Merge results into the variants array
+  const finalVariants: (string | null)[] = [...existingVariants];
+  const errorSummaries: string[] = [];
+
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      finalVariants[r.value.variantIndex] = r.value.url;
+    } else {
+      const err = r.reason as { variantIndex?: number; message?: string } | Error;
+      const idx = (err as { variantIndex?: number }).variantIndex ?? "?";
+      const msg = err instanceof Error ? err.message : String(err);
+      errorSummaries.push(`variant ${idx}: ${msg}`);
+      console.error(`[generate-cover:hunyuan] variant ${idx} failed:`, msg);
+    }
+  }
+
+  const succeeded = finalVariants.filter(Boolean).length;
+
+  if (succeeded === 0) {
+    await supabase
+      .from("story_series")
+      .update({
+        cover_status: "failed",
+        cover_variants: finalVariants,
+        cover_error: errorSummaries.join("; ") || "All cover variants failed",
+      })
+      .eq("id", seriesId);
+
+    return NextResponse.json(
+      { error: "All cover variants failed", details: errorSummaries },
+      { status: 500 }
+    );
+  }
+
+  await supabase
+    .from("story_series")
+    .update({
+      cover_status: "variants_ready",
+      cover_variants: finalVariants,
+      cover_error: errorSummaries.length > 0 ? errorSummaries.join("; ") : null,
+    })
+    .eq("id", seriesId);
+
+  return NextResponse.json({
+    coverStatus: "variants_ready",
+    jobIds: [],
+    variantIndices,
+    model: "hunyuan3",
+    ...(errorSummaries.length > 0 ? { partialFailures: errorSummaries } : {}),
+  });
 }

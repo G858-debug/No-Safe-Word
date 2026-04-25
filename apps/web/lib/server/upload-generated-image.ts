@@ -11,7 +11,9 @@ import { supabase } from "@no-safe-word/story-engine";
  */
 export async function uploadRemoteImageToStorage(
   sourceUrl: string,
-  storagePath: string
+  storagePath: string,
+  bucket = "story-images",
+  options?: { cacheControl?: string }
 ): Promise<string> {
   const res = await fetch(sourceUrl);
   if (!res.ok) {
@@ -24,16 +26,18 @@ export async function uploadRemoteImageToStorage(
   const contentType = res.headers.get("content-type") || "image/jpeg";
 
   const { error: uploadError } = await supabase.storage
-    .from("story-images")
-    .upload(storagePath, buffer, { contentType, upsert: true });
+    .from(bucket)
+    .upload(storagePath, buffer, {
+      contentType,
+      upsert: true,
+      ...(options?.cacheControl ? { cacheControl: options.cacheControl } : {}),
+    });
 
   if (uploadError) {
     throw new Error(`Storage upload failed: ${uploadError.message}`);
   }
 
-  const { data } = supabase.storage
-    .from("story-images")
-    .getPublicUrl(storagePath);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
 
   return data.publicUrl;
 }
