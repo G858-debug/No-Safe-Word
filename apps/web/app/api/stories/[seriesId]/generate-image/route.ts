@@ -4,6 +4,8 @@ import {
   generateHunyuanImage,
   generateFlux2Image,
   imageUrlToBase64,
+  buildSceneCharacterBlock,
+  type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
@@ -97,16 +99,26 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       prompt.secondary_character_id,
     ].filter((id): id is string => Boolean(id));
 
+    // Fetch name + structured description for scene character blocks.
+    // We intentionally do NOT use portrait_prompt_locked here — that text
+    // includes body-type descriptions (which override scene clothing) and
+    // portrait framing instructions (which conflict with scene composition).
+    // buildSceneCharacterBlock extracts only face/skin/hair identity.
     const charBlocks: Record<string, string> = {};
+    const charApproved: Record<string, boolean> = {};
     if (charIds.length > 0) {
       const { data: chars } = await supabase
         .from("characters")
-        .select("id, portrait_prompt_locked")
+        .select("id, name, description, approved_image_id")
         .in("id", charIds);
 
       for (const c of chars ?? []) {
-        if (c.portrait_prompt_locked) {
-          charBlocks[c.id] = c.portrait_prompt_locked;
+        charApproved[c.id] = Boolean(c.approved_image_id);
+        if (c.name && c.description) {
+          charBlocks[c.id] = buildSceneCharacterBlock(
+            c.name,
+            c.description as PortraitCharacterDescription
+          );
         }
       }
     }
@@ -118,14 +130,14 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       ? charBlocks[prompt.secondary_character_id]
       : undefined;
 
-    // Guard — if a character is referenced but has no locked prompt, the
-    // image will drift off-model. Block the generation with a clear error.
-    if (prompt.character_id && !primaryBlock) {
+    // Guard — require portrait approval before generating scenes so the
+    // character's appearance is anchored in the system.
+    if (prompt.character_id && !charApproved[prompt.character_id]) {
       throw new Error(
         `Character "${prompt.character_name ?? prompt.character_id}" has no approved portrait yet — approve the portrait before generating scenes under hunyuan3.`
       );
     }
-    if (prompt.secondary_character_id && !secondaryBlock) {
+    if (prompt.secondary_character_id && !charApproved[prompt.secondary_character_id]) {
       throw new Error(
         `Secondary character "${prompt.secondary_character_name ?? prompt.secondary_character_id}" has no approved portrait yet.`
       );

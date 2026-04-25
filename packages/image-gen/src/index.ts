@@ -71,7 +71,7 @@ export type {
 } from './hunyuan-generator';
 
 // Shared portrait prompt builder (both flux2_dev + hunyuan3)
-export { buildCharacterPortraitPrompt } from './portrait-prompt-builder';
+export { buildCharacterPortraitPrompt, buildSceneCharacterBlock } from './portrait-prompt-builder';
 export type { PortraitCharacterDescription } from './portrait-prompt-builder';
 
 // Flux 2 Dev workflow + generator

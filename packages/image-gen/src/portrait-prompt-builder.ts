@@ -92,6 +92,45 @@ export function buildCharacterPortraitPrompt(
   return parts.join(" ");
 }
 
+/**
+ * Build a minimal character identity block for SCENE generation.
+ *
+ * Intentionally excludes bodyType (overrides scene clothing) and all
+ * portrait composition/lighting/framing text (conflicts with scene setting).
+ * Only face, skin, hair, and basic identity — enough for the model to
+ * recognise the character without fighting the scene prompt.
+ */
+export function buildSceneCharacterBlock(
+  name: string,
+  description: PortraitCharacterDescription
+): string {
+  const parts: string[] = [];
+
+  // Identity line: "Lindiwe, Black South African woman, 24."
+  const who: string[] = [name];
+  if (description.ethnicity) who.push(description.ethnicity.trim());
+  if (description.gender) who.push(description.gender.trim());
+  if (description.age) who.push(description.age.trim());
+  parts.push(who.join(", ") + ".");
+
+  // Skin + hair + eyes
+  const appearance: string[] = [];
+  if (description.skinTone) appearance.push(`${description.skinTone.trim()} skin`);
+  const hair: string[] = [];
+  if (description.hairColor) hair.push(description.hairColor.trim());
+  if (description.hairStyle) hair.push(description.hairStyle.trim());
+  if (hair.length > 0) appearance.push(`${hair.join(" ")} hair`);
+  if (description.eyeColor) appearance.push(`${description.eyeColor.trim()} eyes`);
+  if (appearance.length > 0) parts.push(capitalize(appearance.join(", ")) + ".");
+
+  // Face / distinguishing features (no body shape)
+  if (description.distinguishingFeatures) {
+    parts.push(capitalize(description.distinguishingFeatures.trim()) + ".");
+  }
+
+  return parts.join(" ");
+}
+
 function capitalize(s: string): string {
   if (!s) return s;
   return s[0].toUpperCase() + s.slice(1);
