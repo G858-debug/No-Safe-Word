@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - 'infra/runpod/Dockerfile.base'
+      - 'infra/runpod/patch_pulid.py'
       - 'infra/runpod/download-models.sh'
       - 'infra/runpod/download-civitai-loras.py'
       - 'infra/runpod/download-insightface.py'
