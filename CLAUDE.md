@@ -27,16 +27,18 @@ scripts/               — Utility scripts (model downloads, test harnesses)
 
 **Dual-model architecture.** Every story picks one of two pipelines at import time, stored on `story_series.image_model`:
 
-- **`flux2_dev`** — Flux 2 Dev on RunPod via ComfyUI. Character consistency via **reference-image injection**: the approved portrait on the base `characters.approved_image_id` → `images.stored_url` is base64-encoded and passed as a reference image to the generation job.
-- **`hunyuan3`** — HunyuanImage 3.0 on Replicate. Character consistency via **prompt injection**: `characters.portrait_prompt_locked` (the exact text that produced the approved portrait) is spliced verbatim into every scene prompt.
+- **`flux2_dev`** — Flux 2 Dev on RunPod via ComfyUI. Character consistency via **reference-image injection**: the approved portrait on the base `characters.approved_image_id` → `images.stored_url` is base64-encoded and passed as a reference image to the generation job. **No character text is injected into the prompt** — identity lives in the pixels, and adding text descriptions of the character competes with the image reference and degrades likeness.
+- **`hunyuan3`** — HunyuanImage 3.0 on Replicate. Character consistency via **prompt injection**: `characters.portrait_prompt_locked` (the exact text that produced the approved portrait). Hunyuan has no reference-image conditioning, so identity is text-only. Scene generation strips the portrait's framing/lighting and prepends a `${name}: ${stripped}` block; cover generation injects the locked text verbatim because covers ARE posed portraits and benefit from the framing language.
+
+**Canonical character description.** After portrait approval, `characters.portrait_prompt_locked` is the canonical character description for the image-generation pipeline. The structured `characters.description` JSONB and the per-story `story_characters.prose_description` are independent of image generation — they are seed data for the initial portrait and human-readable context for the dashboard, respectively. Once a portrait is approved, the pipeline reads only `portrait_prompt_locked` (Hunyuan) or `approved_image_id` (Flux). To change a character's appearance after approval, regenerate and re-approve the portrait — there is no per-scene override.
 
 Selection is set at import (defaults to `flux2_dev`) and switchable via `POST /api/stories/[seriesId]/change-image-model`. **Switching does NOT reset portraits** — they live on the base `characters` table and serve both pipelines. Switching only resets in-flight scene prompts for that series.
 
 **Dispatcher:** `POST /api/stories/[seriesId]/generate-image` reads `image_model` and routes to `runFlux2Generation()` or `runHunyuanGeneration()`.
 
-### Hard rule — cover generation is model-locked
+### Cover generation follows the story's image_model
 
-**Cover generation always uses Flux 2 Dev regardless of the story's `image_model` setting.** The dedicated `POST /api/stories/[seriesId]/generate-cover` endpoint calls `generateFlux2Image()` directly, bypassing the model-aware dispatcher. This is intentional — do not "fix" the apparent inconsistency by routing covers through the dispatcher. Reasons: (1) cover composition needs reference-image conditioning against approved portraits, (2) covers are the public marketing artifact and need a single quality bar, (3) Hunyuan does not support reference-image consistency the same way.
+**Cover generation uses the same model as the story's scenes.** `POST /api/stories/[seriesId]/generate-cover` reads `story_series.image_model` and dispatches to either the Flux 2 Dev path (PuLID reference images, no character text) or the Hunyuan 3 path (verbatim `portrait_prompt_locked` injection). The Hunyuan cover path differs from the Hunyuan scene path in one detail: covers keep the locked text verbatim (including portrait composition language), because a cover IS a posed portrait. Scenes strip the portrait composition before injection so it doesn't fight the scene's own framing.
 
 ### Legacy LoRA / Juggernaut Ragnarok pipelines — DELETED (2026-04-24)
 
@@ -56,7 +58,7 @@ Identity and approved portraits are **canonical on the base `characters` table**
 
 - `characters.id / name / description` — identity and structured JSON description.
 - `characters.approved_image_id` / `approved_fullbody_image_id` — FK to `images`. Set on portrait approval; used as reference image for Flux 2 scene generation.
-- `characters.portrait_prompt_locked` — exact prompt text behind the approved portrait; injected verbatim into every scene prompt under Hunyuan 3.
+- `characters.portrait_prompt_locked` — exact prompt text behind the approved portrait. Under Hunyuan 3, scene generation strips the portrait framing/lighting and prepends `${name}: ${stripped}`; cover generation uses it verbatim. Under Flux 2 Dev, this column is unused (identity flows via the reference image).
 - `characters.approved_seed / approved_prompt / approved_fullbody_*` — provenance metadata.
 
 **`story_characters` is now just a link table:** `id`, `series_id`, `character_id`, `role`, `prose_description`. Portrait state is NOT duplicated per series.
@@ -165,6 +167,6 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 - Don't ask me to check the Railway logs — you have access, check them yourself
 - `apps/web` is the ONLY app. Never create files in `apps/dashboard`
 - Scene image generation goes through `/api/stories/[seriesId]/generate-image` (model-aware dispatcher).
-- Cover generation goes through `/api/stories/[seriesId]/generate-cover` (always Flux 2 Dev, bypasses the dispatcher).
+- Cover generation goes through `/api/stories/[seriesId]/generate-cover` (model-aware: dispatches on `story_series.image_model` like scene generation).
 - Character generation goes through `/api/stories/characters/[storyCharId]/generate`.
 - **Never download large files (models, datasets, checkpoints) to the local machine.** The local machine is for code only. All model downloads must go directly to RunPod (network volume via S3 API or in-pod downloads). All heavy processing (inference) runs on RunPod or Replicate, never locally.

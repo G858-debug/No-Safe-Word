@@ -5,6 +5,7 @@ import {
   generateFlux2Image,
   imageUrlToBase64,
   buildSceneCharacterBlock,
+  buildSceneCharacterBlockFromLocked,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
@@ -99,22 +100,32 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       prompt.secondary_character_id,
     ].filter((id): id is string => Boolean(id));
 
-    // Fetch name + structured description for scene character blocks.
-    // We intentionally do NOT use portrait_prompt_locked here — that text
-    // includes body-type descriptions (which override scene clothing) and
-    // portrait framing instructions (which conflict with scene composition).
-    // buildSceneCharacterBlock extracts only face/skin/hair identity.
+    // Build scene character blocks from `portrait_prompt_locked` (the exact
+    // text that produced the approved portrait), stripped of portrait framing
+    // and prepended with the character's name. Same source of truth as the
+    // cover Hunyuan path. Falls back to the structured description only when
+    // the locked prompt is missing (e.g. legacy approvals before the column
+    // was populated) — that path emits a warning so we can spot drift.
     const charBlocks: Record<string, string> = {};
     const charApproved: Record<string, boolean> = {};
     if (charIds.length > 0) {
       const { data: chars } = await supabase
         .from("characters")
-        .select("id, name, description, approved_image_id")
+        .select("id, name, description, approved_image_id, portrait_prompt_locked")
         .in("id", charIds);
 
       for (const c of chars ?? []) {
         charApproved[c.id] = Boolean(c.approved_image_id);
-        if (c.name && c.description) {
+        if (!c.name) continue;
+        if (c.portrait_prompt_locked) {
+          charBlocks[c.id] = buildSceneCharacterBlockFromLocked(
+            c.name,
+            c.portrait_prompt_locked
+          );
+        } else if (c.description) {
+          console.warn(
+            `[generate-image:hunyuan] character ${c.id} (${c.name}) has no portrait_prompt_locked; falling back to description-derived scene block`
+          );
           charBlocks[c.id] = buildSceneCharacterBlock(
             c.name,
             c.description as PortraitCharacterDescription
@@ -147,7 +158,14 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     const aspectRatio =
       prompt.character_id && prompt.secondary_character_id ? "4:3" : "3:4";
 
-    // 5. Generate
+    // 5. Generate.
+    //
+    // Model-aware injection rule (Hunyuan / scene): character text REQUIRED.
+    // HunyuanImage 3.0 has no reference-image conditioning, so identity has
+    // to be carried by prompt text. The blocks above were derived from the
+    // canonical `portrait_prompt_locked` (same source the cover path uses),
+    // stripped of portrait framing/lighting so they don't fight the scene's
+    // own composition. Flux is the opposite — see `runFlux2Generation`.
     const result = await generateHunyuanImage({
       scenePrompt: prompt.prompt,
       characterBlock: primaryBlock,
@@ -336,7 +354,14 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
       });
     }
 
-    // 6. Submit to RunPod — async, returns a jobId the client polls
+    // 6. Submit to RunPod — async, returns a jobId the client polls.
+    //
+    // Model-aware injection rule (Flux 2 Dev / scene): NO character text.
+    // Character identity is anchored by the PuLID reference images above
+    // (built from `characters.approved_image_id`). Adding a text block
+    // describing the same character competes with the image reference and
+    // measurably degrades both likeness and scene fidelity. Hunyuan is the
+    // opposite — see `runHunyuanGeneration` for the text-injection branch.
     const result = await generateFlux2Image({
       scenePrompt: prompt.prompt,
       references,

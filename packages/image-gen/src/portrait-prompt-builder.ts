@@ -1,4 +1,8 @@
-import { VISUAL_SIGNATURE } from "./hunyuan-generator";
+import {
+  VISUAL_SIGNATURE,
+  PORTRAIT_COMPOSITION,
+  FULLBODY_COMPOSITION,
+} from "./prompt-constants";
 
 /**
  * Subset of the structured character description used to build a portrait
@@ -17,18 +21,6 @@ export interface PortraitCharacterDescription {
   distinguishingFeatures?: string;
   expression?: string;
 }
-
-/**
- * Framing/lighting clause for a face portrait (medium close-up, head and shoulders).
- */
-const PORTRAIT_COMPOSITION =
-  "Portrait, looking directly at the camera with a confident expression. Warm side-lighting, dark background with soft bokeh. Medium close-up, eye-level.";
-
-/**
- * Framing/lighting clause for a full-body shot (head to feet, complete figure).
- */
-const FULLBODY_COMPOSITION =
-  "Full body shot, standing upright, looking directly at the camera with a confident expression. Warm side-lighting, plain dark background. Full-length from head to feet, showing entire figure including legs and feet.";
 
 /**
  * Build a natural-language portrait prompt from structured character fields.
@@ -93,12 +85,17 @@ export function buildCharacterPortraitPrompt(
 }
 
 /**
- * Build a minimal character identity block for SCENE generation.
+ * Build a character identity block for SCENE generation from the structured
+ * `characters.description` JSONB.
  *
- * Intentionally excludes bodyType (overrides scene clothing) and all
- * portrait composition/lighting/framing text (conflicts with scene setting).
- * Only face, skin, hair, and basic identity — enough for the model to
- * recognise the character without fighting the scene prompt.
+ * Used as the fallback path when `characters.portrait_prompt_locked` is null
+ * (e.g. a character that hasn't gone through the full portrait approval flow
+ * yet). The preferred scene-block source is `buildSceneCharacterBlockFromLocked`
+ * which reuses the exact text that produced the approved portrait.
+ *
+ * Identity only — name, ethnicity, gender, age, skin, hair, eyes, distinguishing
+ * features, and body shape. Excludes portrait framing/lighting (those belong
+ * to the scene prompt, not the character block).
  */
 export function buildSceneCharacterBlock(
   name: string,
@@ -128,14 +125,66 @@ export function buildSceneCharacterBlock(
     parts.push(capitalize(description.distinguishingFeatures.trim()) + ".");
   }
 
-  // Body shape — included for character consistency. Portrait framing text
-  // (which was in portrait_prompt_locked and caused clothing overrides) is
-  // intentionally absent; the scene prompt controls clothing and composition.
   if (description.bodyType) {
     parts.push(capitalize(description.bodyType.trim()) + ".");
   }
 
   return parts.join(" ");
+}
+
+/**
+ * Resolve the canonical portrait text for a character.
+ *
+ * Returns `portrait_prompt_locked` (the exact text that produced the approved
+ * portrait) if set, otherwise rebuilds from the structured description. Used
+ * verbatim by the cover Hunyuan path; used by scene generation as input to
+ * `stripPortraitFraming` + name prefixing via `buildSceneCharacterBlockFromLocked`.
+ */
+export function resolvePortraitText(
+  locked: string | null,
+  description: PortraitCharacterDescription
+): string {
+  return locked ?? buildCharacterPortraitPrompt(description);
+}
+
+const PORTRAIT_FRAMING_FRAGMENTS: readonly string[] = [
+  PORTRAIT_COMPOSITION,
+  FULLBODY_COMPOSITION,
+  VISUAL_SIGNATURE,
+];
+
+/**
+ * Strip portrait framing/lighting/signature text from a portrait prompt.
+ *
+ * Removes any occurrence of `PORTRAIT_COMPOSITION`, `FULLBODY_COMPOSITION`,
+ * and `VISUAL_SIGNATURE` (handles duplicates from a historical bug where the
+ * signature was concatenated twice). Leaves the structural identity prefix
+ * intact. Tolerates absent fragments.
+ */
+export function stripPortraitFraming(text: string): string {
+  let out = text;
+  for (const fragment of PORTRAIT_FRAMING_FRAGMENTS) {
+    out = out.split(fragment).join(" ");
+  }
+  return out.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Build a SCENE character block from the locked portrait prompt.
+ *
+ * Strips portrait composition/lighting/signature, then prepends the character's
+ * name as a label so the model can bind name → body in multi-character scenes.
+ * Format: `"<name>: <stripped identity prose>"`.
+ *
+ * Caller is responsible for falling back to `buildSceneCharacterBlock` when
+ * `portrait_prompt_locked` is null.
+ */
+export function buildSceneCharacterBlockFromLocked(
+  name: string,
+  lockedText: string
+): string {
+  const stripped = stripPortraitFraming(lockedText);
+  return `${name}: ${stripped}`;
 }
 
 function capitalize(s: string): string {

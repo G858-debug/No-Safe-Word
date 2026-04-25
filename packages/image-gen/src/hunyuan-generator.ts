@@ -1,11 +1,7 @@
 import { getReplicateClient } from "./replicate-client";
+import { VISUAL_SIGNATURE } from "./prompt-constants";
 
-/**
- * Shared cinematic "look" suffix appended to every HunyuanImage prompt
- * so all images share a consistent visual signature regardless of scene.
- */
-export const VISUAL_SIGNATURE =
-  "Cinematic shallow depth of field. Rich shadows with luminous highlights. Soft skin glow. Intimate framing. Editorial photography quality. Photorealistic.";
+export { VISUAL_SIGNATURE };
 
 export interface HunyuanGenerateOptions {
   /** The scene/action description (e.g. from story_image_prompts.prompt) */

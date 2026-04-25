@@ -4,7 +4,7 @@ import {
   generateFlux2Image,
   generateHunyuanImage,
   imageUrlToBase64,
-  buildCharacterPortraitPrompt,
+  resolvePortraitText,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
@@ -65,16 +65,11 @@ function charDescription(c: CharWithBase): PortraitCharacterDescription {
   return (d && typeof d === "object" ? d : {}) as PortraitCharacterDescription;
 }
 
-// Resolve the character's text prompt for Hunyuan injection.
-// Prefer portrait_prompt_locked (exact text that produced the approved
-// portrait). Fall back to buildCharacterPortraitPrompt if not set yet
-// (e.g. the character was approved via Flux before the locked prompt
-// was persisted).
+// Resolve the character's text prompt for Hunyuan injection. Delegates to
+// the shared resolver in @no-safe-word/image-gen so cover and scene routes
+// derive their character text from the same source of truth.
 function resolveCharacterBlock(c: CharWithBase): string {
-  return (
-    portraitPromptLocked(c) ||
-    buildCharacterPortraitPrompt(charDescription(c))
-  );
+  return resolvePortraitText(portraitPromptLocked(c), charDescription(c));
 }
 
 export async function POST(
@@ -344,6 +339,10 @@ export async function POST(
   const jobIds: string[] = [];
   const failures: Array<{ variantIndex: number; message: string }> = [];
 
+  // Model-aware injection rule (Flux 2 Dev / cover): NO character text.
+  // Identity is carried by the PuLID reference images above. The same rule
+  // applies to the Flux scene path; the Hunyuan covers branch (above, when
+  // image_model === 'hunyuan3') is the opposite — text-only identity.
   for (const variantIndex of variantIndices) {
     try {
       const seed = Math.floor(Math.random() * 2 ** 31);
@@ -441,6 +440,13 @@ async function generateHunyuanCover(args: {
 }): Promise<NextResponse> {
   const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices, existingVariants } = args;
 
+  // Model-aware injection rule (Hunyuan / cover): character text REQUIRED,
+  // injected verbatim from `portrait_prompt_locked`. HunyuanImage 3.0 has
+  // no reference-image conditioning, so identity is text-only. Unlike the
+  // Hunyuan scene path (which strips portrait framing), covers keep the
+  // portrait composition language intact — a cover IS a posed portrait,
+  // so framing/lighting from the locked prompt aligns with the artifact
+  // we're producing rather than fighting it.
   const protagonistBlock = resolveCharacterBlock(protagonist);
   const loveInterestBlock = loveInterest ? resolveCharacterBlock(loveInterest) : undefined;
 
@@ -451,7 +457,6 @@ async function generateHunyuanCover(args: {
     hasLoveInterest: Boolean(loveInterestBlock),
   });
 
-  // Generate all requested variants in parallel
   const results = await Promise.allSettled(
     variantIndices.map(async (variantIndex) => {
       const result = await generateHunyuanImage({

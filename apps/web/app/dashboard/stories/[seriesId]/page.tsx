@@ -720,6 +720,9 @@ export default function SeriesDetailPage() {
                 posts={posts}
                 imageUrls={data.image_urls}
                 allCharactersApproved={allReadyForImages}
+                imageModel={(data.series.image_model as ImageModel | null) ?? "flux2_dev"}
+                characters={characters}
+                onNavigateToCharacters={() => setActiveTab("characters")}
               />
             </>
           ) : !coverReady ? (

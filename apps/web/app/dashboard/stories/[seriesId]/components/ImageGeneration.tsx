@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,6 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+// Deep import from the specific submodule rather than the package barrel —
+// the barrel re-exports server-only modules (Replicate SDK, sharp, RunPod
+// fetch helpers) which would otherwise be dragged into the client bundle.
+// `portrait-prompt-builder` is pure (no Node deps after Phase D's
+// extraction of prompt-constants), so it's safe to import here.
+import { buildSceneCharacterBlockFromLocked } from "@no-safe-word/image-gen/portrait-prompt-builder";
+import type { ImageModel } from "@no-safe-word/shared";
+import type { CharacterFromAPI } from "./CharacterApproval";
 import {
   Select,
   SelectContent,
@@ -29,8 +37,8 @@ import {
   CheckCircle2,
   Bug,
   Settings2,
-  SlidersHorizontal,
   Undo2,
+  Lock,
 } from "lucide-react";
 // ══════════════════════════════════════════════════════════════
 // ART DIRECTOR — DEACTIVATED 2026-04-19
@@ -106,43 +114,31 @@ interface ImageGenerationProps {
   posts: PostWithPrompts[];
   imageUrls: Record<string, string>;
   allCharactersApproved: boolean;
+  imageModel: ImageModel;
+  characters: CharacterFromAPI[];
+  onNavigateToCharacters: () => void;
 }
 
-// Default negative prompts (mirrors buildNegativePrompt in prompt-builder.ts)
-const DEFAULT_NEGATIVE_BASE = 'bad anatomy, bad hands, extra limbs, extra fingers, mutated hands, watermark, blurry, text, cartoon, illustration, painting, drawing, low quality, worst quality, deformed, disfigured';
-const DEFAULT_NEGATIVE_SFW = `nudity, naked, nsfw, topless, nude, exposed breasts, nipples, ${DEFAULT_NEGATIVE_BASE}`;
-const DEFAULT_NEGATIVE_NSFW = DEFAULT_NEGATIVE_BASE;
-
-// Default profile values (solo defaults from scene-profiles.ts)
-const DEFAULT_LORA_MODEL = 0.65;
-const DEFAULT_LORA_CLIP = 0.4;
-const DEFAULT_CFG = 5.0;
-const DEFAULT_STEPS = 30;
+/**
+ * Minimal character info needed by the locked-block UI. Keyed by the
+ * canonical `characters.id` (== `story_image_prompts.character_id`).
+ */
+interface CharacterIdentity {
+  name: string | null;
+  portraitPromptLocked: string | null;
+}
 
 interface PromptState {
   status: string;
   imageUrl: string | null;
   promptText: string;
+  savedPromptText: string;
   showPrompt: boolean;
   error: string | null;
   diagnosticFlags: DiagnosticFlags;
   showDiagnostic: boolean;
-  // Revert support
   previousImageId: string | null;
   isReverting: boolean;
-  // Advanced controls
-  showAdvanced: boolean;
-  negativePrompt: string;
-  useRawPrompt: boolean;
-  lastSeed: number | null;
-  lockSeed: boolean;
-  charLoraStrengthModel: number;
-  charLoraStrengthClip: number;
-  cfg: number;
-  steps: number;
-  // Two-pass mode
-  twoPassMode: boolean | 'auto';
-  twoPassDenoise: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +201,24 @@ export default function ImageGeneration({
   posts,
   imageUrls,
   allCharactersApproved,
+  imageModel,
+  characters,
+  onNavigateToCharacters,
 }: ImageGenerationProps) {
+  // Lookup table for the locked-block UI: character_id → name + portrait
+  // text. Same source as the server-side scene block (Phase B); kept in
+  // sync via the `characters` prop loaded on the page.
+  const characterIdentityMap = useMemo<Record<string, CharacterIdentity>>(() => {
+    const m: Record<string, CharacterIdentity> = {};
+    for (const c of characters) {
+      if (!c.character_id) continue;
+      m[c.character_id] = {
+        name: c.name,
+        portraitPromptLocked: c.portrait_prompt_locked,
+      };
+    }
+    return m;
+  }, [characters]);
   // ---- State ----
   const [promptStates, setPromptStates] = useState<
     Record<string, PromptState>
@@ -245,23 +258,13 @@ export default function ImageGeneration({
           status: ip.status,
           imageUrl: url,
           promptText: ip.prompt,
+          savedPromptText: ip.prompt,
           showPrompt: false,
           error: null,
           diagnosticFlags: { ...DEFAULT_DIAGNOSTIC_FLAGS },
           showDiagnostic: false,
           previousImageId: ip.previous_image_id || null,
           isReverting: false,
-          showAdvanced: false,
-          negativePrompt: "",
-          useRawPrompt: false,
-          lastSeed: null,
-          lockSeed: false,
-          charLoraStrengthModel: DEFAULT_LORA_MODEL,
-          charLoraStrengthClip: DEFAULT_LORA_CLIP,
-          cfg: DEFAULT_CFG,
-          steps: DEFAULT_STEPS,
-          twoPassMode: false,
-          twoPassDenoise: 0.35,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -294,8 +297,6 @@ export default function ImageGeneration({
                   status: data.status,
                   imageUrl: data.storedUrl || data.blobUrl || prev[promptId]?.imageUrl || null,
                   error: null,
-                  lastSeed: data.settings?.seed ?? prev[promptId]?.lastSeed ?? null,
-                  negativePrompt: data.negativePrompt || prev[promptId]?.negativePrompt || "",
                 },
               }));
             } else if (data.status === "failed") {
@@ -405,8 +406,6 @@ export default function ImageGeneration({
                 status: "generated",
                 imageUrl: statusData.storedUrl || statusData.blobUrl || data.imageUrl || null,
                 error: null,
-                lastSeed: statusData.settings?.seed ?? null,
-                negativePrompt: statusData.negativePrompt || "",
               });
             } else {
               updatePrompt(promptId, {
@@ -485,6 +484,27 @@ export default function ImageGeneration({
     async (promptId: string): Promise<void> => {
       updatePrompt(promptId, { status: "generating", error: null });
       try {
+        const state = promptStates[promptId];
+        if (state && state.promptText !== state.savedPromptText) {
+          const patchRes = await fetch(
+            `/api/stories/images/${promptId}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prompt: state.promptText }),
+            }
+          );
+          if (!patchRes.ok) {
+            const patchErr = await patchRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: patchErr?.error ?? "Failed to save prompt edit",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedPromptText: state.promptText });
+        }
+
         const res = await fetch(
           `/api/stories/${seriesId}/generate-image`,
           {
@@ -534,7 +554,7 @@ export default function ImageGeneration({
         });
       }
     },
-    [seriesId, updatePrompt]
+    [seriesId, updatePrompt, promptStates]
   );
 
   /** Generate all eligible prompts sequentially. */
@@ -956,6 +976,9 @@ export default function ImageGeneration({
                             onImageClick={setLightboxUrl}
                             onArtDirector={handleRegenerate}
                             batchGenerating={batchGenerating}
+                            imageModel={imageModel}
+                            characterIdentityMap={characterIdentityMap}
+                            onNavigateToCharacters={onNavigateToCharacters}
                           />
                         ))}
                       </div>
@@ -1095,213 +1118,105 @@ function DiagnosticPanel({
   );
 }
 
+
 // ---------------------------------------------------------------------------
-// AdvancedControlsPanel sub-component
+// LockedCharacterBlock — read-only preview of the character text the model
+// will receive for a given prompt.
+//
+// Renders ONLY when the story uses Hunyuan; for Flux 2 Dev, character
+// identity is carried by PuLID reference images and no character text is
+// injected (see Phase C model-aware injection comments in
+// /api/stories/[seriesId]/generate-image/route.ts and /generate-cover/route.ts).
+//
+// The text shown is the SAME string the server-side scene route prepends
+// to the scene prompt (Phase B): `buildSceneCharacterBlockFromLocked`
+// applied to the character's `portrait_prompt_locked`. To change it, the
+// user re-approves the portrait — there is no per-scene override.
 // ---------------------------------------------------------------------------
 
-interface AdvancedControlsProps {
-  negativePrompt: string;
-  useRawPrompt: boolean;
-  lastSeed: number | null;
-  lockSeed: boolean;
-  charLoraStrengthModel: number;
-  charLoraStrengthClip: number;
-  cfg: number;
-  steps: number;
-  twoPassMode: boolean | 'auto';
-  twoPassDenoise: number;
-  imageType: string;
-  isDualCharacter: boolean;
-  disabled: boolean;
-  onChange: (updates: Partial<PromptState>) => void;
+interface LockedCharacterBlockProps {
+  imageModel: ImageModel;
+  primaryCharacterId: string | null;
+  primaryCharacterName: string | null;
+  secondaryCharacterId: string | null;
+  secondaryCharacterName: string | null;
+  characterIdentityMap: Record<string, CharacterIdentity>;
+  onNavigateToCharacters: () => void;
 }
 
-function AdvancedControlsPanel({
-  negativePrompt,
-  useRawPrompt,
-  lastSeed,
-  lockSeed,
-  charLoraStrengthModel,
-  charLoraStrengthClip,
-  cfg,
-  steps,
-  twoPassMode,
-  twoPassDenoise,
-  imageType,
-  isDualCharacter,
-  disabled,
-  onChange,
-}: AdvancedControlsProps) {
-  const isSfw = imageType === "facebook_sfw";
-  const defaultNeg = isSfw ? DEFAULT_NEGATIVE_SFW : DEFAULT_NEGATIVE_NSFW;
+function LockedCharacterBlock({
+  imageModel,
+  primaryCharacterId,
+  primaryCharacterName,
+  secondaryCharacterId,
+  secondaryCharacterName,
+  characterIdentityMap,
+  onNavigateToCharacters,
+}: LockedCharacterBlockProps) {
+  if (imageModel !== "hunyuan3") return null;
+  if (!primaryCharacterId && !secondaryCharacterId) return null;
 
-  const isDefault =
-    charLoraStrengthModel === DEFAULT_LORA_MODEL &&
-    charLoraStrengthClip === DEFAULT_LORA_CLIP &&
-    cfg === DEFAULT_CFG &&
-    steps === DEFAULT_STEPS &&
-    !negativePrompt &&
-    !useRawPrompt &&
-    !lockSeed &&
-    !twoPassMode;
+  const entries: Array<{
+    id: string;
+    name: string;
+    locked: string | null;
+  }> = [];
+
+  if (primaryCharacterId) {
+    const ident = characterIdentityMap[primaryCharacterId];
+    entries.push({
+      id: primaryCharacterId,
+      name: ident?.name ?? primaryCharacterName ?? "Character",
+      locked: ident?.portraitPromptLocked ?? null,
+    });
+  }
+  if (secondaryCharacterId) {
+    const ident = characterIdentityMap[secondaryCharacterId];
+    entries.push({
+      id: secondaryCharacterId,
+      name: ident?.name ?? secondaryCharacterName ?? "Character",
+      locked: ident?.portraitPromptLocked ?? null,
+    });
+  }
 
   return (
-    <div className="space-y-5 rounded-lg border border-blue-500/20 bg-blue-500/5 p-5">
-      {/* Header row: raw prompt toggle + reset */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Switch
-            id="raw-prompt"
-            checked={useRawPrompt}
-            onCheckedChange={(checked) => onChange({ useRawPrompt: checked })}
-            className="h-5 w-9 data-[state=checked]:bg-blue-500"
-            disabled={disabled}
-          />
-          <Label htmlFor="raw-prompt" className="text-sm text-muted-foreground cursor-pointer">
-            Raw prompt (skip AI conversion)
-          </Label>
+    <div className="mt-1.5 rounded border border-zinc-700/40 bg-zinc-900/40 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-zinc-400">
+          <Lock className="h-3 w-3" />
+          Locked character text (Hunyuan)
         </div>
-        {!isDefault && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-3 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() =>
-              onChange({
-                charLoraStrengthModel: DEFAULT_LORA_MODEL,
-                charLoraStrengthClip: DEFAULT_LORA_CLIP,
-                cfg: DEFAULT_CFG,
-                steps: DEFAULT_STEPS,
-                negativePrompt: "",
-                useRawPrompt: false,
-                lockSeed: false,
-                twoPassMode: false,
-                twoPassDenoise: 0.35,
-              })
-            }
-          >
-            Reset defaults
-          </Button>
-        )}
+        <button
+          onClick={onNavigateToCharacters}
+          className="text-[10px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
+        >
+          Edit in Characters
+        </button>
       </div>
-
-      {/* Negative prompt */}
-      <div>
-        <p className="mb-1.5 text-xs font-medium text-muted-foreground">Negative Prompt</p>
-        <Textarea
-          value={negativePrompt}
-          onChange={(e) => onChange({ negativePrompt: e.target.value })}
-          placeholder={defaultNeg}
-          rows={3}
-          className="text-sm font-mono leading-relaxed bg-muted/30 resize-y"
-          disabled={disabled}
-        />
-      </div>
-
-      {/* Generation parameter sliders — 4 across on wide, 2 on narrow */}
-      <div>
-        <p className="mb-2 text-xs font-medium text-muted-foreground">Generation Parameters</p>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              LoRA Model <span className="text-blue-400 font-medium">{charLoraStrengthModel.toFixed(2)}</span>
-            </label>
-            <input
-              type="range" min="0" max="1" step="0.05"
-              value={charLoraStrengthModel}
-              onChange={(e) => onChange({ charLoraStrengthModel: parseFloat(e.target.value) })}
-              className="w-full h-2 accent-blue-500"
-              disabled={disabled}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              LoRA CLIP <span className="text-blue-400 font-medium">{charLoraStrengthClip.toFixed(2)}</span>
-            </label>
-            <input
-              type="range" min="0" max="1" step="0.05"
-              value={charLoraStrengthClip}
-              onChange={(e) => onChange({ charLoraStrengthClip: parseFloat(e.target.value) })}
-              className="w-full h-2 accent-blue-500"
-              disabled={disabled}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              CFG <span className="text-blue-400 font-medium">{cfg.toFixed(1)}</span>
-            </label>
-            <input
-              type="range" min="2" max="10" step="0.5"
-              value={cfg}
-              onChange={(e) => onChange({ cfg: parseFloat(e.target.value) })}
-              className="w-full h-2 accent-blue-500"
-              disabled={disabled}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              Steps <span className="text-blue-400 font-medium">{steps}</span>
-            </label>
-            <input
-              type="range" min="10" max="50" step="5"
-              value={steps}
-              onChange={(e) => onChange({ steps: parseInt(e.target.value) })}
-              className="w-full h-2 accent-blue-500"
-              disabled={disabled}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Seed lock */}
-      {lastSeed && (
-        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-          <input
-            type="checkbox"
-            checked={lockSeed}
-            onChange={(e) => onChange({ lockSeed: e.target.checked })}
-            className="rounded h-4 w-4"
-            disabled={disabled}
-          />
-          Lock seed ({lastSeed})
-        </label>
-      )}
-
-      {/* Two-pass mode — for multi-person interaction scenes */}
-      {isDualCharacter && (
-        <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 space-y-3">
-          <div className="flex items-center gap-3">
-            <Switch
-              id="two-pass"
-              checked={twoPassMode === true || twoPassMode === 'auto'}
-              onCheckedChange={(checked) => onChange({ twoPassMode: checked ? true : false })}
-              className="h-5 w-9 data-[state=checked]:bg-amber-500"
-              disabled={disabled}
-            />
-            <Label htmlFor="two-pass" className="text-sm text-muted-foreground cursor-pointer">
-              Two-pass mode
-            </Label>
-            <span className="text-[10px] text-amber-400/70 ml-auto">Scene first, then identity</span>
-          </div>
-          {(twoPassMode === true || twoPassMode === 'auto') && (
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">
-                Identity strength <span className="text-amber-400 font-medium">{twoPassDenoise.toFixed(2)}</span>
-              </label>
-              <input
-                type="range" min="0.2" max="0.5" step="0.05"
-                value={twoPassDenoise}
-                onChange={(e) => onChange({ twoPassDenoise: parseFloat(e.target.value) })}
-                className="w-full h-2 accent-amber-500"
-                disabled={disabled}
-              />
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Lower = better composition, higher = stronger character identity
-              </p>
+      <div className="mt-1.5 space-y-1.5">
+        {entries.map((e) => (
+          <div key={e.id}>
+            <div className="text-[10px] font-medium text-zinc-300">
+              {e.name}
             </div>
-          )}
-        </div>
-      )}
+            {e.locked ? (
+              <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
+                {buildSceneCharacterBlockFromLocked(e.name, e.locked)}
+              </div>
+            ) : (
+              <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
+                No portrait approved yet — falls back to description-derived
+                identity at generation time. Approve a portrait to lock the
+                exact text.
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-1.5 text-[10px] text-zinc-500">
+        Edits propagate to every image using this character. The scene prompt
+        below is appended to this text.
+      </div>
     </div>
   );
 }
@@ -1324,6 +1239,9 @@ interface ImageCardProps {
   onImageClick: (url: string) => void;
   onArtDirector: (promptId: string) => void;
   batchGenerating: boolean;
+  imageModel: ImageModel;
+  characterIdentityMap: Record<string, CharacterIdentity>;
+  onNavigateToCharacters: () => void;
 }
 
 function ImageCard({
@@ -1340,6 +1258,9 @@ function ImageCard({
   onImageClick,
   onArtDirector,
   batchGenerating,
+  imageModel,
+  characterIdentityMap,
+  onNavigateToCharacters,
 }: ImageCardProps) {
   if (!state) return null;
 
@@ -1370,13 +1291,9 @@ function ImageCard({
       ? state.promptText.slice(0, 100) + "..."
       : state.promptText;
 
-  const isExpanded = state.showAdvanced;
-
   return (
     <Card
       className={`overflow-hidden transition-colors ${
-        isExpanded ? "col-span-full" : ""
-      } ${
         isApproved
           ? "border-green-500/30"
           : isGenerated
@@ -1386,11 +1303,11 @@ function ImageCard({
               : ""
       }`}
     >
-      <div className={isExpanded ? "flex flex-col md:flex-row" : ""}>
+      <div>
         {/* Image area */}
-        <div className={`relative bg-muted/30 ${isExpanded ? "md:w-72 md:shrink-0" : "aspect-[2/3]"}`}>
+        <div className="relative bg-muted/30 aspect-[2/3]">
           {isGenerating ? (
-            <div className={`flex flex-col items-center justify-center ${isExpanded ? "h-72 md:h-full" : "absolute inset-0"}`}>
+            <div className="flex flex-col items-center justify-center absolute inset-0">
               <Loader2 className="mb-2 h-8 w-8 animate-spin text-blue-400" />
               <p className="text-xs text-blue-400">Generating...</p>
             </div>
@@ -1403,8 +1320,8 @@ function ImageCard({
               <img
                 src={state.imageUrl!}
                 alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
-                className={`w-full object-contain ${isExpanded ? "md:h-full md:object-cover" : "h-full"}`}
-                style={isExpanded ? undefined : { aspectRatio: "2/3" }}
+                className="w-full object-contain h-full"
+                style={{ aspectRatio: "2/3" }}
               />
               {isApproved && (
                 <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-[10px] font-medium text-white shadow backdrop-blur-sm">
@@ -1414,7 +1331,7 @@ function ImageCard({
               )}
             </div>
           ) : (
-            <div className={`flex flex-col items-center justify-center ${isExpanded ? "h-48 md:h-full" : "absolute inset-0"}`}>
+            <div className="flex flex-col items-center justify-center absolute inset-0">
               <div className="mb-2 h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
                 <Sparkles className="h-5 w-5 text-muted-foreground/50" />
               </div>
@@ -1424,7 +1341,7 @@ function ImageCard({
         </div>
 
         {/* Controls area */}
-        <CardContent className={`space-y-2.5 ${isExpanded ? "flex-1 p-5 space-y-4" : "p-3"}`}>
+        <CardContent className="space-y-2.5 p-3">
           {/* Status + meta row */}
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge
@@ -1470,20 +1387,31 @@ function ImageCard({
               onClick={() =>
                 onUpdatePrompt(ip.id, { showPrompt: !state.showPrompt })
               }
-              className={`text-muted-foreground hover:text-foreground transition-colors ${isExpanded ? "text-sm" : "text-[11px]"}`}
+              className="text-muted-foreground hover:text-foreground transition-colors text-[11px]"
             >
               {state.showPrompt ? "Hide prompt" : truncatedPrompt}
             </button>
             {state.showPrompt && (
-              <Textarea
-                value={state.promptText}
-                onChange={(e) =>
-                  onUpdatePrompt(ip.id, { promptText: e.target.value })
-                }
-                rows={isExpanded ? 3 : 4}
-                className={`mt-1.5 leading-relaxed resize-y bg-muted/30 ${isExpanded ? "text-sm" : "text-[11px]"}`}
-                disabled={isGenerating || isApproved}
-              />
+              <>
+                <LockedCharacterBlock
+                  imageModel={imageModel}
+                  primaryCharacterId={ip.character_id}
+                  primaryCharacterName={ip.character_name}
+                  secondaryCharacterId={ip.secondary_character_id}
+                  secondaryCharacterName={ip.secondary_character_name}
+                  characterIdentityMap={characterIdentityMap}
+                  onNavigateToCharacters={onNavigateToCharacters}
+                />
+                <Textarea
+                  value={state.promptText}
+                  onChange={(e) =>
+                    onUpdatePrompt(ip.id, { promptText: e.target.value })
+                  }
+                  rows={4}
+                  className="mt-1.5 leading-relaxed resize-y bg-muted/30 text-[11px]"
+                  disabled={isGenerating || isApproved}
+                />
+              </>
             )}
           </div>
 
@@ -1510,46 +1438,13 @@ function ImageCard({
               )}
           </div>
 
-          {/* Advanced controls toggle */}
-          <div>
-            <button
-              onClick={() =>
-                onUpdatePrompt(ip.id, { showAdvanced: !state.showAdvanced })
-              }
-              className={`flex items-center gap-1.5 text-muted-foreground hover:text-blue-400 transition-colors ${isExpanded ? "text-sm font-medium" : "text-[11px]"}`}
-            >
-              <SlidersHorizontal className={isExpanded ? "h-4 w-4" : "h-3 w-3"} />
-              {state.showAdvanced ? "Hide advanced" : "Advanced"}
-            </button>
-            {state.showAdvanced && (
-              <div className="mt-2">
-                <AdvancedControlsPanel
-                  negativePrompt={state.negativePrompt}
-                  useRawPrompt={state.useRawPrompt}
-                  lastSeed={state.lastSeed}
-                  lockSeed={state.lockSeed}
-                  charLoraStrengthModel={state.charLoraStrengthModel}
-                  charLoraStrengthClip={state.charLoraStrengthClip}
-                  cfg={state.cfg}
-                  steps={state.steps}
-                  twoPassMode={state.twoPassMode}
-                  twoPassDenoise={state.twoPassDenoise}
-                  imageType={imageType}
-                  isDualCharacter={!!ip.secondary_character_id}
-                  disabled={isGenerating || isApproved}
-                  onChange={(updates) => onUpdatePrompt(ip.id, updates)}
-                />
-              </div>
-            )}
-          </div>
-
           {/* Actions */}
           <div className="flex items-center gap-2 pt-1">
             {/* Generate / Regenerate — calls the unified /generate-image route (dispatches on image_model) */}
             {(isPending || isFailed) && (
               <Button
-                size={isExpanded ? "default" : "sm"}
-                className={isExpanded ? "text-sm" : "h-7 text-xs"}
+                size="sm"
+                className="h-7 text-xs"
                 onClick={() => onArtDirector(ip.id)}
                 disabled={batchGenerating}
               >
@@ -1560,8 +1455,8 @@ function ImageCard({
             {(isGenerated) && (
               <Button
                 variant="outline"
-                size={isExpanded ? "default" : "sm"}
-                className={isExpanded ? "text-sm" : "h-7 text-xs"}
+                size="sm"
+                className="h-7 text-xs"
                 onClick={() => onArtDirector(ip.id)}
               >
                 <RefreshCw className="mr-1.5 h-4 w-4" />
@@ -1571,8 +1466,8 @@ function ImageCard({
             {isGenerated && state.previousImageId && (
               <Button
                 variant="outline"
-                size={isExpanded ? "default" : "sm"}
-                className={`${isExpanded ? "text-sm" : "h-7 text-xs"} text-orange-400 border-orange-500/30 hover:bg-orange-500/10`}
+                size="sm"
+                className="h-7 text-xs text-orange-400 border-orange-500/30 hover:bg-orange-500/10"
                 onClick={() => onRevert(ip.id)}
                 disabled={state.isReverting}
               >
@@ -1586,8 +1481,8 @@ function ImageCard({
             )}
             {isGenerated && (
               <Button
-                size={isExpanded ? "default" : "sm"}
-                className={`bg-green-600 hover:bg-green-700 ${isExpanded ? "text-sm" : "h-7 text-xs"}`}
+                size="sm"
+                className="bg-green-600 hover:bg-green-700 h-7 text-xs"
                 onClick={() => onApprove(ip.id)}
               >
                 <Check className="mr-1.5 h-4 w-4" />
@@ -1598,8 +1493,8 @@ function ImageCard({
               <>
                 <Button
                   variant="outline"
-                  size={isExpanded ? "default" : "sm"}
-                  className={`text-green-400 border-green-500/30 ${isExpanded ? "text-sm" : "h-7 text-xs"}`}
+                  size="sm"
+                  className="text-green-400 border-green-500/30 h-7 text-xs"
                   disabled
                 >
                   <Check className="mr-1.5 h-4 w-4" />
@@ -1607,8 +1502,8 @@ function ImageCard({
                 </Button>
                 <Button
                   variant="outline"
-                  size={isExpanded ? "default" : "sm"}
-                  className={isExpanded ? "text-sm" : "h-7 text-xs"}
+                  size="sm"
+                  className="h-7 text-xs"
                   onClick={() => onArtDirector(ip.id)}
                   disabled={batchGenerating}
                 >

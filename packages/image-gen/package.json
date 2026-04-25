@@ -7,7 +7,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./controlnet": "./src/controlnet/index.ts",
-    "./runpod": "./src/runpod.ts"
+    "./runpod": "./src/runpod.ts",
+    "./portrait-prompt-builder": "./src/portrait-prompt-builder.ts",
+    "./prompt-constants": "./src/prompt-constants.ts"
   },
   "scripts": {
     "lint": "eslint . --ext .ts,.tsx"
