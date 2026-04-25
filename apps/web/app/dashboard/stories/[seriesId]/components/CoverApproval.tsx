@@ -107,6 +107,11 @@ export default function CoverApproval({ seriesId }: Props) {
   // Also poll each outstanding job directly so the status endpoint drives
   // webhook-style writes. /api/status/[jobId] is pull-driven — nothing
   // advances generation_jobs.status until someone GETs it.
+  // Per-slot timestamps used to bust the browser image cache when a variant
+  // is regenerated (the storage path never changes, so without this the
+  // browser serves the old image after an overwrite).
+  const [variantTs, setVariantTs] = useState<number[]>(() => Array(VARIANT_COUNT).fill(Date.now()));
+
   const [outstandingJobs, setOutstandingJobs] = useState<string[]>([]);
   useEffect(() => {
     if (outstandingJobs.length === 0) return;
@@ -160,6 +165,10 @@ export default function CoverApproval({ seriesId }: Props) {
       }
       setOutstandingJobs(data.jobIds ?? []);
       setPromptDirty(false);
+      // Bust cache for the regenerated slots so the browser loads the new image
+      const regeneratedIndices: number[] = body.retryVariants ?? Array.from({ length: VARIANT_COUNT }, (_, i) => i);
+      const now = Date.now();
+      setVariantTs((prev) => prev.map((ts, i) => regeneratedIndices.includes(i) ? now : ts));
       await fetchCover();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
@@ -381,6 +390,7 @@ export default function CoverApproval({ seriesId }: Props) {
                 key={i}
                 index={i}
                 url={url}
+                ts={variantTs[i]}
                 isGenerating={isGenerating}
                 isSelected={selectedIdx === i}
                 canSelect={
@@ -389,6 +399,14 @@ export default function CoverApproval({ seriesId }: Props) {
                   state.cover_status === "complete"
                 }
                 onSelect={() => setPendingSelection(i)}
+                onRegenerate={() => handleRetrySingle(i)}
+                canRegenerate={
+                  !busy &&
+                  !isGenerating &&
+                  (state.cover_status === "variants_ready" ||
+                    state.cover_status === "approved" ||
+                    state.cover_status === "complete")
+                }
                 onRetry={() => handleRetrySingle(i)}
                 retryDisabled={busy || isGenerating}
                 showFailed={
@@ -491,10 +509,13 @@ function primaryButtonLabel(
 interface VariantSlotProps {
   index: number;
   url: string | null;
+  ts: number;
   isGenerating: boolean;
   isSelected: boolean;
   canSelect: boolean;
   onSelect: () => void;
+  onRegenerate: () => void;
+  canRegenerate: boolean;
   onRetry: () => void;
   retryDisabled: boolean;
   showFailed: boolean;
@@ -503,10 +524,13 @@ interface VariantSlotProps {
 function VariantSlot({
   index,
   url,
+  ts,
   isGenerating,
   isSelected,
   canSelect,
   onSelect,
+  onRegenerate,
+  canRegenerate,
   onRetry,
   retryDisabled,
   showFailed,
@@ -517,19 +541,34 @@ function VariantSlot({
 
   if (url) {
     return (
-      <button
-        type="button"
-        onClick={canSelect ? onSelect : undefined}
-        disabled={!canSelect}
-        className={`group relative aspect-[2/3] overflow-hidden rounded-md border border-border bg-muted transition ${ring} ${
-          canSelect ? "cursor-pointer hover:opacity-95" : "cursor-default"
-        }`}
-      >
-        <img src={url} alt={`Variant ${index + 1}`} className="h-full w-full object-cover" />
-        <div className="absolute top-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white">
+      <div className={`group relative aspect-[2/3] overflow-hidden rounded-md border border-border bg-muted transition ${ring}`}>
+        <button
+          type="button"
+          onClick={canSelect ? onSelect : undefined}
+          disabled={!canSelect}
+          className={`absolute inset-0 w-full h-full ${canSelect ? "cursor-pointer" : "cursor-default"}`}
+        >
+          <img
+            src={`${url}?t=${ts}`}
+            alt={`Variant ${index + 1}`}
+            className="h-full w-full object-cover"
+          />
+        </button>
+        <div className="absolute top-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white pointer-events-none">
           {index + 1}
         </div>
-      </button>
+        {canRegenerate && (
+          <div className="absolute bottom-2 inset-x-0 flex justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRegenerate(); }}
+              className="rounded bg-black/75 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-black/90 backdrop-blur-sm"
+            >
+              ↻ Regenerate
+            </button>
+          </div>
+        )}
+      </div>
     );
   }
 
