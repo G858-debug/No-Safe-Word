@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,7 @@ import CoverApproval from "./components/CoverApproval";
 import BlurbSelection from "./components/BlurbSelection";
 import ImageGeneration from "./components/ImageGeneration";
 import PublishPanel from "./components/PublishPanel";
+import CoverStatusPill from "./components/CoverStatusPill";
 import type {
   StorySeriesRow,
   StoryPostRow,
@@ -208,6 +209,56 @@ export default function SeriesDetailPage() {
 
     fetchData();
   }, [seriesId]);
+
+  // Poll cover status every 30 s while generating or compositing so the
+  // status pill stays current even when the user is on a different tab.
+  const coverStatusForPoll = (data?.series.cover_status ?? "pending") as CoverStatus;
+  useEffect(() => {
+    if (
+      coverStatusForPoll !== "generating" &&
+      coverStatusForPoll !== "compositing"
+    ) {
+      return;
+    }
+    const id = setInterval(() => {
+      fetch(`/api/stories/${seriesId}`)
+        .then((r) => r.json())
+        .then((d) => setData(d))
+        .catch(() => {/* non-fatal */});
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [coverStatusForPoll, seriesId]);
+
+  // Page-load reconciliation: when the publisher loads and cover_status is
+  // 'generating', drive any pending RunPod/Replicate jobs through their status
+  // handlers so DB state reflects reality (catches drift if the user closed
+  // the tab mid-generation and returned later).
+  const reconciledRef = useRef(false);
+  useEffect(() => {
+    if (reconciledRef.current) return;
+    if (!data || data.series.cover_status !== "generating") return;
+    reconciledRef.current = true;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/stories/${seriesId}/pending-cover-jobs`);
+        if (!res.ok) return;
+        const { jobIds } = (await res.json()) as { jobIds: string[] };
+        if (!jobIds?.length) return;
+        // Trigger each job's status handler — drives maybeTransitionCoverStatus
+        await Promise.allSettled(
+          jobIds.map((jid) => fetch(`/api/status/${jid}`))
+        );
+        // Refresh series to pick up any state transition
+        const fresh = await fetch(`/api/stories/${seriesId}`).then((r) =>
+          r.json()
+        );
+        setData(fresh);
+      } catch {
+        /* non-fatal */
+      }
+    })();
+  }, [data?.series.id, seriesId]);
 
   // Derived state
   const allCharsApproved =
@@ -428,6 +479,14 @@ export default function SeriesDetailPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Cover status pill — visible from any tab while generation is in flight */}
+      <div className="flex items-center">
+        <CoverStatusPill
+          coverStatus={coverStatus}
+          onNavigateToCover={() => setActiveTab("cover")}
+        />
       </div>
 
       {/* Tabs */}
@@ -681,15 +740,14 @@ export default function SeriesDetailPage() {
         </div>
 
         {/* ======================= BLURBS TAB ======================= */}
+        {/* Cover approval no longer blocks blurb selection — covers generate
+            in the background while the user works on blurbs. Final publish
+            still requires an approved cover (enforced in PublishPanel). */}
         <div className={activeTab === "blurbs" ? "mt-6" : "hidden"}>
-          {coverAtLeastApproved ? (
+          {allCharsApproved ? (
             <BlurbSelection
               seriesId={seriesId}
               onChange={() => {
-                // Refresh the series data so downstream tab gates see the
-                // new blurb_*_selected values. fetchData is an IIFE above,
-                // so we just reload — cheap and matches the existing
-                // model-change flow.
                 fetch(`/api/stories/${seriesId}`)
                   .then((r) => r.json())
                   .then((d) => setData(d))
@@ -700,12 +758,12 @@ export default function SeriesDetailPage() {
             />
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <FileText className="mb-4 h-12 w-12 text-yellow-400" />
-              <h3 className="mb-2 text-lg font-semibold">Approve the Cover First</h3>
+              <Users className="mb-4 h-12 w-12 text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">
+                Approve Characters First
+              </h3>
               <p className="max-w-md text-sm text-muted-foreground">
-                Blurb selection unlocks once the cover is approved. The
-                short blurb also drives a cover re-composite, so the cover
-                needs to be in place first.
+                Complete the Characters step before selecting blurbs.
               </p>
             </div>
           )}
@@ -753,6 +811,7 @@ export default function SeriesDetailPage() {
             seriesId={seriesId}
             posts={posts}
             imageUrls={data.image_urls}
+            coverStatus={coverStatus}
           />
         </div>
       </Tabs>

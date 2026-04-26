@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
+import type { CoverStatus } from "@no-safe-word/shared";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -69,6 +70,7 @@ interface PublishPanelProps {
   seriesId: string;
   posts: PostData[];
   imageUrls: Record<string, string>;
+  coverStatus: CoverStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +113,12 @@ export default function PublishPanel({
   seriesId,
   posts: initialPosts,
   imageUrls,
+  coverStatus,
 }: PublishPanelProps) {
+  const coverApproved =
+    coverStatus === "approved" ||
+    coverStatus === "compositing" ||
+    coverStatus === "complete";
   const [posts, setPosts] = useState(initialPosts);
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(
     new Set(initialPosts.length > 0 ? [initialPosts[0].id] : [])
@@ -830,6 +837,20 @@ export default function PublishPanel({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Blocker: cover not approved */}
+          {!coverApproved && (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Cover not approved</p>
+                <p className="text-red-400/70">
+                  An approved cover is required before publishing. Go to the
+                  Cover tab to generate and approve a variant.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Warning: not all images approved */}
           {!allImagesApproved && (
             <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-400">
@@ -851,7 +872,10 @@ export default function PublishPanel({
             <Button
               variant="outline"
               onClick={() => setShowSchedule(!showSchedule)}
-              disabled={statusSummary.published === statusSummary.total}
+              disabled={
+                !coverApproved ||
+                statusSummary.published === statusSummary.total
+              }
             >
               <Calendar className="mr-2 h-4 w-4" />
               Schedule All
@@ -861,6 +885,7 @@ export default function PublishPanel({
             <Button
               onClick={publishAll}
               disabled={
+                !coverApproved ||
                 publishAllRunning ||
                 statusSummary.published === statusSummary.total
               }
