@@ -88,6 +88,9 @@ interface SeriesData {
       character_block_override: string | null;
       secondary_character_block_override: string | null;
       suppress_character_block: boolean;
+      clothing_override: string | null;
+      sfw_constraint_override: string | null;
+      visual_signature_override: string | null;
     }[];
   })[];
   characters: CharacterFromAPI[];
