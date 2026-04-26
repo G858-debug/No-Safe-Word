@@ -792,6 +792,7 @@ export type Database = {
           post_id: string
           previous_image_id: string | null
           prompt: string
+          secondary_character_block_override: string | null
           secondary_character_id: string | null
           secondary_character_name: string | null
           sfw_image_id: string | null
@@ -813,6 +814,7 @@ export type Database = {
           post_id: string
           previous_image_id?: string | null
           prompt: string
+          secondary_character_block_override?: string | null
           secondary_character_id?: string | null
           secondary_character_name?: string | null
           sfw_image_id?: string | null
@@ -834,6 +836,7 @@ export type Database = {
           post_id?: string
           previous_image_id?: string | null
           prompt?: string
+          secondary_character_block_override?: string | null
           secondary_character_id?: string | null
           secondary_character_name?: string | null
           sfw_image_id?: string | null

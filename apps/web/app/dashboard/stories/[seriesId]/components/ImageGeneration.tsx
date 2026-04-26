@@ -101,6 +101,7 @@ export interface ImagePromptData {
   previous_image_id: string | null;
   status: string;
   character_block_override: string | null;
+  secondary_character_block_override: string | null;
 }
 
 export interface PostWithPrompts {
@@ -143,6 +144,9 @@ interface PromptState {
   characterBlockOverride: string | null;
   savedCharacterBlockOverride: string | null;
   showOverride: boolean;
+  secondaryCharacterBlockOverride: string | null;
+  savedSecondaryCharacterBlockOverride: string | null;
+  showSecondaryOverride: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +276,9 @@ export default function ImageGeneration({
           characterBlockOverride: ip.character_block_override ?? null,
           savedCharacterBlockOverride: ip.character_block_override ?? null,
           showOverride: Boolean(ip.character_block_override),
+          secondaryCharacterBlockOverride: ip.secondary_character_block_override ?? null,
+          savedSecondaryCharacterBlockOverride: ip.secondary_character_block_override ?? null,
+          showSecondaryOverride: Boolean(ip.secondary_character_block_override),
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -530,6 +537,26 @@ export default function ImageGeneration({
             return;
           }
           updatePrompt(promptId, { savedCharacterBlockOverride: state.characterBlockOverride });
+        }
+
+        if (state.secondaryCharacterBlockOverride !== state.savedSecondaryCharacterBlockOverride) {
+          const secOverrideRes = await fetch(
+            `/api/stories/images/${promptId}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ secondary_character_block_override: state.secondaryCharacterBlockOverride }),
+            }
+          );
+          if (!secOverrideRes.ok) {
+            const secOverrideErr = await secOverrideRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: secOverrideErr?.error ?? "Failed to save secondary character block override",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedSecondaryCharacterBlockOverride: state.secondaryCharacterBlockOverride });
         }
 
         const res = await fetch(
@@ -1174,6 +1201,11 @@ interface LockedCharacterBlockProps {
   onOverrideChange: (text: string) => void;
   onToggleOverride: (prefilledText: string) => void;
   onClearOverride: () => void;
+  secondaryCharacterBlockOverride: string | null;
+  showSecondaryOverride: boolean;
+  onSecondaryOverrideChange: (text: string) => void;
+  onSecondaryToggleOverride: (prefilledText: string) => void;
+  onSecondaryClearOverride: () => void;
 }
 
 function LockedCharacterBlock({
@@ -1189,33 +1221,46 @@ function LockedCharacterBlock({
   onOverrideChange,
   onToggleOverride,
   onClearOverride,
+  secondaryCharacterBlockOverride,
+  showSecondaryOverride,
+  onSecondaryOverrideChange,
+  onSecondaryToggleOverride,
+  onSecondaryClearOverride,
 }: LockedCharacterBlockProps) {
   if (imageModel !== "hunyuan3") return null;
   if (!primaryCharacterId && !secondaryCharacterId) return null;
 
-  const entries: Array<{ id: string; name: string; locked: string | null }> = [];
+  const primaryIdent = primaryCharacterId
+    ? characterIdentityMap[primaryCharacterId]
+    : null;
+  const primaryEntry = primaryCharacterId
+    ? {
+        id: primaryCharacterId,
+        name: primaryIdent?.name ?? primaryCharacterName ?? "Character",
+        locked: primaryIdent?.portraitPromptLocked ?? null,
+      }
+    : null;
 
-  if (primaryCharacterId) {
-    const ident = characterIdentityMap[primaryCharacterId];
-    entries.push({
-      id: primaryCharacterId,
-      name: ident?.name ?? primaryCharacterName ?? "Character",
-      locked: ident?.portraitPromptLocked ?? null,
-    });
-  }
-  if (secondaryCharacterId) {
-    const ident = characterIdentityMap[secondaryCharacterId];
-    entries.push({
-      id: secondaryCharacterId,
-      name: ident?.name ?? secondaryCharacterName ?? "Character",
-      locked: ident?.portraitPromptLocked ?? null,
-    });
-  }
+  const secondaryIdent = secondaryCharacterId
+    ? characterIdentityMap[secondaryCharacterId]
+    : null;
+  const secondaryEntry = secondaryCharacterId
+    ? {
+        id: secondaryCharacterId,
+        name: secondaryIdent?.name ?? secondaryCharacterName ?? "Character",
+        locked: secondaryIdent?.portraitPromptLocked ?? null,
+      }
+    : null;
 
-  const primaryEntry = entries[0];
-  const defaultLockedText = primaryEntry?.locked
+  const defaultPrimaryLocked = primaryEntry?.locked
     ? buildSceneCharacterBlockFromLocked(primaryEntry.name, primaryEntry.locked)
     : "";
+  const defaultSecondaryLocked = secondaryEntry?.locked
+    ? buildSceneCharacterBlockFromLocked(secondaryEntry.name, secondaryEntry.locked)
+    : "";
+
+  const eitherOverrideActive =
+    characterBlockOverride !== null || secondaryCharacterBlockOverride !== null;
 
   return (
     <div className="mt-1.5 rounded border border-zinc-700/40 bg-zinc-900/40 p-2">
@@ -1223,7 +1268,7 @@ function LockedCharacterBlock({
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
           <Lock className="h-3 w-3" />
           Locked character text (Hunyuan)
-          {characterBlockOverride !== null && (
+          {eitherOverrideActive && (
             <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-400">
               Custom
             </span>
@@ -1237,85 +1282,138 @@ function LockedCharacterBlock({
         </button>
       </div>
 
-      {!showOverride && (
-        <div className="mt-1.5 space-y-1.5">
-          {entries.map((e) => (
-            <div key={e.id}>
-              <div className="text-[10px] font-medium text-zinc-300">{e.name}</div>
-              {characterBlockOverride !== null && e.id === primaryCharacterId ? (
+      <div className="mt-1.5 space-y-2.5">
+        {primaryEntry && (
+          <div>
+            <div className="text-[10px] font-medium text-zinc-300">
+              {primaryEntry.name}
+            </div>
+            {!showOverride && (
+              characterBlockOverride !== null ? (
                 <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-amber-950/30 px-2 py-1 font-mono text-[10px] leading-relaxed text-amber-300/80">
                   {characterBlockOverride}
                 </div>
-              ) : e.locked ? (
+              ) : primaryEntry.locked ? (
                 <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
-                  {buildSceneCharacterBlockFromLocked(e.name, e.locked)}
+                  {buildSceneCharacterBlockFromLocked(primaryEntry.name, primaryEntry.locked)}
                 </div>
               ) : (
                 <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
                   No portrait approved yet — falls back to description-derived
-                  identity at generation time. Approve a portrait to lock the
-                  exact text.
+                  identity at generation time.
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {showOverride && (
-        <div className="mt-1.5 space-y-1.5">
-          <div className="text-[10px] text-amber-400/80">
-            This override applies to this image only.{" "}
-            {primaryEntry && (
-              <>
-                Other images using{" "}
-                <span className="font-medium text-amber-300">{primaryEntry.name}</span>{" "}
-                are not affected.
-              </>
+              )
             )}
-          </div>
-          <Textarea
-            value={characterBlockOverride ?? ""}
-            onChange={(e) => onOverrideChange(e.target.value)}
-            rows={4}
-            className="leading-relaxed resize-y border-amber-700/40 bg-amber-950/20 font-mono text-[11px]"
-            placeholder="Enter custom character block for this image only…"
-          />
-        </div>
-      )}
-
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        {!showOverride && (
-          <div className="text-[10px] text-zinc-500">
-            Edits propagate to every image using this character. The scene
-            prompt below is appended to this text.
+            {showOverride && (
+              <div className="mt-0.5 space-y-1">
+                <div className="text-[10px] text-amber-400/80">
+                  This override applies to this image only. Other images using{" "}
+                  <span className="font-medium text-amber-300">{primaryEntry.name}</span>{" "}
+                  are not affected.
+                </div>
+                <Textarea
+                  value={characterBlockOverride ?? ""}
+                  onChange={(e) => onOverrideChange(e.target.value)}
+                  rows={4}
+                  className="leading-relaxed resize-y border-amber-700/40 bg-amber-950/20 font-mono text-[11px]"
+                  placeholder="Enter custom character block for this image only…"
+                />
+              </div>
+            )}
+            <div className="mt-1 flex items-center justify-end gap-2">
+              {characterBlockOverride !== null && !showOverride && (
+                <button
+                  onClick={onClearOverride}
+                  className="text-[10px] text-zinc-400 transition-colors hover:text-red-400"
+                >
+                  Clear override
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (!showOverride && characterBlockOverride === null) {
+                    onToggleOverride(defaultPrimaryLocked);
+                  } else {
+                    onToggleOverride(characterBlockOverride ?? defaultPrimaryLocked);
+                  }
+                }}
+                className="text-[10px] text-blue-400 transition-colors hover:text-blue-300"
+              >
+                {showOverride ? "Hide editor" : "Override for this image only"}
+              </button>
+            </div>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          {characterBlockOverride !== null && !showOverride && (
-            <button
-              onClick={onClearOverride}
-              className="text-[10px] text-zinc-400 transition-colors hover:text-red-400"
-            >
-              Clear override
-            </button>
-          )}
-          {primaryEntry && (
-            <button
-              onClick={() => {
-                if (!showOverride && characterBlockOverride === null) {
-                  onToggleOverride(defaultLockedText);
-                } else {
-                  onToggleOverride(characterBlockOverride ?? defaultLockedText);
-                }
-              }}
-              className="text-[10px] text-blue-400 transition-colors hover:text-blue-300"
-            >
-              {showOverride ? "Hide editor" : "Override for this image only"}
-            </button>
-          )}
-        </div>
+
+        {secondaryEntry && (
+          <div>
+            <div className="text-[10px] font-medium text-zinc-300">
+              {secondaryEntry.name}
+            </div>
+            {!showSecondaryOverride && (
+              secondaryCharacterBlockOverride !== null ? (
+                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-amber-950/30 px-2 py-1 font-mono text-[10px] leading-relaxed text-amber-300/80">
+                  {secondaryCharacterBlockOverride}
+                </div>
+              ) : secondaryEntry.locked ? (
+                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
+                  {buildSceneCharacterBlockFromLocked(secondaryEntry.name, secondaryEntry.locked)}
+                </div>
+              ) : (
+                <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
+                  No portrait approved yet — falls back to description-derived
+                  identity at generation time.
+                </div>
+              )
+            )}
+            {showSecondaryOverride && (
+              <div className="mt-0.5 space-y-1">
+                <div className="text-[10px] text-amber-400/80">
+                  This override applies to this image only. Other images using{" "}
+                  <span className="font-medium text-amber-300">{secondaryEntry.name}</span>{" "}
+                  are not affected.
+                </div>
+                <Textarea
+                  value={secondaryCharacterBlockOverride ?? ""}
+                  onChange={(e) => onSecondaryOverrideChange(e.target.value)}
+                  rows={4}
+                  className="leading-relaxed resize-y border-amber-700/40 bg-amber-950/20 font-mono text-[11px]"
+                  placeholder="Enter custom character block for this image only…"
+                />
+              </div>
+            )}
+            <div className="mt-1 flex items-center justify-end gap-2">
+              {secondaryCharacterBlockOverride !== null && !showSecondaryOverride && (
+                <button
+                  onClick={onSecondaryClearOverride}
+                  className="text-[10px] text-zinc-400 transition-colors hover:text-red-400"
+                >
+                  Clear override
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (!showSecondaryOverride && secondaryCharacterBlockOverride === null) {
+                    onSecondaryToggleOverride(defaultSecondaryLocked);
+                  } else {
+                    onSecondaryToggleOverride(secondaryCharacterBlockOverride ?? defaultSecondaryLocked);
+                  }
+                }}
+                className="text-[10px] text-blue-400 transition-colors hover:text-blue-300"
+              >
+                {showSecondaryOverride ? "Hide editor" : "Override for this image only"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {!showOverride && !showSecondaryOverride && (
+        <div className="mt-1.5 text-[10px] text-zinc-500">
+          Edits propagate to every image using this character. The scene
+          prompt below is appended to this text.
+        </div>
+      )}
     </div>
   );
 }
@@ -1470,7 +1568,7 @@ function ImageCard({
                 Diagnostic
               </Badge>
             )}
-            {state.characterBlockOverride !== null && (
+            {(state.characterBlockOverride !== null || state.secondaryCharacterBlockOverride !== null) && (
               <Badge
                 variant="outline"
                 className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30"
@@ -1526,14 +1624,32 @@ function ImageCard({
                   onClearOverride={() =>
                     onUpdatePrompt(ip.id, { characterBlockOverride: null, showOverride: false })
                   }
+                  secondaryCharacterBlockOverride={state.secondaryCharacterBlockOverride}
+                  showSecondaryOverride={state.showSecondaryOverride}
+                  onSecondaryOverrideChange={(text) =>
+                    onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: text })
+                  }
+                  onSecondaryToggleOverride={(prefilledText) => {
+                    if (!state.showSecondaryOverride && state.secondaryCharacterBlockOverride === null) {
+                      onUpdatePrompt(ip.id, {
+                        showSecondaryOverride: true,
+                        secondaryCharacterBlockOverride: prefilledText,
+                      });
+                    } else {
+                      onUpdatePrompt(ip.id, { showSecondaryOverride: !state.showSecondaryOverride });
+                    }
+                  }}
+                  onSecondaryClearOverride={() =>
+                    onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: null, showSecondaryOverride: false })
+                  }
                 />
                 <Textarea
                   value={state.promptText}
                   onChange={(e) =>
                     onUpdatePrompt(ip.id, { promptText: e.target.value })
                   }
-                  rows={4}
-                  className="mt-1.5 leading-relaxed resize-y bg-muted/30 text-[11px]"
+                  rows={10}
+                  className="mt-1.5 leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
                   disabled={isGenerating || isApproved}
                 />
               </>

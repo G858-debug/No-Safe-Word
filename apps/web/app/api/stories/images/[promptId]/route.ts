@@ -46,17 +46,19 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { prompt, character_block_override } = body as {
+    const { prompt, character_block_override, secondary_character_block_override } = body as {
       prompt?: string;
       character_block_override?: string | null;
+      secondary_character_block_override?: string | null;
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
     const hasOverrideUpdate = character_block_override !== undefined;
+    const hasSecondaryOverrideUpdate = secondary_character_block_override !== undefined;
 
-    if (!hasPromptUpdate && !hasOverrideUpdate) {
+    if (!hasPromptUpdate && !hasOverrideUpdate && !hasSecondaryOverrideUpdate) {
       return NextResponse.json(
-        { error: "prompt or character_block_override is required" },
+        { error: "prompt, character_block_override, or secondary_character_block_override is required" },
         { status: 400 }
       );
     }
@@ -78,6 +80,7 @@ export async function PATCH(
     const updates: Record<string, unknown> = {};
     if (hasPromptUpdate) updates.prompt = prompt;
     if (hasOverrideUpdate) updates.character_block_override = character_block_override;
+    if (hasSecondaryOverrideUpdate) updates.secondary_character_block_override = secondary_character_block_override;
 
     // Reset to pending on any content change so the next generation uses fresh data
     if (existing.status === "generated" || existing.status === "approved") {

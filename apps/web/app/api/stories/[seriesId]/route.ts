@@ -32,7 +32,7 @@ export async function GET(
       story_image_prompts (
         id, image_type, pairs_with, position, position_after_word,
         character_name, character_id, secondary_character_id, secondary_character_name,
-        prompt, image_id, previous_image_id, status, character_block_override
+        prompt, image_id, previous_image_id, status, character_block_override, secondary_character_block_override
       )
     `
     )
