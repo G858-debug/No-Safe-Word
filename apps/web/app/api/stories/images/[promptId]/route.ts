@@ -46,19 +46,21 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { prompt, character_block_override, secondary_character_block_override } = body as {
+    const { prompt, character_block_override, secondary_character_block_override, suppress_character_block } = body as {
       prompt?: string;
       character_block_override?: string | null;
       secondary_character_block_override?: string | null;
+      suppress_character_block?: boolean | null;
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
     const hasOverrideUpdate = character_block_override !== undefined;
     const hasSecondaryOverrideUpdate = secondary_character_block_override !== undefined;
+    const hasSuppressUpdate = suppress_character_block !== undefined;
 
-    if (!hasPromptUpdate && !hasOverrideUpdate && !hasSecondaryOverrideUpdate) {
+    if (!hasPromptUpdate && !hasOverrideUpdate && !hasSecondaryOverrideUpdate && !hasSuppressUpdate) {
       return NextResponse.json(
-        { error: "prompt, character_block_override, or secondary_character_block_override is required" },
+        { error: "prompt, character_block_override, secondary_character_block_override, or suppress_character_block is required" },
         { status: 400 }
       );
     }
@@ -81,6 +83,7 @@ export async function PATCH(
     if (hasPromptUpdate) updates.prompt = prompt;
     if (hasOverrideUpdate) updates.character_block_override = character_block_override;
     if (hasSecondaryOverrideUpdate) updates.secondary_character_block_override = secondary_character_block_override;
+    if (hasSuppressUpdate) updates.suppress_character_block = suppress_character_block;
 
     // Reset to pending on any content change so the next generation uses fresh data
     if (existing.status === "generated" || existing.status === "approved") {

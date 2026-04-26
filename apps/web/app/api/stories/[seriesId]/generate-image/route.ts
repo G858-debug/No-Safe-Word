@@ -76,7 +76,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, character_block_override, secondary_character_block_override"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, character_block_override, secondary_character_block_override, suppress_character_block"
     )
     .eq("id", promptId)
     .single();
@@ -139,16 +139,21 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       }
     }
 
-    const primaryBlock = prompt.character_block_override?.trim()
-      ? prompt.character_block_override.trim()
-      : prompt.character_id
-        ? charBlocks[prompt.character_id]
-        : undefined;
-    const secondaryBlock = prompt.secondary_character_block_override?.trim()
-      ? prompt.secondary_character_block_override.trim()
-      : prompt.secondary_character_id
-        ? charBlocks[prompt.secondary_character_id]
-        : undefined;
+    let primaryBlock: string | undefined;
+    let secondaryBlock: string | undefined;
+
+    if (!prompt.suppress_character_block) {
+      primaryBlock = prompt.character_block_override?.trim()
+        ? prompt.character_block_override.trim()
+        : prompt.character_id
+          ? charBlocks[prompt.character_id]
+          : undefined;
+      secondaryBlock = prompt.secondary_character_block_override?.trim()
+        ? prompt.secondary_character_block_override.trim()
+        : prompt.secondary_character_id
+          ? charBlocks[prompt.secondary_character_id]
+          : undefined;
+    }
 
     // Guard — require portrait approval before generating scenes so the
     // character's appearance is anchored in the system.
@@ -234,12 +239,13 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
         image_id: imageId,
         previous_image_id: currentPrompt?.image_id ?? null,
         debug_data: {
-          primary_block_source: prompt.character_block_override?.trim()
-            ? "override"
-            : "db",
-          secondary_block_source: prompt.secondary_character_block_override?.trim()
-            ? "override"
-            : "db",
+          primary_block_source: prompt.suppress_character_block
+            ? "suppressed"
+            : prompt.character_block_override?.trim() ? "override" : "db",
+          secondary_block_source: prompt.suppress_character_block
+            ? "suppressed"
+            : prompt.secondary_character_block_override?.trim() ? "override" : "db",
+          suppressed: Boolean(prompt.suppress_character_block),
         },
       })
       .eq("id", promptId);

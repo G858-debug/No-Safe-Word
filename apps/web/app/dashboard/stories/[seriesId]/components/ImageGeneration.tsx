@@ -147,6 +147,8 @@ interface PromptState {
   secondaryCharacterBlockOverride: string | null;
   savedSecondaryCharacterBlockOverride: string | null;
   showSecondaryOverride: boolean;
+  suppressCharacterBlock: boolean;
+  savedSuppressCharacterBlock: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +281,8 @@ export default function ImageGeneration({
           secondaryCharacterBlockOverride: ip.secondary_character_block_override ?? null,
           savedSecondaryCharacterBlockOverride: ip.secondary_character_block_override ?? null,
           showSecondaryOverride: Boolean(ip.secondary_character_block_override),
+          suppressCharacterBlock: ip.suppress_character_block ?? false,
+          savedSuppressCharacterBlock: ip.suppress_character_block ?? false,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -557,6 +561,23 @@ export default function ImageGeneration({
             return;
           }
           updatePrompt(promptId, { savedSecondaryCharacterBlockOverride: state.secondaryCharacterBlockOverride });
+        }
+
+        if (state.suppressCharacterBlock !== state.savedSuppressCharacterBlock) {
+          const suppressRes = await fetch(`/api/stories/images/${promptId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ suppress_character_block: state.suppressCharacterBlock }),
+          });
+          if (!suppressRes.ok) {
+            const suppressErr = await suppressRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: suppressErr?.error ?? "Failed to save character block suppression",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedSuppressCharacterBlock: state.suppressCharacterBlock });
         }
 
         const res = await fetch(
@@ -1206,6 +1227,8 @@ interface LockedCharacterBlockProps {
   onSecondaryOverrideChange: (text: string) => void;
   onSecondaryToggleOverride: (prefilledText: string) => void;
   onSecondaryClearOverride: () => void;
+  suppressCharacterBlock: boolean;
+  onToggleSuppressCharacterBlock: () => void;
 }
 
 function LockedCharacterBlock({
@@ -1226,6 +1249,8 @@ function LockedCharacterBlock({
   onSecondaryOverrideChange,
   onSecondaryToggleOverride,
   onSecondaryClearOverride,
+  suppressCharacterBlock,
+  onToggleSuppressCharacterBlock,
 }: LockedCharacterBlockProps) {
   if (imageModel !== "hunyuan3") return null;
   if (!primaryCharacterId && !secondaryCharacterId) return null;
@@ -1268,21 +1293,40 @@ function LockedCharacterBlock({
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
           <Lock className="h-3 w-3" />
           Locked character text (Hunyuan)
-          {eitherOverrideActive && (
+          {eitherOverrideActive && !suppressCharacterBlock && (
             <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-400">
               Custom
             </span>
           )}
         </div>
-        <button
-          onClick={onNavigateToCharacters}
-          className="text-[10px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
-        >
-          Edit in Characters
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleSuppressCharacterBlock}
+            className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+              suppressCharacterBlock
+                ? "border-red-700/40 bg-red-900/30 text-red-400 hover:bg-red-900/50"
+                : "border-zinc-700/30 bg-zinc-800/40 text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {suppressCharacterBlock ? "Suppressed" : "Inject"}
+          </button>
+          <button
+            onClick={onNavigateToCharacters}
+            className="text-[10px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
+          >
+            Edit in Characters
+          </button>
+        </div>
       </div>
 
-      <div className="mt-1.5 space-y-2.5">
+      {suppressCharacterBlock ? (
+        <p className="mt-1.5 rounded bg-zinc-900/60 px-2 py-1.5 text-[10px] italic text-zinc-500">
+          No character description will be sent for this image. Use this for detail shots, hands, objects, and atmospheric images.
+        </p>
+      ) : (
+        <>
+        <div className="mt-1.5 space-y-2.5">
         {primaryEntry && (
           <div>
             <div className="text-[10px] font-medium text-zinc-300">
@@ -1414,6 +1458,8 @@ function LockedCharacterBlock({
           prompt below is appended to this text.
         </div>
       )}
+        </>
+      )}
     </div>
   );
 }
@@ -1490,7 +1536,7 @@ function ImageCard({
 
   return (
     <Card
-      className={`overflow-hidden transition-colors ${
+      className={`overflow-visible transition-colors ${
         isApproved
           ? "border-green-500/30"
           : isGenerated
@@ -1538,7 +1584,9 @@ function ImageCard({
         </div>
 
         {/* Controls area */}
-        <CardContent className="space-y-2.5 p-3">
+        <CardContent className="p-0">
+          {/* Zone 1: always-visible header */}
+          <div className="space-y-2.5 p-3">
           {/* Status + meta row */}
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge
@@ -1576,6 +1624,14 @@ function ImageCard({
                 Custom char block
               </Badge>
             )}
+            {state.suppressCharacterBlock && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 bg-zinc-700/20 text-zinc-400 border-zinc-700/40"
+              >
+                No char injection
+              </Badge>
+            )}
           </div>
 
           {/* Error */}
@@ -1586,101 +1642,105 @@ function ImageCard({
             </div>
           )}
 
-          {/* Collapsible prompt */}
-          <div>
-            <button
-              onClick={() =>
-                onUpdatePrompt(ip.id, { showPrompt: !state.showPrompt })
-              }
-              className="text-muted-foreground hover:text-foreground transition-colors text-[11px]"
-            >
-              {state.showPrompt ? "Hide prompt" : truncatedPrompt}
-            </button>
-            {state.showPrompt && (
-              <>
-                <LockedCharacterBlock
-                  imageModel={imageModel}
-                  primaryCharacterId={ip.character_id}
-                  primaryCharacterName={ip.character_name}
-                  secondaryCharacterId={ip.secondary_character_id}
-                  secondaryCharacterName={ip.secondary_character_name}
-                  characterIdentityMap={characterIdentityMap}
-                  onNavigateToCharacters={onNavigateToCharacters}
-                  characterBlockOverride={state.characterBlockOverride}
-                  showOverride={state.showOverride}
-                  onOverrideChange={(text) =>
-                    onUpdatePrompt(ip.id, { characterBlockOverride: text })
-                  }
-                  onToggleOverride={(prefilledText) => {
-                    if (!state.showOverride && state.characterBlockOverride === null) {
-                      onUpdatePrompt(ip.id, {
-                        showOverride: true,
-                        characterBlockOverride: prefilledText,
-                      });
-                    } else {
-                      onUpdatePrompt(ip.id, { showOverride: !state.showOverride });
-                    }
-                  }}
-                  onClearOverride={() =>
-                    onUpdatePrompt(ip.id, { characterBlockOverride: null, showOverride: false })
-                  }
-                  secondaryCharacterBlockOverride={state.secondaryCharacterBlockOverride}
-                  showSecondaryOverride={state.showSecondaryOverride}
-                  onSecondaryOverrideChange={(text) =>
-                    onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: text })
-                  }
-                  onSecondaryToggleOverride={(prefilledText) => {
-                    if (!state.showSecondaryOverride && state.secondaryCharacterBlockOverride === null) {
-                      onUpdatePrompt(ip.id, {
-                        showSecondaryOverride: true,
-                        secondaryCharacterBlockOverride: prefilledText,
-                      });
-                    } else {
-                      onUpdatePrompt(ip.id, { showSecondaryOverride: !state.showSecondaryOverride });
-                    }
-                  }}
-                  onSecondaryClearOverride={() =>
-                    onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: null, showSecondaryOverride: false })
-                  }
-                />
-                <Textarea
-                  value={state.promptText}
-                  onChange={(e) =>
-                    onUpdatePrompt(ip.id, { promptText: e.target.value })
-                  }
-                  rows={10}
-                  className="mt-1.5 leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
-                  disabled={isGenerating || isApproved}
-                />
-              </>
-            )}
+          {/* Prompt toggle */}
+          <button
+            onClick={() =>
+              onUpdatePrompt(ip.id, { showPrompt: !state.showPrompt })
+            }
+            className="text-muted-foreground hover:text-foreground transition-colors text-[11px]"
+          >
+            {state.showPrompt ? "Hide prompt" : truncatedPrompt}
+          </button>
           </div>
 
-          {/* Diagnostic toggles */}
-          <div>
-            <button
-                onClick={() =>
-                  onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
+          {/* Zone 2: scrollable editing area */}
+          {state.showPrompt && (
+            <div className="max-h-[60vh] overflow-y-auto px-3 pb-1 space-y-2">
+              <LockedCharacterBlock
+                imageModel={imageModel}
+                primaryCharacterId={ip.character_id}
+                primaryCharacterName={ip.character_name}
+                secondaryCharacterId={ip.secondary_character_id}
+                secondaryCharacterName={ip.secondary_character_name}
+                characterIdentityMap={characterIdentityMap}
+                onNavigateToCharacters={onNavigateToCharacters}
+                characterBlockOverride={state.characterBlockOverride}
+                showOverride={state.showOverride}
+                onOverrideChange={(text) =>
+                  onUpdatePrompt(ip.id, { characterBlockOverride: text })
                 }
-                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-amber-400 transition-colors"
-              >
-                <Settings2 className="h-3 w-3" />
-                {state.showDiagnostic ? "Hide diagnostics" : "Diagnostics"}
-              </button>
-              {state.showDiagnostic && (
-                <div className="mt-1.5">
-                  <DiagnosticPanel
-                    flags={state.diagnosticFlags}
-                    onChange={(newFlags) =>
-                      onUpdatePrompt(ip.id, { diagnosticFlags: newFlags })
-                    }
-                  />
-                </div>
-              )}
-          </div>
+                onToggleOverride={(prefilledText) => {
+                  if (!state.showOverride && state.characterBlockOverride === null) {
+                    onUpdatePrompt(ip.id, {
+                      showOverride: true,
+                      characterBlockOverride: prefilledText,
+                    });
+                  } else {
+                    onUpdatePrompt(ip.id, { showOverride: !state.showOverride });
+                  }
+                }}
+                onClearOverride={() =>
+                  onUpdatePrompt(ip.id, { characterBlockOverride: null, showOverride: false })
+                }
+                secondaryCharacterBlockOverride={state.secondaryCharacterBlockOverride}
+                showSecondaryOverride={state.showSecondaryOverride}
+                onSecondaryOverrideChange={(text) =>
+                  onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: text })
+                }
+                onSecondaryToggleOverride={(prefilledText) => {
+                  if (!state.showSecondaryOverride && state.secondaryCharacterBlockOverride === null) {
+                    onUpdatePrompt(ip.id, {
+                      showSecondaryOverride: true,
+                      secondaryCharacterBlockOverride: prefilledText,
+                    });
+                  } else {
+                    onUpdatePrompt(ip.id, { showSecondaryOverride: !state.showSecondaryOverride });
+                  }
+                }}
+                onSecondaryClearOverride={() =>
+                  onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: null, showSecondaryOverride: false })
+                }
+                suppressCharacterBlock={state.suppressCharacterBlock}
+                onToggleSuppressCharacterBlock={() =>
+                  onUpdatePrompt(ip.id, { suppressCharacterBlock: !state.suppressCharacterBlock })
+                }
+              />
+              <Textarea
+                value={state.promptText}
+                onChange={(e) =>
+                  onUpdatePrompt(ip.id, { promptText: e.target.value })
+                }
+                rows={10}
+                className="leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
+                disabled={isGenerating || isApproved}
+              />
+              {/* Diagnostic toggles */}
+              <div>
+                <button
+                  onClick={() =>
+                    onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
+                  }
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-amber-400 transition-colors"
+                >
+                  <Settings2 className="h-3 w-3" />
+                  {state.showDiagnostic ? "Hide diagnostics" : "Diagnostics"}
+                </button>
+                {state.showDiagnostic && (
+                  <div className="mt-1.5">
+                    <DiagnosticPanel
+                      flags={state.diagnosticFlags}
+                      onChange={(newFlags) =>
+                        onUpdatePrompt(ip.id, { diagnosticFlags: newFlags })
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-          {/* Actions */}
-          <div className="flex items-center gap-2 pt-1">
+          {/* Zone 3: sticky action buttons */}
+          <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-border/50 bg-card/95 px-3 py-2 backdrop-blur-sm">
             {/* Generate / Regenerate — calls the unified /generate-image route (dispatches on image_model) */}
             {(isPending || isFailed) && (
               <Button

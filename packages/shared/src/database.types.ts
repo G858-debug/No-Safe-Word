@@ -797,6 +797,7 @@ export type Database = {
           secondary_character_name: string | null
           sfw_image_id: string | null
           status: string
+          suppress_character_block: boolean
           updated_at: string
         }
         Insert: {
@@ -819,6 +820,7 @@ export type Database = {
           secondary_character_name?: string | null
           sfw_image_id?: string | null
           status?: string
+          suppress_character_block?: boolean
           updated_at?: string
         }
         Update: {
@@ -841,6 +843,7 @@ export type Database = {
           secondary_character_name?: string | null
           sfw_image_id?: string | null
           status?: string
+          suppress_character_block?: boolean
           updated_at?: string
         }
         Relationships: [
