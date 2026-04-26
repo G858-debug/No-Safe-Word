@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 // `portrait-prompt-builder` is pure (no Node deps after Phase D's
 // extraction of prompt-constants), so it's safe to import here.
 import { buildSceneCharacterBlockFromLocked } from "@no-safe-word/image-gen/portrait-prompt-builder";
+import { VISUAL_SIGNATURE } from "@no-safe-word/image-gen/prompt-constants";
 import type { ImageModel } from "@no-safe-word/shared";
 import type { CharacterFromAPI } from "./CharacterApproval";
 import {
@@ -39,6 +40,7 @@ import {
   Settings2,
   Undo2,
   Lock,
+  Eye,
 } from "lucide-react";
 // ══════════════════════════════════════════════════════════════
 // ART DIRECTOR — DEACTIVATED 2026-04-19
@@ -103,6 +105,9 @@ export interface ImagePromptData {
   character_block_override: string | null;
   secondary_character_block_override: string | null;
   suppress_character_block: boolean;
+  clothing_override: string | null;
+  sfw_constraint_override: string | null;
+  visual_signature_override: string | null;
 }
 
 export interface PostWithPrompts {
@@ -129,6 +134,7 @@ interface ImageGenerationProps {
 interface CharacterIdentity {
   name: string | null;
   portraitPromptLocked: string | null;
+  clothing: string | null;
 }
 
 interface PromptState {
@@ -150,6 +156,16 @@ interface PromptState {
   showSecondaryOverride: boolean;
   suppressCharacterBlock: boolean;
   savedSuppressCharacterBlock: boolean;
+  clothingOverride: string | null;
+  savedClothingOverride: string | null;
+  showClothingOverride: boolean;
+  sfwConstraintOverride: string | null;
+  savedSfwConstraintOverride: string | null;
+  showSfwConstraintOverride: boolean;
+  visualSignatureOverride: string | null;
+  savedVisualSignatureOverride: string | null;
+  showVisualSignatureOverride: boolean;
+  showFullPromptPreview: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +242,7 @@ export default function ImageGeneration({
       m[c.character_id] = {
         name: c.name,
         portraitPromptLocked: c.portrait_prompt_locked,
+        clothing: (c.description as Record<string, string>)?.clothing ?? null,
       };
     }
     return m;
@@ -284,6 +301,16 @@ export default function ImageGeneration({
           showSecondaryOverride: Boolean(ip.secondary_character_block_override),
           suppressCharacterBlock: ip.suppress_character_block ?? false,
           savedSuppressCharacterBlock: ip.suppress_character_block ?? false,
+          clothingOverride: ip.clothing_override ?? null,
+          savedClothingOverride: ip.clothing_override ?? null,
+          showClothingOverride: Boolean(ip.clothing_override),
+          sfwConstraintOverride: ip.sfw_constraint_override ?? null,
+          savedSfwConstraintOverride: ip.sfw_constraint_override ?? null,
+          showSfwConstraintOverride: Boolean(ip.sfw_constraint_override),
+          visualSignatureOverride: ip.visual_signature_override ?? null,
+          savedVisualSignatureOverride: ip.visual_signature_override ?? null,
+          showVisualSignatureOverride: Boolean(ip.visual_signature_override),
+          showFullPromptPreview: false,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -579,6 +606,57 @@ export default function ImageGeneration({
             return;
           }
           updatePrompt(promptId, { savedSuppressCharacterBlock: state.suppressCharacterBlock });
+        }
+
+        if (state.clothingOverride !== state.savedClothingOverride) {
+          const clothingRes = await fetch(`/api/stories/images/${promptId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clothing_override: state.clothingOverride }),
+          });
+          if (!clothingRes.ok) {
+            const clothingErr = await clothingRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: clothingErr?.error ?? "Failed to save clothing override",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedClothingOverride: state.clothingOverride });
+        }
+
+        if (state.sfwConstraintOverride !== state.savedSfwConstraintOverride) {
+          const sfwRes = await fetch(`/api/stories/images/${promptId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sfw_constraint_override: state.sfwConstraintOverride }),
+          });
+          if (!sfwRes.ok) {
+            const sfwErr = await sfwRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: sfwErr?.error ?? "Failed to save SFW constraint override",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedSfwConstraintOverride: state.sfwConstraintOverride });
+        }
+
+        if (state.visualSignatureOverride !== state.savedVisualSignatureOverride) {
+          const sigRes = await fetch(`/api/stories/images/${promptId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ visual_signature_override: state.visualSignatureOverride }),
+          });
+          if (!sigRes.ok) {
+            const sigErr = await sigRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: sigErr?.error ?? "Failed to save visual signature override",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedVisualSignatureOverride: state.visualSignatureOverride });
         }
 
         const res = await fetch(
@@ -1466,6 +1544,75 @@ function LockedCharacterBlock({
 }
 
 // ---------------------------------------------------------------------------
+// Prompt assembly — mirrors the server-side assembleHunyuanPrompt logic so
+// the preview is accurate without a round-trip.
+// ---------------------------------------------------------------------------
+
+function assembleFullPrompt(
+  state: PromptState,
+  ip: ImagePromptData,
+  characterIdentityMap: Record<string, CharacterIdentity>,
+  imageModel: ImageModel
+): string {
+  const isSfw = ip.image_type === "facebook_sfw" || ip.image_type === "shared";
+  const suppress =
+    state.suppressCharacterBlock || state.characterBlockOverride === "";
+  const parts: string[] = [];
+
+  if (imageModel === "hunyuan3" && !suppress) {
+    if (state.characterBlockOverride) {
+      parts.push(state.characterBlockOverride);
+    } else if (ip.character_id) {
+      const ident = characterIdentityMap[ip.character_id];
+      if (ident?.name && ident?.portraitPromptLocked) {
+        parts.push(buildSceneCharacterBlockFromLocked(ident.name, ident.portraitPromptLocked));
+      }
+    }
+
+    if (state.secondaryCharacterBlockOverride) {
+      parts.push(state.secondaryCharacterBlockOverride);
+    } else if (ip.secondary_character_id) {
+      const ident = characterIdentityMap[ip.secondary_character_id];
+      if (ident?.name && ident?.portraitPromptLocked) {
+        parts.push(buildSceneCharacterBlockFromLocked(ident.name, ident.portraitPromptLocked));
+      }
+    }
+
+    if (isSfw) {
+      if (state.clothingOverride !== null) {
+        if (state.clothingOverride.trim()) parts.push(state.clothingOverride.trim());
+      } else {
+        for (const charId of [ip.character_id, ip.secondary_character_id]) {
+          if (!charId) continue;
+          const ident = characterIdentityMap[charId];
+          if (ident?.name && ident?.clothing) {
+            parts.push(`${ident.name} is wearing ${ident.clothing}.`);
+          }
+        }
+      }
+    }
+  }
+
+  if (state.promptText.trim()) parts.push(state.promptText.trim());
+
+  if (isSfw) {
+    if (state.sfwConstraintOverride !== null) {
+      if (state.sfwConstraintOverride.trim()) parts.push(state.sfwConstraintOverride.trim());
+    } else {
+      parts.push("Both characters fully clothed. No nudity.");
+    }
+  }
+
+  if (state.visualSignatureOverride !== null) {
+    if (state.visualSignatureOverride.trim()) parts.push(state.visualSignatureOverride.trim());
+  } else {
+    parts.push(VISUAL_SIGNATURE);
+  }
+
+  return parts.join(" ");
+}
+
+// ---------------------------------------------------------------------------
 // ImageCard sub-component
 // ---------------------------------------------------------------------------
 
@@ -1516,6 +1663,9 @@ function ImageCard({
   const isApproved = state.status === "approved";
   const isFailed = state.status === "failed";
   const isPending = state.status === "pending";
+  const isSfw = imageType === "facebook_sfw" || imageType === "shared";
+  const isCharBlockSuppressed =
+    state.suppressCharacterBlock || state.characterBlockOverride === "";
 
   // Build meta indicator
   let metaLabel: string | null = null;
@@ -1715,6 +1865,193 @@ function ImageCard({
                 className="leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
                 disabled={isGenerating || isApproved}
               />
+              {/* Clothing override — SFW only, hidden when character blocks are suppressed */}
+              {isSfw && !isCharBlockSuppressed && (
+                <div>
+                  <button
+                    onClick={() => {
+                      if (!state.showClothingOverride && state.clothingOverride === null) {
+                        const autoClothing = [ip.character_id, ip.secondary_character_id]
+                          .filter(Boolean)
+                          .map((id) => {
+                            const ident = characterIdentityMap[id as string];
+                            return ident?.name && ident?.clothing
+                              ? `${ident.name} is wearing ${ident.clothing}.`
+                              : null;
+                          })
+                          .filter(Boolean)
+                          .join(" ");
+                        onUpdatePrompt(ip.id, {
+                          showClothingOverride: true,
+                          clothingOverride: autoClothing,
+                        });
+                      } else {
+                        onUpdatePrompt(ip.id, { showClothingOverride: !state.showClothingOverride });
+                      }
+                    }}
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronRight className={`h-3 w-3 transition-transform ${state.showClothingOverride ? "rotate-90" : ""}`} />
+                    {state.clothingOverride !== null ? "Clothing override (active)" : "Override clothing"}
+                  </button>
+                  {state.showClothingOverride && (
+                    <div className="mt-1 space-y-1">
+                      <Textarea
+                        value={state.clothingOverride ?? ""}
+                        onChange={(e) =>
+                          onUpdatePrompt(ip.id, { clothingOverride: e.target.value || null })
+                        }
+                        rows={2}
+                        placeholder={[ip.character_id, ip.secondary_character_id]
+                          .filter(Boolean)
+                          .map((id) => {
+                            const ident = characterIdentityMap[id as string];
+                            return ident?.name && ident?.clothing
+                              ? `${ident.name} is wearing ${ident.clothing}.`
+                              : null;
+                          })
+                          .filter(Boolean)
+                          .join(" ") || "Custom clothing sentence…"}
+                        className="resize-y bg-muted/30 text-[11px]"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Empty = auto. Set to suppress.</p>
+                      {state.clothingOverride !== null && (
+                        <button
+                          onClick={() => onUpdatePrompt(ip.id, { clothingOverride: null, showClothingOverride: false })}
+                          className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          Clear override (restore auto)
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SFW constraint override — SFW only */}
+              {isSfw && (
+                <div>
+                  <button
+                    onClick={() => {
+                      if (!state.showSfwConstraintOverride && state.sfwConstraintOverride === null) {
+                        onUpdatePrompt(ip.id, {
+                          showSfwConstraintOverride: true,
+                          sfwConstraintOverride: "Both characters fully clothed. No nudity.",
+                        });
+                      } else {
+                        onUpdatePrompt(ip.id, { showSfwConstraintOverride: !state.showSfwConstraintOverride });
+                      }
+                    }}
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronRight className={`h-3 w-3 transition-transform ${state.showSfwConstraintOverride ? "rotate-90" : ""}`} />
+                    {state.sfwConstraintOverride !== null ? "SFW constraint (active)" : "Override SFW constraint"}
+                  </button>
+                  {state.showSfwConstraintOverride && (
+                    <div className="mt-1 space-y-1">
+                      <Textarea
+                        value={state.sfwConstraintOverride ?? ""}
+                        onChange={(e) =>
+                          onUpdatePrompt(ip.id, { sfwConstraintOverride: e.target.value === "" ? "" : e.target.value })
+                        }
+                        rows={2}
+                        placeholder="Both characters fully clothed. No nudity."
+                        className="resize-y bg-muted/30 text-[11px]"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Empty = suppress entirely.</p>
+                      {state.sfwConstraintOverride !== null && (
+                        <button
+                          onClick={() => onUpdatePrompt(ip.id, { sfwConstraintOverride: null, showSfwConstraintOverride: false })}
+                          className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          Clear override (restore default)
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Visual signature override — always shown */}
+              <div>
+                <button
+                  onClick={() => {
+                    if (!state.showVisualSignatureOverride && state.visualSignatureOverride === null) {
+                      onUpdatePrompt(ip.id, {
+                        showVisualSignatureOverride: true,
+                        visualSignatureOverride: VISUAL_SIGNATURE,
+                      });
+                    } else {
+                      onUpdatePrompt(ip.id, { showVisualSignatureOverride: !state.showVisualSignatureOverride });
+                    }
+                  }}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronRight className={`h-3 w-3 transition-transform ${state.showVisualSignatureOverride ? "rotate-90" : ""}`} />
+                  {state.visualSignatureOverride !== null ? "Visual signature (active)" : "Override visual signature"}
+                </button>
+                {state.showVisualSignatureOverride && (
+                  <div className="mt-1 space-y-1">
+                    <Textarea
+                      value={state.visualSignatureOverride ?? ""}
+                      onChange={(e) =>
+                        onUpdatePrompt(ip.id, { visualSignatureOverride: e.target.value === "" ? "" : e.target.value })
+                      }
+                      rows={3}
+                      placeholder={VISUAL_SIGNATURE}
+                      className="resize-y bg-muted/30 text-[11px]"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Empty = suppress entirely.</p>
+                    {state.visualSignatureOverride !== null && (
+                      <button
+                        onClick={() => onUpdatePrompt(ip.id, { visualSignatureOverride: null, showVisualSignatureOverride: false })}
+                        className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        Clear override (restore default)
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Full prompt preview */}
+              <div>
+                <button
+                  onClick={() =>
+                    onUpdatePrompt(ip.id, { showFullPromptPreview: !state.showFullPromptPreview })
+                  }
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Eye className="h-3 w-3" />
+                  {state.showFullPromptPreview ? "Hide full prompt" : "Preview full prompt"}
+                </button>
+                {state.showFullPromptPreview && (
+                  <div className="relative mt-1.5">
+                    <p className="mb-1 text-[10px] text-muted-foreground">
+                      This is the prompt sent to the model
+                    </p>
+                    <Textarea
+                      value={assembleFullPrompt(state, ip, characterIdentityMap, imageModel)}
+                      readOnly
+                      rows={8}
+                      className="resize-y bg-muted/50 font-mono text-[10px] leading-relaxed pr-16"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="absolute right-1 top-6 h-6 px-2 text-[10px]"
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          assembleFullPrompt(state, ip, characterIdentityMap, imageModel)
+                        )
+                      }
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                )}
+              </div>
+
               {/* Diagnostic toggles */}
               <div>
                 <button

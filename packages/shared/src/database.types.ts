@@ -781,6 +781,7 @@ export type Database = {
           character_block_override: string | null
           character_id: string | null
           character_name: string | null
+          clothing_override: string | null
           created_at: string
           debug_data: Json | null
           id: string
@@ -795,15 +796,18 @@ export type Database = {
           secondary_character_block_override: string | null
           secondary_character_id: string | null
           secondary_character_name: string | null
+          sfw_constraint_override: string | null
           sfw_image_id: string | null
           status: string
           suppress_character_block: boolean
           updated_at: string
+          visual_signature_override: string | null
         }
         Insert: {
           character_block_override?: string | null
           character_id?: string | null
           character_name?: string | null
+          clothing_override?: string | null
           created_at?: string
           debug_data?: Json | null
           id?: string
@@ -818,15 +822,18 @@ export type Database = {
           secondary_character_block_override?: string | null
           secondary_character_id?: string | null
           secondary_character_name?: string | null
+          sfw_constraint_override?: string | null
           sfw_image_id?: string | null
           status?: string
           suppress_character_block?: boolean
           updated_at?: string
+          visual_signature_override?: string | null
         }
         Update: {
           character_block_override?: string | null
           character_id?: string | null
           character_name?: string | null
+          clothing_override?: string | null
           created_at?: string
           debug_data?: Json | null
           id?: string
@@ -841,10 +848,12 @@ export type Database = {
           secondary_character_block_override?: string | null
           secondary_character_id?: string | null
           secondary_character_name?: string | null
+          sfw_constraint_override?: string | null
           sfw_image_id?: string | null
           status?: string
           suppress_character_block?: boolean
           updated_at?: string
+          visual_signature_override?: string | null
         }
         Relationships: [
           {

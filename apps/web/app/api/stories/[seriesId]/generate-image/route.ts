@@ -76,7 +76,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, character_block_override, secondary_character_block_override, suppress_character_block"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, character_block_override, secondary_character_block_override, suppress_character_block, clothing_override, sfw_constraint_override, visual_signature_override"
     )
     .eq("id", promptId)
     .single();
@@ -172,6 +172,14 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     const aspectRatio =
       prompt.character_id && prompt.secondary_character_id ? "4:3" : "3:4";
 
+    // Apply clothing_override: null = use auto clothingMap, "" = suppress, non-empty = replace
+    let resolvedClothingMap = clothingMap;
+    if (prompt.clothing_override !== null && prompt.clothing_override !== undefined) {
+      resolvedClothingMap = prompt.clothing_override
+        ? { _: prompt.clothing_override }
+        : {};
+    }
+
     // 5. Generate.
     //
     // Model-aware injection rule (Hunyuan / scene): character text REQUIRED.
@@ -186,7 +194,9 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       secondaryCharacterBlock: secondaryBlock,
       aspectRatio,
       imageType: prompt.image_type,
-      clothingMap,
+      clothingMap: Object.keys(resolvedClothingMap).length ? resolvedClothingMap : undefined,
+      sfwConstraint: prompt.sfw_constraint_override ?? undefined,
+      visualSignature: prompt.visual_signature_override ?? undefined,
     });
 
     // 6. Create the images row first so we have a DB-generated UUID, then

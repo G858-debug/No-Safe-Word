@@ -14,6 +14,9 @@ export interface HunyuanGenerateOptions {
   aspectRatio?: string;
   /** Override the visual signature suffix. Default: the shared VISUAL_SIGNATURE constant. */
   visualSignature?: string;
+  /** Override the SFW nudity constraint. undefined → default "Both characters fully clothed. No nudity."
+   *  "" → suppress entirely. Non-empty string → use as-is. Only applied when imageType is SFW. */
+  sfwConstraint?: string;
   /** image_type from story_image_prompts — drives SFW clothing enforcement. */
   imageType?: string;
   /** characterId → preformatted clothing sentence ("Lindiwe is wearing a fitted blazer.").
@@ -62,7 +65,11 @@ export function assembleHunyuanPrompt(options: HunyuanGenerateOptions): string {
   }
 
   if (isSfw) {
-    parts.push("Both characters fully clothed. No nudity.");
+    const constraint =
+      options.sfwConstraint !== undefined
+        ? options.sfwConstraint
+        : "Both characters fully clothed. No nudity.";
+    if (constraint.trim()) parts.push(constraint.trim());
   }
 
   const signature = options.visualSignature ?? VISUAL_SIGNATURE;

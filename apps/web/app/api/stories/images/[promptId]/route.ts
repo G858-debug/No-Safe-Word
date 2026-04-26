@@ -46,21 +46,43 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { prompt, character_block_override, secondary_character_block_override, suppress_character_block } = body as {
+    const {
+      prompt,
+      character_block_override,
+      secondary_character_block_override,
+      suppress_character_block,
+      clothing_override,
+      sfw_constraint_override,
+      visual_signature_override,
+    } = body as {
       prompt?: string;
       character_block_override?: string | null;
       secondary_character_block_override?: string | null;
       suppress_character_block?: boolean | null;
+      clothing_override?: string | null;
+      sfw_constraint_override?: string | null;
+      visual_signature_override?: string | null;
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
     const hasOverrideUpdate = character_block_override !== undefined;
     const hasSecondaryOverrideUpdate = secondary_character_block_override !== undefined;
     const hasSuppressUpdate = suppress_character_block !== undefined;
+    const hasClothingOverrideUpdate = clothing_override !== undefined;
+    const hasSfwConstraintOverrideUpdate = sfw_constraint_override !== undefined;
+    const hasVisualSignatureOverrideUpdate = visual_signature_override !== undefined;
 
-    if (!hasPromptUpdate && !hasOverrideUpdate && !hasSecondaryOverrideUpdate && !hasSuppressUpdate) {
+    if (
+      !hasPromptUpdate &&
+      !hasOverrideUpdate &&
+      !hasSecondaryOverrideUpdate &&
+      !hasSuppressUpdate &&
+      !hasClothingOverrideUpdate &&
+      !hasSfwConstraintOverrideUpdate &&
+      !hasVisualSignatureOverrideUpdate
+    ) {
       return NextResponse.json(
-        { error: "prompt, character_block_override, secondary_character_block_override, or suppress_character_block is required" },
+        { error: "At least one field to update is required" },
         { status: 400 }
       );
     }
@@ -84,6 +106,9 @@ export async function PATCH(
     if (hasOverrideUpdate) updates.character_block_override = character_block_override;
     if (hasSecondaryOverrideUpdate) updates.secondary_character_block_override = secondary_character_block_override;
     if (hasSuppressUpdate) updates.suppress_character_block = suppress_character_block;
+    if (hasClothingOverrideUpdate) updates.clothing_override = clothing_override;
+    if (hasSfwConstraintOverrideUpdate) updates.sfw_constraint_override = sfw_constraint_override;
+    if (hasVisualSignatureOverrideUpdate) updates.visual_signature_override = visual_signature_override;
 
     // Reset to pending on any content change so the next generation uses fresh data
     if (existing.status === "generated" || existing.status === "approved") {
