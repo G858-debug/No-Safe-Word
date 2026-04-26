@@ -1,11 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ImageIcon, CheckCircle2, Clock } from "lucide-react";
+import { ImageIcon, CheckCircle2, Clock, AlertCircle } from "lucide-react";
 import type { CoverStatus } from "@no-safe-word/shared";
+
+export interface CoverJobState {
+  variant_index: number;
+  status: string; // 'pending' | 'processing' | 'completed' | 'failed'
+  created_at: string;
+  job_id: string;
+}
 
 interface CoverStatusPillProps {
   coverStatus: CoverStatus | null | undefined;
+  /** Per-variant job states from generation_jobs — present when generating. */
+  coverJobStates?: CoverJobState[];
   onNavigateToCover: () => void;
 }
 
@@ -15,13 +24,31 @@ function formatElapsed(seconds: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+/** Derive aggregate RunPod state from per-variant job statuses. */
+function getAggregateJobState(
+  jobs: CoverJobState[]
+): "queued" | "running" | "mixed" | "none" {
+  if (!jobs.length) return "none";
+  const statuses = jobs.map((j) => j.status);
+  const anyRunning = statuses.some((s) => s === "processing");
+  const allQueued = statuses.every((s) => s === "pending");
+  if (anyRunning) return "running";
+  if (allQueued) return "queued";
+  return "mixed"; // some queued, some running — treat as running
+}
+
 /**
  * Persistent cover state indicator shown above the publisher tabs.
  * Hidden when cover_status is 'pending' (no generation has started).
  * Clicking navigates to the Cover tab from any publisher stage.
+ *
+ * When cover_status is 'generating', uses coverJobStates to show:
+ *   - "Queued — waiting for GPU" when all jobs are pending (IN_QUEUE on RunPod)
+ *   - "Generating" when any job is processing (IN_PROGRESS on RunPod)
  */
 export default function CoverStatusPill({
   coverStatus,
+  coverJobStates = [],
   onNavigateToCover,
 }: CoverStatusPillProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -30,7 +57,6 @@ export default function CoverStatusPill({
 
   useEffect(() => {
     if (coverStatus === "generating") {
-      // Record start time on first transition into generating
       if (!startRef.current) {
         startRef.current = new Date();
         setElapsedSeconds(0);
@@ -41,7 +67,6 @@ export default function CoverStatusPill({
         );
       }, 1000);
     } else {
-      // Clear timer and reset when not generating
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -62,6 +87,21 @@ export default function CoverStatusPill({
   }
 
   if (coverStatus === "generating") {
+    const aggregateState = getAggregateJobState(coverJobStates);
+    const isQueued = aggregateState === "queued";
+
+    if (isQueued) {
+      return (
+        <button
+          onClick={onNavigateToCover}
+          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-500/40 bg-zinc-700/20 px-3 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700/30"
+        >
+          <Clock className="h-3 w-3 animate-pulse text-zinc-400" />
+          Cover: Queued ({formatElapsed(elapsedSeconds)}) — waiting for GPU
+        </button>
+      );
+    }
+
     return (
       <button
         onClick={onNavigateToCover}

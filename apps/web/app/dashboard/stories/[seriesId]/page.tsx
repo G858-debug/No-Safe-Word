@@ -41,7 +41,7 @@ import CoverApproval from "./components/CoverApproval";
 import BlurbSelection from "./components/BlurbSelection";
 import ImageGeneration from "./components/ImageGeneration";
 import PublishPanel from "./components/PublishPanel";
-import CoverStatusPill from "./components/CoverStatusPill";
+import CoverStatusPill, { type CoverJobState } from "./components/CoverStatusPill";
 import type {
   StorySeriesRow,
   StoryPostRow,
@@ -97,6 +97,7 @@ interface SeriesData {
     approved: number;
     failed: number;
   };
+  cover_job_states?: CoverJobState[];
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +486,7 @@ export default function SeriesDetailPage() {
       <div className="flex items-center">
         <CoverStatusPill
           coverStatus={coverStatus}
+          coverJobStates={data.cover_job_states ?? []}
           onNavigateToCover={() => setActiveTab("cover")}
         />
       </div>

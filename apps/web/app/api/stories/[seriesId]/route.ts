@@ -89,12 +89,33 @@ export async function GET(
     failed: allPrompts.filter((p: { status: string }) => p.status === "failed").length,
   };
 
+  // When cover is actively generating, include per-variant job states so the
+  // status pill and cover approval UI can show "Queued" vs "Generating" without
+  // re-polling RunPod on every page load.  The cover-variant-handler writes
+  // 'processing' to generation_jobs.status when RunPod returns IN_PROGRESS.
+  let coverJobStates: Array<{
+    variant_index: number;
+    status: string;
+    created_at: string;
+    job_id: string;
+  }> = [];
+  if (series.cover_status === "generating") {
+    const { data: coverJobs } = await supabase
+      .from("generation_jobs")
+      .select("variant_index, status, created_at, job_id")
+      .eq("series_id", seriesId)
+      .eq("job_type", "cover_variant")
+      .in("status", ["pending", "processing"]);
+    coverJobStates = (coverJobs ?? []) as typeof coverJobStates;
+  }
+
   return NextResponse.json({
     series,
     posts: posts || [],
     characters: storyCharacters || [],
     image_urls: imageUrls,
     image_prompt_counts: imageCounts,
+    cover_job_states: coverJobStates,
   });
 }
 

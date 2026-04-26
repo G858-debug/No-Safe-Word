@@ -177,14 +177,33 @@ export async function handleCoverVariantCompletion(args: {
     });
   }
 
-  if (status.status === "FAILED") {
-    const errorMsg = status.error || JSON.stringify(status.output || "");
-    console.warn(`[status:cover][${jobId}] variant ${variantIndex} FAILED: ${errorMsg}`);
+  if (
+    status.status === "FAILED" ||
+    status.status === "CANCELLED" ||
+    status.status === "TIMED_OUT"
+  ) {
+    const errorMsg =
+      status.status === "CANCELLED"
+        ? "RunPod job was cancelled"
+        : status.status === "TIMED_OUT"
+        ? "RunPod job timed out (execution limit exceeded)"
+        : status.error || JSON.stringify(status.output || "");
+    console.warn(`[status:cover][${jobId}] variant ${variantIndex} ${status.status}: ${errorMsg}`);
     await markJobFailed(jobId, errorMsg);
-    // Leave the cover_variants slot as null — the UI renders those as
-    // "Retry" affordances.
     await maybeTransitionCoverStatus(seriesId);
     return NextResponse.json({ jobId, completed: false, error: errorMsg });
+  }
+
+  // Write live RunPod status to DB so the status pill reads it without
+  // re-calling RunPod on every page load:
+  //   IN_QUEUE  → pending   (initial state, unchanged — job is queued)
+  //   IN_PROGRESS → processing  (already a valid status value)
+  if (status.status === "IN_PROGRESS") {
+    await supabase
+      .from("generation_jobs")
+      .update({ status: "processing" })
+      .eq("job_id", jobId)
+      .eq("status", "pending"); // only update once, avoid redundant writes
   }
 
   // IN_QUEUE for longer than the threshold → trigger Replicate fallback

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { XCircle } from "lucide-react";
 import type { CoverStatus } from "@no-safe-word/shared";
 
 // Shape of the cover-relevant fields returned by GET /api/stories/[seriesId].
@@ -23,6 +24,13 @@ interface CoverState {
     email?: string;
   } | null;
   cover_error: string | null;
+}
+
+interface CoverJobState {
+  variant_index: number;
+  status: string; // 'pending' (queued) | 'processing' (running)
+  created_at: string; // ISO timestamp — used for per-slot elapsed display
+  job_id: string;
 }
 
 // Matches Phase 2's generate-cover endpoint response (202 Accepted).
@@ -66,6 +74,7 @@ export default function CoverApproval({ seriesId }: Props) {
       const data = await res.json();
       const s = data.series as CoverState;
       setState(s);
+      setCoverJobStates((data.cover_job_states as CoverJobState[]) ?? []);
       if (!promptDirty) {
         setPromptDraft(s.cover_prompt ?? "");
       }
@@ -111,6 +120,16 @@ export default function CoverApproval({ seriesId }: Props) {
   // is regenerated (the storage path never changes, so without this the
   // browser serves the old image after an overwrite).
   const [variantTs, setVariantTs] = useState<number[]>(() => Array(VARIANT_COUNT).fill(Date.now()));
+
+  // Per-variant job states (pending=queued, processing=running) fetched from DB
+  const [coverJobStates, setCoverJobStates] = useState<CoverJobState[]>([]);
+  // Ticks every second when generating so per-slot elapsed times update live
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!state || state.cover_status !== "generating") return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [state?.cover_status]);
 
   const [outstandingJobs, setOutstandingJobs] = useState<string[]>([]);
   useEffect(() => {
@@ -223,6 +242,31 @@ export default function CoverApproval({ seriesId }: Props) {
 
   async function handleRetrySingle(index: number) {
     await generate({ retryVariants: [index] });
+  }
+
+  async function handleCancelCover() {
+    const ok = window.confirm(
+      "Cancel all queued cover generation jobs? The cover will return to 'pending' and you can restart generation when ready."
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/cancel-cover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Cancel failed");
+      }
+      setOutstandingJobs([]);
+      await fetchCover();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cancel failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleRegeneratePrompt() {
@@ -391,35 +435,41 @@ export default function CoverApproval({ seriesId }: Props) {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            {variants.map((url, i) => (
-              <VariantSlot
-                key={i}
-                index={i}
-                url={url}
-                ts={variantTs[i]}
-                isGenerating={isGenerating}
-                isSelected={selectedIdx === i}
-                canSelect={
-                  state.cover_status === "variants_ready" ||
-                  state.cover_status === "approved" ||
-                  state.cover_status === "complete"
-                }
-                onSelect={() => setPendingSelection(i)}
-                onRegenerate={() => handleRetrySingle(i)}
-                canRegenerate={
-                  !busy &&
-                  !isGenerating &&
-                  (state.cover_status === "variants_ready" ||
+            {variants.map((url, i) => {
+              const jobState = coverJobStates.find((j) => j.variant_index === i) ?? null;
+              return (
+                <VariantSlot
+                  key={i}
+                  index={i}
+                  url={url}
+                  ts={variantTs[i]}
+                  jobStatus={jobState?.status ?? null}
+                  jobCreatedAtMs={jobState ? new Date(jobState.created_at).getTime() : null}
+                  nowMs={nowMs}
+                  isGenerating={isGenerating}
+                  isSelected={selectedIdx === i}
+                  canSelect={
+                    state.cover_status === "variants_ready" ||
                     state.cover_status === "approved" ||
-                    state.cover_status === "complete")
-                }
-                onRetry={() => handleRetrySingle(i)}
-                retryDisabled={busy || isGenerating}
-                showFailed={
-                  state.cover_status === "variants_ready" && url === null
-                }
-              />
-            ))}
+                    state.cover_status === "complete"
+                  }
+                  onSelect={() => setPendingSelection(i)}
+                  onRegenerate={() => handleRetrySingle(i)}
+                  canRegenerate={
+                    !busy &&
+                    !isGenerating &&
+                    (state.cover_status === "variants_ready" ||
+                      state.cover_status === "approved" ||
+                      state.cover_status === "complete")
+                  }
+                  onRetry={() => handleRetrySingle(i)}
+                  retryDisabled={busy || isGenerating}
+                  showFailed={
+                    state.cover_status === "variants_ready" && url === null
+                  }
+                />
+              );
+            })}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -429,6 +479,20 @@ export default function CoverApproval({ seriesId }: Props) {
             >
               {primaryButtonLabel(state.cover_status, completedCount, promptDirty)}
             </Button>
+
+            {/* Cancel: shown when generation is in-flight with queued/running jobs */}
+            {isGenerating && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelCover}
+                disabled={busy}
+                className="gap-1.5 text-muted-foreground hover:text-destructive hover:border-destructive/50"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                Cancel generation
+              </Button>
+            )}
 
             {failedIndices.length > 0 && state.cover_status === "variants_ready" && (
               <Button
@@ -516,6 +580,12 @@ interface VariantSlotProps {
   index: number;
   url: string | null;
   ts: number;
+  /** DB status of the generation_job for this variant ('pending'=queued, 'processing'=running, null=none). */
+  jobStatus: string | null;
+  /** Epoch ms when the job was created — drives the per-slot elapsed display. */
+  jobCreatedAtMs: number | null;
+  /** Parent-level "now" tick (updated every second when generating). */
+  nowMs: number;
   isGenerating: boolean;
   isSelected: boolean;
   canSelect: boolean;
@@ -527,10 +597,20 @@ interface VariantSlotProps {
   showFailed: boolean;
 }
 
+function formatSlotElapsed(createdAtMs: number, nowMs: number): string {
+  const s = Math.floor((nowMs - createdAtMs) / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
 function VariantSlot({
   index,
   url,
   ts,
+  jobStatus,
+  jobCreatedAtMs,
+  nowMs,
   isGenerating,
   isSelected,
   canSelect,
@@ -579,13 +659,40 @@ function VariantSlot({
   }
 
   if (isGenerating) {
+    const isQueued = jobStatus === "pending";
+    const isRunning = jobStatus === "processing";
+    const elapsed =
+      jobCreatedAtMs !== null ? formatSlotElapsed(jobCreatedAtMs, nowMs) : null;
+
     return (
       <div className="aspect-[2/3] overflow-hidden rounded-md border border-border bg-muted relative">
         <Skeleton className="h-full w-full" />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xs text-muted-foreground animate-pulse">
-            Variant {index + 1}
-          </span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2">
+          {isQueued ? (
+            <>
+              <span className="text-[11px] font-medium text-zinc-400">
+                Queued
+              </span>
+              {elapsed && (
+                <span className="text-[10px] text-zinc-500 animate-pulse">
+                  {elapsed} — waiting for GPU
+                </span>
+              )}
+            </>
+          ) : isRunning ? (
+            <>
+              <span className="text-[11px] font-medium text-blue-400 animate-pulse">
+                Generating
+              </span>
+              {elapsed && (
+                <span className="text-[10px] text-zinc-500">{elapsed}</span>
+              )}
+            </>
+          ) : (
+            <span className="text-xs text-muted-foreground animate-pulse">
+              Variant {index + 1}
+            </span>
+          )}
         </div>
       </div>
     );
