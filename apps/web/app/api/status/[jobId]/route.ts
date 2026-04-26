@@ -31,7 +31,7 @@ export async function GET(
 
     const { data: jobRow } = await supabase
       .from("generation_jobs")
-      .select("image_id, job_type, variant_index, series_id")
+      .select("image_id, job_type, variant_index, series_id, created_at")
       .eq("job_id", jobId)
       .single();
 
@@ -57,6 +57,7 @@ export async function GET(
           image_id: jobRow.image_id,
           variant_index: jobRow.variant_index ?? null,
           series_id: jobRow.series_id ?? null,
+          job_created_at: jobRow.created_at ?? null,
         },
         settings,
       });

@@ -32,6 +32,7 @@ interface CoverJobRow {
   image_id: string | null;
   variant_index: number | null;
   series_id: string | null;
+  job_created_at?: string | null;
 }
 
 export async function handleCoverVariantCompletion(args: {
@@ -206,23 +207,26 @@ export async function handleCoverVariantCompletion(args: {
       .eq("status", "pending"); // only update once, avoid redundant writes
   }
 
-  // IN_QUEUE for longer than the threshold → trigger Replicate fallback
-  if (
-    status.status === "IN_QUEUE" &&
-    typeof status.delayTime === "number" &&
-    status.delayTime > RUNPOD_QUEUE_FALLBACK_MS
-  ) {
-    console.warn(
-      `[status:cover][${jobId}] IN_QUEUE ${status.delayTime}ms > ${RUNPOD_QUEUE_FALLBACK_MS}ms — triggering Flux 2 Pro fallback`
-    );
-    return handleReplicateFallback({
-      jobId,
-      runpodJobId,
-      endpointOverride,
-      imageId,
-      variantIndex,
-      seriesId,
-    });
+  // IN_QUEUE for longer than the threshold → trigger Replicate fallback.
+  // Use DB created_at as the elapsed clock — RunPod does not return delayTime
+  // on IN_QUEUE responses for serverless endpoints.
+  if (status.status === "IN_QUEUE") {
+    const ageMs = jobRow.job_created_at
+      ? Date.now() - new Date(jobRow.job_created_at).getTime()
+      : 0;
+    if (ageMs > RUNPOD_QUEUE_FALLBACK_MS) {
+      console.warn(
+        `[status:cover][${jobId}] IN_QUEUE ${Math.round(ageMs / 1000)}s > ${RUNPOD_QUEUE_FALLBACK_MS / 1000}s — triggering Flux 2 Pro fallback`
+      );
+      return handleReplicateFallback({
+        jobId,
+        runpodJobId,
+        endpointOverride,
+        imageId,
+        variantIndex,
+        seriesId,
+      });
+    }
   }
 
   // Still running / in queue under threshold
