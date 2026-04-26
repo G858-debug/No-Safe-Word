@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -12,9 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, RotateCcw, Sparkles } from "lucide-react";
-import { ImageUploader } from "./ImageUploader";
-import { GenerationView } from "./GenerationView";
+import { Loader2, Sparkles, Clock } from "lucide-react";
 
 export interface GeneratedImage {
   url: string;
@@ -25,53 +24,23 @@ export interface GeneratedImage {
 
 const ASPECT_RATIOS = [
   { value: "3:4", label: "3:4 — Portrait" },
-  { value: "9:16", label: "9:16 — Tall portrait" },
+  { value: "9:16", label: "9:16 — Tall" },
   { value: "1:1", label: "1:1 — Square" },
   { value: "4:3", label: "4:3 — Landscape" },
   { value: "16:9", label: "16:9 — Wide" },
 ];
 
-type Phase = "upload" | "analyzing" | "editing" | "generating" | "complete";
-
 export function ImageLab() {
-  const [phase, setPhase] = useState<Phase>("upload");
-  const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("3:4");
-  const [currentGenerated, setCurrentGenerated] = useState<GeneratedImage | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [current, setCurrent] = useState<GeneratedImage | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const handleImageSelected = useCallback(async (base64: string, mimeType: string) => {
-    setOriginalImage(`data:${mimeType};base64,${base64}`);
-    setPhase("analyzing");
-    setError(null);
-
-    try {
-      const resp = await fetch("/api/image-generator/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mimeType }),
-      });
-
-      if (!resp.ok) {
-        const data = await resp.json();
-        throw new Error(data.error || "Analysis failed");
-      }
-
-      const analysis = await resp.json();
-      setPrompt(analysis.prompt || "");
-      setAspectRatio(analysis.aspectRatio || "3:4");
-      setPhase("editing");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
-      setPhase("upload");
-    }
-  }, []);
-
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim()) return;
-    setPhase("generating");
+    if (!prompt.trim() || generating) return;
+    setGenerating(true);
     setError(null);
 
     try {
@@ -81,153 +50,75 @@ export function ImageLab() {
         body: JSON.stringify({ prompt: prompt.trim(), aspectRatio }),
       });
 
-      if (!resp.ok) {
-        const data = await resp.json();
-        throw new Error(data.error || "Generation failed");
-      }
-
-      const { imageUrl, prompt: finalPrompt } = await resp.json();
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Generation failed");
 
       const generated: GeneratedImage = {
-        url: imageUrl,
-        prompt: finalPrompt || prompt,
+        url: data.imageUrl,
+        prompt: data.prompt || prompt,
         aspectRatio,
         timestamp: Date.now(),
       };
 
-      setCurrentGenerated(generated);
-      setHistory((prev) => [...prev, generated]);
-      setPhase("complete");
+      setCurrent(generated);
+      setHistory((prev) => [generated, ...prev]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
-      setPhase("editing");
+    } finally {
+      setGenerating(false);
     }
-  }, [prompt, aspectRatio]);
-
-  const handleEditAndRegenerate = useCallback(() => {
-    setPhase("editing");
-    setError(null);
-  }, []);
-
-  const handleStartOver = useCallback(() => {
-    setPhase("upload");
-    setOriginalImage(null);
-    setPrompt("");
-    setAspectRatio("3:4");
-    setCurrentGenerated(null);
-    setError(null);
-  }, []);
+  }, [prompt, aspectRatio, generating]);
 
   return (
     <div className="space-y-6">
-      {error && (
-        <Card className="border-destructive">
-          <CardContent className="p-4">
-            <p className="text-sm text-destructive">{error}</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {phase === "upload" && (
-        <ImageUploader onImageSelected={handleImageSelected} />
-      )}
-
-      {phase === "analyzing" && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-4 py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <div className="text-center">
-              <p className="font-medium">Analyzing image with Claude Vision...</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Building a Hunyuan prompt from your image
-              </p>
-            </div>
-            {originalImage && (
-              <img
-                src={originalImage}
-                alt="Uploaded"
-                className="mt-4 max-h-64 rounded-lg border border-border object-contain"
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {(phase === "editing" || phase === "generating") && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Original image */}
-          <div className="lg:col-span-1">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-medium">Original</h3>
-                  <Button variant="ghost" size="sm" onClick={handleStartOver}>
-                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                    New
-                  </Button>
-                </div>
-                {originalImage && (
-                  <img
-                    src={originalImage}
-                    alt="Original"
-                    className="w-full rounded-lg border border-border object-contain max-h-96"
-                  />
-                )}
-              </CardContent>
-            </Card>
+      {/* Prompt input */}
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+              Prompt
+            </Label>
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="mt-1.5 min-h-[160px] text-sm"
+              placeholder="Describe the scene in natural language…"
+              disabled={generating}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleGenerate();
+              }}
+            />
           </div>
 
-          {/* Prompt editor */}
-          <div className="lg:col-span-2 space-y-4">
-            <Card>
-              <CardContent className="p-4 space-y-4">
-                <div>
-                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Prompt
-                  </Label>
-                  <Textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    className="mt-1.5 min-h-[180px] text-sm"
-                    placeholder="Describe the scene in natural language..."
-                    disabled={phase === "generating"}
-                  />
-                </div>
-
-                <div className="w-48">
-                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Aspect Ratio
-                  </Label>
-                  <Select
-                    value={aspectRatio}
-                    onValueChange={setAspectRatio}
-                    disabled={phase === "generating"}
-                  >
-                    <SelectTrigger className="mt-1.5">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ASPECT_RATIOS.map((r) => (
-                        <SelectItem key={r.value} value={r.value}>
-                          {r.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="flex items-end gap-3">
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+                Aspect Ratio
+              </Label>
+              <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={generating}>
+                <SelectTrigger className="mt-1.5 w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ASPECT_RATIOS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             <Button
               size="lg"
-              className="w-full"
+              className="flex-1"
               onClick={handleGenerate}
-              disabled={phase === "generating" || !prompt.trim()}
+              disabled={generating || !prompt.trim()}
             >
-              {phase === "generating" ? (
+              {generating ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Generating on HunyuanImage 3.0...
+                  Generating…
                 </>
               ) : (
                 <>
@@ -237,18 +128,79 @@ export function ImageLab() {
               )}
             </Button>
           </div>
-        </div>
+        </CardContent>
+      </Card>
+
+      {/* Error */}
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="p-4">
+            <p className="text-sm text-destructive">{error}</p>
+          </CardContent>
+        </Card>
       )}
 
-      {phase === "complete" && originalImage && currentGenerated && (
-        <GenerationView
-          originalImage={originalImage}
-          generated={currentGenerated}
-          history={history}
-          onSelectHistory={setCurrentGenerated}
-          onEditAndRegenerate={handleEditAndRegenerate}
-          onStartOver={handleStartOver}
-        />
+      {/* Current result */}
+      {generating && !current && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center gap-3 py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Running on HunyuanImage 3.0…</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {current && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <Badge variant="secondary" className="font-mono text-xs">
+                {current.aspectRatio}
+              </Badge>
+              <span className="text-xs text-muted-foreground">tencent/hunyuan-image-3</span>
+            </div>
+            <img
+              src={current.url}
+              alt="Generated"
+              className="w-full rounded-lg border border-border object-contain max-h-[700px]"
+            />
+            <p className="text-xs text-muted-foreground font-mono whitespace-pre-wrap p-2 rounded bg-muted/50">
+              {current.prompt}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* History strip */}
+      {history.length > 1 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">History</span>
+              <span className="text-xs text-muted-foreground">({history.length})</span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {history.map((img, i) => (
+                <button
+                  key={img.timestamp}
+                  className={`flex-shrink-0 rounded-lg border-2 transition-colors ${
+                    img.timestamp === current?.timestamp
+                      ? "border-primary"
+                      : "border-border hover:border-muted-foreground"
+                  }`}
+                  onClick={() => setCurrent(img)}
+                >
+                  <img
+                    src={img.url}
+                    alt={`Generation ${history.length - i}`}
+                    className="h-20 w-20 rounded-md object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
