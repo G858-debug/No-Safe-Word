@@ -108,6 +108,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     // was populated) — that path emits a warning so we can spot drift.
     const charBlocks: Record<string, string> = {};
     const charApproved: Record<string, boolean> = {};
+    const clothingMap: Record<string, string> = {};
     if (charIds.length > 0) {
       const { data: chars } = await supabase
         .from("characters")
@@ -130,6 +131,10 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
             c.name,
             c.description as PortraitCharacterDescription
           );
+        }
+        const clothing = (c.description as Record<string, string>)?.clothing;
+        if (clothing) {
+          clothingMap[c.id] = `${c.name} is wearing ${clothing}.`;
         }
       }
     }
@@ -171,6 +176,8 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       characterBlock: primaryBlock,
       secondaryCharacterBlock: secondaryBlock,
       aspectRatio,
+      imageType: prompt.image_type,
+      clothingMap,
     });
 
     // 6. Create the images row first so we have a DB-generated UUID, then

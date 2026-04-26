@@ -14,6 +14,11 @@ export interface HunyuanGenerateOptions {
   aspectRatio?: string;
   /** Override the visual signature suffix. Default: the shared VISUAL_SIGNATURE constant. */
   visualSignature?: string;
+  /** image_type from story_image_prompts — drives SFW clothing enforcement. */
+  imageType?: string;
+  /** characterId → preformatted clothing sentence ("Lindiwe is wearing a fitted blazer.").
+   *  Injected after character blocks for facebook_sfw/shared image types. */
+  clothingMap?: Record<string, string>;
 }
 
 export interface HunyuanGenerateResult {
@@ -36,6 +41,8 @@ const HUNYUAN_MODEL = "tencent/hunyuan-image-3";
  */
 export function assembleHunyuanPrompt(options: HunyuanGenerateOptions): string {
   const parts: string[] = [];
+  const isSfw =
+    options.imageType === "facebook_sfw" || options.imageType === "shared";
 
   if (options.characterBlock?.trim()) {
     parts.push(options.characterBlock.trim());
@@ -43,8 +50,19 @@ export function assembleHunyuanPrompt(options: HunyuanGenerateOptions): string {
   if (options.secondaryCharacterBlock?.trim()) {
     parts.push(options.secondaryCharacterBlock.trim());
   }
+
+  if (isSfw && options.clothingMap) {
+    for (const sentence of Object.values(options.clothingMap)) {
+      if (sentence.trim()) parts.push(sentence.trim());
+    }
+  }
+
   if (options.scenePrompt?.trim()) {
     parts.push(options.scenePrompt.trim());
+  }
+
+  if (isSfw) {
+    parts.push("Both characters fully clothed. No nudity.");
   }
 
   const signature = options.visualSignature ?? VISUAL_SIGNATURE;
