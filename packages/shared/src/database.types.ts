@@ -7,6 +7,8 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "12.2.12 (cd3cf9e)"
   }
@@ -776,6 +778,7 @@ export type Database = {
       }
       story_image_prompts: {
         Row: {
+          character_block_override: string | null
           character_id: string | null
           character_name: string | null
           created_at: string
@@ -796,6 +799,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          character_block_override?: string | null
           character_id?: string | null
           character_name?: string | null
           created_at?: string
@@ -816,6 +820,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          character_block_override?: string | null
           character_id?: string | null
           character_name?: string | null
           created_at?: string
@@ -1068,10 +1073,139 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      current_blocked_users: {
+        Row: {
+          blocked_at: string | null
+          minutes_remaining: number | null
+          phone_number: string | null
+          reason: string | null
+          status: string | null
+          unblock_at: string | null
+        }
+        Insert: {
+          blocked_at?: string | null
+          minutes_remaining?: never
+          phone_number?: string | null
+          reason?: string | null
+          status?: never
+          unblock_at?: string | null
+        }
+        Update: {
+          blocked_at?: string | null
+          minutes_remaining?: never
+          phone_number?: string | null
+          reason?: string | null
+          status?: never
+          unblock_at?: string | null
+        }
+        Relationships: []
+      }
+      daily_active_users: {
+        Row: {
+          active_users: number | null
+          avg_time_on_page: number | null
+          date: string | null
+          total_events: number | null
+        }
+        Relationships: []
+      }
+      feature_popularity: {
+        Row: {
+          avg_minutes_used: number | null
+          feature_name: string | null
+          last_used: string | null
+          total_uses: number | null
+          unique_users: number | null
+        }
+        Relationships: []
+      }
+      pricing_by_gateway: {
+        Row: {
+          billing_currency_code: string | null
+          country_count: number | null
+          max_professional: number | null
+          max_starter: number | null
+          min_professional: number | null
+          min_starter: number | null
+          payment_gateway: string | null
+        }
+        Relationships: []
+      }
+      recent_security_threats: {
+        Row: {
+          blocked_messages: number | null
+          command_attempts: number | null
+          critical_threats: number | null
+          date: string | null
+          script_attempts: number | null
+          sql_attempts: number | null
+          unique_attackers: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      calculate_net_amount: {
+        Args: {
+          gross_amount: number
+          payfast_fee?: number
+          platform_fee?: number
+        }
+        Returns: number
+      }
+      calculate_payfast_fee: { Args: { amount: number }; Returns: number }
+      calculate_video_performance_score: {
+        Args: {
+          p_completion_rate: number
+          p_engagement_rate: number
+          p_share_count: number
+          p_view_count: number
+        }
+        Returns: number
+      }
+      can_auto_approve: {
+        Args: { p_amount: number; p_client_id: string; p_trainer_id: string }
+        Returns: boolean
+      }
+      check_token_limits: {
+        Args: { p_amount: number; p_token_id: string }
+        Returns: boolean
+      }
+      cleanup_abandoned_links: { Args: never; Returns: number }
+      cleanup_expired_assessment_tokens: { Args: never; Returns: undefined }
+      cleanup_expired_dashboard_tokens: { Args: never; Returns: undefined }
+      cleanup_expired_flow_tokens: { Args: never; Returns: undefined }
+      cleanup_expired_pending_bookings: { Args: never; Returns: undefined }
+      cleanup_expired_registrations: { Args: never; Returns: undefined }
+      cleanup_expired_token_setup: { Args: never; Returns: undefined }
+      cleanup_old_processed_messages: { Args: never; Returns: undefined }
+      cleanup_old_verifications: { Args: never; Returns: undefined }
+      expire_old_registration_sessions: { Args: never; Returns: undefined }
+      get_country_pricing: {
+        Args: { p_country_code: string }
+        Returns: {
+          billing_currency_code: string
+          country_name: string
+          payment_gateway: string
+          professional_annual: number
+          professional_monthly: number
+          starter_annual: number
+          starter_monthly: number
+          studio_annual: number
+          studio_monthly: number
+        }[]
+      }
+      get_next_reminder_date: {
+        Args: { reminder_day: number }
+        Returns: string
+      }
+      get_payment_gateway: { Args: { p_country_code: string }; Returns: string }
+      increment: { Args: { row_id: string; x: number }; Returns: number }
+      mask_account_number: { Args: { account_number: string }; Returns: string }
+      verify_trainer_client_relationship: {
+        Args: { p_client_id: string; p_trainer_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
@@ -1081,3 +1215,126 @@ export type Database = {
     }
   }
 }
+
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {},
+  },
+} as const
