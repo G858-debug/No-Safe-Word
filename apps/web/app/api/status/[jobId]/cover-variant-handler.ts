@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRunPodJobStatus, base64ToBuffer } from "@no-safe-word/image-gen";
+import { getRunPodJobStatus, base64ToBuffer, generateFlux2ProImage } from "@no-safe-word/image-gen";
+import type { Flux2ProGenerateResult } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
 
 // ============================================================
@@ -25,6 +26,7 @@ const BUCKET = "story-covers";
 const VARIANT_COUNT = 4;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MIN_EXPECTED_BYTES = 100 * 1024;
+const RUNPOD_QUEUE_FALLBACK_MS = 60_000;
 
 interface CoverJobRow {
   image_id: string | null;
@@ -60,6 +62,22 @@ export async function handleCoverVariantCompletion(args: {
   const modelSetting = typeof settings.model === "string" ? (settings.model as string) : undefined;
   const endpointOverride =
     modelSetting === "flux2_dev" ? process.env.RUNPOD_FLUX2_ENDPOINT_ID : undefined;
+
+  // Guard: skip RunPod if this job already reached a terminal state (e.g. via
+  // a prior Replicate fallback). Prevents a late-arriving RunPod COMPLETED from
+  // overwriting a successfully written fallback result.
+  const { data: currentJob } = await supabase
+    .from("generation_jobs")
+    .select("status")
+    .eq("job_id", jobId)
+    .single();
+  if (currentJob?.status === "completed" || currentJob?.status === "failed") {
+    return NextResponse.json({
+      jobId,
+      completed: currentJob.status === "completed",
+      cached: true,
+    });
+  }
 
   const status = await getRunPodJobStatus(runpodJobId, endpointOverride);
 
@@ -169,7 +187,26 @@ export async function handleCoverVariantCompletion(args: {
     return NextResponse.json({ jobId, completed: false, error: errorMsg });
   }
 
-  // Still running
+  // IN_QUEUE for longer than the threshold → trigger Replicate fallback
+  if (
+    status.status === "IN_QUEUE" &&
+    typeof status.delayTime === "number" &&
+    status.delayTime > RUNPOD_QUEUE_FALLBACK_MS
+  ) {
+    console.warn(
+      `[status:cover][${jobId}] IN_QUEUE ${status.delayTime}ms > ${RUNPOD_QUEUE_FALLBACK_MS}ms — triggering Flux 2 Pro fallback`
+    );
+    return handleReplicateFallback({
+      jobId,
+      runpodJobId,
+      endpointOverride,
+      imageId,
+      variantIndex,
+      seriesId,
+    });
+  }
+
+  // Still running / in queue under threshold
   return NextResponse.json({
     jobId,
     completed: false,
@@ -183,6 +220,134 @@ async function markJobFailed(jobId: string, error: string): Promise<void> {
     .from("generation_jobs")
     .update({ status: "failed", completed_at: new Date().toISOString(), error })
     .eq("job_id", jobId);
+}
+
+async function cancelRunPodJob(runpodJobId: string, endpointOverride?: string): Promise<void> {
+  const endpointId =
+    endpointOverride ??
+    process.env.RUNPOD_FLUX2_ENDPOINT_ID ??
+    process.env.RUNPOD_ENDPOINT_ID;
+  const apiKey = process.env.RUNPOD_API_KEY;
+  if (!endpointId || !apiKey) return;
+  try {
+    const res = await fetch(
+      `https://api.runpod.ai/v2/${endpointId}/cancel/${runpodJobId}`,
+      { method: "POST", headers: { Authorization: `Bearer ${apiKey}` } }
+    );
+    if (!res.ok) {
+      console.warn(`[status:cover] cancel ${runpodJobId} → ${res.status}`);
+    } else {
+      console.log(`[status:cover] RunPod job ${runpodJobId} cancelled`);
+    }
+  } catch (err) {
+    console.warn(`[status:cover] cancel failed (non-fatal): ${err}`);
+  }
+}
+
+async function handleReplicateFallback(args: {
+  jobId: string;
+  runpodJobId: string;
+  endpointOverride: string | undefined;
+  imageId: string;
+  variantIndex: number;
+  seriesId: string;
+}): Promise<NextResponse> {
+  const { jobId, runpodJobId, endpointOverride, imageId, variantIndex, seriesId } = args;
+
+  const { data: imageRow } = await supabase
+    .from("images")
+    .select("prompt")
+    .eq("id", imageId)
+    .single();
+  if (!imageRow?.prompt) {
+    await markJobFailed(jobId, "Fallback: assembled prompt missing from images table");
+    await maybeTransitionCoverStatus(seriesId);
+    return NextResponse.json({ jobId, completed: false, error: "Fallback: prompt not found" });
+  }
+
+  const { data: series } = await supabase
+    .from("story_series")
+    .select("slug")
+    .eq("id", seriesId)
+    .single();
+  if (!series?.slug) {
+    await markJobFailed(jobId, "Fallback: series slug missing");
+    await maybeTransitionCoverStatus(seriesId);
+    return NextResponse.json(
+      { jobId, completed: false, error: "Fallback: slug missing" },
+      { status: 500 }
+    );
+  }
+
+  let replicateResult: Flux2ProGenerateResult;
+  try {
+    replicateResult = await generateFlux2ProImage({
+      prompt: imageRow.prompt,
+      aspectRatio: "2:3",
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[status:cover][${jobId}] Flux 2 Pro failed: ${msg}`);
+    void cancelRunPodJob(runpodJobId, endpointOverride);
+    await markJobFailed(jobId, `Replicate fallback failed: ${msg}`);
+    await maybeTransitionCoverStatus(seriesId);
+    return NextResponse.json({ jobId, completed: false, error: msg });
+  }
+
+  // Cancel the RunPod job once Replicate has the image (best-effort, non-blocking)
+  void cancelRunPodJob(runpodJobId, endpointOverride);
+
+  // Fetch JPEG from Replicate CDN and upload directly to Supabase Storage
+  const storagePath = `${series.slug}/variants/variant-${variantIndex}.jpeg`;
+  let variantUrl: string;
+  try {
+    const imgRes = await fetch(replicateResult.imageUrl);
+    if (!imgRes.ok) throw new Error(`Replicate CDN fetch failed: ${imgRes.status}`);
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET)
+      .upload(storagePath, buffer, {
+        contentType: "image/jpeg",
+        upsert: true,
+        cacheControl: "public, max-age=60",
+      });
+    if (uploadError) throw new Error(uploadError.message);
+
+    const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+    variantUrl = publicUrlData.publicUrl;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await markJobFailed(jobId, `Fallback upload failed: ${msg}`);
+    await maybeTransitionCoverStatus(seriesId);
+    return NextResponse.json({ jobId, completed: false, error: msg });
+  }
+
+  await supabase
+    .from("images")
+    .update({ stored_url: variantUrl, sfw_url: variantUrl })
+    .eq("id", imageId);
+
+  await writeVariantUrl(seriesId, variantIndex, variantUrl);
+
+  await supabase
+    .from("generation_jobs")
+    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .eq("job_id", jobId);
+
+  await maybeTransitionCoverStatus(seriesId);
+
+  console.log(
+    `[status:cover][${jobId}] Replicate fallback done: variant ${variantIndex} → ${variantUrl}`
+  );
+  return NextResponse.json({
+    jobId,
+    completed: true,
+    imageUrl: variantUrl,
+    variantIndex,
+    scheduled: true,
+    fallback: "replicate_flux2_pro",
+  });
 }
 
 async function writeVariantUrl(

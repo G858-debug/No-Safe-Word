@@ -92,3 +92,10 @@ export type {
   Flux2GenerateOptions,
   Flux2GenerateResult,
 } from './flux2-generator';
+
+// Flux 2 Pro (Replicate) — fallback for cover generation when RunPod has no capacity
+export { generateFlux2ProImage } from './flux2-pro-generator';
+export type {
+  Flux2ProGenerateOptions,
+  Flux2ProGenerateResult,
+} from './flux2-pro-generator';
