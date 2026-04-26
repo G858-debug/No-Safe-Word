@@ -145,12 +145,12 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     if (!prompt.suppress_character_block) {
       primaryBlock = prompt.character_block_override?.trim()
         ? prompt.character_block_override.trim()
-        : prompt.character_id
+        : prompt.character_id && prompt.character_block_override === null
           ? charBlocks[prompt.character_id]
           : undefined;
       secondaryBlock = prompt.secondary_character_block_override?.trim()
         ? prompt.secondary_character_block_override.trim()
-        : prompt.secondary_character_id
+        : prompt.secondary_character_id && prompt.secondary_character_block_override === null
           ? charBlocks[prompt.secondary_character_id]
           : undefined;
     }
