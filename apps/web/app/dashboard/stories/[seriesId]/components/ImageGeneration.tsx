@@ -102,6 +102,7 @@ export interface ImagePromptData {
   status: string;
   character_block_override: string | null;
   secondary_character_block_override: string | null;
+  suppress_character_block: boolean;
 }
 
 export interface PostWithPrompts {

@@ -87,6 +87,7 @@ interface SeriesData {
       status: string;
       character_block_override: string | null;
       secondary_character_block_override: string | null;
+      suppress_character_block: boolean;
     }[];
   })[];
   characters: CharacterFromAPI[];
