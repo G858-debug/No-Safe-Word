@@ -26,7 +26,7 @@ export default function ImageGeneratorPage() {
             <h1 className="text-3xl font-bold tracking-tight">Image Lab</h1>
           </div>
           <p className="text-muted-foreground mt-1">
-            Paste an image, analyze it with AI, and recreate it on CivitAI
+            Upload an image, analyze it with Claude Vision, and reproduce it with HunyuanImage 3.0
           </p>
         </header>
         <ImageLab />

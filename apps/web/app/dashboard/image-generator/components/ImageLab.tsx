@@ -3,83 +3,47 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { ImageUploader } from "./ImageUploader";
-import { ResourceEditor } from "./ResourceEditor";
-import { CivitaiSearchDialog } from "./CivitaiSearchDialog";
 import { GenerationView } from "./GenerationView";
-
-export interface CheckpointInfo {
-  name: string;
-  urn: string;
-  modelId?: number;
-  versionId?: number;
-  thumbnailUrl?: string;
-}
-
-export interface LoraInfo {
-  name: string;
-  urn: string;
-  strength: number;
-  thumbnailUrl?: string;
-}
-
-export interface GenerationParams {
-  steps: number;
-  cfgScale: number;
-  scheduler: string;
-  width: number;
-  height: number;
-  clipSkip: number;
-  seed: number;
-}
-
-export interface GenerationConfig {
-  prompt: string;
-  negativePrompt: string;
-  checkpoint: CheckpointInfo;
-  loras: LoraInfo[];
-  params: GenerationParams;
-}
 
 export interface GeneratedImage {
   url: string;
-  seed: number;
-  cost: number;
-  config: GenerationConfig;
+  prompt: string;
+  aspectRatio: string;
   timestamp: number;
 }
 
-type Phase =
-  | "upload"
-  | "analyzing"
-  | "editing"
-  | "generating"
-  | "complete";
+const ASPECT_RATIOS = [
+  { value: "3:4", label: "3:4 — Portrait" },
+  { value: "9:16", label: "9:16 — Tall portrait" },
+  { value: "1:1", label: "1:1 — Square" },
+  { value: "4:3", label: "4:3 — Landscape" },
+  { value: "16:9", label: "16:9 — Wide" },
+];
+
+type Phase = "upload" | "analyzing" | "editing" | "generating" | "complete";
 
 export function ImageLab() {
   const [phase, setPhase] = useState<Phase>("upload");
   const [originalImage, setOriginalImage] = useState<string | null>(null);
-  const [originalMimeType, setOriginalMimeType] = useState<string | null>(null);
-  const [config, setConfig] = useState<GenerationConfig | null>(null);
-  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [aspectRatio, setAspectRatio] = useState("3:4");
   const [currentGenerated, setCurrentGenerated] = useState<GeneratedImage | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchType, setSearchType] = useState<"Checkpoint" | "LORA">("Checkpoint");
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, []);
 
   const handleImageSelected = useCallback(async (base64: string, mimeType: string) => {
     setOriginalImage(`data:${mimeType};base64,${base64}`);
-    setOriginalMimeType(mimeType);
     setPhase("analyzing");
     setError(null);
 
@@ -96,14 +60,8 @@ export function ImageLab() {
       }
 
       const analysis = await resp.json();
-
-      setConfig({
-        prompt: analysis.prompt,
-        negativePrompt: analysis.negativePrompt,
-        checkpoint: analysis.suggestedCheckpoint,
-        loras: analysis.suggestedLoras || [],
-        params: analysis.params,
-      });
+      setPrompt(analysis.prompt || "");
+      setAspectRatio(analysis.aspectRatio || "3:4");
       setPhase("editing");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed");
@@ -112,27 +70,15 @@ export function ImageLab() {
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!config) return;
+    if (!prompt.trim()) return;
     setPhase("generating");
     setError(null);
 
     try {
-      // Build additionalNetworks from LoRAs — schema only accepts { strength } not type
-      const additionalNetworks: Record<string, { strength: number }> = {};
-      for (const lora of config.loras) {
-        additionalNetworks[lora.urn] = { strength: lora.strength };
-      }
-
-      const resp = await fetch("/api/image-generator/generate", {
+      const resp = await fetch("/api/image-generator/generate-hunyuan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: config.checkpoint.urn,
-          prompt: config.prompt,
-          negativePrompt: config.negativePrompt,
-          params: config.params,
-          additionalNetworks: Object.keys(additionalNetworks).length > 0 ? additionalNetworks : undefined,
-        }),
+        body: JSON.stringify({ prompt: prompt.trim(), aspectRatio }),
       });
 
       if (!resp.ok) {
@@ -140,59 +86,23 @@ export function ImageLab() {
         throw new Error(data.error || "Generation failed");
       }
 
-      const { token } = await resp.json();
+      const { imageUrl, prompt: finalPrompt } = await resp.json();
 
-      const pollStart = Date.now();
-      const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+      const generated: GeneratedImage = {
+        url: imageUrl,
+        prompt: finalPrompt || prompt,
+        aspectRatio,
+        timestamp: Date.now(),
+      };
 
-      // Start polling
-      pollingRef.current = setInterval(async () => {
-        // Hard timeout — stop polling after 5 minutes
-        if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
-          if (pollingRef.current) clearInterval(pollingRef.current);
-          pollingRef.current = null;
-          setError("Generation timed out after 5 minutes. CivitAI may be busy — try again.");
-          setPhase("editing");
-          return;
-        }
-
-        try {
-          const statusResp = await fetch(`/api/image-generator/civitai-status/${encodeURIComponent(token)}`);
-          const statusData = await statusResp.json();
-
-          if (statusData.status === "completed") {
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            pollingRef.current = null;
-
-            const images: GeneratedImage[] = (statusData.images || []).map((img: any) => ({
-              url: img.url,
-              seed: img.seed,
-              cost: img.cost,
-              config: { ...config },
-              timestamp: Date.now(),
-            }));
-
-            if (images.length > 0) {
-              setCurrentGenerated(images[0]);
-              setGeneratedImages(images);
-              setHistory((prev) => [...prev, ...images]);
-            }
-            setPhase("complete");
-          } else if (statusData.status === "failed") {
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            pollingRef.current = null;
-            setError(statusData.error || "Generation failed");
-            setPhase("editing");
-          }
-        } catch {
-          // Polling errors are transient, keep polling
-        }
-      }, 4000);
+      setCurrentGenerated(generated);
+      setHistory((prev) => [...prev, generated]);
+      setPhase("complete");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
       setPhase("editing");
     }
-  }, [config]);
+  }, [prompt, aspectRatio]);
 
   const handleEditAndRegenerate = useCallback(() => {
     setPhase("editing");
@@ -200,37 +110,13 @@ export function ImageLab() {
   }, []);
 
   const handleStartOver = useCallback(() => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
     setPhase("upload");
     setOriginalImage(null);
-    setOriginalMimeType(null);
-    setConfig(null);
-    setGeneratedImages([]);
+    setPrompt("");
+    setAspectRatio("3:4");
     setCurrentGenerated(null);
     setError(null);
   }, []);
-
-  const handleOpenSearch = useCallback((type: "Checkpoint" | "LORA") => {
-    setSearchType(type);
-    setSearchOpen(true);
-  }, []);
-
-  const handleSearchSelect = useCallback((item: { name: string; urn: string; thumbnailUrl?: string }) => {
-    if (!config) return;
-
-    if (searchType === "Checkpoint") {
-      setConfig({
-        ...config,
-        checkpoint: { name: item.name, urn: item.urn, thumbnailUrl: item.thumbnailUrl },
-      });
-    } else {
-      setConfig({
-        ...config,
-        loras: [...config.loras, { name: item.name, urn: item.urn, strength: 0.75, thumbnailUrl: item.thumbnailUrl }],
-      });
-    }
-    setSearchOpen(false);
-  }, [config, searchType]);
 
   return (
     <div className="space-y-6">
@@ -253,7 +139,7 @@ export function ImageLab() {
             <div className="text-center">
               <p className="font-medium">Analyzing image with Claude Vision...</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Detecting art style, composition, and generating reproduction tags
+                Building a Hunyuan prompt from your image
               </p>
             </div>
             {originalImage && (
@@ -267,9 +153,9 @@ export function ImageLab() {
         </Card>
       )}
 
-      {(phase === "editing" || phase === "generating") && config && (
+      {(phase === "editing" || phase === "generating") && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Original image preview */}
+          {/* Original image */}
           <div className="lg:col-span-1">
             <Card>
               <CardContent className="p-4">
@@ -291,15 +177,65 @@ export function ImageLab() {
             </Card>
           </div>
 
-          {/* Resource editor */}
-          <div className="lg:col-span-2">
-            <ResourceEditor
-              config={config}
-              onChange={setConfig}
-              onGenerate={handleGenerate}
-              onOpenSearch={handleOpenSearch}
-              isGenerating={phase === "generating"}
-            />
+          {/* Prompt editor */}
+          <div className="lg:col-span-2 space-y-4">
+            <Card>
+              <CardContent className="p-4 space-y-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Prompt
+                  </Label>
+                  <Textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    className="mt-1.5 min-h-[180px] text-sm"
+                    placeholder="Describe the scene in natural language..."
+                    disabled={phase === "generating"}
+                  />
+                </div>
+
+                <div className="w-48">
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Aspect Ratio
+                  </Label>
+                  <Select
+                    value={aspectRatio}
+                    onValueChange={setAspectRatio}
+                    disabled={phase === "generating"}
+                  >
+                    <SelectTrigger className="mt-1.5">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ASPECT_RATIOS.map((r) => (
+                        <SelectItem key={r.value} value={r.value}>
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={handleGenerate}
+              disabled={phase === "generating" || !prompt.trim()}
+            >
+              {phase === "generating" ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Generating on HunyuanImage 3.0...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Generate
+                </>
+              )}
+            </Button>
           </div>
         </div>
       )}
@@ -309,17 +245,9 @@ export function ImageLab() {
           originalImage={originalImage}
           generated={currentGenerated}
           history={history}
-          onSelectHistory={(img) => setCurrentGenerated(img)}
+          onSelectHistory={setCurrentGenerated}
           onEditAndRegenerate={handleEditAndRegenerate}
           onStartOver={handleStartOver}
-        />
-      )}
-
-      {searchOpen && (
-        <CivitaiSearchDialog
-          type={searchType}
-          onSelect={handleSearchSelect}
-          onClose={() => setSearchOpen(false)}
         />
       )}
     </div>
