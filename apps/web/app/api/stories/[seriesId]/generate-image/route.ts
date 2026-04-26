@@ -76,7 +76,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, character_block_override"
     )
     .eq("id", promptId)
     .single();
@@ -139,9 +139,11 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       }
     }
 
-    const primaryBlock = prompt.character_id
-      ? charBlocks[prompt.character_id]
-      : undefined;
+    const primaryBlock = prompt.character_block_override?.trim()
+      ? prompt.character_block_override.trim()
+      : prompt.character_id
+        ? charBlocks[prompt.character_id]
+        : undefined;
     const secondaryBlock = prompt.secondary_character_id
       ? charBlocks[prompt.secondary_character_id]
       : undefined;
@@ -229,6 +231,11 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
         status: "generated",
         image_id: imageId,
         previous_image_id: currentPrompt?.image_id ?? null,
+        debug_data: {
+          character_block_source: prompt.character_block_override?.trim()
+            ? "override"
+            : "db",
+        },
       })
       .eq("id", promptId);
 

@@ -85,6 +85,7 @@ interface SeriesData {
       image_id: string | null;
       previous_image_id: string | null;
       status: string;
+      character_block_override: string | null;
     }[];
   })[];
   characters: CharacterFromAPI[];

@@ -36,7 +36,7 @@ export async function GET(
   }
 }
 
-// PATCH /api/stories/images/[promptId] — Update the prompt text for a story image prompt
+// PATCH /api/stories/images/[promptId] — Update prompt text and/or character_block_override
 export async function PATCH(
   request: NextRequest,
   props: { params: Promise<{ promptId: string }> }
@@ -46,11 +46,17 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { prompt } = body as { prompt: string };
+    const { prompt, character_block_override } = body as {
+      prompt?: string;
+      character_block_override?: string | null;
+    };
 
-    if (!prompt || typeof prompt !== "string") {
+    const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
+    const hasOverrideUpdate = character_block_override !== undefined;
+
+    if (!hasPromptUpdate && !hasOverrideUpdate) {
       return NextResponse.json(
-        { error: "prompt is required and must be a string" },
+        { error: "prompt or character_block_override is required" },
         { status: 400 }
       );
     }
@@ -69,12 +75,12 @@ export async function PATCH(
       );
     }
 
-    // If already generated/approved, reset to pending so it can be regenerated
-    const resetStatus =
-      existing.status === "generated" || existing.status === "approved";
+    const updates: Record<string, unknown> = {};
+    if (hasPromptUpdate) updates.prompt = prompt;
+    if (hasOverrideUpdate) updates.character_block_override = character_block_override;
 
-    const updates: Record<string, unknown> = { prompt };
-    if (resetStatus) {
+    // Reset to pending on any content change so the next generation uses fresh data
+    if (existing.status === "generated" || existing.status === "approved") {
       updates.status = "pending";
     }
 

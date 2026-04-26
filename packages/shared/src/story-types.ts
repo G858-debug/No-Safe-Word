@@ -306,6 +306,7 @@ export interface StoryImagePromptRow {
   status: ImagePromptStatus;
   created_at: string;
   updated_at: string;
+  character_block_override: string | null;
 }
 
 export type ImageType = "facebook_sfw" | "website_nsfw_paired" | "website_only";

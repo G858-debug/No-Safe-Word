@@ -100,6 +100,7 @@ export interface ImagePromptData {
   image_id: string | null;
   previous_image_id: string | null;
   status: string;
+  character_block_override: string | null;
 }
 
 export interface PostWithPrompts {
@@ -139,6 +140,9 @@ interface PromptState {
   showDiagnostic: boolean;
   previousImageId: string | null;
   isReverting: boolean;
+  characterBlockOverride: string | null;
+  savedCharacterBlockOverride: string | null;
+  showOverride: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +269,9 @@ export default function ImageGeneration({
           showDiagnostic: false,
           previousImageId: ip.previous_image_id || null,
           isReverting: false,
+          characterBlockOverride: ip.character_block_override ?? null,
+          savedCharacterBlockOverride: ip.character_block_override ?? null,
+          showOverride: Boolean(ip.character_block_override),
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -503,6 +510,26 @@ export default function ImageGeneration({
             return;
           }
           updatePrompt(promptId, { savedPromptText: state.promptText });
+        }
+
+        if (state && state.characterBlockOverride !== state.savedCharacterBlockOverride) {
+          const overrideRes = await fetch(
+            `/api/stories/images/${promptId}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ character_block_override: state.characterBlockOverride }),
+            }
+          );
+          if (!overrideRes.ok) {
+            const overrideErr = await overrideRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: overrideErr?.error ?? "Failed to save character block override",
+            });
+            return;
+          }
+          updatePrompt(promptId, { savedCharacterBlockOverride: state.characterBlockOverride });
         }
 
         const res = await fetch(
@@ -1142,6 +1169,11 @@ interface LockedCharacterBlockProps {
   secondaryCharacterName: string | null;
   characterIdentityMap: Record<string, CharacterIdentity>;
   onNavigateToCharacters: () => void;
+  characterBlockOverride: string | null;
+  showOverride: boolean;
+  onOverrideChange: (text: string) => void;
+  onToggleOverride: (prefilledText: string) => void;
+  onClearOverride: () => void;
 }
 
 function LockedCharacterBlock({
@@ -1152,15 +1184,16 @@ function LockedCharacterBlock({
   secondaryCharacterName,
   characterIdentityMap,
   onNavigateToCharacters,
+  characterBlockOverride,
+  showOverride,
+  onOverrideChange,
+  onToggleOverride,
+  onClearOverride,
 }: LockedCharacterBlockProps) {
   if (imageModel !== "hunyuan3") return null;
   if (!primaryCharacterId && !secondaryCharacterId) return null;
 
-  const entries: Array<{
-    id: string;
-    name: string;
-    locked: string | null;
-  }> = [];
+  const entries: Array<{ id: string; name: string; locked: string | null }> = [];
 
   if (primaryCharacterId) {
     const ident = characterIdentityMap[primaryCharacterId];
@@ -1179,12 +1212,22 @@ function LockedCharacterBlock({
     });
   }
 
+  const primaryEntry = entries[0];
+  const defaultLockedText = primaryEntry?.locked
+    ? buildSceneCharacterBlockFromLocked(primaryEntry.name, primaryEntry.locked)
+    : "";
+
   return (
     <div className="mt-1.5 rounded border border-zinc-700/40 bg-zinc-900/40 p-2">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-zinc-400">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
           <Lock className="h-3 w-3" />
           Locked character text (Hunyuan)
+          {characterBlockOverride !== null && (
+            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-400">
+              Custom
+            </span>
+          )}
         </div>
         <button
           onClick={onNavigateToCharacters}
@@ -1193,29 +1236,85 @@ function LockedCharacterBlock({
           Edit in Characters
         </button>
       </div>
-      <div className="mt-1.5 space-y-1.5">
-        {entries.map((e) => (
-          <div key={e.id}>
-            <div className="text-[10px] font-medium text-zinc-300">
-              {e.name}
+
+      {!showOverride && (
+        <div className="mt-1.5 space-y-1.5">
+          {entries.map((e) => (
+            <div key={e.id}>
+              <div className="text-[10px] font-medium text-zinc-300">{e.name}</div>
+              {characterBlockOverride !== null && e.id === primaryCharacterId ? (
+                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-amber-950/30 px-2 py-1 font-mono text-[10px] leading-relaxed text-amber-300/80">
+                  {characterBlockOverride}
+                </div>
+              ) : e.locked ? (
+                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
+                  {buildSceneCharacterBlockFromLocked(e.name, e.locked)}
+                </div>
+              ) : (
+                <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
+                  No portrait approved yet — falls back to description-derived
+                  identity at generation time. Approve a portrait to lock the
+                  exact text.
+                </div>
+              )}
             </div>
-            {e.locked ? (
-              <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
-                {buildSceneCharacterBlockFromLocked(e.name, e.locked)}
-              </div>
-            ) : (
-              <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
-                No portrait approved yet — falls back to description-derived
-                identity at generation time. Approve a portrait to lock the
-                exact text.
-              </div>
+          ))}
+        </div>
+      )}
+
+      {showOverride && (
+        <div className="mt-1.5 space-y-1.5">
+          <div className="text-[10px] text-amber-400/80">
+            This override applies to this image only.{" "}
+            {primaryEntry && (
+              <>
+                Other images using{" "}
+                <span className="font-medium text-amber-300">{primaryEntry.name}</span>{" "}
+                are not affected.
+              </>
             )}
           </div>
-        ))}
-      </div>
-      <div className="mt-1.5 text-[10px] text-zinc-500">
-        Edits propagate to every image using this character. The scene prompt
-        below is appended to this text.
+          <Textarea
+            value={characterBlockOverride ?? ""}
+            onChange={(e) => onOverrideChange(e.target.value)}
+            rows={4}
+            className="leading-relaxed resize-y border-amber-700/40 bg-amber-950/20 font-mono text-[11px]"
+            placeholder="Enter custom character block for this image only…"
+          />
+        </div>
+      )}
+
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        {!showOverride && (
+          <div className="text-[10px] text-zinc-500">
+            Edits propagate to every image using this character. The scene
+            prompt below is appended to this text.
+          </div>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {characterBlockOverride !== null && !showOverride && (
+            <button
+              onClick={onClearOverride}
+              className="text-[10px] text-zinc-400 transition-colors hover:text-red-400"
+            >
+              Clear override
+            </button>
+          )}
+          {primaryEntry && (
+            <button
+              onClick={() => {
+                if (!showOverride && characterBlockOverride === null) {
+                  onToggleOverride(defaultLockedText);
+                } else {
+                  onToggleOverride(characterBlockOverride ?? defaultLockedText);
+                }
+              }}
+              className="text-[10px] text-blue-400 transition-colors hover:text-blue-300"
+            >
+              {showOverride ? "Hide editor" : "Override for this image only"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1371,6 +1470,14 @@ function ImageCard({
                 Diagnostic
               </Badge>
             )}
+            {state.characterBlockOverride !== null && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30"
+              >
+                Custom char block
+              </Badge>
+            )}
           </div>
 
           {/* Error */}
@@ -1401,6 +1508,24 @@ function ImageCard({
                   secondaryCharacterName={ip.secondary_character_name}
                   characterIdentityMap={characterIdentityMap}
                   onNavigateToCharacters={onNavigateToCharacters}
+                  characterBlockOverride={state.characterBlockOverride}
+                  showOverride={state.showOverride}
+                  onOverrideChange={(text) =>
+                    onUpdatePrompt(ip.id, { characterBlockOverride: text })
+                  }
+                  onToggleOverride={(prefilledText) => {
+                    if (!state.showOverride && state.characterBlockOverride === null) {
+                      onUpdatePrompt(ip.id, {
+                        showOverride: true,
+                        characterBlockOverride: prefilledText,
+                      });
+                    } else {
+                      onUpdatePrompt(ip.id, { showOverride: !state.showOverride });
+                    }
+                  }}
+                  onClearOverride={() =>
+                    onUpdatePrompt(ip.id, { characterBlockOverride: null, showOverride: false })
+                  }
                 />
                 <Textarea
                   value={state.promptText}
