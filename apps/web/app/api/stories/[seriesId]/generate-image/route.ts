@@ -29,6 +29,7 @@ export async function POST(
   const { seriesId } = await props.params;
 
   let promptId: string;
+  let suppressAssembly = false;
   try {
     const body = await request.json();
     if (typeof body?.promptId !== "string" || !body.promptId) {
@@ -38,6 +39,10 @@ export async function POST(
       );
     }
     promptId = body.promptId;
+    // suppressAssembly: true when the Mistral rewriter already produced the
+    // complete assembled prompt. The generate-image route skips character
+    // block injection and just appends the visual signature.
+    suppressAssembly = body?.suppressAssembly === true;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -61,7 +66,7 @@ export async function POST(
       return await runFlux2Generation(seriesId, promptId);
 
     case "hunyuan3":
-      return await runHunyuanGeneration(seriesId, promptId);
+      return await runHunyuanGeneration(seriesId, promptId, suppressAssembly);
 
     default:
       return NextResponse.json(
@@ -71,7 +76,7 @@ export async function POST(
   }
 }
 
-async function runHunyuanGeneration(seriesId: string, promptId: string) {
+async function runHunyuanGeneration(seriesId: string, promptId: string, suppressAssembly = false) {
   // 1. Fetch the prompt row + linked character IDs
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
@@ -182,22 +187,37 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
 
     // 5. Generate.
     //
-    // Model-aware injection rule (Hunyuan / scene): character text REQUIRED.
-    // HunyuanImage 3.0 has no reference-image conditioning, so identity has
-    // to be carried by prompt text. The blocks above were derived from the
-    // canonical `portrait_prompt_locked` (same source the cover path uses),
-    // stripped of portrait framing/lighting so they don't fight the scene's
-    // own composition. Flux is the opposite — see `runFlux2Generation`.
-    const result = await generateHunyuanImage({
-      scenePrompt: prompt.prompt,
-      characterBlock: primaryBlock,
-      secondaryCharacterBlock: secondaryBlock,
-      aspectRatio,
-      imageType: prompt.image_type,
-      clothingMap: Object.keys(resolvedClothingMap).length ? resolvedClothingMap : undefined,
-      sfwConstraint: prompt.sfw_constraint_override ?? undefined,
-      visualSignature: prompt.visual_signature_override ?? undefined,
-    });
+    // Two paths based on whether the Mistral rewriter assembled the prompt:
+    //
+    // suppressAssembly = true (rewriter ON): The stored prompt.prompt is the
+    // complete assembled prompt produced by Mistral — character descriptions,
+    // scene, SFW constraints are all already included. Send it directly; the
+    // assembler only appends the visual signature (or the override if set).
+    //
+    // suppressAssembly = false (rewriter OFF): Normal assembly — character
+    // blocks, clothing, and SFW constraint are injected by the assembler.
+    // HunyuanImage 3.0 has no reference-image conditioning, so identity must
+    // be carried by prompt text. Flux is the opposite — see runFlux2Generation.
+    const result = await generateHunyuanImage(
+      suppressAssembly
+        ? {
+            scenePrompt: prompt.prompt,
+            aspectRatio,
+            imageType: prompt.image_type,
+            sfwConstraint: "",  // Mistral already included SFW constraints
+            visualSignature: prompt.visual_signature_override ?? undefined,
+          }
+        : {
+            scenePrompt: prompt.prompt,
+            characterBlock: primaryBlock,
+            secondaryCharacterBlock: secondaryBlock,
+            aspectRatio,
+            imageType: prompt.image_type,
+            clothingMap: Object.keys(resolvedClothingMap).length ? resolvedClothingMap : undefined,
+            sfwConstraint: prompt.sfw_constraint_override ?? undefined,
+            visualSignature: prompt.visual_signature_override ?? undefined,
+          }
+    );
 
     // 6. Create the images row first so we have a DB-generated UUID, then
     // upload to Supabase Storage under that ID and back-fill stored_url.

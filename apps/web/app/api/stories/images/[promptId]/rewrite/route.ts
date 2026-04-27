@@ -4,19 +4,22 @@ import {
   rewritePromptForHunyuan,
   type ImageTypeHint,
 } from "@no-safe-word/image-gen";
+import { buildSceneCharacterBlockFromLocked } from "@no-safe-word/image-gen/portrait-prompt-builder";
 
 /**
  * POST /api/stories/images/[promptId]/rewrite
  *
- * Rewrites the scene prompt in the request body using Mistral Small,
- * applying the HunyuanImage 3.0 known-working composition patterns.
+ * Rewrites the scene prompt in the request body using Mistral Small.
+ * Mistral receives the complete character context — gender, stripped
+ * portrait description block, and (for SFW images) clothing sentence —
+ * and produces the COMPLETE final prompt that goes to Replicate.
  *
  * Body: { prompt: string }
- *
- * Reads character data (names only — identity is injected by the
- * assembler) from the base `characters` table.
- *
  * Returns: { rewrittenPrompt: string }
+ *
+ * The caller (generateOne in ImageGeneration.tsx) stores the rewritten
+ * prompt back to story_image_prompts.prompt and passes suppressAssembly:true
+ * to generate-image so the mechanical assembler is bypassed.
  */
 export async function POST(
   request: NextRequest,
@@ -48,40 +51,74 @@ export async function POST(
     return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
   }
 
-  // Resolve character names from the base characters table
+  const isSfw = promptRow.image_type === "facebook_sfw";
+  const imageType: ImageTypeHint = isSfw ? "sfw" : "explicit";
+
+  // Resolve full character context from the base characters table
   const charIds = [
     promptRow.character_id,
     promptRow.secondary_character_id,
   ].filter((id): id is string => Boolean(id));
 
-  const nameById: Record<string, string> = {};
+  interface CharData {
+    name: string;
+    gender?: string;
+    portraitBlock?: string;
+    clothing?: string;
+  }
+  const charDataById: Record<string, CharData> = {};
+
   if (charIds.length > 0) {
     const { data: chars } = await supabase
       .from("characters")
-      .select("id, name")
+      .select("id, name, description, portrait_prompt_locked")
       .in("id", charIds);
+
     for (const c of chars ?? []) {
-      if (c.id && c.name) nameById[c.id] = c.name;
+      if (!c.id || !c.name) continue;
+      const desc = (c.description as Record<string, string>) ?? {};
+
+      const portraitBlock = c.portrait_prompt_locked
+        ? buildSceneCharacterBlockFromLocked(c.name, c.portrait_prompt_locked)
+        : undefined;
+
+      const clothingRaw = desc.clothing;
+      const clothing = clothingRaw
+        ? `${c.name} is wearing ${clothingRaw}.`
+        : undefined;
+
+      charDataById[c.id] = {
+        name: c.name,
+        gender: desc.gender || undefined,
+        portraitBlock,
+        clothing,
+      };
     }
   }
 
-  const primaryName = promptRow.character_id
-    ? (nameById[promptRow.character_id] ?? promptRow.character_name ?? undefined)
-    : undefined;
-  const secondaryName = promptRow.secondary_character_id
-    ? (nameById[promptRow.secondary_character_id] ?? promptRow.secondary_character_name ?? undefined)
+  // Resolve primary and secondary — fall back to name stored on the prompt row
+  const primaryId = promptRow.character_id;
+  const secondaryId = promptRow.secondary_character_id;
+
+  const primaryData = primaryId
+    ? (charDataById[primaryId] ?? {
+        name: promptRow.character_name ?? primaryId,
+      })
     : undefined;
 
-  // Map image_type to the rewriter's hint
-  const imageType: ImageTypeHint =
-    promptRow.image_type === "facebook_sfw" ? "sfw" : "explicit";
+  const secondaryData = secondaryId
+    ? (charDataById[secondaryId] ?? {
+        name: promptRow.secondary_character_name ?? secondaryId,
+      })
+    : undefined;
 
   try {
     const { rewrittenPrompt } = await rewritePromptForHunyuan(
       prompt,
       {
-        primaryCharacter: primaryName ? { name: primaryName } : undefined,
-        secondaryCharacter: secondaryName ? { name: secondaryName } : undefined,
+        primaryCharacter: primaryData,
+        secondaryCharacter: secondaryData,
+        isSfw,
       },
       imageType
     );

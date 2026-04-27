@@ -737,7 +737,10 @@ export default function ImageGeneration({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ promptId }),
+            // suppressAssembly: rewriter produced the complete prompt —
+            // generate-image skips character block injection and only appends
+            // the visual signature. False = normal assembly path.
+            body: JSON.stringify({ promptId, suppressAssembly: promptWasRewritten }),
           }
         );
         const data = await res.json().catch(() => ({}));
