@@ -388,6 +388,7 @@ export type Database = {
         Row: {
           character_id: string | null
           created_at: string
+          critique: string | null
           id: string
           mode: string
           negative_prompt: string
@@ -400,6 +401,7 @@ export type Database = {
         Insert: {
           character_id?: string | null
           created_at?: string
+          critique?: string | null
           id?: string
           mode?: string
           negative_prompt?: string
@@ -412,6 +414,7 @@ export type Database = {
         Update: {
           character_id?: string | null
           created_at?: string
+          critique?: string | null
           id?: string
           mode?: string
           negative_prompt?: string
