@@ -31,14 +31,22 @@ export default function ContactPage() {
             Email
           </h2>
           <p className="mt-3 text-sm text-warm-300">
-            For general enquiries, support, cancellations, and POPIA data
-            requests:
+            For general enquiries, support, and POPIA data requests:
           </p>
           <a
             href="mailto:ntsiki@nosafeword.co.za"
             className="mt-2 inline-block text-amber-500 transition-colors hover:text-amber-400"
           >
             ntsiki@nosafeword.co.za
+          </a>
+          <p className="mt-4 text-sm text-warm-300">
+            To cancel your subscription:
+          </p>
+          <a
+            href="mailto:cancel@nosafeword.co.za"
+            className="mt-1 inline-block text-amber-500 transition-colors hover:text-amber-400"
+          >
+            cancel@nosafeword.co.za
           </a>
         </div>
 

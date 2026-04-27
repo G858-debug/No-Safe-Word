@@ -117,10 +117,10 @@ export default function TermsPage() {
               <strong className="text-warm-200">Cancellation.</strong> You may
               cancel your subscription at any time by emailing{" "}
               <a
-                href="mailto:ntsiki@nosafeword.co.za"
+                href="mailto:cancel@nosafeword.co.za"
                 className="text-amber-500 transition-colors hover:text-amber-400"
               >
-                ntsiki@nosafeword.co.za
+                cancel@nosafeword.co.za
               </a>{" "}
               or by contacting us via the Contact page. Cancellation takes
               effect at the end of the current billing cycle &mdash; you retain

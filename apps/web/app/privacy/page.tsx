@@ -101,28 +101,58 @@ export default function PrivacyPage() {
             className="text-xl font-bold text-amber-50"
             style={{ fontFamily: "var(--font-serif)" }}
           >
-            4. Data Sharing
+            4. Third-Party Processors (POPIA Section 72)
           </h2>
           <div className="mt-3 space-y-3">
             <p>
-              We do not sell your personal information. We may share information
-              with:
+              We do not sell your personal information. We share information
+              only with the processors listed below, each engaged solely to
+              operate the Service:
             </p>
             <ul className="ml-4 list-disc space-y-2 text-warm-300">
               <li>
-                <strong className="text-warm-200">Payment Processors:</strong>{" "}
-                Payfast, for processing transactions securely.
+                <strong className="text-warm-200">PayFast</strong> — payment
+                processing. Handles subscription and purchase transactions;
+                processes payment card and bank details on our behalf. Hosted
+                in South Africa.
               </li>
               <li>
-                <strong className="text-warm-200">Hosting Providers:</strong>{" "}
-                Our website infrastructure providers, who process data on our
-                behalf.
+                <strong className="text-warm-200">Supabase</strong> — database
+                hosting and authentication. Processes account data and login
+                credentials. Hosted in the EU.
+              </li>
+              <li>
+                <strong className="text-warm-200">Resend</strong> —
+                transactional and marketing email delivery. Processes your
+                email address and the content of emails we send you. Hosted in
+                the US.
+              </li>
+              <li>
+                <strong className="text-warm-200">OpenClaw / WhatsApp</strong>{" "}
+                — WhatsApp PIN authentication for accounts that opt into
+                WhatsApp sign-in. Processes phone number and authentication
+                PINs. Hosted on Railway in US/EU regions.
+              </li>
+              <li>
+                <strong className="text-warm-200">Railway</strong> —
+                application hosting. Processes all traffic routed to the
+                site. Hosted in the EU.
               </li>
               <li>
                 <strong className="text-warm-200">Legal Requirements:</strong>{" "}
-                If required by law or to protect our rights.
+                We may disclose information if required by law or to protect
+                our rights.
               </li>
             </ul>
+            <p>
+              Some of the processors above are located outside South Africa.
+              In accordance with POPIA Section 72, data is transferred to
+              foreign recipients only where those recipients are subject to a
+              law, binding corporate rules, or a binding agreement that
+              provides an adequate level of protection substantially similar to
+              POPIA. All listed processors operate under contractual data
+              processing agreements that meet this standard.
+            </p>
           </div>
         </section>
 
