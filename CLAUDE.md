@@ -132,6 +132,78 @@ The import schema uses these three arrays on each post (see `PostImagesImport` i
 
 Settings must be specific: Middelburg, Soweto, Sandton — not generic "African". Include local details: shweshwe fabric, Amarula bottle, township bedroom, mechanic workshop.
 
+## HunyuanImage 3.0 — Known-Working Composition Patterns
+
+The Hunyuan path through `assembleHunyuanPrompt` produces reliable explicit
+imagery only when scene prompts use specific compositional patterns. This was
+established by structured testing in April 2026. The prompt rewriter
+(`packages/image-gen/src/prompt-rewriter.ts`) targets these patterns and
+should be updated whenever new patterns are validated or existing patterns
+fail.
+
+### Reliable patterns (use these)
+
+**Pattern A — Female-from-behind, male anonymous.**
+Female subject fully visible from behind. Male figure represented only by hands
+at her hips and male anatomy entering from the camera direction. Critical
+prompt rule: male hands must be described as "coming from the same direction
+as the camera" — not "hands at her hips." Lifting/restating this rule reliably
+produces correct hand placement.
+
+**Pattern B — Side profile, male cropped.**
+Camera at 90° to the scene. Female subject's face visible in profile with
+expression. Torso visible from the side. Male figure cropped entirely out of
+frame except for the anatomical connection entering from the left frame edge.
+Specify "left edge of frame" for the male element and "right side of frame"
+for the female face.
+
+**Pattern C — Kissing close-up, both faces visible.**
+Both characters' faces visible. Requires explicit lip-contact language: "lips
+pressed firmly together in contact, mouths closed and sealed." Without this
+language the model produces faces approaching but not touching.
+
+**Pattern D — Oral, no hands, low upward angle.**
+Face-only female subject, male anatomy from low angle. Do NOT specify hand
+placement — adding hands causes the model to position them from the sides
+rather than from the camera axis. The "no hands" variant of this pattern is
+the only reliable form.
+
+### Unreliable patterns (do not use)
+
+**Reversed gender (male visible, female anonymous).**
+The gender-flipped version of Pattern A produces consistently poor output.
+Abandoned.
+
+**True top-down first-person oral.**
+Steep overhead first-person perspective produces anatomical distortion
+regardless of how it's prompted. The model defaults to a low upward angle or
+fails at the geometry. Use Pattern D instead.
+
+**Fully visible two-character explicit (both bodies fully in frame, both
+genders rendered, anatomical connection visible).**
+This is the pattern HunyuanImage 3.0 cannot reliably render. The two-pipeline
+strategy (Hunyuan + Pony specialist) was considered and deferred. For now,
+explicit scenes use Patterns A–D and avoid this composition entirely.
+
+### Universal prompt rules for Hunyuan explicit scenes
+
+- Female character's full physical description must appear inline in every
+  prompt. HunyuanImage has no reference-image conditioning.
+- Every prompt must be fully self-contained — full setting, lighting, and
+  positioning re-described each time.
+- Male figure must be explicitly described as "cropped out of frame /
+  off-frame" when using Pattern B — not just absent or unmentioned.
+- Male anatomy and hands must enter from "the same direction as the camera"
+  for Pattern A — stated explicitly.
+
+### When to update this section
+
+- A new composition pattern proves reliable across at least 5 generations on
+  3 different seeds — add it as a lettered pattern above.
+- A pattern that was reliable starts failing — flag it in the unreliable
+  section with the date and what changed.
+- HunyuanImage 3.0 is replaced or upgraded — re-test and revise.
+
 ## Prompt Enhancement
 
 Scene prompts route through Claude before generation (`prompt-enhancer.ts`). The enhancer converts Five Layers Framework descriptions into final generation prompts:
