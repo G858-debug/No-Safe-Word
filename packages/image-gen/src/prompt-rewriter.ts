@@ -64,7 +64,7 @@ export async function rewritePromptForHunyuan(
   originalPrompt: string,
   characterContext: CharacterContext = {},
   imageType: ImageTypeHint,
-  options?: { model?: "small" | "large"; knowledge?: string }
+  options?: { model?: "small" | "large"; knowledge?: string; critique?: string }
 ): Promise<RewriteResult> {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) {
@@ -96,6 +96,12 @@ export async function rewritePromptForHunyuan(
   messageParts.push("");
   messageParts.push("SCENE PROMPT:");
   messageParts.push(originalPrompt.trim());
+
+  if (options?.critique?.trim()) {
+    messageParts.push("");
+    messageParts.push("CRITIQUE OF PREVIOUS GENERATION:");
+    messageParts.push(options.critique.trim());
+  }
 
   const userMessage = messageParts.join("\n");
 

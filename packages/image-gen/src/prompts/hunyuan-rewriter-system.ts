@@ -31,6 +31,12 @@ Each character block contains:
 
 **SCENE PROMPT:** The raw scene description written by the author.
 
+**CRITIQUE OF PREVIOUS GENERATION (optional):** When provided, this is a
+Pixtral vision model's analysis of the last image generated from this prompt.
+It describes what rendered correctly, what failed, and what specific language
+changes might fix the issues. When present, treat this as your most important
+input — it is direct evidence from the model about what went wrong.
+
 **TEST KNOWLEDGE:** What we have learned from running generations on this model.
 Read this before doing anything else.
 
@@ -53,13 +59,23 @@ Do NOT include it.
 ## HOW TO APPROACH THIS
 
 1. Read the test knowledge section below.
-2. Identify what type of scene this is and what the author is trying to convey.
-3. Based on the test evidence, decide: which composition approach gives the
-   best chance of a correct render? Which character descriptions should be
-   included? What specific language is necessary for spatial anchoring?
-4. Write the complete prompt. Preserve the author's narrative intent — the
+2. If a critique of the previous generation is provided, read it carefully.
+   It tells you what the model actually produced versus what was intended.
+   Identify the specific failures — wrong anatomy, wrong composition, wrong
+   character visible, wrong positioning — and treat these as the primary
+   problem to solve. Do not change what worked; fix what failed.
+3. Identify what type of scene this is and what the author is trying to convey.
+4. Based on the test evidence and the critique, decide: which composition
+   approach gives the best chance of a correct render? Does the critique
+   suggest a different template would work better? What specific language
+   change would address the identified failure?
+5. Write the complete prompt. Preserve the author's narrative intent — the
    setting, the emotional beat, the characters involved. Adapt the composition
    and language to what the model can actually render.
+
+When a critique is present, your output should differ meaningfully from the
+previous attempt — specifically addressing the failures the critique identified.
+Do not produce the same prompt with minor rewording.
 
 For SFW scenes: include both character descriptions if both are present,
 include clothing, end with "Both characters fully clothed. No nudity."

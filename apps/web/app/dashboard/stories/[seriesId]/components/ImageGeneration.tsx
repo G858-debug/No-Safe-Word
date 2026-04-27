@@ -572,7 +572,10 @@ export default function ImageGeneration({
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt: state.promptText }),
+              body: JSON.stringify({
+                prompt: state.promptText,
+                critique: state.critiqueText ?? undefined,
+              }),
             }
           );
           if (!rewriteRes.ok) {

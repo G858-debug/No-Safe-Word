@@ -51,12 +51,16 @@ export async function POST(
   const { promptId } = await props.params;
 
   let prompt: string;
+  let critique: string | undefined;
   try {
     const body = await request.json();
     if (typeof body?.prompt !== "string" || !body.prompt.trim()) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
     }
     prompt = body.prompt.trim();
+    critique = typeof body?.critique === "string" && body.critique.trim()
+      ? body.critique.trim()
+      : undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -146,7 +150,7 @@ export async function POST(
         isSfw,
       },
       imageType,
-      { knowledge, model: "large" }
+      { knowledge, model: "large", critique }
     );
 
     return NextResponse.json({ rewrittenPrompt });
