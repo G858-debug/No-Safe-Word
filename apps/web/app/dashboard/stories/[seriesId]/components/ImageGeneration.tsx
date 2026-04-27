@@ -2238,7 +2238,7 @@ function ImageCard({
           )}
 
           {/* Zone 3: sticky action buttons */}
-          <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-border/50 bg-card/95 px-3 py-2 backdrop-blur-sm">
+          <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-border/50 bg-card/95 px-3 py-2 backdrop-blur-sm">
             {/* Generate / Regenerate — calls the unified /generate-image route (dispatches on image_model) */}
             {(isPending || isFailed) && (
               <Button
