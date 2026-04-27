@@ -64,7 +64,7 @@ export async function rewritePromptForHunyuan(
   originalPrompt: string,
   characterContext: CharacterContext = {},
   imageType: ImageTypeHint,
-  options?: { model?: "small" | "large" }
+  options?: { model?: "small" | "large"; knowledge?: string }
 ): Promise<RewriteResult> {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) {
@@ -99,6 +99,15 @@ export async function rewritePromptForHunyuan(
 
   const userMessage = messageParts.join("\n");
 
+  // Inject knowledge into the system prompt. If no knowledge was loaded
+  // (e.g. file not found), the placeholder is removed and Mistral falls
+  // back to its own general knowledge — still useful, just less tuned.
+  const knowledge = options?.knowledge?.trim() ?? "";
+  const systemPrompt = HUNYUAN_REWRITER_SYSTEM.replace(
+    "{KNOWLEDGE}",
+    knowledge || "(No test knowledge loaded — apply general best practices.)"
+  );
+
   const response = await fetch(MISTRAL_API_URL, {
     method: "POST",
     headers: {
@@ -108,7 +117,7 @@ export async function rewritePromptForHunyuan(
     body: JSON.stringify({
       model: modelId,
       messages: [
-        { role: "system", content: HUNYUAN_REWRITER_SYSTEM },
+        { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
       max_tokens: 1200,

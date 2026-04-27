@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
@@ -5,6 +7,27 @@ import {
   type ImageTypeHint,
 } from "@no-safe-word/image-gen";
 import { buildSceneCharacterBlockFromLocked } from "@no-safe-word/image-gen/portrait-prompt-builder";
+
+/**
+ * Load the Hunyuan test-knowledge file at request time so updates to
+ * hunyuan-knowledge.md take effect on the next deploy without any code
+ * changes. Falls back silently if the file is missing.
+ *
+ * Path: packages/image-gen/src/prompts/hunyuan-knowledge.md
+ * process.cwd() is apps/web in both local dev and Railway.
+ */
+function loadKnowledge(): string {
+  const knowledgePath = path.join(
+    process.cwd(),
+    "../../packages/image-gen/src/prompts/hunyuan-knowledge.md"
+  );
+  try {
+    return fs.readFileSync(knowledgePath, "utf-8");
+  } catch {
+    console.warn("[rewrite] hunyuan-knowledge.md not found at", knowledgePath, "— proceeding without it");
+    return "";
+  }
+}
 
 /**
  * POST /api/stories/images/[promptId]/rewrite
@@ -112,6 +135,8 @@ export async function POST(
       })
     : undefined;
 
+  const knowledge = loadKnowledge();
+
   try {
     const { rewrittenPrompt } = await rewritePromptForHunyuan(
       prompt,
@@ -120,7 +145,8 @@ export async function POST(
         secondaryCharacter: secondaryData,
         isSfw,
       },
-      imageType
+      imageType,
+      { knowledge }
     );
 
     return NextResponse.json({ rewrittenPrompt });
