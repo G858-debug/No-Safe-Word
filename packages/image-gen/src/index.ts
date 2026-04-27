@@ -99,3 +99,10 @@ export type {
   Flux2ProGenerateOptions,
   Flux2ProGenerateResult,
 } from './flux2-pro-generator';
+
+// HunyuanImage 3.0 scene prompt rewriter (Mistral Small)
+export { rewritePromptForHunyuan } from './prompt-rewriter';
+export type { ImageTypeHint, CharacterContext, RewriteResult } from './prompt-rewriter';
+
+// Generated image critic (Pixtral 12B)
+export { critiqueGeneratedImage } from './image-critic';

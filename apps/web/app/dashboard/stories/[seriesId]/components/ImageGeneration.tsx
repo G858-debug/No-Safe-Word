@@ -166,6 +166,9 @@ interface PromptState {
   savedVisualSignatureOverride: string | null;
   showVisualSignatureOverride: boolean;
   showFullPromptPreview: boolean;
+  useRewriter: boolean;
+  critiqueText: string | null;
+  critiqueLoading: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +314,9 @@ export default function ImageGeneration({
           savedVisualSignatureOverride: ip.visual_signature_override ?? null,
           showVisualSignatureOverride: Boolean(ip.visual_signature_override),
           showFullPromptPreview: false,
+          useRewriter: true,
+          critiqueText: null,
+          critiqueLoading: false,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -468,6 +474,27 @@ export default function ImageGeneration({
               error: null,
             });
           }
+          // Trigger critique for the completed async job
+          void (async () => {
+            updatePrompt(promptId, { critiqueLoading: true, critiqueText: null });
+            try {
+              const critiqueRes = await fetch(
+                `/api/stories/images/${promptId}/critique`,
+                { method: "POST" }
+              );
+              if (critiqueRes.ok) {
+                const critiqueData = await critiqueRes.json();
+                updatePrompt(promptId, {
+                  critiqueText: critiqueData.critique ?? null,
+                  critiqueLoading: false,
+                });
+              } else {
+                updatePrompt(promptId, { critiqueLoading: false });
+              }
+            } catch {
+              updatePrompt(promptId, { critiqueLoading: false });
+            }
+          })();
         } else if (data.error) {
           // Job failed
           pollingIdsRef.current.delete(promptId);
@@ -528,16 +555,59 @@ export default function ImageGeneration({
    */
   const generateOne = useCallback(
     async (promptId: string): Promise<void> => {
-      updatePrompt(promptId, { status: "generating", error: null });
+      updatePrompt(promptId, { status: "generating", error: null, critiqueText: null });
       try {
         const state = promptStates[promptId];
-        if (state && state.promptText !== state.savedPromptText) {
+
+        // ── Part A: Prompt Rewriter ──────────────────────────────────────
+        // If the rewriter toggle is ON and the story uses Hunyuan, call the
+        // rewrite API before patching. The rewritten prompt replaces the
+        // user's current textbox content in both the UI and the DB.
+        let promptTextToUse = state?.promptText ?? "";
+        let promptWasRewritten = false;
+
+        if (state?.useRewriter && imageModel === "hunyuan3") {
+          const rewriteRes = await fetch(
+            `/api/stories/images/${promptId}/rewrite`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prompt: state.promptText }),
+            }
+          );
+          if (!rewriteRes.ok) {
+            const rewriteErr = await rewriteRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: `Rewriter failed — ${rewriteErr?.error ?? "check MISTRAL_API_KEY"}. Disable the Rewrite toggle and retry with the original prompt.`,
+            });
+            return;
+          }
+          const rewriteData = await rewriteRes.json().catch(() => ({}));
+          if (rewriteData?.rewrittenPrompt) {
+            promptTextToUse = rewriteData.rewrittenPrompt;
+            promptWasRewritten = true;
+            // Update the textbox and mark the baseline in sync so the user
+            // sees the rewritten version and a subsequent Regenerate click
+            // won't re-patch the prompt unnecessarily.
+            updatePrompt(promptId, {
+              promptText: promptTextToUse,
+              savedPromptText: promptTextToUse,
+            });
+          }
+        }
+
+        // ── Prompt PATCH ─────────────────────────────────────────────────
+        // Persist if the prompt changed (either via rewrite or manual edit).
+        // Note: `state` was captured before the rewrite; compare
+        // `promptTextToUse` against the original savedPromptText.
+        if (promptWasRewritten || (state && state.promptText !== state.savedPromptText)) {
           const patchRes = await fetch(
             `/api/stories/images/${promptId}`,
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt: state.promptText }),
+              body: JSON.stringify({ prompt: promptTextToUse }),
             }
           );
           if (!patchRes.ok) {
@@ -548,7 +618,10 @@ export default function ImageGeneration({
             });
             return;
           }
-          updatePrompt(promptId, { savedPromptText: state.promptText });
+          if (!promptWasRewritten) {
+            // Rewrite already set savedPromptText above
+            updatePrompt(promptId, { savedPromptText: promptTextToUse });
+          }
         }
 
         if (state && state.characterBlockOverride !== state.savedCharacterBlockOverride) {
@@ -686,6 +759,28 @@ export default function ImageGeneration({
             imageUrl: data.imageUrl,
             error: null,
           });
+          // Trigger critique asynchronously — don't block the generation UI
+          // feedback. critiqueLoading goes true, then resolves in the background.
+          void (async () => {
+            updatePrompt(promptId, { critiqueLoading: true, critiqueText: null });
+            try {
+              const critiqueRes = await fetch(
+                `/api/stories/images/${promptId}/critique`,
+                { method: "POST" }
+              );
+              if (critiqueRes.ok) {
+                const critiqueData = await critiqueRes.json();
+                updatePrompt(promptId, {
+                  critiqueText: critiqueData.critique ?? null,
+                  critiqueLoading: false,
+                });
+              } else {
+                updatePrompt(promptId, { critiqueLoading: false });
+              }
+            } catch {
+              updatePrompt(promptId, { critiqueLoading: false });
+            }
+          })();
           return;
         }
 
@@ -708,7 +803,7 @@ export default function ImageGeneration({
         });
       }
     },
-    [seriesId, updatePrompt, promptStates]
+    [seriesId, updatePrompt, promptStates, imageModel]
   );
 
   /** Generate all eligible prompts sequentially. */
@@ -1793,6 +1888,27 @@ function ImageCard({
             </div>
           )}
 
+          {/* AI Critique panel — appears after generation, always visible */}
+          {(state.critiqueLoading || state.critiqueText) && (
+            <div className="rounded border border-zinc-700/40 bg-zinc-900/40 p-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                <Eye className="h-3 w-3" />
+                AI Critique
+                <span className="text-zinc-600">· Pixtral</span>
+              </div>
+              {state.critiqueLoading ? (
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Analysing image…
+                </div>
+              ) : (
+                <p className="text-[11px] leading-relaxed text-zinc-300">
+                  {state.critiqueText}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Prompt toggle */}
           <button
             onClick={() =>
@@ -1856,6 +1972,33 @@ function ImageCard({
                   onUpdatePrompt(ip.id, { suppressCharacterBlock: !state.suppressCharacterBlock })
                 }
               />
+              {/* Rewriter toggle — Hunyuan only (Flux uses reference images, not text) */}
+              {imageModel === "hunyuan3" && (
+                <div className="flex items-center justify-between rounded border border-zinc-700/30 bg-zinc-900/30 px-2 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={`rewriter-${ip.id}`}
+                      checked={state.useRewriter}
+                      onCheckedChange={(checked) =>
+                        onUpdatePrompt(ip.id, { useRewriter: checked })
+                      }
+                      className="h-4 w-7 data-[state=checked]:bg-violet-600"
+                    />
+                    <Label
+                      htmlFor={`rewriter-${ip.id}`}
+                      className="cursor-pointer text-[11px] text-zinc-400"
+                    >
+                      Rewrite for Hunyuan
+                    </Label>
+                  </div>
+                  <span className="text-[10px] text-zinc-600">
+                    {state.useRewriter
+                      ? "Mistral rewrites before generating"
+                      : "Sends prompt as-is"}
+                  </span>
+                </div>
+              )}
+
               <Textarea
                 value={state.promptText}
                 onChange={(e) =>
