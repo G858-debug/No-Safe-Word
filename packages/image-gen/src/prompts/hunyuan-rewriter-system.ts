@@ -93,6 +93,13 @@ Return ONLY the complete prompt. No preamble. No explanation. No labels.
 No markdown. The visual signature is appended by the pipeline — end your
 output with the last sentence of the scene.
 
+Write your output in Simplified Chinese (简体中文). The image generation
+model is trained primarily on Chinese-language data and produces better
+results when the prompt is in Chinese. Translate and adapt all character
+descriptions, scene directions, and compositional language into Chinese.
+The visual signature appended after your output will remain in English —
+do not include it.
+
 ---
 
 ## TEST KNOWLEDGE
