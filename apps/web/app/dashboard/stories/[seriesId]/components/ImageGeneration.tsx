@@ -2327,11 +2327,12 @@ function ImageCard({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0 text-zinc-600 hover:text-red-400"
+              className="h-7 px-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 text-[11px] gap-1"
               title="Remove from story"
               onClick={() => onDelete(ip.id)}
             >
               <Trash2 className="h-3.5 w-3.5" />
+              Delete
             </Button>
           </div>
         </CardContent>
