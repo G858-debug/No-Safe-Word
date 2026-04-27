@@ -146,7 +146,7 @@ export async function POST(
         isSfw,
       },
       imageType,
-      { knowledge }
+      { knowledge, model: "large" }
     );
 
     return NextResponse.json({ rewrittenPrompt });
