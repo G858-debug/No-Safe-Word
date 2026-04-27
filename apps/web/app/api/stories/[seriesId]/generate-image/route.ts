@@ -189,10 +189,12 @@ async function runHunyuanGeneration(seriesId: string, promptId: string, suppress
     //
     // Two paths based on whether the Mistral rewriter assembled the prompt:
     //
-    // suppressAssembly = true (rewriter ON): The stored prompt.prompt is the
-    // complete assembled prompt produced by Mistral — character descriptions,
-    // scene, SFW constraints are all already included. Send it directly; the
-    // assembler only appends the visual signature (or the override if set).
+    // suppressAssembly = true (rewriter ON): Mistral produced the complete
+    // prompt — character blocks and scene are handled. The assembler still
+    // enforces the SFW constraint as a hard safety net (Mistral Small is not
+    // reliable enough at content safety to be the sole guardian). For NSFW
+    // images the SFW block doesn't fire anyway (assembleHunyuanPrompt checks
+    // imageType), so passing the override through has no effect on NSFW.
     //
     // suppressAssembly = false (rewriter OFF): Normal assembly — character
     // blocks, clothing, and SFW constraint are injected by the assembler.
@@ -204,7 +206,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string, suppress
             scenePrompt: prompt.prompt,
             aspectRatio,
             imageType: prompt.image_type,
-            sfwConstraint: "",  // Mistral already included SFW constraints
+            sfwConstraint: prompt.sfw_constraint_override ?? undefined,
             visualSignature: prompt.visual_signature_override ?? undefined,
           }
         : {
