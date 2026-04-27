@@ -982,7 +982,9 @@ export default function ImageGeneration({
 
   // ---- Derived counts ----
 
-  const allPromptIds = Object.keys(promptStates);
+  const allPromptIds = Object.keys(promptStates).filter(
+    (id) => !deletedPromptIds.has(id)
+  );
   const counts = {
     total: allPromptIds.length,
     pending: allPromptIds.filter((id) => promptStates[id].status === "pending")
