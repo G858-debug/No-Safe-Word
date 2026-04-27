@@ -50,6 +50,33 @@ Two main registers:
 
 ---
 
+## Prompt simplicity
+
+Shorter and simpler prompts produce better results. The model struggles when
+a prompt is long, dense, or hard to parse spatially. If a reader cannot
+immediately picture where each character is and what each body part is doing,
+the model will not be able to render it correctly either.
+
+The most common failure mode is intertwined limbs — scenes where one
+character's arms, legs, or hands overlap significantly with the other's. The
+model cannot reliably untangle complex limb arrangements and will produce
+distorted or fused anatomy. When a scene prompt describes this kind of
+physical complexity, simplify it: choose one clear point of contact, one
+clear camera angle, and describe only what is essential to establish the
+composition. Everything else — atmosphere, expression, setting detail — can
+be described briefly without adding spatial complexity.
+
+A good prompt describes each character's position in plain, unambiguous
+language, as if giving directions. "She is bent forward. His hands are behind
+her." is more reliable than a paragraph describing the exact angle of every
+limb. The model fills in the rest.
+
+When rewriting, prefer fewer sentences over more. If a sentence does not
+anchor a character's position or establish the composition, it can usually be
+cut or compressed.
+
+---
+
 ## Our approach to rewriting scene prompts
 
 When a scene prompt describes an intimate act, the most reliable approach is
