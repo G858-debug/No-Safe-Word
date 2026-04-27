@@ -546,8 +546,11 @@ export type Database = {
           created_at: string
           ends_at: string | null
           id: string
+          is_founding_member: boolean
+          locked_rate_cents: number | null
           payfast_token: string | null
           plan: string
+          rate_locked_until: string | null
           starts_at: string
           status: string
           updated_at: string
@@ -558,8 +561,11 @@ export type Database = {
           created_at?: string
           ends_at?: string | null
           id?: string
+          is_founding_member?: boolean
+          locked_rate_cents?: number | null
           payfast_token?: string | null
           plan: string
+          rate_locked_until?: string | null
           starts_at: string
           status: string
           updated_at?: string
@@ -570,8 +576,11 @@ export type Database = {
           created_at?: string
           ends_at?: string | null
           id?: string
+          is_founding_member?: boolean
+          locked_rate_cents?: number | null
           payfast_token?: string | null
           plan?: string
+          rate_locked_until?: string | null
           starts_at?: string
           status?: string
           updated_at?: string

@@ -35,7 +35,12 @@ export type EventType =
   | "nurture.dispatch_failed"
   // payfast (Phase 1 — ITN webhook idempotency guard)
   | "payfast.itn_duplicate"
-  | "payfast.itn_insert_failed";
+  | "payfast.itn_insert_failed"
+  // founding members (Phase 0.5f)
+  | "founding.granted"
+  | "founding.cap_reached"
+  | "founding.count_query_failed"
+  | "founding.bonus_send";
 
 export interface LogEventParams {
   eventType: EventType;

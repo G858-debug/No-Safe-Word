@@ -3,6 +3,8 @@ import { supabase } from "@no-safe-word/story-engine";
 import { validateITN } from "@/lib/payfast";
 import { logEvent } from "@/lib/server/events";
 
+const FOUNDING_CAP = 100;
+
 /**
  * Resolve a PayFast ITN's nsw_users.id (custom_str2) to auth.users.id
  * so `events.user_id` (FK → auth.users) links correctly. Returns null
@@ -169,6 +171,37 @@ export async function POST(req: Request) {
         .single();
       const wasAlreadyActive = preUpdateSub?.status === "active";
 
+      // Founding-member check — only on first activation, never on renewals.
+      let isFounding = false;
+      let foundingPosition: number | null = null;
+      let rateLockUntil: string | null = null;
+
+      if (!wasAlreadyActive) {
+        const { count: foundingCount, error: countError } = await supabase
+          .from("nsw_subscriptions")
+          .select("*", { count: "exact", head: true })
+          .eq("is_founding_member", true)
+          .eq("status", "active");
+
+        if (countError) {
+          await logEvent({
+            eventType: "founding.count_query_failed",
+            metadata: { error: countError.message },
+          });
+        }
+
+        // On count error, foundingCount is null — treat as cap reached so we
+        // never over-grant founding status due to a failed query.
+        isFounding = (foundingCount ?? FOUNDING_CAP) < FOUNDING_CAP;
+
+        if (isFounding) {
+          const lockDate = new Date();
+          lockDate.setMonth(lockDate.getMonth() + 36);
+          foundingPosition = (foundingCount ?? 0) + 1;
+          rateLockUntil = lockDate.toISOString();
+        }
+      }
+
       // Update subscription to active
       const endsAt = new Date();
       endsAt.setMonth(endsAt.getMonth() + 1);
@@ -180,6 +213,13 @@ export async function POST(req: Request) {
           starts_at: new Date().toISOString(),
           ends_at: endsAt.toISOString(),
           payfast_token: body.token,
+          ...(!wasAlreadyActive
+            ? {
+                is_founding_member: isFounding,
+                locked_rate_cents: isFounding ? 5500 : null,
+                rate_locked_until: rateLockUntil,
+              }
+            : {}),
         })
         .eq("id", body.custom_str4);
 
@@ -202,6 +242,26 @@ export async function POST(req: Request) {
           payment_status: body.payment_status,
         },
       });
+
+      if (!wasAlreadyActive && foundingPosition !== null) {
+        await logEvent({
+          eventType: "founding.granted",
+          userId: subAuthUserId,
+          metadata: { user_id: body.custom_str2, position: foundingPosition },
+        });
+        if (foundingPosition === FOUNDING_CAP) {
+          await logEvent({
+            eventType: "founding.cap_reached",
+            metadata: { position: foundingPosition },
+          });
+        }
+        // Consumed by future Resend single-email automation (bonus letter).
+        await logEvent({
+          eventType: "founding.bonus_send",
+          userId: subAuthUserId,
+          metadata: { user_id: body.custom_str2, position: foundingPosition },
+        });
+      }
     } else {
       console.warn("Unknown payment type:", paymentType);
     }
