@@ -81,11 +81,69 @@ const COLOR_AMBER = "#C9A961";
 // stable relative to the repo layout; do not lazy-load per request.
 const FONTS_DIR = path.join(process.cwd(), "apps/web/public/fonts");
 
+/**
+ * Remove the `fvar` (font variations) table directory entry from a TTF buffer.
+ *
+ * @shuding/opentype.js (used by satori) throws "Cannot read properties of
+ * undefined (reading '256')" when parsing variable fonts that have an `fvar`
+ * table — specifically in parseFvarAxis. Removing the entry from the table
+ * directory makes the font appear static to the parser. The glyph outlines
+ * and metrics in the file are unchanged; only variation axis metadata is
+ * hidden. This is sufficient for satori's needs (we target a single weight).
+ *
+ * Static fonts (no `fvar`) are returned unchanged.
+ */
+function stripFvarTable(buf: Buffer): Buffer {
+  const numTables = buf.readUInt16BE(4);
+
+  let fvarIdx = -1;
+  for (let i = 0; i < numTables; i++) {
+    const tag = buf.slice(12 + i * 16, 12 + i * 16 + 4).toString("ascii");
+    if (tag === "fvar") { fvarIdx = i; break; }
+  }
+  if (fvarIdx === -1) return buf; // static font, nothing to do
+
+  const newNumTables = numTables - 1;
+  const newSearchRange = Math.pow(2, Math.floor(Math.log2(newNumTables))) * 16;
+  const newEntrySelector = Math.floor(Math.log2(newNumTables));
+  const newRangeShift = newNumTables * 16 - newSearchRange;
+
+  const header = Buffer.alloc(12);
+  buf.copy(header, 0, 0, 4);
+  header.writeUInt16BE(newNumTables, 4);
+  header.writeUInt16BE(newSearchRange, 6);
+  header.writeUInt16BE(newEntrySelector, 8);
+  header.writeUInt16BE(newRangeShift, 10);
+
+  // Rebuild directory, skipping the fvar entry and adjusting every remaining
+  // offset by -16 (one removed record shifts all table data by 16 bytes).
+  const newDir = Buffer.alloc(newNumTables * 16);
+  let out = 0;
+  for (let i = 0; i < numTables; i++) {
+    if (i === fvarIdx) continue;
+    const src = 12 + i * 16;
+    buf.copy(newDir, out, src, src + 8);
+    newDir.writeUInt32BE(buf.readUInt32BE(src + 8) - 16, out + 8);
+    buf.copy(newDir, out + 12, src + 12, src + 16);
+    out += 16;
+  }
+
+  return Buffer.concat([header, newDir, buf.slice(12 + numTables * 16)]);
+}
+
 // Module-level cache. A single promise is shared by all callers so we
 // don't race on first load.
-let _fontsPromise: Promise<{ cormorant: Buffer; inter: Buffer }> | null = null;
+let _fontsPromise: Promise<{
+  cormorant: Buffer;
+  interRegular: Buffer;
+  interMedium: Buffer;
+}> | null = null;
 
-function loadFonts(): Promise<{ cormorant: Buffer; inter: Buffer }> {
+function loadFonts(): Promise<{
+  cormorant: Buffer;
+  interRegular: Buffer;
+  interMedium: Buffer;
+}> {
   if (_fontsPromise) return _fontsPromise;
 
   _fontsPromise = (async () => {
@@ -99,9 +157,20 @@ function loadFonts(): Promise<{ cormorant: Buffer; inter: Buffer }> {
 
     for (const dir of candidates) {
       try {
-        const cormorant = await fs.readFile(path.join(dir, "CormorantGaramond.ttf"));
-        const inter = await fs.readFile(path.join(dir, "Inter.ttf"));
-        return { cormorant, inter };
+        const cormorantRaw = await fs.readFile(path.join(dir, "CormorantGaramond.ttf"));
+        // Static weight files — Inter.ttf was a variable font that
+        // @shuding/opentype.js (used by satori) cannot parse (fvar bug).
+        const interRegularRaw = await fs.readFile(path.join(dir, "Inter-Regular.ttf"));
+        const interMediumRaw = await fs.readFile(path.join(dir, "Inter-Medium.ttf"));
+        // Strip fvar tables so satori's opentype parser can handle both fonts.
+        // CormorantGaramond.ttf ships as a variable font; fvar causes a crash
+        // in @shuding/opentype.js parseFvarAxis. Static Inter files have no
+        // fvar and are returned unchanged.
+        return {
+          cormorant: stripFvarTable(cormorantRaw),
+          interRegular: stripFvarTable(interRegularRaw),
+          interMedium: stripFvarTable(interMediumRaw),
+        };
       } catch {
         // try next candidate
       }
@@ -109,7 +178,7 @@ function loadFonts(): Promise<{ cormorant: Buffer; inter: Buffer }> {
 
     throw new Error(
       `Cover compositor failed to load font files. Looked in: ${candidates.join(", ")}. ` +
-        `Ensure apps/web/public/fonts/{CormorantGaramond,Inter}.ttf exist.`
+        `Ensure apps/web/public/fonts/{CormorantGaramond,Inter-Regular,Inter-Medium}.ttf exist.`
     );
   })();
 
@@ -427,7 +496,7 @@ export async function composeCover(
   input: ComposeCoverInput
 ): Promise<ComposeCoverOutput> {
   const spec = SIZE_SPECS[input.size];
-  const { cormorant, inter } = await loadFonts();
+  const { cormorant, interRegular, interMedium } = await loadFonts();
 
   // Encode the base image as a data URL so satori can embed it.
   // sharp normalises to PNG for consistent rendering.
@@ -457,8 +526,8 @@ export async function composeCover(
     height: spec.height,
     fonts: [
       { name: "Cormorant Garamond", data: cormorant, weight: 600, style: "normal" },
-      { name: "Inter", data: inter, weight: 400, style: "normal" },
-      { name: "Inter", data: inter, weight: 500, style: "normal" },
+      { name: "Inter", data: interRegular, weight: 400, style: "normal" },
+      { name: "Inter", data: interMedium, weight: 500, style: "normal" },
     ],
   });
 
