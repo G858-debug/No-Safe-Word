@@ -10,6 +10,62 @@ decide how to use this knowledge for a given scene.
 
 ---
 
+## Official guidance from Tencent (HunyuanImage 3.0)
+
+These are observations from Tencent's own documentation, technical report,
+and prompt handbook for this model. Sources: the GitHub README, HuggingFace
+model card, and the official prompt handbook at docs.qq.com.
+
+**Prompt length:** The model is built for long prompts and handles over 1,000
+characters of complex instructions — far more than SDXL-era models that were
+limited to ~77 tokens. There is no need to keep prompts short to avoid token
+overflow. What matters is precision and clarity, not brevity. That said, more
+words means more for the model to balance — specificity is better than volume.
+
+**Recommended structure:** Subject and action first, then environment, then
+lighting, then composition and perspective, then atmosphere. The model weights
+earlier tokens more heavily, so the most important elements should come first.
+
+**Lighting:** Use precise technical lighting terms rather than vague descriptors.
+"Golden hour," "rim lighting," "chiaroscuro," "practical lamps," "overcast
+diffuse," "neon rim light," "soft box + hair light" all activate specific
+expert networks in the model. "Warm lighting" or "soft light" alone does not.
+We have observed this ourselves — it matches the official guidance.
+
+**Composition:** Lens and aperture language works. "85mm portrait," "f/1.8
+shallow DoF," "f/2.8," "50mm natural" are understood and applied. Rule of
+thirds, negative space, and explicit frame placement language (left/right/
+upper two-thirds) all work as composition anchors.
+
+**Relationship mapping:** When two subjects are in the frame, explicitly define
+their spatial relationship rather than listing them separately. "She is in
+front of him, his hands visible at her sides" is more reliable than describing
+two characters independently. The model needs to understand who is where
+relative to whom.
+
+**Anchor and constrain:** Keep the core positioning objective in one clear
+sentence near the top of the prompt. Then add two or three hard constraints
+(lens, lighting, composition). This stabilises results. A long prompt that
+buries the key compositional directive deep in the text will not weight it
+correctly.
+
+**What to avoid:**
+- Excessive adjectives stacked together ("beautiful amazing stunning glowing")
+  — these dilute each other and create noise
+- Contradictory instructions (bright sunny day + dark moody atmosphere)
+- Vague spatial language — replace with measurable cues: "f/2.0," "85mm,"
+  "left edge of frame," "upper two-thirds of frame"
+- Generic style descriptors — be specific about the visual register: "editorial
+  photography," "photorealistic," "cinematic still" are distinct and understood
+
+**NSFW:** We use `disable_safety_checker: true` via Replicate, which is already
+in the pipeline. The base model (which we use) is relatively permissive for
+explicit content when the safety checker is disabled. The instruct variant is
+even less restrictive, but we are not using it — we run our own Mistral-based
+prompt rewriting rather than their built-in DeepSeek rewriter.
+
+---
+
 ## What we are trying to produce
 
 Serialised adult romance fiction imagery for a Black South African audience.
