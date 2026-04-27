@@ -41,6 +41,7 @@ import {
   Undo2,
   Lock,
   Eye,
+  Trash2,
 } from "lucide-react";
 // ══════════════════════════════════════════════════════════════
 // ART DIRECTOR — DEACTIVATED 2026-04-19
@@ -259,6 +260,7 @@ export default function ImageGeneration({
   const promptToJobIdRef = useRef<Map<string, string>>(new Map());
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchApproving, setBatchApproving] = useState(false);
+  const [deletedPromptIds, setDeletedPromptIds] = useState<Set<string>>(new Set());
   const [selectedChapter, setSelectedChapter] = useState<string>("");
   const [collapsedPosts, setCollapsedPosts] = useState<Set<string>>(
     new Set()
@@ -561,9 +563,10 @@ export default function ImageGeneration({
 
         // ── Part A: Prompt Rewriter ──────────────────────────────────────
         // If the rewriter toggle is ON and the story uses Hunyuan, call the
-        // rewrite API before patching. The rewritten prompt replaces the
-        // user's current textbox content in both the UI and the DB.
-        let promptTextToUse = state?.promptText ?? "";
+        // rewrite API. The rewritten prompt (may be in Chinese) is passed
+        // directly to generate-image via assembledPrompt — the textbox and
+        // DB stay in English so the user can read and edit them.
+        let assembledPrompt: string | undefined;
         let promptWasRewritten = false;
 
         if (state?.useRewriter && imageModel === "hunyuan3") {
@@ -588,29 +591,23 @@ export default function ImageGeneration({
           }
           const rewriteData = await rewriteRes.json().catch(() => ({}));
           if (rewriteData?.rewrittenPrompt) {
-            promptTextToUse = rewriteData.rewrittenPrompt;
+            assembledPrompt = rewriteData.rewrittenPrompt;
             promptWasRewritten = true;
-            // Update the textbox and mark the baseline in sync so the user
-            // sees the rewritten version and a subsequent Regenerate click
-            // won't re-patch the prompt unnecessarily.
-            updatePrompt(promptId, {
-              promptText: promptTextToUse,
-              savedPromptText: promptTextToUse,
-            });
+            // Textbox and DB stay in English — UI remains readable.
           }
         }
 
         // ── Prompt PATCH ─────────────────────────────────────────────────
-        // Persist if the prompt changed (either via rewrite or manual edit).
-        // Note: `state` was captured before the rewrite; compare
-        // `promptTextToUse` against the original savedPromptText.
-        if (promptWasRewritten || (state && state.promptText !== state.savedPromptText)) {
+        // Only persist when the user manually edited the textbox.
+        // When the rewriter ran, the English prompt in the textbox is already
+        // the correct DB value; there is nothing to patch.
+        if (!promptWasRewritten && state && state.promptText !== state.savedPromptText) {
           const patchRes = await fetch(
             `/api/stories/images/${promptId}`,
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt: promptTextToUse }),
+              body: JSON.stringify({ prompt: state.promptText }),
             }
           );
           if (!patchRes.ok) {
@@ -621,10 +618,7 @@ export default function ImageGeneration({
             });
             return;
           }
-          if (!promptWasRewritten) {
-            // Rewrite already set savedPromptText above
-            updatePrompt(promptId, { savedPromptText: promptTextToUse });
-          }
+          updatePrompt(promptId, { savedPromptText: state.promptText });
         }
 
         if (state && state.characterBlockOverride !== state.savedCharacterBlockOverride) {
@@ -740,10 +734,11 @@ export default function ImageGeneration({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            // suppressAssembly: rewriter produced the complete prompt —
-            // generate-image skips character block injection and only appends
-            // the visual signature. False = normal assembly path.
-            body: JSON.stringify({ promptId, suppressAssembly: promptWasRewritten }),
+            body: JSON.stringify({
+              promptId,
+              suppressAssembly: promptWasRewritten,
+              assembledPrompt,  // Chinese prompt from rewriter; undefined = use DB value
+            }),
           }
         );
         const data = await res.json().catch(() => ({}));
@@ -920,6 +915,17 @@ export default function ImageGeneration({
     },
     [promptStates, updatePrompt]
   );
+
+  const handleDelete = useCallback(async (promptId: string) => {
+    if (!window.confirm("Remove this image from the story? This cannot be undone.")) return;
+    const res = await fetch(`/api/stories/images/${promptId}`, { method: "DELETE" });
+    if (res.ok) {
+      setDeletedPromptIds((prev) => new Set(prev).add(promptId));
+    } else {
+      const err = await res.json().catch(() => ({}));
+      updatePrompt(promptId, { error: err?.error ?? "Delete failed" });
+    }
+  }, [updatePrompt]);
 
   const handleApproveAllGenerated = useCallback(async () => {
     const toApprove = Object.entries(promptStates)
@@ -1154,7 +1160,9 @@ export default function ImageGeneration({
       {/* ======== POST SECTIONS ======== */}
       {posts.map((post) => {
         const isCollapsed = collapsedPosts.has(post.id);
-        const prompts = post.story_image_prompts;
+        const prompts = post.story_image_prompts.filter(
+          (ip) => !deletedPromptIds.has(ip.id)
+        );
 
         // Count by type
         const typeCounts: Record<string, number> = {};
@@ -1230,6 +1238,7 @@ export default function ImageGeneration({
                             onGenerate={() => handleRegenerate(ip.id)}
                             onImageClick={setLightboxUrl}
                             onArtDirector={handleRegenerate}
+                            onDelete={handleDelete}
                             batchGenerating={batchGenerating}
                             imageModel={imageModel}
                             characterIdentityMap={characterIdentityMap}
@@ -1730,6 +1739,7 @@ interface ImageCardProps {
   onGenerate: () => void;
   onImageClick: (url: string) => void;
   onArtDirector: (promptId: string) => void;
+  onDelete: (promptId: string) => void;
   batchGenerating: boolean;
   imageModel: ImageModel;
   characterIdentityMap: Record<string, CharacterIdentity>;
@@ -1749,6 +1759,7 @@ function ImageCard({
   onGenerate,
   onImageClick,
   onArtDirector,
+  onDelete,
   batchGenerating,
   imageModel,
   characterIdentityMap,
@@ -2313,6 +2324,15 @@ function ImageCard({
                 <Bug className="h-3.5 w-3.5" />
               </Button>
             </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-zinc-600 hover:text-red-400"
+              title="Remove from story"
+              onClick={() => onDelete(ip.id)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </CardContent>
       </div>

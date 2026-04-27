@@ -141,3 +141,23 @@ export async function PATCH(
     );
   }
 }
+
+// DELETE /api/stories/images/[promptId] — Remove an image prompt from the story
+export async function DELETE(
+  _request: NextRequest,
+  props: { params: Promise<{ promptId: string }> }
+) {
+  const params = await props.params;
+  const { promptId } = params;
+
+  const { error } = await supabase
+    .from("story_image_prompts")
+    .delete()
+    .eq("id", promptId);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ deleted: true });
+}

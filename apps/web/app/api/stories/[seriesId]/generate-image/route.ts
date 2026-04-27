@@ -30,6 +30,7 @@ export async function POST(
 
   let promptId: string;
   let suppressAssembly = false;
+  let assembledPrompt: string | undefined;
   try {
     const body = await request.json();
     if (typeof body?.promptId !== "string" || !body.promptId) {
@@ -39,10 +40,14 @@ export async function POST(
       );
     }
     promptId = body.promptId;
-    // suppressAssembly: true when the Mistral rewriter already produced the
-    // complete assembled prompt. The generate-image route skips character
-    // block injection and just appends the visual signature.
     suppressAssembly = body?.suppressAssembly === true;
+    // assembledPrompt: the fully assembled prompt produced by Mistral (may be
+    // in Chinese). When present, used as scenePrompt directly instead of the
+    // English version stored in story_image_prompts.prompt.
+    assembledPrompt =
+      typeof body?.assembledPrompt === "string" && body.assembledPrompt.trim()
+        ? body.assembledPrompt.trim()
+        : undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -66,7 +71,7 @@ export async function POST(
       return await runFlux2Generation(seriesId, promptId);
 
     case "hunyuan3":
-      return await runHunyuanGeneration(seriesId, promptId, suppressAssembly);
+      return await runHunyuanGeneration(seriesId, promptId, suppressAssembly, assembledPrompt);
 
     default:
       return NextResponse.json(
@@ -76,7 +81,7 @@ export async function POST(
   }
 }
 
-async function runHunyuanGeneration(seriesId: string, promptId: string, suppressAssembly = false) {
+async function runHunyuanGeneration(seriesId: string, promptId: string, suppressAssembly = false, assembledPrompt?: string) {
   // 1. Fetch the prompt row + linked character IDs
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
@@ -203,7 +208,9 @@ async function runHunyuanGeneration(seriesId: string, promptId: string, suppress
     const result = await generateHunyuanImage(
       suppressAssembly
         ? {
-            scenePrompt: prompt.prompt,
+            // Use the assembled prompt from the rewriter (may be Chinese)
+            // if provided; fall back to the stored English scene prompt.
+            scenePrompt: assembledPrompt ?? prompt.prompt,
             aspectRatio,
             imageType: prompt.image_type,
             sfwConstraint: prompt.sfw_constraint_override ?? undefined,
