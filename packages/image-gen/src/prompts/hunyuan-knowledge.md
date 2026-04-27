@@ -50,6 +50,30 @@ Two main registers:
 
 ---
 
+## Our approach to rewriting scene prompts
+
+When a scene prompt describes an intimate act, the most reliable approach is
+to simplify the composition down to the closest matching template below rather
+than trying to preserve every detail of how the author described it. The
+author's intent — the emotional beat, the setting, the characters, the
+narrative moment — should be preserved. But the specific body positioning,
+camera angle, and spatial language should be replaced with the template
+language that we know works for this model.
+
+The templates are not creative constraints; they are the shapes this model
+can actually render. An elaborate description of a complex two-character
+position will fail or produce a chimera. The same narrative moment described
+through one of these templates will render cleanly.
+
+If a scene doesn't map neatly to any of the four templates — for example,
+it calls for a composition in the "What we have not found a reliable pattern
+for" section — rewrite it to the closest template that preserves the
+narrative intent. It is better to have a cleanly rendered image that
+slightly simplifies the original scene than a detailed prompt that produces
+an unusable result.
+
+---
+
 ## Explicit composition: what we have tested
 
 ### Female-from-behind, male anonymous (what we call Pattern A)
