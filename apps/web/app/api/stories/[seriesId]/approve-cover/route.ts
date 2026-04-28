@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { fireAndForgetInternalPost } from "@/lib/server/fire-and-forget";
+import { logEvent } from "@/lib/server/events";
 
 // ============================================================
 // POST /api/stories/[seriesId]/approve-cover
@@ -131,19 +131,16 @@ export async function POST(
     );
   }
 
-  // Fire-and-forget: trigger typography compositing. The composite-cover
-  // endpoint runs satori/resvg/sharp sequentially across 4 sizes
-  // (~15-30s). We don't await it — the UI's cover polling loop picks up
-  // the approved → compositing → complete transition from
-  // story_series.cover_status. See docs/security-debt.md for the note
-  // on internal-call auth.
-  fireAndForgetInternalPost(
-    request,
-    `/api/stories/${seriesId}/composite-cover`,
-    undefined,
-    { label: `approve-cover → composite-cover (series=${seriesId})` }
-  );
+  await logEvent({
+    eventType: "cover.approved",
+    metadata: { series_id: seriesId, slug: series.slug, selected_variant: idx },
+  });
 
+  // No server-side trigger — the dashboard polling loop fires
+  // /recompose-cover after the user has been waiting >30s. See
+  // CoverApproval.tsx and Phase B2 plan for the rationale (the previous
+  // fire-and-forget pattern silently failed because middleware rejects
+  // unauth'd internal calls with 401, which fetch().catch() does not see).
   return NextResponse.json({
     coverStatus: "approved",
     coverBaseUrl,

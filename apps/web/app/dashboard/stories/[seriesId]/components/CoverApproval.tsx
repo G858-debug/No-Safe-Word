@@ -24,6 +24,10 @@ interface CoverState {
     email?: string;
   } | null;
   cover_error: string | null;
+  // Used by the polling-side recompose trigger to wait ~30s after
+  // approval before firing a recompose-cover POST. Comes from
+  // story_series.updated_at via the GET /api/stories/[seriesId] select("*").
+  updated_at: string;
 }
 
 interface CoverJobState {
@@ -89,14 +93,17 @@ export default function CoverApproval({ seriesId }: Props) {
     fetchCover();
   }, [fetchCover]);
 
-  // Poll every 3s while generating OR compositing. Matches CharacterCard's
-  // polling cadence. The compositing state is driven by the fire-and-forget
-  // trigger in approve-cover, so the UI observes the transition without
-  // the user initiating another request.
+  // Poll every 3s while:
+  //   - generating (variant images are being created)
+  //   - compositing (typography pass running server-side)
+  //   - approved+no cover_sizes (waiting for the polling-side recompose
+  //     trigger to fire ~30s post-approval, then waiting for it to land)
   useEffect(() => {
     if (!state) return;
     const shouldPoll =
-      state.cover_status === "generating" || state.cover_status === "compositing";
+      state.cover_status === "generating" ||
+      state.cover_status === "compositing" ||
+      (state.cover_status === "approved" && state.cover_sizes === null);
     if (!shouldPoll) {
       if (pollRef.current) {
         clearInterval(pollRef.current);
@@ -112,6 +119,45 @@ export default function CoverApproval({ seriesId }: Props) {
       }
     };
   }, [state, fetchCover]);
+
+  // Polling-side recompose trigger.
+  //
+  // approve-cover used to fire-and-forget a POST to composite-cover, but
+  // that bare fetch had no auth cookie and the middleware rejected it
+  // with 401 silently. We've moved the trigger to the client: once the
+  // dashboard has been showing 'approved' with no cover_sizes (and no
+  // surfaced error) for >30s, fire one recompose-cover POST. The 30s
+  // buffer absorbs any in-flight work and prevents thundering retries
+  // if multiple browser tabs are open. A useRef flag ensures we fire
+  // exactly once per mount; remounting (page reload) restarts the loop
+  // organically.
+  const recomposeFiredRef = useRef(false);
+  useEffect(() => {
+    if (!state) return;
+    if (state.cover_status !== "approved") return;
+    if (state.cover_sizes !== null) return;
+    if (state.cover_error !== null) return; // user retries via the error block button
+    if (recomposeFiredRef.current) return;
+
+    const ageMs = Date.now() - new Date(state.updated_at).getTime();
+    if (ageMs < 30 * 1000) return;
+
+    recomposeFiredRef.current = true;
+    (async () => {
+      try {
+        await fetch(`/api/stories/${seriesId}/recompose-cover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch {
+        // Network failures will be picked up by the next mount (page
+        // reload) — no inline error UI here, the polling loop just
+        // keeps showing 'Compositing typography…'.
+      } finally {
+        await fetchCover();
+      }
+    })();
+  }, [state, seriesId, fetchCover]);
 
   // Also poll each outstanding job directly so the status endpoint drives
   // webhook-style writes. /api/status/[jobId] is pull-driven — nothing
@@ -215,12 +261,16 @@ export default function CoverApproval({ seriesId }: Props) {
   async function handleRetryCompositing() {
     setBusy(true);
     setError(null);
+    // Reset the one-shot guard so the polling loop can retrigger if
+    // this manual retry doesn't land. recompose-cover handles stale
+    // 'compositing' state recovery internally.
+    recomposeFiredRef.current = false;
     try {
-      const res = await fetch(`/api/stories/${seriesId}/composite-cover`, {
+      const res = await fetch(`/api/stories/${seriesId}/recompose-cover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      // composite-cover runs synchronously; on success it returns 200,
+      // recompose-cover runs synchronously; on success it returns 200,
       // on failure it reverts to 'approved' with cover_error populated.
       // Either way, fetchCover() pulls the resolved state.
       if (!res.ok) {
@@ -376,6 +426,32 @@ export default function CoverApproval({ seriesId }: Props) {
               )}
             </div>
           )}
+
+          {/* Stuck/in-progress fallback: cover is approved but composites
+              haven't landed yet. Covers the ~30s pre-trigger wait + the
+              actual compositing pass. Mutually exclusive with the
+              cover_error block above. */}
+          {state.cover_status === "approved" &&
+            state.cover_sizes === null &&
+            state.cover_error === null && (
+              <div className="rounded-md border border-border bg-muted/30 p-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Compositing typography…</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Generating hero, card, OG, and email covers. This takes about
+                    a minute. If it persists for more than a minute, click Retry.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryCompositing}
+                  disabled={busy}
+                >
+                  Retry now
+                </Button>
+              </div>
+            )}
 
           {state.cover_status === "complete" && heroUrl && (
             <div className="rounded-md border border-border bg-muted/30 p-3">

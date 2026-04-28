@@ -40,7 +40,14 @@ export type EventType =
   | "founding.granted"
   | "founding.cap_reached"
   | "founding.count_query_failed"
-  | "founding.bonus_send";
+  | "founding.bonus_send"
+  // cover pipeline (typography composite + recomposite intent markers)
+  | "cover.approved"
+  | "cover.composite_started"
+  | "cover.composite_completed"
+  | "cover.composite_failed"
+  | "cover.recomposite_started"
+  | "cover.recomposite_completed";
 
 export interface LogEventParams {
   eventType: EventType;
