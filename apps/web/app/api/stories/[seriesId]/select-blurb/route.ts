@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
-import { fireAndForgetInternalPost } from "@/lib/server/fire-and-forget";
+import { runCoverCompositing } from "@/lib/server/run-cover-compositing";
 
-// Node runtime — the fire-and-forget helper and supabase client both
-// need Node APIs (fetch inherits Buffer handling, etc).
+// Node runtime — the supabase client and runCoverCompositing both need
+// Node APIs (sharp/satori/resvg native bindings, fs reads).
 export const runtime = "nodejs";
+// When kind='short' and the cover is already complete we re-composite
+// inline, which can take 15–30s.
+export const maxDuration = 120;
 
 // ============================================================
 // POST /api/stories/[seriesId]/select-blurb
@@ -98,22 +101,25 @@ export async function POST(
   }
 
   // Short blurb selection changes the visible text on the og + email
-  // landscape composites → trigger a re-composite. Only if cover
-  // compositing has already completed at least once (cover_status ===
-  // 'complete'). If it's still pending/generating/compositing, skip —
-  // the natural approve-cover → composite-cover path will pick up the
-  // selection when it runs. Long blurb selection never affects any
-  // composite, so no trigger for it.
+  // landscape composites → re-composite synchronously. We block the
+  // response for ~15–30s rather than fire-and-forget because the
+  // previous fire-and-forget was failing silently (middleware rejected
+  // the unauth'd internal call with 401 — see Phase B2 plan). Calling
+  // the library directly avoids the HTTP hop entirely, no auth needed.
+  //
+  // Only triggers when cover_status='complete'. For other states the
+  // approve-cover → recompose-cover flow will pick up the new selection
+  // when it runs. Long blurb selection never affects any composite.
+  let compositeResult: { ok: true } | { ok: false; error: string } | null = null;
   if (body.kind === "short" && (series as { cover_status?: string }).cover_status === "complete") {
-    fireAndForgetInternalPost(
-      request,
-      `/api/stories/${seriesId}/composite-cover`,
-      undefined,
-      { label: `select-blurb(short) → composite-cover (series=${seriesId})` }
-    );
+    const result = await runCoverCompositing(seriesId);
+    compositeResult = result.ok
+      ? { ok: true }
+      : { ok: false, error: result.error };
   }
 
   return NextResponse.json({
     [selectedCol]: idx,
+    recomposite: compositeResult,
   });
 }

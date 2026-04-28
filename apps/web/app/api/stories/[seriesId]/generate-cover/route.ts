@@ -8,6 +8,7 @@ import {
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
+import { logEvent } from "@/lib/server/events";
 
 export const runtime = "nodejs";
 
@@ -270,6 +271,17 @@ export async function POST(
   // 8. Branch on image model
   const imageModel = (series.image_model as string | null) ?? "flux2_dev";
 
+  await logEvent({
+    eventType: "cover.variant_generation_started",
+    metadata: {
+      series_id: seriesId,
+      slug: series.slug,
+      model: imageModel,
+      variant_count: variantIndices.length,
+      partial_retry: isPartialRetry,
+    },
+  });
+
   if (imageModel === "hunyuan3") {
     return generateHunyuanCover({
       seriesId,
@@ -512,12 +524,31 @@ async function generateHunyuanCover(args: {
   for (const r of results) {
     if (r.status === "fulfilled") {
       finalVariants[r.value.variantIndex] = r.value.url;
+      await logEvent({
+        eventType: "cover.variant_generated",
+        metadata: {
+          series_id: seriesId,
+          slug,
+          variant_index: r.value.variantIndex,
+          model: "hunyuan3",
+        },
+      });
     } else {
       const err = r.reason as { variantIndex?: number; message?: string } | Error;
-      const idx = (err as { variantIndex?: number }).variantIndex ?? "?";
+      const idx = (err as { variantIndex?: number }).variantIndex ?? null;
       const msg = err instanceof Error ? err.message : String(err);
-      errorSummaries.push(`variant ${idx}: ${msg}`);
-      console.error(`[generate-cover:hunyuan] variant ${idx} failed:`, msg);
+      errorSummaries.push(`variant ${idx ?? "?"}: ${msg}`);
+      console.error(`[generate-cover:hunyuan] variant ${idx ?? "?"} failed:`, msg);
+      await logEvent({
+        eventType: "cover.variant_failed",
+        metadata: {
+          series_id: seriesId,
+          slug,
+          variant_index: idx,
+          model: "hunyuan3",
+          error: msg,
+        },
+      });
     }
   }
 

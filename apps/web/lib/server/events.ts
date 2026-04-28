@@ -47,7 +47,11 @@ export type EventType =
   | "cover.composite_completed"
   | "cover.composite_failed"
   | "cover.recomposite_started"
-  | "cover.recomposite_completed";
+  | "cover.recomposite_completed"
+  // variant generation (RunPod / Replicate upstream image gen)
+  | "cover.variant_generation_started"
+  | "cover.variant_generated"
+  | "cover.variant_failed";
 
 export interface LogEventParams {
   eventType: EventType;

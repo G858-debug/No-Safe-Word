@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
+import { logEvent } from "@/lib/server/events";
 
 // GET /api/stories/[seriesId] — Full series with all related data
 export async function GET(
@@ -108,6 +109,72 @@ export async function GET(
       .eq("job_type", "cover_variant")
       .in("status", ["pending", "processing"]);
     coverJobStates = (coverJobs ?? []) as typeof coverJobStates;
+
+    // Stuck-state recovery: a RunPod variant job that hangs (pod
+    // evicted, network blip, GPU OOM with no error) leaves the series
+    // in 'generating' forever — the user sees "Generating…" with no
+    // recovery path. RunPod cover variants typically take 30–90s; 5
+    // minutes is 3–10× expected. If the OLDEST active job exceeds
+    // that, fail all active jobs and revert the series to 'pending'.
+    const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+    const now = Date.now();
+    const oldestActive = coverJobStates.reduce<number | null>((acc, j) => {
+      const t = new Date(j.created_at).getTime();
+      return acc === null || t < acc ? t : acc;
+    }, null);
+    if (oldestActive !== null && now - oldestActive > STUCK_THRESHOLD_MS) {
+      const stuckErrorMsg = `Stuck >${Math.round(STUCK_THRESHOLD_MS / 60000)}min — auto-failed by GET /api/stories reconciliation`;
+      await supabase
+        .from("generation_jobs")
+        .update({
+          status: "failed",
+          error: stuckErrorMsg,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("series_id", seriesId)
+        .eq("job_type", "cover_variant")
+        .in("status", ["pending", "processing"]);
+
+      // Log a cover.variant_failed event for each job we just timed out
+      // so the events table reflects the failure mode (otherwise stuck
+      // jobs would silently disappear into 'pending' with no trace).
+      await Promise.all(
+        coverJobStates.map((j) =>
+          logEvent({
+            eventType: "cover.variant_failed",
+            metadata: {
+              series_id: seriesId,
+              variant_index: j.variant_index,
+              model: "flux2_dev",
+              job_id: j.job_id,
+              error: stuckErrorMsg,
+              reason: "stuck_timeout",
+            },
+          })
+        )
+      );
+      await supabase
+        .from("story_series")
+        .update({
+          cover_status: "pending",
+          cover_variants: [null, null, null, null],
+          cover_error: `Cover generation timed out after ${Math.round(STUCK_THRESHOLD_MS / 60000)} minutes. Try generating again.`,
+        })
+        .eq("id", seriesId)
+        .eq("cover_status", "generating");
+
+      // Re-read so the response reflects the recovered state instead
+      // of the stale 'generating' we read at the top of this handler.
+      const { data: refreshed } = await supabase
+        .from("story_series")
+        .select("*")
+        .eq("id", seriesId)
+        .single();
+      if (refreshed) {
+        Object.assign(series, refreshed);
+      }
+      coverJobStates = [];
+    }
   }
 
   return NextResponse.json({

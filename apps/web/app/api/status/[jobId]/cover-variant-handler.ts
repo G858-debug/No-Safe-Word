@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRunPodJobStatus, base64ToBuffer, generateFlux2ProImage } from "@no-safe-word/image-gen";
 import type { Flux2ProGenerateResult } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
+import { logEvent } from "@/lib/server/events";
 
 // ============================================================
 // Cover-variant completion handler
@@ -167,6 +168,16 @@ export async function handleCoverVariantCompletion(args: {
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("job_id", jobId);
 
+    await logEvent({
+      eventType: "cover.variant_generated",
+      metadata: {
+        series_id: seriesId,
+        variant_index: variantIndex,
+        model: "flux2_dev",
+        job_id: jobId,
+      },
+    });
+
     await maybeTransitionCoverStatus(seriesId);
 
     return NextResponse.json({
@@ -190,6 +201,7 @@ export async function handleCoverVariantCompletion(args: {
         ? "RunPod job timed out (execution limit exceeded)"
         : status.error || JSON.stringify(status.output || "");
     console.warn(`[status:cover][${jobId}] variant ${variantIndex} ${status.status}: ${errorMsg}`);
+    // markJobFailed centrally logs cover.variant_failed.
     await markJobFailed(jobId, errorMsg);
     await maybeTransitionCoverStatus(seriesId);
     return NextResponse.json({ jobId, completed: false, error: errorMsg });
@@ -239,10 +251,33 @@ export async function handleCoverVariantCompletion(args: {
 }
 
 async function markJobFailed(jobId: string, error: string): Promise<void> {
+  // Look up series_id + variant_index from the job row before marking
+  // it failed so we can attach them to the cover.variant_failed event.
+  // (The lookup is cheap and lets every failure path through this
+  // helper get instrumented automatically — central choke point.)
+  const { data: jobRow } = await supabase
+    .from("generation_jobs")
+    .select("series_id, variant_index")
+    .eq("job_id", jobId)
+    .maybeSingle();
+
   await supabase
     .from("generation_jobs")
     .update({ status: "failed", completed_at: new Date().toISOString(), error })
     .eq("job_id", jobId);
+
+  if (jobRow?.series_id != null) {
+    await logEvent({
+      eventType: "cover.variant_failed",
+      metadata: {
+        series_id: jobRow.series_id,
+        variant_index: jobRow.variant_index,
+        model: "flux2_dev",
+        job_id: jobId,
+        error,
+      },
+    });
+  }
 }
 
 async function cancelRunPodJob(runpodJobId: string, endpointOverride?: string): Promise<void> {

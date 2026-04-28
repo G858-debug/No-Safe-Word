@@ -66,17 +66,34 @@ export async function runCoverCompositing(
     };
   }
 
-  // ── State: approved/complete → compositing ──
+  // ── State: approved/complete → compositing (compare-and-swap) ──
+  // The CAS predicate `.in("cover_status", ["approved", "complete"])`
+  // guarantees only one concurrent caller wins the transition. Without
+  // it, two tabs (or a polling-side trigger racing the manual Retry
+  // button) could both pass the SELECT validation above and both run
+  // the 4-size pipeline — wasting Railway compute and producing noisy
+  // duplicate composite_* events. Whoever loses the race gets a 409.
   {
-    const { error: transErr } = await supabase
+    const { data: updated, error: transErr } = await supabase
       .from("story_series")
       .update({ cover_status: "compositing", cover_error: null })
-      .eq("id", seriesId);
+      .eq("id", seriesId)
+      .in("cover_status", ["approved", "complete"])
+      .select("id")
+      .maybeSingle();
     if (transErr) {
       return {
         ok: false,
         error: `Failed to transition to compositing: ${transErr.message}`,
         status: 500,
+      };
+    }
+    if (!updated) {
+      return {
+        ok: false,
+        error:
+          "Compositing already in progress (status changed between read and write).",
+        status: 409,
       };
     }
   }
