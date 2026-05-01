@@ -286,6 +286,21 @@ export default function CoverApproval({ seriesId }: Props) {
       .filter((i) => i >= 0);
   }, [state, variants]);
 
+  // Slots that need generation: empty in cover_variants AND not currently
+  // being generated (no pending/processing job for that slot). Drives the
+  // dynamic "Generate N Variants" button — only the slots actually available
+  // to be filled count.
+  const availableSlots = useMemo(() => {
+    const activeIndices = new Set(
+      coverJobStates
+        .filter((j) => j.status === "pending" || j.status === "processing")
+        .map((j) => j.variant_index)
+    );
+    return variants
+      .map((v, i) => (v === null && !activeIndices.has(i) ? i : -1))
+      .filter((i) => i >= 0);
+  }, [variants, coverJobStates]);
+
   // Low-level: submits a generation request, merges returned jobIds into
   // outstandingJobs (so concurrent retries don't clobber each other), and
   // refreshes cover state. Throws on error so callers can wrap with their
@@ -345,7 +360,26 @@ export default function CoverApproval({ seriesId }: Props) {
       );
       if (!ok) return;
     }
-    await generate(promptDirty ? { prompt: promptDraft } : {});
+
+    // Two paths:
+    //   1. Full regenerate (resets all 4 slots): when the user has edited the
+    //      prompt OR the cover was already approved/complete. Either case
+    //      invalidates existing variants — start fresh.
+    //   2. Partial retry of available slots: when there are some empty/non-
+    //      active slots and we're not doing a full regenerate. Preserves any
+    //      already-completed variants and any in-flight ones.
+    const fullRegenerate =
+      promptDirty ||
+      state?.cover_status === "approved" ||
+      state?.cover_status === "complete";
+
+    if (fullRegenerate) {
+      await generate(promptDirty ? { prompt: promptDraft } : {});
+      return;
+    }
+
+    if (availableSlots.length === 0) return;
+    await generate({ retryVariants: availableSlots });
   }
 
   async function handleRetryCompositing() {
@@ -760,9 +794,25 @@ export default function CoverApproval({ seriesId }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               onClick={handleGenerate}
-              disabled={busy || isGenerating || (!promptDraft && !state.cover_prompt)}
+              disabled={(() => {
+                if (busy) return true;
+                if (!promptDraft && !state.cover_prompt) return true;
+                // Full regenerate paths always allowed (they reset everything)
+                const isFullRegenerate =
+                  promptDirty ||
+                  state.cover_status === "approved" ||
+                  state.cover_status === "complete";
+                if (isFullRegenerate) return false;
+                // Partial generate path requires at least one available slot
+                return availableSlots.length === 0;
+              })()}
             >
-              {primaryButtonLabel(state.cover_status, completedCount, promptDirty)}
+              {primaryButtonLabel(
+                state.cover_status,
+                completedCount,
+                availableSlots.length,
+                promptDirty
+              )}
             </Button>
 
             {/* Cancel: shown when generation is in-flight with queued/running jobs */}
@@ -851,14 +901,24 @@ function renderStatusBadge(status: CoverStatus, completedCount: number) {
 function primaryButtonLabel(
   status: CoverStatus,
   completedCount: number,
+  availableCount: number,
   promptDirty: boolean
 ): string {
-  if (status === "generating") return `Generating... (${completedCount}/${VARIANT_COUNT} complete)`;
-  if (status === "pending" || status === "failed") return "Generate 4 Variants";
-  if (status === "variants_ready" || status === "approved" || status === "complete") {
-    return promptDirty ? "Regenerate 4 Variants (new prompt)" : "Regenerate 4 Variants";
+  // Prompt edits or already-approved covers always do a FULL regenerate
+  // (all 4 slots reset), so the label reflects that regardless of
+  // currently-available slot count.
+  if (promptDirty) return "Regenerate 4 Variants (new prompt)";
+  if (status === "approved" || status === "complete") return "Regenerate 4 Variants";
+
+  if (availableCount === 0) {
+    if (status === "generating") {
+      return `Generating... (${completedCount}/${VARIANT_COUNT} complete)`;
+    }
+    return "All variants ready";
   }
-  return "Generate 4 Variants";
+
+  const noun = availableCount === 1 ? "Variant" : "Variants";
+  return `Generate ${availableCount} ${noun}`;
 }
 
 interface VariantSlotProps {
