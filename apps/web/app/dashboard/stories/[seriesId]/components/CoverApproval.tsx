@@ -242,6 +242,31 @@ export default function CoverApproval({ seriesId }: Props) {
     return () => clearInterval(interval);
   }, [outstandingJobs, fetchCover]);
 
+  // Resume polling after a page refresh: when the page mounts (or
+  // navigates back) with cover_status='generating' but no outstanding
+  // jobs yet, fetch the still-pending generation_jobs from the DB and
+  // seed outstandingJobs with them. Without this, /api/status is never
+  // called between mount and the auto-fail timeout, so jobs that are
+  // legitimately still running on Siray sit untouched until the
+  // reconciliation kills them.
+  const seedRef = useRef(false);
+  useEffect(() => {
+    if (seedRef.current) return;
+    if (!state || state.cover_status !== "generating") return;
+    if (outstandingJobs.length > 0) return;
+    seedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/stories/${seriesId}/pending-cover-jobs`);
+        if (!res.ok) return;
+        const { jobIds } = (await res.json()) as { jobIds: string[] };
+        if (jobIds?.length) setOutstandingJobs(jobIds);
+      } catch {
+        /* non-fatal — auto-fail will eventually unblock */
+      }
+    })();
+  }, [state, seriesId, outstandingJobs.length]);
+
   const variants: (string | null)[] = useMemo(() => {
     const base = state?.cover_variants ?? [];
     return Array.from({ length: VARIANT_COUNT }, (_, i) => base[i] ?? null);

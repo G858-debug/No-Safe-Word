@@ -119,10 +119,11 @@ export async function GET(
     // recovery path. The threshold is model-specific:
     //   RunPod (Flux 2):  cover variants typically take 30–90s. 5min is
     //                     3–10× expected.
-    //   Siray (Hunyuan):  cover variants legitimately take 2–5min when
-    //                     i2i references are involved + queue depth
-    //                     adds variance. 10min keeps the safety net but
-    //                     stops false-positives on normal generations.
+    //   Siray (Hunyuan):  cover variants are bimodal in practice — fast
+    //                     workers finish in ~2.5min, slow ones in ~8min,
+    //                     plus queue depth adds variance. 15min gives
+    //                     ~2× tail headroom while still catching truly
+    //                     stuck jobs.
     // We detect Siray via the `siray-` job_id prefix on the OLDEST job
     // (all jobs in one cover run come from the same backend, so any
     // sample is representative).
@@ -130,7 +131,7 @@ export async function GET(
       j.job_id?.startsWith("siray-")
     );
     const stuckModel = isSirayBatch ? "hunyuan3" : "flux2_dev";
-    const STUCK_THRESHOLD_MS = (isSirayBatch ? 10 : 5) * 60 * 1000;
+    const STUCK_THRESHOLD_MS = (isSirayBatch ? 15 : 5) * 60 * 1000;
     const now = Date.now();
     const oldestActive = coverJobStates.reduce<number | null>((acc, j) => {
       const t = new Date(j.created_at).getTime();
@@ -167,12 +168,39 @@ export async function GET(
           })
         )
       );
+      // Preserve any cover_variants slots that already have URLs — they
+      // came from previously-completed jobs (this same series may have
+      // finished some variants on a prior run, or in the case of a
+      // partial retry the un-retried slots are intact). Only the slots
+      // tied to the stuck pending/processing jobs are at risk; the rest
+      // are real images sitting in storage that we shouldn't discard.
+      const stuckIndices = new Set(
+        coverJobStates
+          .map((j) => j.variant_index)
+          .filter((i): i is number => typeof i === "number")
+      );
+      const preservedVariants: (string | null)[] = Array.from(
+        { length: 4 },
+        (_, i) => {
+          if (stuckIndices.has(i)) return null;
+          const existing = (series.cover_variants as (string | null)[] | null) ?? [];
+          return existing[i] ?? null;
+        }
+      );
+      const anyPreserved = preservedVariants.some((v) => v !== null);
+      // If anything was preserved, recover to variants_ready so the user
+      // can keep the good art and retry only the stuck slots. Otherwise
+      // fall back to 'pending' so they can start fresh.
       await supabase
         .from("story_series")
         .update({
-          cover_status: "pending",
-          cover_variants: [null, null, null, null],
-          cover_error: `Cover generation timed out after ${Math.round(STUCK_THRESHOLD_MS / 60000)} minutes. Try generating again.`,
+          cover_status: anyPreserved ? "variants_ready" : "pending",
+          cover_variants: preservedVariants,
+          cover_error: `Cover generation timed out after ${Math.round(STUCK_THRESHOLD_MS / 60000)} minutes. ${
+            anyPreserved
+              ? "Existing variants preserved — retry the failed slots."
+              : "Try generating again."
+          }`,
         })
         .eq("id", seriesId)
         .eq("cover_status", "generating");
