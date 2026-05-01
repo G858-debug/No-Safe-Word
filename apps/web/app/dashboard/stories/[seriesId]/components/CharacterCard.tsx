@@ -241,7 +241,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   );
 
   return (
-    <Card>
+    <Card className="border-2 border-zinc-400 dark:border-zinc-500">
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-lg">{name}</CardTitle>
