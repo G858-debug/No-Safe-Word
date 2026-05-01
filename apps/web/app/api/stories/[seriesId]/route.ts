@@ -110,13 +110,24 @@ export async function GET(
       .in("status", ["pending", "processing"]);
     coverJobStates = (coverJobs ?? []) as typeof coverJobStates;
 
-    // Stuck-state recovery: a RunPod variant job that hangs (pod
-    // evicted, network blip, GPU OOM with no error) leaves the series
-    // in 'generating' forever — the user sees "Generating…" with no
-    // recovery path. RunPod cover variants typically take 30–90s; 5
-    // minutes is 3–10× expected. If the OLDEST active job exceeds
-    // that, fail all active jobs and revert the series to 'pending'.
-    const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+    // Stuck-state recovery: a variant job that hangs (RunPod pod
+    // evicted, Siray queue stall, network blip) leaves the series in
+    // 'generating' forever — the user sees "Generating…" with no
+    // recovery path. The threshold is model-specific:
+    //   RunPod (Flux 2):  cover variants typically take 30–90s. 5min is
+    //                     3–10× expected.
+    //   Siray (Hunyuan):  cover variants legitimately take 2–5min when
+    //                     i2i references are involved + queue depth
+    //                     adds variance. 10min keeps the safety net but
+    //                     stops false-positives on normal generations.
+    // We detect Siray via the `siray-` job_id prefix on the OLDEST job
+    // (all jobs in one cover run come from the same backend, so any
+    // sample is representative).
+    const isSirayBatch = coverJobStates.some((j) =>
+      j.job_id?.startsWith("siray-")
+    );
+    const stuckModel = isSirayBatch ? "hunyuan3" : "flux2_dev";
+    const STUCK_THRESHOLD_MS = (isSirayBatch ? 10 : 5) * 60 * 1000;
     const now = Date.now();
     const oldestActive = coverJobStates.reduce<number | null>((acc, j) => {
       const t = new Date(j.created_at).getTime();
@@ -145,7 +156,7 @@ export async function GET(
             metadata: {
               series_id: seriesId,
               variant_index: j.variant_index,
-              model: "flux2_dev",
+              model: stuckModel,
               job_id: j.job_id,
               error: stuckErrorMsg,
               reason: "stuck_timeout",
