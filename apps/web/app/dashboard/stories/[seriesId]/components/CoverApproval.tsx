@@ -92,6 +92,16 @@ export default function CoverApproval({ seriesId }: Props) {
   const [retryingSlots, setRetryingSlots] = useState<Set<number>>(new Set());
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Mirror promptDirty in a ref so async fetchCover calls read the LATEST
+  // value rather than a stale closure-captured one. Without this, a polling
+  // tick that fires just before the user types overwrites the user's typing
+  // when its fetch resolves — because its `promptDirty` was captured back
+  // when no edits existed.
+  const promptDirtyRef = useRef(promptDirty);
+  useEffect(() => {
+    promptDirtyRef.current = promptDirty;
+  }, [promptDirty]);
+
   const fetchCover = useCallback(async () => {
     try {
       const res = await fetch(`/api/stories/${seriesId}`);
@@ -103,7 +113,7 @@ export default function CoverApproval({ seriesId }: Props) {
       const s = data.series as CoverState;
       setState(s);
       setCoverJobStates((data.cover_job_states as CoverJobState[]) ?? []);
-      if (!promptDirty) {
+      if (!promptDirtyRef.current) {
         setPromptDraft(s.cover_prompt ?? "");
       }
 
@@ -134,7 +144,7 @@ export default function CoverApproval({ seriesId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [seriesId, promptDirty]);
+  }, [seriesId]);
 
   useEffect(() => {
     fetchCover();
