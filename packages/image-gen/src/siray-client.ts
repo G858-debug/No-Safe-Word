@@ -11,7 +11,10 @@
 
 const SIRAY_BASE_URL = "https://api.siray.ai/v1";
 const POLL_INTERVAL_MS = 3_000;
-const DEFAULT_MAX_WAIT_MS = 120_000;
+// HunyuanImage 3.0 on Siray typically returns in 30s–3min, but queue
+// spikes have been observed pushing it past 6min. 10min is generous
+// enough to absorb that without surfacing spurious timeout failures.
+const DEFAULT_MAX_WAIT_MS = 600_000;
 
 export type SirayModelId =
   | "tencent/hunyuan-image-3-instruct-t2i"
@@ -26,14 +29,41 @@ export interface SirayJobPayload {
   images?: string[];
 }
 
+/**
+ * Siray's async-job poll response. The API wraps the actual job state in
+ * a `data` envelope and uses uppercase status values:
+ *   IN_PROGRESS → SUCCESS (or FAILED)
+ *
+ * `fail_reason` is observed to contain a URL even on success — only read
+ * it when status is FAILED.
+ */
 export interface SirayPollResponse {
-  code: string;
+  code: string | number;
   message: string;
+  data: SirayJobState;
+}
+
+export interface SirayJobState {
   task_id: string;
+  action?: string;
   status: string;
   outputs?: string[];
   fail_reason?: string;
   progress?: string;
+  submit_time?: number;
+  start_time?: number;
+  finish_time?: number;
+}
+
+/**
+ * Submit-response shape — the API duplicates `task_id` at the root and
+ * inside `data`. We accept either.
+ */
+interface SiraySubmitResponse {
+  code: string | number;
+  message: string;
+  task_id?: string;
+  data?: { task_id?: string };
 }
 
 interface SirayClient {
@@ -80,11 +110,11 @@ async function submitJob(
     );
   }
 
-  const data = (await res.json()) as Partial<SirayPollResponse>;
-  const taskId = data.task_id;
+  const body = (await res.json()) as SiraySubmitResponse;
+  const taskId = body.task_id ?? body.data?.task_id;
   if (!taskId || typeof taskId !== "string") {
     throw new Error(
-      `[siray] submit returned no task_id (response: ${safeStringify(data)})`
+      `[siray] submit returned no task_id (response: ${safeStringify(body)})`
     );
   }
 
@@ -118,26 +148,35 @@ async function pollForResult(
       );
     }
 
-    const data = (await res.json()) as SirayPollResponse;
-
-    if (data.progress && data.progress !== lastProgress) {
-      console.log(`[siray] task ${taskId} progress=${data.progress}`);
-      lastProgress = data.progress;
+    const body = (await res.json()) as SirayPollResponse;
+    const job = body.data;
+    if (!job) {
+      throw new Error(
+        `[siray] poll for task ${taskId} returned no data envelope (response: ${safeStringify(body)})`
+      );
     }
 
-    if (data.status === "completed") {
-      const url = data.outputs?.[0];
+    if (job.progress && job.progress !== lastProgress) {
+      console.log(`[siray] task ${taskId} progress=${job.progress}`);
+      lastProgress = job.progress;
+    }
+
+    // Siray uses uppercase status strings. Normalize to be tolerant of
+    // future case changes; treat both SUCCESS and COMPLETED as terminal.
+    const status = (job.status ?? "").toUpperCase();
+    if (status === "SUCCESS" || status === "COMPLETED") {
+      const url = job.outputs?.[0];
       if (!url) {
         throw new Error(
-          `[siray] task ${taskId} completed with no outputs (response: ${safeStringify(data)})`
+          `[siray] task ${taskId} succeeded with no outputs (response: ${safeStringify(body)})`
         );
       }
       return url;
     }
 
-    if (data.status === "failed") {
+    if (status === "FAILED" || status === "FAILURE" || status === "ERROR") {
       throw new Error(
-        `[siray] task ${taskId} failed: ${data.fail_reason ?? "unknown reason"}`
+        `[siray] task ${taskId} failed: ${job.fail_reason ?? "unknown reason"}`
       );
     }
 
