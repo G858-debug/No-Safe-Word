@@ -37,13 +37,16 @@ export async function POST(
 
   const { data: series, error: seriesErr } = await supabase
     .from("story_series")
-    .select("id, title")
+    .select("id, title, image_model")
     .eq("id", seriesId)
     .single();
 
   if (seriesErr || !series) {
     return NextResponse.json({ error: "Series not found" }, { status: 404 });
   }
+
+  const imageModel: "flux2_dev" | "hunyuan3" =
+    (series.image_model as string | null) === "hunyuan3" ? "hunyuan3" : "flux2_dev";
 
   const { count: postCount } = await supabase
     .from("story_posts")
@@ -143,21 +146,22 @@ export async function POST(
     proseDescription: c.prose_description,
   }));
 
-  // Call Claude
+  // Call Mistral (model-aware: Hunyuan vs Flux system prompt)
   const callInput: GenerateCoverPromptInput = {
     seriesId,
     title: series.title,
     fullStoryText,
     characters,
+    imageModel,
   };
 
   let coverPrompt: string;
   try {
     coverPrompt = await generateCoverPromptForStory(callInput);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown Claude error";
+    const message = err instanceof Error ? err.message : "Unknown Mistral error";
     console.error(
-      `[regenerate-cover-prompt][${seriesId}] Claude call failed:`,
+      `[regenerate-cover-prompt][${seriesId}] Mistral call failed:`,
       message
     );
     return NextResponse.json(
