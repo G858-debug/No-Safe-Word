@@ -472,12 +472,32 @@ export async function maybeTransitionCoverStatus(seriesId: string): Promise<void
   );
 
   // Determine per-slot terminal state:
-  //   populated URL          → succeeded
-  //   null + any failed job  → failed
-  //   null + no failed job   → still generating
+  //   populated URL                          → succeeded
+  //   null + active (pending/processing) job → still generating
+  //   null + no active job + failed job      → failed
+  //
+  // A slot with BOTH a failed old job AND a pending new job (i.e. the user
+  // retried that slot) must NOT be counted as failed — the pending job is the
+  // active one and supersedes the old failure. We track active indices first
+  // and exclude them from failedByIndex so stale failures don't pollute the
+  // transition logic.
+  const activeByIndex = new Set<number>();
+  for (const j of jobs) {
+    if (
+      (j.status === "pending" || j.status === "processing") &&
+      typeof j.variant_index === "number"
+    ) {
+      activeByIndex.add(j.variant_index);
+    }
+  }
+
   const failedByIndex = new Map<number, string>();
   for (const j of jobs) {
-    if (j.status === "failed" && typeof j.variant_index === "number") {
+    if (
+      j.status === "failed" &&
+      typeof j.variant_index === "number" &&
+      !activeByIndex.has(j.variant_index)
+    ) {
       failedByIndex.set(j.variant_index, (j.error as string | null) ?? "unknown error");
     }
   }
