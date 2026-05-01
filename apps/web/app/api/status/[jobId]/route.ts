@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRunPodJobStatus, base64ToBuffer } from "@no-safe-word/image-gen";
 import { handleCoverVariantCompletion } from "./cover-variant-handler";
 import { handleSirayJobStatus } from "./siray-job-handler";
+import { handleSirayCoverVariantStatus } from "./siray-cover-variant-handler";
 import { supabase } from "@no-safe-word/story-engine";
 
 /**
@@ -50,8 +51,34 @@ export async function GET(
       }
     }
 
-    // Cover variants have their own state machine — delegate.
+    // Cover variants have their own state machine — delegate. Siray-backed
+    // cover jobs (Hunyuan path) follow the submit-then-poll pattern and
+    // need a Siray-aware handler; RunPod-backed cover jobs (Flux 2 path)
+    // use the original handler.
     if (jobRow?.job_type === "cover_variant") {
+      if (jobId.startsWith("siray-") && jobRow.series_id) {
+        const { data: seriesRow } = await supabase
+          .from("story_series")
+          .select("slug")
+          .eq("id", jobRow.series_id)
+          .single();
+        const seriesSlug = (seriesRow?.slug as string | null) ?? "";
+        if (!seriesSlug) {
+          return NextResponse.json(
+            { error: "Series slug missing for Siray cover variant" },
+            { status: 500 }
+          );
+        }
+        return await handleSirayCoverVariantStatus({
+          jobId,
+          jobRow: {
+            image_id: jobRow.image_id,
+            variant_index: jobRow.variant_index ?? null,
+            series_id: jobRow.series_id ?? null,
+          },
+          seriesSlug,
+        });
+      }
       return await handleCoverVariantCompletion({
         jobId,
         jobRow: {

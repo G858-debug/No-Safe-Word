@@ -23,7 +23,8 @@ import { logEvent } from "@/lib/server/events";
 // both series_id and variant_index, so we can assert those present.
 // ============================================================
 
-const BUCKET = "story-covers";
+export const COVER_BUCKET = "story-covers";
+const BUCKET = COVER_BUCKET;
 const VARIANT_COUNT = 4;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MIN_EXPECTED_BYTES = 100 * 1024;
@@ -250,7 +251,7 @@ export async function handleCoverVariantCompletion(args: {
   });
 }
 
-async function markJobFailed(jobId: string, error: string): Promise<void> {
+export async function markJobFailed(jobId: string, error: string): Promise<void> {
   // Look up series_id + variant_index from the job row before marking
   // it failed so we can attach them to the cover.variant_failed event.
   // (The lookup is cheap and lets every failure path through this
@@ -408,7 +409,7 @@ async function handleReplicateFallback(args: {
   });
 }
 
-async function writeVariantUrl(
+export async function writeVariantUrl(
   seriesId: string,
   variantIndex: number,
   url: string
@@ -440,7 +441,7 @@ async function writeVariantUrl(
  *   - all failed    → cover_status = 'failed' + cover_error populated
  * If no — some variants still generating — leave cover_status='generating'.
  */
-async function maybeTransitionCoverStatus(seriesId: string): Promise<void> {
+export async function maybeTransitionCoverStatus(seriesId: string): Promise<void> {
   const { data: jobs } = await supabase
     .from("generation_jobs")
     .select("status, variant_index, error")

@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
   generateFlux2Image,
-  generateSceneImage,
+  submitSirayImage,
   assembleHunyuanPrompt,
   imageUrlToBase64,
   resolvePortraitText,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
-import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
 import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
 import { logEvent } from "@/lib/server/events";
 
@@ -20,8 +19,11 @@ export const runtime = "nodejs";
 // Generates 4 cover variants. Model selection mirrors the story's
 // image_model setting:
 //   flux2_dev  → 4 async RunPod jobs (ComfyUI + PuLID reference images)
-//   hunyuan3   → 4 synchronous Siray calls (portrait_prompt_locked text +
-//                approved portrait URLs as i2i reference images)
+//   hunyuan3   → 4 async Siray jobs (portrait_prompt_locked text +
+//                approved portrait URLs as i2i reference images). Both
+//                paths return jobIds + cover_status='generating'; the
+//                client polls /api/status/{jobId} until cover_variants
+//                fill in.
 //
 // Partial retry: body.retryVariants: number[] regenerates only those slots.
 // ============================================================
@@ -29,7 +31,6 @@ export const runtime = "nodejs";
 const COVER_WIDTH = 1024;
 const COVER_HEIGHT = 1536;
 const VARIANT_COUNT = 4;
-const COVER_BUCKET = "story-covers";
 
 type GenerateCoverBody = {
   prompt?: string;
@@ -293,7 +294,6 @@ export async function POST(
       protagonist,
       loveInterest,
       variantIndices,
-      existingVariants: newCoverVariants,
     });
   }
 
@@ -451,9 +451,8 @@ async function generateHunyuanCover(args: {
   protagonist: CharWithBase;
   loveInterest: CharWithBase | undefined;
   variantIndices: number[];
-  existingVariants: (string | null)[];
 }): Promise<NextResponse> {
-  const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices, existingVariants } = args;
+  const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices } = args;
 
   // Model-aware injection rule (Hunyuan / cover) on Siray: BOTH channels.
   //   - Character text from `portrait_prompt_locked` is injected verbatim
@@ -478,7 +477,7 @@ async function generateHunyuanCover(args: {
     aspectRatio: "4:5",
   });
 
-  console.log("[generate-cover:hunyuan] starting", {
+  console.log("[generate-cover:hunyuan] submitting", {
     seriesId,
     variants: variantIndices,
     protagonistBlock: protagonistBlock.slice(0, 80),
@@ -486,121 +485,104 @@ async function generateHunyuanCover(args: {
     referenceImageCount: referenceImageUrls.length,
   });
 
-  const results = await Promise.allSettled(
-    variantIndices.map(async (variantIndex) => {
-      const generatedUrl = await generateSceneImage(
-        assembledPrompt,
+  // Async submit-and-register: each Siray task returns immediately. The
+  // status route + siray-cover-variant-handler upload the image, write the
+  // URL into story_series.cover_variants[N], and advance cover_status when
+  // the last variant settles.
+  const jobIds: string[] = [];
+  const submissionFailures: Array<{ variantIndex: number; message: string }> = [];
+
+  for (const variantIndex of variantIndices) {
+    try {
+      const submitted = await submitSirayImage({
+        prompt: assembledPrompt,
+        aspectRatio: "4:5",
         referenceImageUrls,
-        "4:5"
-      );
+      });
 
-      const storagePath = `${slug}/variants/variant-${variantIndex}.jpeg`;
-      const variantUrl = await uploadRemoteImageToStorage(
-        generatedUrl,
-        storagePath,
-        COVER_BUCKET,
-        { cacheControl: "public, max-age=60" }
-      );
-
-      // Provenance row
-      const { data: imageRow } = await supabase
+      const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
           prompt: assembledPrompt,
           settings: {
             model: "hunyuan3",
             provider: "siray",
-            siray_model: "hunyuan3-instruct",
+            siray_model: submitted.model,
+            siray_task_id: submitted.taskId,
             purpose: "cover_variant",
             series_id: seriesId,
             variant_index: variantIndex,
             aspect_ratio: "4:5",
-            reference_image_count: referenceImageUrls.length,
+            size: submitted.size,
+            reference_image_count: submitted.referenceImageCount,
           },
           mode: "sfw",
         })
         .select("id")
         .single();
 
-      if (imageRow) {
-        await supabase
-          .from("images")
-          .update({ stored_url: variantUrl, sfw_url: variantUrl })
-          .eq("id", imageRow.id);
+      if (imgErr || !imageRow) {
+        throw new Error(`Failed to create image record: ${imgErr?.message ?? "unknown"}`);
       }
 
-      console.log(`[generate-cover:hunyuan] variant ${variantIndex} done: ${variantUrl}`);
-      return { variantIndex, url: variantUrl };
-    })
-  );
-
-  // Merge results into the variants array
-  const finalVariants: (string | null)[] = [...existingVariants];
-  const errorSummaries: string[] = [];
-
-  for (const r of results) {
-    if (r.status === "fulfilled") {
-      finalVariants[r.value.variantIndex] = r.value.url;
-      await logEvent({
-        eventType: "cover.variant_generated",
-        metadata: {
-          series_id: seriesId,
-          slug,
-          variant_index: r.value.variantIndex,
-          model: "hunyuan3",
-        },
+      const jobId = `siray-${submitted.taskId}`;
+      const { error: jobErr } = await supabase.from("generation_jobs").insert({
+        job_id: jobId,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+        job_type: "cover_variant",
+        variant_index: variantIndex,
+        series_id: seriesId,
       });
-    } else {
-      const err = r.reason as { variantIndex?: number; message?: string } | Error;
-      const idx = (err as { variantIndex?: number }).variantIndex ?? null;
-      const msg = err instanceof Error ? err.message : String(err);
-      errorSummaries.push(`variant ${idx ?? "?"}: ${msg}`);
-      console.error(`[generate-cover:hunyuan] variant ${idx ?? "?"} failed:`, msg);
+
+      if (jobErr) {
+        throw new Error(`Failed to register Siray cover job: ${jobErr.message}`);
+      }
+
+      jobIds.push(jobId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error submitting job";
+      console.error(
+        `[generate-cover:hunyuan] variant ${variantIndex} submission failed:`,
+        message
+      );
+      submissionFailures.push({ variantIndex, message });
       await logEvent({
         eventType: "cover.variant_failed",
         metadata: {
           series_id: seriesId,
           slug,
-          variant_index: idx,
+          variant_index: variantIndex,
           model: "hunyuan3",
-          error: msg,
+          error: message,
         },
       });
     }
   }
 
-  const succeeded = finalVariants.filter(Boolean).length;
-
-  if (succeeded === 0) {
+  if (submissionFailures.length === variantIndices.length) {
     await supabase
       .from("story_series")
       .update({
         cover_status: "failed",
-        cover_variants: finalVariants,
-        cover_error: errorSummaries.join("; ") || "All cover variants failed",
+        cover_error: submissionFailures
+          .map((f) => `variant ${f.variantIndex}: ${f.message}`)
+          .join("; "),
       })
       .eq("id", seriesId);
 
     return NextResponse.json(
-      { error: "All cover variants failed", details: errorSummaries },
+      { error: "All cover variant submissions failed", details: submissionFailures },
       { status: 500 }
     );
   }
 
-  await supabase
-    .from("story_series")
-    .update({
-      cover_status: "variants_ready",
-      cover_variants: finalVariants,
-      cover_error: errorSummaries.length > 0 ? errorSummaries.join("; ") : null,
-    })
-    .eq("id", seriesId);
-
   return NextResponse.json({
-    coverStatus: "variants_ready",
-    jobIds: [],
+    jobIds,
+    coverStatus: "generating",
     variantIndices,
     model: "hunyuan3",
-    ...(errorSummaries.length > 0 ? { partialFailures: errorSummaries } : {}),
+    ...(submissionFailures.length > 0 ? { submissionFailures } : {}),
   });
 }
