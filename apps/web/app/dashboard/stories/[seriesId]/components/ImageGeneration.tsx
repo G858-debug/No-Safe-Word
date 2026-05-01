@@ -1956,6 +1956,54 @@ function ImageCard({
                 className="leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
                 disabled={isGenerating || isApproved}
               />
+              <div className="rounded-md border border-zinc-700/40 bg-zinc-900/30 p-2 space-y-1">
+                <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+                  Per-image prompt overrides
+                </div>
+                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                  Every section the model sees is editable here. &ldquo;Preview full prompt&rdquo;
+                  shows the exact text sent to the model. Each override applies to
+                  this image only.
+                </p>
+
+              {/* Full prompt preview — first so it's the most visible */}
+              <div>
+                <button
+                  onClick={() =>
+                    onUpdatePrompt(ip.id, { showFullPromptPreview: !state.showFullPromptPreview })
+                  }
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Eye className="h-3 w-3" />
+                  {state.showFullPromptPreview ? "Hide full prompt" : "Preview full prompt"}
+                </button>
+                {state.showFullPromptPreview && (
+                  <div className="relative mt-1.5">
+                    <p className="mb-1 text-[10px] text-muted-foreground">
+                      This is the prompt sent to the model
+                    </p>
+                    <Textarea
+                      value={assembleFullPrompt(state, ip, characterIdentityMap, imageModel)}
+                      readOnly
+                      rows={8}
+                      className="resize-y bg-muted/50 font-mono text-[10px] leading-relaxed pr-16"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="absolute right-1 top-6 h-6 px-2 text-[10px]"
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          assembleFullPrompt(state, ip, characterIdentityMap, imageModel)
+                        )
+                      }
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                )}
+              </div>
+
               {/* Clothing override — SFW only, hidden when character blocks are suppressed */}
               {isSfw && !isCharBlockSuppressed && (
                 <div>
@@ -2104,44 +2152,8 @@ function ImageCard({
                   </div>
                 )}
               </div>
-
-              {/* Full prompt preview */}
-              <div>
-                <button
-                  onClick={() =>
-                    onUpdatePrompt(ip.id, { showFullPromptPreview: !state.showFullPromptPreview })
-                  }
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Eye className="h-3 w-3" />
-                  {state.showFullPromptPreview ? "Hide full prompt" : "Preview full prompt"}
-                </button>
-                {state.showFullPromptPreview && (
-                  <div className="relative mt-1.5">
-                    <p className="mb-1 text-[10px] text-muted-foreground">
-                      This is the prompt sent to the model
-                    </p>
-                    <Textarea
-                      value={assembleFullPrompt(state, ip, characterIdentityMap, imageModel)}
-                      readOnly
-                      rows={8}
-                      className="resize-y bg-muted/50 font-mono text-[10px] leading-relaxed pr-16"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="absolute right-1 top-6 h-6 px-2 text-[10px]"
-                      onClick={() =>
-                        navigator.clipboard.writeText(
-                          assembleFullPrompt(state, ip, characterIdentityMap, imageModel)
-                        )
-                      }
-                    >
-                      Copy
-                    </Button>
-                  </div>
-                )}
               </div>
+              {/* end of Per-image prompt overrides group */}
 
               {/* Diagnostic toggles */}
               <div>
