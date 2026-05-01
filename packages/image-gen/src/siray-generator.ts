@@ -25,10 +25,11 @@ const I2I_MODEL: SirayModelId = "tencent/hunyuan-image-3-instruct-i2i";
 
 const FALLBACK_SIZE = "1024x1024";
 
+// Native 1-MP sizes documented for HunyuanImage 3.0. Labels match the actual
+// pixel ratio of the size (1024:1280 = 4:5, 1280:1024 = 5:4).
 const ASPECT_RATIO_TO_SIZE: Record<string, string> = {
-  "3:4": "768x1024",
-  "4:3": "1024x768",
-  "2:3": "768x1024",
+  "4:5": "1024x1280",
+  "5:4": "1280x1024",
 };
 
 export interface GenerateSirayImageParams {
@@ -141,7 +142,7 @@ export async function generateCharacterPortrait(
 ): Promise<string> {
   return generateSirayImage({
     prompt,
-    aspectRatio: "3:4",
+    aspectRatio: "4:5",
     seed,
   });
 }

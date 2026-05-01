@@ -23,16 +23,16 @@ export interface GeneratedImage {
 }
 
 const ASPECT_RATIOS = [
-  { value: "3:4", label: "3:4 — Portrait" },
+  { value: "4:5", label: "4:5 — Portrait" },
   { value: "9:16", label: "9:16 — Tall" },
   { value: "1:1", label: "1:1 — Square" },
-  { value: "4:3", label: "4:3 — Landscape" },
+  { value: "5:4", label: "5:4 — Landscape" },
   { value: "16:9", label: "16:9 — Wide" },
 ];
 
 export function ImageLab() {
   const [prompt, setPrompt] = useState("");
-  const [aspectRatio, setAspectRatio] = useState("3:4");
+  const [aspectRatio, setAspectRatio] = useState("4:5");
   const [generating, setGenerating] = useState(false);
   const [current, setCurrent] = useState<GeneratedImage | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);

@@ -127,7 +127,7 @@ export async function POST(
       const referenceImageUrls = approvedFaceUrl ? [approvedFaceUrl] : [];
       const submitted = await submitSirayImage({
         prompt: promptText,
-        aspectRatio: "3:4",
+        aspectRatio: "4:5",
         referenceImageUrls,
       });
 
@@ -143,7 +143,7 @@ export async function POST(
             provider: "siray",
             siray_model: submitted.model,
             siray_task_id: submitted.taskId,
-            aspect_ratio: "3:4",
+            aspect_ratio: "4:5",
             size: submitted.size,
             imageType,
             stage,

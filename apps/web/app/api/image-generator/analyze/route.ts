@@ -20,7 +20,7 @@ JSON fields:
 - Art style: photorealistic, cinematic, etc.
 Write 3–6 detailed sentences.
 
-"aspectRatio" — Exactly one of: "1:1", "3:4", "4:3", "9:16", "16:9". Choose based on the image composition (portrait subjects → "3:4" or "9:16"; landscape/wide shots → "4:3" or "16:9"; square → "1:1").
+"aspectRatio" — Exactly one of: "1:1", "4:5", "5:4", "9:16", "16:9". Choose based on the image composition (portrait subjects → "4:5" or "9:16"; landscape/wide shots → "5:4" or "16:9"; square → "1:1").
 
 Return ONLY the JSON object.`;
 
@@ -103,11 +103,11 @@ export async function POST(request: NextRequest) {
     } catch {
       console.log("[ImageAnalyze] Claude returned non-JSON:", textBlock.text.slice(0, 200));
       // Analysis refused or malformed — return empty prompt so user can describe manually
-      return NextResponse.json({ prompt: "", aspectRatio: "3:4", manualMode: true });
+      return NextResponse.json({ prompt: "", aspectRatio: "4:5", manualMode: true });
     }
 
-    const validRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
-    const aspectRatio = validRatios.includes(analysis.aspectRatio || "") ? analysis.aspectRatio! : "3:4";
+    const validRatios = ["1:1", "4:5", "5:4", "9:16", "16:9"];
+    const aspectRatio = validRatios.includes(analysis.aspectRatio || "") ? analysis.aspectRatio! : "4:5";
 
     return NextResponse.json({
       prompt: analysis.prompt || "",

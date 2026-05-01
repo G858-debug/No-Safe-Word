@@ -171,7 +171,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
 
     // 4. Aspect ratio — two-character scenes get landscape, single/none get portrait
     const aspectRatio =
-      prompt.character_id && prompt.secondary_character_id ? "4:3" : "3:4";
+      prompt.character_id && prompt.secondary_character_id ? "5:4" : "4:5";
 
     // Apply clothing_override: null = use auto clothingMap, "" = suppress, non-empty = replace
     let resolvedClothingMap = clothingMap;

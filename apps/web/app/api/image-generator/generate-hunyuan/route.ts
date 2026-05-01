@@ -8,13 +8,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { prompt, aspectRatio = "3:4" } = body;
+    const { prompt, aspectRatio = "4:5" } = body;
 
     if (!prompt?.trim()) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
     }
 
-    const validRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+    const validRatios = ["1:1", "4:5", "5:4", "9:16", "16:9"];
     if (!validRatios.includes(aspectRatio)) {
       return NextResponse.json({ error: `aspectRatio must be one of: ${validRatios.join(", ")}` }, { status: 400 });
     }

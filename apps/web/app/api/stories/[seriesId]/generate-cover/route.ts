@@ -475,7 +475,7 @@ async function generateHunyuanCover(args: {
     scenePrompt: effectivePrompt,
     characterBlock: protagonistBlock,
     secondaryCharacterBlock: loveInterestBlock,
-    aspectRatio: "2:3",
+    aspectRatio: "4:5",
   });
 
   console.log("[generate-cover:hunyuan] starting", {
@@ -491,7 +491,7 @@ async function generateHunyuanCover(args: {
       const generatedUrl = await generateSceneImage(
         assembledPrompt,
         referenceImageUrls,
-        "2:3"
+        "4:5"
       );
 
       const storagePath = `${slug}/variants/variant-${variantIndex}.jpeg`;
@@ -514,7 +514,7 @@ async function generateHunyuanCover(args: {
             purpose: "cover_variant",
             series_id: seriesId,
             variant_index: variantIndex,
-            aspect_ratio: "2:3",
+            aspect_ratio: "4:5",
             reference_image_count: referenceImageUrls.length,
           },
           mode: "sfw",
