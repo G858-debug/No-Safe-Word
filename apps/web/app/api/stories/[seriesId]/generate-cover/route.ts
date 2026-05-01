@@ -3,10 +3,7 @@ import { supabase } from "@no-safe-word/story-engine";
 import {
   generateFlux2Image,
   submitSirayImage,
-  assembleHunyuanPrompt,
   imageUrlToBase64,
-  resolvePortraitText,
-  type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
 import { logEvent } from "@/lib/server/events";
@@ -43,16 +40,8 @@ type CharWithBase = {
   character_id: string;
   role: string | null;
   characters:
-    | {
-        approved_image_id: string | null;
-        portrait_prompt_locked: string | null;
-        description: unknown;
-      }
-    | {
-        approved_image_id: string | null;
-        portrait_prompt_locked: string | null;
-        description: unknown;
-      }[]
+    | { approved_image_id: string | null }
+    | { approved_image_id: string | null }[]
     | null;
 };
 
@@ -61,20 +50,6 @@ function baseChar(c: CharWithBase) {
 }
 function approvedImageId(c: CharWithBase) {
   return baseChar(c)?.approved_image_id ?? null;
-}
-function portraitPromptLocked(c: CharWithBase): string | null {
-  return baseChar(c)?.portrait_prompt_locked ?? null;
-}
-function charDescription(c: CharWithBase): PortraitCharacterDescription {
-  const d = baseChar(c)?.description;
-  return (d && typeof d === "object" ? d : {}) as PortraitCharacterDescription;
-}
-
-// Resolve the character's text prompt for Hunyuan injection. Delegates to
-// the shared resolver in @no-safe-word/image-gen so cover and scene routes
-// derive their character text from the same source of truth.
-function resolveCharacterBlock(c: CharWithBase): string {
-  return resolvePortraitText(portraitPromptLocked(c), charDescription(c));
 }
 
 export async function POST(
@@ -194,7 +169,7 @@ export async function POST(
   const { data: seriesChars, error: charsErr } = await supabase
     .from("story_characters")
     .select(
-      "id, character_id, role, characters:character_id ( approved_image_id, portrait_prompt_locked, description )"
+      "id, character_id, role, characters:character_id ( approved_image_id )"
     )
     .eq("series_id", seriesId);
 
@@ -486,34 +461,30 @@ async function generateHunyuanCover(args: {
 }): Promise<NextResponse> {
   const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices } = args;
 
-  // Model-aware injection rule (Hunyuan / cover) on Siray: BOTH channels.
-  //   - Character text from `portrait_prompt_locked` is injected verbatim
-  //     (unlike scenes, covers keep the portrait composition language —
-  //     a cover IS a posed portrait, so framing/lighting from the locked
-  //     prompt aligns with the artifact we're producing).
-  //   - The approved portrait URLs are also passed as i2i reference images
-  //     to reinforce identity through pixels.
-  const protagonistBlock = resolveCharacterBlock(protagonist);
-  const loveInterestBlock = loveInterest ? resolveCharacterBlock(loveInterest) : undefined;
+  // Model-aware injection rule (Hunyuan / cover) on Siray:
+  //   - Identity flows ONLY through i2i reference images (Siray's
+  //     instruct-i2i variant has strong pixel-level identity
+  //     conditioning — once the protagonist's approved portrait is
+  //     passed as a reference image, the model produces that face
+  //     reliably without needing text identity prompts).
+  //   - The cover prompt textarea is sent VERBATIM to Siray. No
+  //     character blocks injected, no visual signature appended. What
+  //     the user sees in the dashboard is exactly what Siray gets,
+  //     which is critical for editing wardrobe/pose/composition for a
+  //     specific cover scene without competing against the original
+  //     portrait's clothing description.
+  void protagonist;
+  void loveInterest;
 
   const referenceImageUrls = await getPortraitUrlsForScene([
     protagonist.character_id,
     loveInterest?.character_id,
   ]);
 
-  // Pre-assemble the prompt once — it's identical across all variants.
-  const assembledPrompt = assembleHunyuanPrompt({
-    scenePrompt: effectivePrompt,
-    characterBlock: protagonistBlock,
-    secondaryCharacterBlock: loveInterestBlock,
-    aspectRatio: "4:5",
-  });
-
   console.log("[generate-cover:hunyuan] submitting", {
     seriesId,
     variants: variantIndices,
-    protagonistBlock: protagonistBlock.slice(0, 80),
-    hasLoveInterest: Boolean(loveInterestBlock),
+    promptLength: effectivePrompt.length,
     referenceImageCount: referenceImageUrls.length,
   });
 
@@ -532,7 +503,7 @@ async function generateHunyuanCover(args: {
   const settled = await Promise.allSettled(
     variantIndices.map(async (variantIndex) => {
       const submitted = await submitSirayImage({
-        prompt: assembledPrompt,
+        prompt: effectivePrompt,
         aspectRatio: "4:5",
         referenceImageUrls,
       });
@@ -540,7 +511,7 @@ async function generateHunyuanCover(args: {
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
-          prompt: assembledPrompt,
+          prompt: effectivePrompt,
           settings: {
             model: "hunyuan3",
             provider: "siray",

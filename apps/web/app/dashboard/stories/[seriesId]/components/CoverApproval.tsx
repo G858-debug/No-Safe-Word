@@ -644,6 +644,16 @@ export default function CoverApproval({ seriesId }: Props) {
               }}
               className="min-h-[160px] text-sm"
             />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              This text is sent <strong>verbatim</strong> to the image model.
+              No character descriptions, no visual signature, and no other text
+              is injected behind the scenes — what you see here is what the
+              model gets. The approved character portrait(s) are also attached
+              as reference image(s); identity (faces, bodies, skin, hair) flows
+              through those, so you don&rsquo;t need to describe physical
+              features in the prompt. Use the prompt to control wardrobe,
+              pose, setting, lighting, and composition.
+            </p>
             {promptDirty && (
               <p className="mt-1 text-xs text-muted-foreground">
                 Prompt edited — will be saved on next generation.
