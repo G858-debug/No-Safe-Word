@@ -155,14 +155,21 @@ export async function handleCoverVariantCompletion(args: {
     const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
     const variantUrl = publicUrlData.publicUrl;
 
+    // Cover variant storage paths are stable (`variant-{N}.png`), so each
+    // regeneration overwrites the previous file at the same URL. Append
+    // `?v={completionTimestamp}` so each completion writes a unique URL
+    // into cover_variants — the UI's <img> tag sees a brand-new URL it
+    // has never fetched, dodging any browser/CDN cache holding old bytes.
+    const cacheBustedUrl = `${variantUrl}?v=${Date.now()}`;
+
     // Mirror the URL onto the images row (provenance) AND onto
     // story_series.cover_variants (what the UI reads).
     await supabase
       .from("images")
-      .update({ stored_url: variantUrl, sfw_url: variantUrl })
+      .update({ stored_url: cacheBustedUrl, sfw_url: cacheBustedUrl })
       .eq("id", imageId);
 
-    await writeVariantUrl(seriesId, variantIndex, variantUrl);
+    await writeVariantUrl(seriesId, variantIndex, cacheBustedUrl);
 
     await supabase
       .from("generation_jobs")
@@ -382,12 +389,17 @@ async function handleReplicateFallback(args: {
     return NextResponse.json({ jobId, completed: false, error: msg });
   }
 
+  // Same cache-bust as the primary path: append a unique ?v= so the URL
+  // stored in cover_variants differs each completion, defeating any
+  // browser/CDN cache holding old bytes from a prior regeneration.
+  const cacheBustedUrl = `${variantUrl}?v=${Date.now()}`;
+
   await supabase
     .from("images")
-    .update({ stored_url: variantUrl, sfw_url: variantUrl })
+    .update({ stored_url: cacheBustedUrl, sfw_url: cacheBustedUrl })
     .eq("id", imageId);
 
-  await writeVariantUrl(seriesId, variantIndex, variantUrl);
+  await writeVariantUrl(seriesId, variantIndex, cacheBustedUrl);
 
   await supabase
     .from("generation_jobs")
@@ -397,12 +409,12 @@ async function handleReplicateFallback(args: {
   await maybeTransitionCoverStatus(seriesId);
 
   console.log(
-    `[status:cover][${jobId}] Replicate fallback done: variant ${variantIndex} → ${variantUrl}`
+    `[status:cover][${jobId}] Replicate fallback done: variant ${variantIndex} → ${cacheBustedUrl}`
   );
   return NextResponse.json({
     jobId,
     completed: true,
-    imageUrl: variantUrl,
+    imageUrl: cacheBustedUrl,
     variantIndex,
     scheduled: true,
     fallback: "replicate_flux2_pro",

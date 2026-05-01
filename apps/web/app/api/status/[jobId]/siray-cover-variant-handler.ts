@@ -118,12 +118,21 @@ export async function handleSirayCoverVariantStatus(args: {
 
   // Persist the URL on the images row (provenance) and on the series-level
   // cover_variants slot (what the UI reads).
+  //
+  // Cover variant storage paths are stable (`variant-{N}.jpeg`), so each
+  // regeneration overwrites the previous file at the same URL. To bust
+  // any browser/CDN cache that might still hold the old bytes, we append
+  // `?v={completionTimestamp}` to the URL written into cover_variants.
+  // Each completion writes a unique URL string into the DB, so the UI's
+  // <img> tag sees a brand-new URL it has never fetched.
+  const cacheBustedUrl = `${variantUrl}?v=${Date.now()}`;
+
   await supabase
     .from("images")
-    .update({ stored_url: variantUrl, sfw_url: variantUrl })
+    .update({ stored_url: cacheBustedUrl, sfw_url: cacheBustedUrl })
     .eq("id", imageId);
 
-  await writeVariantUrl(seriesId, variantIndex, variantUrl);
+  await writeVariantUrl(seriesId, variantIndex, cacheBustedUrl);
 
   await supabase
     .from("generation_jobs")

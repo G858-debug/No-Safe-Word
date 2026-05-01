@@ -341,13 +341,22 @@ export default function CoverApproval({ seriesId }: Props) {
         Array.from(new Set([...prev, ...newIds]))
       );
     }
+    // Refresh cover state FIRST — the server has already nulled the
+    // retried slots in cover_variants, so after fetchCover the slot
+    // will render as "Generating…" with no <img> tag. Only then bump
+    // variantTs. If we bumped before fetchCover, React would briefly
+    // render <img src="<oldUrl>?t=<newTs>"> in the window between
+    // setVariantTs and fetchCover resolving, the browser would fetch
+    // and cache the old image under that exact URL, and the eventual
+    // post-completion render with the same URL would serve the cached
+    // old image instead of the freshly-uploaded new one.
+    await fetchCover();
     const regeneratedIndices: number[] =
       body.retryVariants ?? Array.from({ length: VARIANT_COUNT }, (_, i) => i);
     const now = Date.now();
     setVariantTs((prev) =>
       prev.map((ts, i) => (regeneratedIndices.includes(i) ? now : ts))
     );
-    await fetchCover();
   }
 
   async function generate(body: { prompt?: string; retryVariants?: number[] }) {
@@ -990,7 +999,7 @@ function VariantSlot({
           className={`absolute inset-0 w-full h-full ${canSelect ? "cursor-pointer" : "cursor-default"}`}
         >
           <img
-            src={`${url}?t=${ts}`}
+            src={`${url}${url.includes("?") ? "&" : "?"}t=${ts}`}
             alt={`Variant ${index + 1}`}
             className="h-full w-full object-cover"
           />
