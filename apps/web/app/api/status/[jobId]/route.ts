@@ -69,7 +69,7 @@ export async function GET(
     // the `siray-` prefix on job_id (mirrors the `runpod-` convention).
     if (jobId.startsWith("siray-")) {
       const sirayJobType =
-        jobRow?.job_type === "scene" ? "scene" : "portrait";
+        jobRow?.job_type === "scene_image" ? "scene" : "portrait";
       return await handleSirayJobStatus({
         jobId,
         imageId,

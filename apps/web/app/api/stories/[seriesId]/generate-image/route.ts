@@ -248,7 +248,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       image_id: imageId,
       status: "pending",
       cost: 0,
-      job_type: "scene",
+      job_type: "scene_image",
     });
 
     if (jobErr) {

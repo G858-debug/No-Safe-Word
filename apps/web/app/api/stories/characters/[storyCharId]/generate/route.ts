@@ -144,7 +144,7 @@ export async function POST(
         image_id: imageRow.id,
         status: "pending",
         cost: 0,
-        job_type: "portrait",
+        job_type: "character_portrait",
       });
 
       if (jobErr) {
