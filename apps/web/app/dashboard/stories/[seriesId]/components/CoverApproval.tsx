@@ -483,8 +483,8 @@ export default function CoverApproval({ seriesId }: Props) {
                 }
               >
                 {regeneratingPrompt
-                  ? "Regenerating with Claude..."
-                  : "Regenerate prompt with Claude"}
+                  ? "Regenerating with Mistral..."
+                  : "Regenerate prompt with Mistral"}
               </Button>
             </div>
             <Textarea
