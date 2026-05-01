@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
   buildCharacterPortraitPrompt,
+  deriveBodyPromptFromFace,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 
@@ -24,7 +25,7 @@ export async function GET(
 
   const { data: character } = await supabase
     .from("characters")
-    .select("description")
+    .select("description, portrait_prompt_locked")
     .eq("id", storyChar.character_id)
     .single();
 
@@ -32,10 +33,17 @@ export async function GET(
     return NextResponse.json({ error: "Character not found" }, { status: 404 });
   }
 
-  const prompt = buildCharacterPortraitPrompt(
-    character.description as PortraitCharacterDescription,
-    stage
-  );
+  // Body stage: if the face has been approved, derive the body prompt from
+  // the locked face prompt so any descriptive edits the user made for the
+  // face carry through. Falls back to the structured-description build when
+  // no face has been approved yet (or in the face stage).
+  const prompt =
+    stage === "body" && character.portrait_prompt_locked
+      ? deriveBodyPromptFromFace(character.portrait_prompt_locked)
+      : buildCharacterPortraitPrompt(
+          character.description as PortraitCharacterDescription,
+          stage
+        );
 
   return NextResponse.json({ prompt });
 }

@@ -75,6 +75,7 @@ export {
   buildCharacterPortraitPrompt,
   buildSceneCharacterBlock,
   buildSceneCharacterBlockFromLocked,
+  deriveBodyPromptFromFace,
   resolvePortraitText,
   stripPortraitFraming,
 } from './portrait-prompt-builder';

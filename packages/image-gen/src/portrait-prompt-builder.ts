@@ -170,6 +170,23 @@ export function stripPortraitFraming(text: string): string {
 }
 
 /**
+ * Derive a full-body portrait prompt from an approved face prompt.
+ *
+ * Strips the face's framing/composition/signature, then re-appends the
+ * full-body framing + signature. Preserves any descriptive edits the user
+ * made to the face prompt (skin, hair, distinguishing features, expression),
+ * so the body inherits the same identity prose rather than rebuilding from
+ * the structured `description` JSONB.
+ *
+ * Caller should fall back to `buildCharacterPortraitPrompt(desc, "body")`
+ * when there is no locked face prompt.
+ */
+export function deriveBodyPromptFromFace(lockedFacePrompt: string): string {
+  const identity = stripPortraitFraming(lockedFacePrompt);
+  return [identity, FULLBODY_COMPOSITION, VISUAL_SIGNATURE].join(" ");
+}
+
+/**
  * Build a SCENE character block from the locked portrait prompt.
  *
  * Strips portrait composition/lighting/signature, then prepends the character's
