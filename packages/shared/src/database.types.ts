@@ -983,6 +983,7 @@ export type Database = {
       }
       story_series: {
         Row: {
+          author_notes: Json | null
           blurb_long_selected: number | null
           blurb_long_variants: Json | null
           blurb_short_selected: number | null
@@ -1008,6 +1009,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
           blurb_short_selected?: number | null
@@ -1033,6 +1035,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
           blurb_short_selected?: number | null

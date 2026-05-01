@@ -2,10 +2,12 @@ import { supabase } from "./supabase";
 import type { Json } from "@no-safe-word/shared";
 import {
   slugify,
+  AUTHOR_NOTES_KEYS,
   type StoryImportPayload,
   type ImportResult,
   type CharacterImport,
   type ImageModel,
+  type AuthorNotes,
 } from "@no-safe-word/shared";
 import { cleanScenePrompt } from "@no-safe-word/image-gen";
 import { detectSecondaryCharacters } from "./detect-secondary-character";
@@ -100,6 +102,52 @@ export async function importStory(
       ? String(marketing.cover_prompt).trim() || null
       : null;
 
+  // Defense-in-depth re-validation of author_notes (mirrors validator).
+  // Non-webhook callers of importStory() bypass validateImportPayload; this
+  // ensures malformed blocks fail loudly here rather than landing partially
+  // populated in the JSONB column.
+  let authorNotes: AuthorNotes | null = null;
+  if (marketing?.author_notes !== undefined && marketing.author_notes !== null) {
+    const raw = marketing.author_notes as unknown;
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error("marketing.author_notes must be an object when provided");
+    }
+    const notes = raw as Record<string, unknown>;
+
+    for (const key of AUTHOR_NOTES_KEYS) {
+      const value = notes[key];
+      if (value === undefined) {
+        throw new Error(
+          `marketing.author_notes.${key} is required and must be a non-empty string`
+        );
+      }
+      if (typeof value !== "string") {
+        throw new Error(`marketing.author_notes.${key} must be a string`);
+      }
+      if (value.trim().length === 0) {
+        throw new Error(
+          `marketing.author_notes.${key} must not be empty or whitespace-only`
+        );
+      }
+    }
+
+    const allowed = new Set<string>(AUTHOR_NOTES_KEYS);
+    for (const key of Object.keys(notes)) {
+      if (!allowed.has(key)) {
+        throw new Error(
+          `marketing.author_notes contains unknown key: '${key}'`
+        );
+      }
+    }
+
+    authorNotes = {
+      website_long: notes.website_long as string,
+      email_version: notes.email_version as string,
+      linkedin_post: notes.linkedin_post as string,
+      social_caption: notes.social_caption as string,
+    };
+  }
+
   // 3. Create the story series
   const { data: series, error: seriesError } = await supabase
     .from("story_series")
@@ -115,6 +163,7 @@ export async function importStory(
       blurb_short_variants: (blurbShortVariants ?? null) as Json | null,
       blurb_long_variants: (blurbLongVariants ?? null) as Json | null,
       cover_prompt: coverPrompt,
+      author_notes: (authorNotes ?? null) as Json | null,
     })
     .select("id")
     .single();

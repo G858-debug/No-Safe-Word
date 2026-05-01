@@ -113,13 +113,51 @@ export interface MarketingImport {
   blurb_long_variants?: string[];
   /** Cover image prompt (Five Layers Framework, two-character intimate composition, suggestive-not-explicit). Generated via Flux 2 Dev regardless of story image_model. */
   cover_prompt?: string;
+  /**
+   * Optional editorial reflection block from the "Nontsikelelo Mabaso" author persona.
+   * Absent when the story is entertainment-only and did not earn notes.
+   * When present, all four sub-fields are required and non-empty.
+   */
+  author_notes?: AuthorNotes;
 }
+
+/**
+ * Editorial reflection block produced at Stage 7 alongside the story JSON.
+ * Persisted on `story_series.author_notes` as JSONB. Rendered on the Publish
+ * review screen and (future) on the public website story page.
+ */
+export interface AuthorNotes {
+  /** 400–700 word reflection, paywalled on the website story page. */
+  website_long: string;
+  /** 200–350 word email body. */
+  email_version: string;
+  /** 150–250 word LinkedIn post under the Nontsikelelo persona. */
+  linkedin_post: string;
+  /** 60–120 word Facebook/Instagram caption. */
+  social_caption: string;
+}
+
+/** Allowed keys inside `author_notes`. Used by validators to reject unknown keys. */
+export const AUTHOR_NOTES_KEYS: ReadonlyArray<keyof AuthorNotes> = [
+  "website_long",
+  "email_version",
+  "linkedin_post",
+  "social_caption",
+];
 
 // ============================================================
 // DATABASE ROW TYPES (what Supabase stores)
 // ============================================================
 
-/** Active image generation model for a story. Set at import time. */
+/**
+ * Active image generation model for a story. Set at import time.
+ *
+ * - `flux2_dev`: Flux 2 Dev via ComfyUI/RunPod (PuLID reference images).
+ * - `hunyuan3`: HunyuanImage 3.0 via Siray.ai (text + i2i reference images).
+ *
+ * The string values are persisted to the database — do not rename them
+ * even if the underlying provider changes.
+ */
 export type ImageModel = 'flux2_dev' | 'hunyuan3';
 
 /**
@@ -184,6 +222,13 @@ export interface StorySeriesRow {
   blurb_long_variants: string[] | null;
   /** Index 0–2 of selected long blurb. */
   blurb_long_selected: number | null;
+
+  // --- Author's notes (migration 20260428100000) ---
+  /**
+   * Optional editorial reflection block. NULL when the story did not earn notes.
+   * When present, contains exactly four non-empty strings (validated at import).
+   */
+  author_notes: AuthorNotes | null;
 
   created_at: string;
   updated_at: string;
@@ -433,6 +478,33 @@ export function validateImportPayload(
 
       if (m.cover_prompt !== undefined && (typeof m.cover_prompt !== "string" || m.cover_prompt.length === 0)) {
         errors.push("marketing.cover_prompt must be a non-empty string when provided");
+      }
+
+      // author_notes — optional, but strict when present.
+      if (m.author_notes !== undefined && m.author_notes !== null) {
+        if (typeof m.author_notes !== "object" || Array.isArray(m.author_notes)) {
+          errors.push("marketing.author_notes must be an object when provided");
+        } else {
+          const notes = m.author_notes as Record<string, unknown>;
+
+          for (const key of AUTHOR_NOTES_KEYS) {
+            const value = notes[key];
+            if (value === undefined) {
+              errors.push(`marketing.author_notes.${key} is required and must be a non-empty string`);
+            } else if (typeof value !== "string") {
+              errors.push(`marketing.author_notes.${key} must be a string`);
+            } else if (value.trim().length === 0) {
+              errors.push(`marketing.author_notes.${key} must not be empty or whitespace-only`);
+            }
+          }
+
+          const allowed = new Set<string>(AUTHOR_NOTES_KEYS);
+          for (const key of Object.keys(notes)) {
+            if (!allowed.has(key)) {
+              errors.push(`marketing.author_notes contains unknown key: '${key}'`);
+            }
+          }
+        }
       }
     }
   }

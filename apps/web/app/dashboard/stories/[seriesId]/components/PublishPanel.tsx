@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import type { CoverStatus } from "@no-safe-word/shared";
+import type { AuthorNotes, CoverStatus } from "@no-safe-word/shared";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,6 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import {
   Send,
   Copy,
@@ -71,6 +77,8 @@ interface PublishPanelProps {
   posts: PostData[];
   imageUrls: Record<string, string>;
   coverStatus: CoverStatus;
+  /** Optional editorial reflection block. When non-null, renders the Author's Notes review panel. */
+  authorNotes: AuthorNotes | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +122,7 @@ export default function PublishPanel({
   posts: initialPosts,
   imageUrls,
   coverStatus,
+  authorNotes,
 }: PublishPanelProps) {
   const coverApproved =
     coverStatus === "approved" ||
@@ -999,6 +1008,9 @@ export default function PublishPanel({
         </CardContent>
       </Card>
 
+      {/* =================== AUTHOR'S NOTES (optional) =================== */}
+      {authorNotes && <AuthorNotesPanel notes={authorNotes} />}
+
       {/* =================== PER-POST SECTIONS =================== */}
       {posts.map((post) => {
         const isExpanded = expandedPosts.has(post.id);
@@ -1203,5 +1215,60 @@ function MobilePreviewTabs({
 
       {tab === "facebook" ? renderFacebook() : renderWebsite()}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AuthorNotesPanel — read-only preview of the editorial reflection block
+// ---------------------------------------------------------------------------
+
+const AUTHOR_NOTES_SECTIONS: ReadonlyArray<{
+  key: keyof AuthorNotes;
+  label: string;
+}> = [
+  { key: "website_long", label: "Website Long" },
+  { key: "email_version", label: "Email" },
+  { key: "linkedin_post", label: "LinkedIn" },
+  { key: "social_caption", label: "Social" },
+];
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function AuthorNotesPanel({ notes }: { notes: AuthorNotes }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Author&apos;s Notes</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Editorial reflection by the Nontsikelelo persona — read-only preview.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue={AUTHOR_NOTES_SECTIONS[0].key} className="w-full">
+          <TabsList className="grid w-full grid-cols-4">
+            {AUTHOR_NOTES_SECTIONS.map(({ key, label }) => (
+              <TabsTrigger key={key} value={key} className="gap-2">
+                <span>{label}</span>
+                <Badge variant="outline" className="text-xs font-normal">
+                  {countWords(notes[key])}
+                </Badge>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {AUTHOR_NOTES_SECTIONS.map(({ key, label }) => (
+            <TabsContent key={key} value={key} className="mt-4">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                {notes[key]}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {label} · {countWords(notes[key])} words
+              </p>
+            </TabsContent>
+          ))}
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }
