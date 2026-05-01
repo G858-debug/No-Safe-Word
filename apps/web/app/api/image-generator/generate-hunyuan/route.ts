@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateHunyuanImage } from "@no-safe-word/image-gen";
+import { generateSceneImage } from "@no-safe-word/image-gen";
 
 export async function POST(request: NextRequest) {
-  if (!process.env.REPLICATE_API_TOKEN) {
-    return NextResponse.json({ error: "REPLICATE_API_TOKEN not configured" }, { status: 500 });
+  if (!process.env.SIRAY_API_KEY) {
+    return NextResponse.json({ error: "SIRAY_API_KEY not configured" }, { status: 500 });
   }
 
   try {
@@ -21,14 +21,14 @@ export async function POST(request: NextRequest) {
 
     console.log("[HunyuanStudio] Generating:", { aspectRatio, promptLength: prompt.length });
 
-    const result = await generateHunyuanImage({
-      scenePrompt: prompt.trim(),
-      aspectRatio,
-    });
+    const trimmedPrompt = prompt.trim();
+    // Studio quick-gen has no character context — empty refs falls back
+    // to t2i (the helper logs a warning, which is acceptable here).
+    const imageUrl = await generateSceneImage(trimmedPrompt, [], aspectRatio);
 
-    console.log("[HunyuanStudio] Generated:", result.imageUrl.slice(0, 80));
+    console.log("[HunyuanStudio] Generated:", imageUrl.slice(0, 80));
 
-    return NextResponse.json({ imageUrl: result.imageUrl, prompt: result.prompt });
+    return NextResponse.json({ imageUrl, prompt: trimmedPrompt });
   } catch (err) {
     console.error("[HunyuanStudio] Generation failed:", err);
     return NextResponse.json(

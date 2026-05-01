@@ -41,11 +41,42 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const desc = (character.description as Record<string, string>) || {};
   const name = character.name ?? "(unnamed)";
 
+  const portraitApproved = character.approved;
+  const fullbodyApproved = character.approved_fullbody;
+  const fullyApproved = portraitApproved && fullbodyApproved;
+
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  // Pre-load the default generation prompt for the current stage on mount
+  // and whenever the stage transitions (face → body after face approval).
+  // The textarea then becomes the single edit surface — no separate
+  // override block, no "Load default prompt" button to click first.
+  useEffect(() => {
+    if (fullyApproved) return; // form is hidden, no need to fetch
+    let cancelled = false;
+    setIsLoadingPrompt(true);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/stories/characters/${character.id}/default-prompt?stage=${stage}`
+        );
+        if (cancelled) return;
+        const data = (await res.json()) as { prompt?: string };
+        if (data.prompt && !cancelled) setCustomPrompt(data.prompt);
+      } catch {
+        // silent — user can still type manually
+      } finally {
+        if (!cancelled) setIsLoadingPrompt(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [character.id, stage, fullyApproved]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -81,23 +112,6 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     [stopPolling]
   );
 
-  const handleLoadPrompt = useCallback(async () => {
-    if (pendingPrompt) {
-      setCustomPrompt(pendingPrompt);
-      return;
-    }
-    setIsLoadingPrompt(true);
-    try {
-      const res = await fetch(`/api/stories/characters/${character.id}/default-prompt?stage=${stage}`);
-      const data = (await res.json()) as { prompt?: string; error?: string };
-      if (data.prompt) setCustomPrompt(data.prompt);
-    } catch {
-      // silently ignore — user can still type manually
-    } finally {
-      setIsLoadingPrompt(false);
-    }
-  }, [character.id, pendingPrompt]);
-
   const handleGenerate = useCallback(async () => {
     setError(null);
     setIsGenerating(true);
@@ -132,7 +146,13 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         throw new Error(data.error || "Generation failed");
       }
 
-      if (data.promptUsed) setPendingPrompt(data.promptUsed);
+      if (data.promptUsed) {
+        setPendingPrompt(data.promptUsed);
+        // Reflect the prompt that was actually sent in the textarea so the
+        // user can see/iterate on it (matters when they cleared the field
+        // and the server fell back to the default).
+        setCustomPrompt(data.promptUsed);
+      }
 
       if (data.imageUrl) {
         // Synchronous (hunyuan3)
@@ -173,12 +193,13 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Approval failed");
 
-      // Clear in-flight state and advance the stage.
+      // Clear in-flight state and advance the stage. customPrompt is
+      // re-populated by the default-prompt effect when stage flips —
+      // no need to blank it manually here.
       setPendingImageId(null);
       setPendingImageUrl(null);
       setPendingJobId(null);
       setPendingPrompt(null);
-      setCustomPrompt("");
       if (stage === "face") setStage("body");
       onUpdate();
     } catch (err) {
@@ -215,10 +236,6 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     },
     [character.id, onUpdate]
   );
-
-  const portraitApproved = character.approved;
-  const fullbodyApproved = character.approved_fullbody;
-  const fullyApproved = portraitApproved && fullbodyApproved;
 
   return (
     <Card>
@@ -284,27 +301,21 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             </p>
             <Textarea
               placeholder={
-                stage === "face"
-                  ? "Optional custom prompt (overrides default)"
-                  : "Optional custom prompt for full-body"
+                isLoadingPrompt
+                  ? "Loading default prompt…"
+                  : "Generation prompt — edit freely. Clear to fall back to the auto-built default."
               }
               value={customPrompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
-              className="text-sm"
-              rows={3}
-            />
-            <button
-              type="button"
-              onClick={handleLoadPrompt}
               disabled={isLoadingPrompt}
-              className="text-xs text-muted-foreground underline hover:text-foreground disabled:opacity-50"
-            >
-              {isLoadingPrompt
-                ? "Loading…"
-                : pendingPrompt
-                ? "Edit last prompt"
-                : "Load default prompt"}
-            </button>
+              className="text-sm font-mono"
+              rows={6}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Loaded from the structured character description. Edits are sent
+              to the model on Generate and persisted to the character row on
+              Approve.
+            </p>
             <div className="flex gap-2">
               <Button
                 onClick={handleGenerate}

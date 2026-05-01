@@ -26,7 +26,7 @@ export default function ImageGeneratorPage() {
             <h1 className="text-3xl font-bold tracking-tight">Image Lab</h1>
           </div>
           <p className="text-muted-foreground mt-1">
-            Write a prompt and generate directly with HunyuanImage 3.0 on Replicate
+            Write a prompt and generate directly with HunyuanImage 3.0 on Siray.ai
           </p>
         </header>
         <ImageLab />

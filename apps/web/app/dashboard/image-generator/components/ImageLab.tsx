@@ -157,7 +157,7 @@ export function ImageLab() {
               <Badge variant="secondary" className="font-mono text-xs">
                 {current.aspectRatio}
               </Badge>
-              <span className="text-xs text-muted-foreground">tencent/hunyuan-image-3</span>
+              <span className="text-xs text-muted-foreground">hunyuan-3-instruct (Siray.ai)</span>
             </div>
             <img
               src={current.url}

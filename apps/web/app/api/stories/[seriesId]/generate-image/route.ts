@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  generateHunyuanImage,
+  generateSceneImage,
+  assembleHunyuanPrompt,
   generateFlux2Image,
   imageUrlToBase64,
   buildSceneCharacterBlock,
@@ -10,6 +11,7 @@ import {
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
+import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
 
 /**
  * POST /api/stories/[seriesId]/generate-image
@@ -18,7 +20,7 @@ import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image"
  * story_series.image_model and dispatches to the correct backend:
  *
  *   - flux2_dev  → Flux 2 Dev via RunPod/ComfyUI (Phase 4)
- *   - hunyuan3   → HunyuanImage 3.0 via Replicate (Phase 3, implemented below)
+ *   - hunyuan3   → HunyuanImage 3.0 via Siray.ai (text + reference-image i2i)
  *
  * Body: { promptId: string }
  */
@@ -29,8 +31,6 @@ export async function POST(
   const { seriesId } = await props.params;
 
   let promptId: string;
-  let suppressAssembly = false;
-  let assembledPrompt: string | undefined;
   try {
     const body = await request.json();
     if (typeof body?.promptId !== "string" || !body.promptId) {
@@ -40,14 +40,6 @@ export async function POST(
       );
     }
     promptId = body.promptId;
-    suppressAssembly = body?.suppressAssembly === true;
-    // assembledPrompt: the fully assembled prompt produced by Mistral (may be
-    // in Chinese). When present, used as scenePrompt directly instead of the
-    // English version stored in story_image_prompts.prompt.
-    assembledPrompt =
-      typeof body?.assembledPrompt === "string" && body.assembledPrompt.trim()
-        ? body.assembledPrompt.trim()
-        : undefined;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -71,7 +63,7 @@ export async function POST(
       return await runFlux2Generation(seriesId, promptId);
 
     case "hunyuan3":
-      return await runHunyuanGeneration(seriesId, promptId, suppressAssembly, assembledPrompt);
+      return await runHunyuanGeneration(seriesId, promptId);
 
     default:
       return NextResponse.json(
@@ -81,7 +73,7 @@ export async function POST(
   }
 }
 
-async function runHunyuanGeneration(seriesId: string, promptId: string, suppressAssembly = false, assembledPrompt?: string) {
+async function runHunyuanGeneration(seriesId: string, promptId: string) {
   // 1. Fetch the prompt row + linked character IDs
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
@@ -190,42 +182,34 @@ async function runHunyuanGeneration(seriesId: string, promptId: string, suppress
         : {};
     }
 
-    // 5. Generate.
+    // 5. Assemble the final prompt + resolve reference image URLs, then
+    //    dispatch to Siray.
     //
-    // Two paths based on whether the Mistral rewriter assembled the prompt:
-    //
-    // suppressAssembly = true (rewriter ON): Mistral produced the complete
-    // prompt — character blocks and scene are handled. The assembler still
-    // enforces the SFW constraint as a hard safety net (Mistral Small is not
-    // reliable enough at content safety to be the sole guardian). For NSFW
-    // images the SFW block doesn't fire anyway (assembleHunyuanPrompt checks
-    // imageType), so passing the override through has no effect on NSFW.
-    //
-    // suppressAssembly = false (rewriter OFF): Normal assembly — character
-    // blocks, clothing, and SFW constraint are injected by the assembler.
-    // HunyuanImage 3.0 has no reference-image conditioning, so identity must
-    // be carried by prompt text. Flux is the opposite — see runFlux2Generation.
-    const result = await generateHunyuanImage(
-      suppressAssembly
-        ? {
-            // Use the assembled prompt from the rewriter (may be Chinese)
-            // if provided; fall back to the stored English scene prompt.
-            scenePrompt: assembledPrompt ?? prompt.prompt,
-            aspectRatio,
-            imageType: prompt.image_type,
-            sfwConstraint: prompt.sfw_constraint_override ?? undefined,
-            visualSignature: prompt.visual_signature_override ?? undefined,
-          }
-        : {
-            scenePrompt: prompt.prompt,
-            characterBlock: primaryBlock,
-            secondaryCharacterBlock: secondaryBlock,
-            aspectRatio,
-            imageType: prompt.image_type,
-            clothingMap: Object.keys(resolvedClothingMap).length ? resolvedClothingMap : undefined,
-            sfwConstraint: prompt.sfw_constraint_override ?? undefined,
-            visualSignature: prompt.visual_signature_override ?? undefined,
-          }
+    // Identity reinforcement runs through TWO channels:
+    //   - text: portrait_prompt_locked is injected into the assembled
+    //     prompt via primaryBlock/secondaryBlock.
+    //   - image: approved portrait URLs are passed as i2i reference images.
+    // Flux 2 Dev uses image-only (no character text). See runFlux2Generation.
+    const assembledFinalPrompt = assembleHunyuanPrompt({
+      scenePrompt: prompt.prompt,
+      characterBlock: primaryBlock,
+      secondaryCharacterBlock: secondaryBlock,
+      aspectRatio,
+      imageType: prompt.image_type,
+      clothingMap: Object.keys(resolvedClothingMap).length ? resolvedClothingMap : undefined,
+      sfwConstraint: prompt.sfw_constraint_override ?? undefined,
+      visualSignature: prompt.visual_signature_override ?? undefined,
+    });
+
+    const referenceImageUrls = await getPortraitUrlsForScene([
+      prompt.character_id,
+      prompt.secondary_character_id,
+    ]);
+
+    const generatedUrl = await generateSceneImage(
+      assembledFinalPrompt,
+      referenceImageUrls,
+      aspectRatio
     );
 
     // 6. Create the images row first so we have a DB-generated UUID, then
@@ -233,12 +217,13 @@ async function runHunyuanGeneration(seriesId: string, promptId: string, suppress
     const { data: imageRow, error: imageErr } = await supabase
       .from("images")
       .insert({
-        prompt: result.prompt,
+        prompt: assembledFinalPrompt,
         settings: {
           model: "hunyuan3",
-          provider: "replicate",
-          replicate_model: result.model,
+          provider: "siray",
+          siray_model: "hunyuan3-instruct",
           aspect_ratio: aspectRatio,
+          reference_image_count: referenceImageUrls.length,
         },
         mode: deriveMode(prompt.image_type),
       })
@@ -254,7 +239,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string, suppress
     const imageId = imageRow.id;
     const storagePath = `stories/${imageId}.jpeg`;
     const storedUrl = await uploadRemoteImageToStorage(
-      result.imageUrl,
+      generatedUrl,
       storagePath
     );
 

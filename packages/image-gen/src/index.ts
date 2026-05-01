@@ -100,9 +100,19 @@ export type {
   Flux2ProGenerateResult,
 } from './flux2-pro-generator';
 
-// HunyuanImage 3.0 scene prompt rewriter (Mistral Small)
-export { rewritePromptForHunyuan } from './prompt-rewriter';
-export type { ImageTypeHint, CharacterContext, RewriteResult } from './prompt-rewriter';
+// Siray.ai client + generator (HunyuanImage 3.0 — replaces Replicate path)
+export { getSirayClient } from './siray-client';
+export type {
+  SirayJobPayload,
+  SirayPollResponse,
+  SirayModelId,
+} from './siray-client';
+export {
+  generateSirayImage,
+  generateCharacterPortrait,
+  generateSceneImage,
+} from './siray-generator';
+export type { GenerateSirayImageParams } from './siray-generator';
 
 // Generated image critic (Pixtral 12B)
 export { critiqueGeneratedImage } from './image-critic';

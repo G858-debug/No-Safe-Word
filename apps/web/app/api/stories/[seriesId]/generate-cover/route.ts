@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
   generateFlux2Image,
-  generateHunyuanImage,
+  generateSceneImage,
+  assembleHunyuanPrompt,
   imageUrlToBase64,
   resolvePortraitText,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
+import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
 import { logEvent } from "@/lib/server/events";
 
 export const runtime = "nodejs";
@@ -18,7 +20,8 @@ export const runtime = "nodejs";
 // Generates 4 cover variants. Model selection mirrors the story's
 // image_model setting:
 //   flux2_dev  → 4 async RunPod jobs (ComfyUI + PuLID reference images)
-//   hunyuan3   → 4 synchronous Replicate calls (portrait_prompt_locked injection)
+//   hunyuan3   → 4 synchronous Siray calls (portrait_prompt_locked text +
+//                approved portrait URLs as i2i reference images)
 //
 // Partial retry: body.retryVariants: number[] regenerates only those slots.
 // ============================================================
@@ -439,7 +442,7 @@ export async function POST(
   );
 }
 
-// ── Hunyuan cover generation (synchronous Replicate) ────────────
+// ── Hunyuan cover generation (synchronous Siray) ────────────────
 
 async function generateHunyuanCover(args: {
   seriesId: string;
@@ -452,35 +455,48 @@ async function generateHunyuanCover(args: {
 }): Promise<NextResponse> {
   const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices, existingVariants } = args;
 
-  // Model-aware injection rule (Hunyuan / cover): character text REQUIRED,
-  // injected verbatim from `portrait_prompt_locked`. HunyuanImage 3.0 has
-  // no reference-image conditioning, so identity is text-only. Unlike the
-  // Hunyuan scene path (which strips portrait framing), covers keep the
-  // portrait composition language intact — a cover IS a posed portrait,
-  // so framing/lighting from the locked prompt aligns with the artifact
-  // we're producing rather than fighting it.
+  // Model-aware injection rule (Hunyuan / cover) on Siray: BOTH channels.
+  //   - Character text from `portrait_prompt_locked` is injected verbatim
+  //     (unlike scenes, covers keep the portrait composition language —
+  //     a cover IS a posed portrait, so framing/lighting from the locked
+  //     prompt aligns with the artifact we're producing).
+  //   - The approved portrait URLs are also passed as i2i reference images
+  //     to reinforce identity through pixels.
   const protagonistBlock = resolveCharacterBlock(protagonist);
   const loveInterestBlock = loveInterest ? resolveCharacterBlock(loveInterest) : undefined;
+
+  const referenceImageUrls = await getPortraitUrlsForScene([
+    protagonist.character_id,
+    loveInterest?.character_id,
+  ]);
+
+  // Pre-assemble the prompt once — it's identical across all variants.
+  const assembledPrompt = assembleHunyuanPrompt({
+    scenePrompt: effectivePrompt,
+    characterBlock: protagonistBlock,
+    secondaryCharacterBlock: loveInterestBlock,
+    aspectRatio: "2:3",
+  });
 
   console.log("[generate-cover:hunyuan] starting", {
     seriesId,
     variants: variantIndices,
     protagonistBlock: protagonistBlock.slice(0, 80),
     hasLoveInterest: Boolean(loveInterestBlock),
+    referenceImageCount: referenceImageUrls.length,
   });
 
   const results = await Promise.allSettled(
     variantIndices.map(async (variantIndex) => {
-      const result = await generateHunyuanImage({
-        scenePrompt: effectivePrompt,
-        characterBlock: protagonistBlock,
-        secondaryCharacterBlock: loveInterestBlock,
-        aspectRatio: "2:3",
-      });
+      const generatedUrl = await generateSceneImage(
+        assembledPrompt,
+        referenceImageUrls,
+        "2:3"
+      );
 
       const storagePath = `${slug}/variants/variant-${variantIndex}.jpeg`;
       const variantUrl = await uploadRemoteImageToStorage(
-        result.imageUrl,
+        generatedUrl,
         storagePath,
         COVER_BUCKET,
         { cacheControl: "public, max-age=60" }
@@ -490,15 +506,16 @@ async function generateHunyuanCover(args: {
       const { data: imageRow } = await supabase
         .from("images")
         .insert({
-          prompt: result.prompt,
+          prompt: assembledPrompt,
           settings: {
             model: "hunyuan3",
-            provider: "replicate",
-            replicate_model: result.model,
+            provider: "siray",
+            siray_model: "hunyuan3-instruct",
             purpose: "cover_variant",
             series_id: seriesId,
             variant_index: variantIndex,
             aspect_ratio: "2:3",
+            reference_image_count: referenceImageUrls.length,
           },
           mode: "sfw",
         })

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  generateHunyuanImage,
+  generateCharacterPortrait,
   generateFlux2Image,
   buildCharacterPortraitPrompt,
   type PortraitCharacterDescription,
@@ -74,7 +74,8 @@ export async function POST(
     // flux2_dev → currently still uses the Juggernaut Ragnarok path on
     // RunPod. Phase 4 swaps this for Flux 2 Dev once the new endpoint +
     // Docker image are provisioned.
-    // hunyuan3 → synchronous Replicate call, handled below.
+    // hunyuan3 → synchronous Siray call, handled below. No reference
+    // images yet — this IS the portrait being created.
 
     // 2. Fetch the character's structured description
     const { data: character, error: charError } = await supabase
@@ -96,27 +97,23 @@ export async function POST(
 
     console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} [model=${imageModel}]`);
 
-    // ── hunyuan3 portrait path (synchronous Replicate) ──
+    // ── hunyuan3 portrait path (synchronous Siray, t2i — no references) ──
     if (imageModel === "hunyuan3") {
       const promptText =
         customPrompt ??
         buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, stage);
 
-      const result = await generateHunyuanImage({
-        scenePrompt: "",
-        characterBlock: promptText,
-        aspectRatio: "3:4",
-      });
+      const generatedUrl = await generateCharacterPortrait(promptText);
 
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
           character_id: character.id,
-          prompt: result.prompt,
+          prompt: promptText,
           settings: {
             model: "hunyuan3",
-            provider: "replicate",
-            replicate_model: result.model,
+            provider: "siray",
+            siray_model: "hunyuan3-instruct",
             aspect_ratio: "3:4",
             imageType,
             stage,
@@ -133,7 +130,7 @@ export async function POST(
       const imageId = imageRow.id;
       const storagePath = `characters/${imageId}.jpeg`;
       const storedUrl = await uploadRemoteImageToStorage(
-        result.imageUrl,
+        generatedUrl,
         storagePath
       );
 
@@ -143,11 +140,11 @@ export async function POST(
         .eq("id", imageId);
 
       return NextResponse.json({
-        jobId: `replicate-${imageId}`,
+        jobId: `siray-${imageId}`,
         imageId,
         imageUrl: storedUrl,
         model: "hunyuan3",
-        promptUsed: result.prompt,
+        promptUsed: promptText,
       });
     }
 

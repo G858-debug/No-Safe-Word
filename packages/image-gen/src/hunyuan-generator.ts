@@ -1,6 +1,20 @@
 import { getReplicateClient } from "./replicate-client";
 import { VISUAL_SIGNATURE } from "./prompt-constants";
 
+/**
+ * HunyuanImage 3.0 generator — historical Replicate path.
+ *
+ * Status (post-Siray migration):
+ *   - `generateHunyuanImage` — DEPRECATED. All four API routes now call
+ *     `generateSceneImage` / `generateCharacterPortrait` from
+ *     `siray-generator.ts`. Safe to delete after Siray is stable in prod.
+ *   - `assembleHunyuanPrompt` — STILL LIVE. The new Siray routes call
+ *     this to build the final prompt before passing it to Siray. Do not
+ *     remove without first migrating the prompt-assembly logic.
+ *   - `VISUAL_SIGNATURE` — STILL LIVE. Re-exported from prompt-constants
+ *     and consumed by `flux2-generator.ts`.
+ */
+
 export { VISUAL_SIGNATURE };
 
 export interface HunyuanGenerateOptions {
@@ -89,6 +103,11 @@ export function assembleHunyuanPrompt(options: HunyuanGenerateOptions): string {
  * Throws descriptive errors on auth failure, safety filter, timeouts,
  * or a missing image URL. Does NOT re-upload to Supabase Storage — the
  * caller is responsible for persisting the returned URL.
+ *
+ * @deprecated Use `generateSceneImage` / `generateCharacterPortrait` from
+ *   `siray-generator.ts`. All four API routes have been migrated; this
+ *   function is retained only as a rollback safety net and may be deleted
+ *   once Siray.ai is confirmed stable in production.
  */
 export async function generateHunyuanImage(
   options: HunyuanGenerateOptions

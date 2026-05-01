@@ -44,9 +44,9 @@ const MODEL_OPTIONS: Array<{
   },
   {
     value: "hunyuan3",
-    label: "HunyuanImage 3.0 (Replicate)",
+    label: "HunyuanImage 3.0 (Siray.ai)",
     helper:
-      "Stronger explicit anatomy. Character consistency via prompt descriptions. Pay-per-image via Replicate.",
+      "Stronger explicit anatomy. Character consistency via prompt descriptions plus approved-portrait reference images. Pay-per-image via Siray.ai.",
   },
 ];
 

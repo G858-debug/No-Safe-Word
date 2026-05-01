@@ -167,7 +167,6 @@ interface PromptState {
   savedVisualSignatureOverride: string | null;
   showVisualSignatureOverride: boolean;
   showFullPromptPreview: boolean;
-  useRewriter: boolean;
   critiqueText: string | null;
   critiqueLoading: boolean;
 }
@@ -316,7 +315,6 @@ export default function ImageGeneration({
           savedVisualSignatureOverride: ip.visual_signature_override ?? null,
           showVisualSignatureOverride: Boolean(ip.visual_signature_override),
           showFullPromptPreview: false,
-          useRewriter: true,
           critiqueText: null,
           critiqueLoading: false,
         };
@@ -561,47 +559,9 @@ export default function ImageGeneration({
       try {
         const state = promptStates[promptId];
 
-        // ── Part A: Prompt Rewriter ──────────────────────────────────────
-        // If the rewriter toggle is ON and the story uses Hunyuan, call the
-        // rewrite API. The rewritten prompt (may be in Chinese) is passed
-        // directly to generate-image via assembledPrompt — the textbox and
-        // DB stay in English so the user can read and edit them.
-        let assembledPrompt: string | undefined;
-        let promptWasRewritten = false;
-
-        if (state?.useRewriter && imageModel === "hunyuan3") {
-          const rewriteRes = await fetch(
-            `/api/stories/images/${promptId}/rewrite`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                prompt: state.promptText,
-                critique: state.critiqueText ?? undefined,
-              }),
-            }
-          );
-          if (!rewriteRes.ok) {
-            const rewriteErr = await rewriteRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: `Rewriter failed — ${rewriteErr?.error ?? "check MISTRAL_API_KEY"}. Disable the Rewrite toggle and retry with the original prompt.`,
-            });
-            return;
-          }
-          const rewriteData = await rewriteRes.json().catch(() => ({}));
-          if (rewriteData?.rewrittenPrompt) {
-            assembledPrompt = rewriteData.rewrittenPrompt;
-            promptWasRewritten = true;
-            // Textbox and DB stay in English — UI remains readable.
-          }
-        }
-
         // ── Prompt PATCH ─────────────────────────────────────────────────
-        // Only persist when the user manually edited the textbox.
-        // When the rewriter ran, the English prompt in the textbox is already
-        // the correct DB value; there is nothing to patch.
-        if (!promptWasRewritten && state && state.promptText !== state.savedPromptText) {
+        // Persist any user edits to the prompt textbox before generating.
+        if (state && state.promptText !== state.savedPromptText) {
           const patchRes = await fetch(
             `/api/stories/images/${promptId}`,
             {
@@ -734,11 +694,7 @@ export default function ImageGeneration({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              promptId,
-              suppressAssembly: promptWasRewritten,
-              assembledPrompt,  // Chinese prompt from rewriter; undefined = use DB value
-            }),
+            body: JSON.stringify({ promptId }),
           }
         );
         const data = await res.json().catch(() => ({}));
@@ -1991,33 +1947,6 @@ function ImageCard({
                   onUpdatePrompt(ip.id, { suppressCharacterBlock: !state.suppressCharacterBlock })
                 }
               />
-              {/* Rewriter toggle — Hunyuan only (Flux uses reference images, not text) */}
-              {imageModel === "hunyuan3" && (
-                <div className="flex items-center justify-between rounded border border-zinc-700/30 bg-zinc-900/30 px-2 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id={`rewriter-${ip.id}`}
-                      checked={state.useRewriter}
-                      onCheckedChange={(checked) =>
-                        onUpdatePrompt(ip.id, { useRewriter: checked })
-                      }
-                      className="h-4 w-7 data-[state=checked]:bg-violet-600"
-                    />
-                    <Label
-                      htmlFor={`rewriter-${ip.id}`}
-                      className="cursor-pointer text-[11px] text-zinc-400"
-                    >
-                      Rewrite for Hunyuan
-                    </Label>
-                  </div>
-                  <span className="text-[10px] text-zinc-600">
-                    {state.useRewriter
-                      ? "Mistral rewrites before generating"
-                      : "Sends prompt as-is"}
-                  </span>
-                </div>
-              )}
-
               <Textarea
                 value={state.promptText}
                 onChange={(e) =>

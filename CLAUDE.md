@@ -134,21 +134,19 @@ Settings must be specific: Middelburg, Soweto, Sandton — not generic "African"
 
 ## HunyuanImage 3.0 — Known-Working Composition Patterns
 
-> **Single source of truth for test findings:**
+> **Reference for prompt patterns and test findings:**
 > [`packages/image-gen/src/prompts/hunyuan-knowledge.md`](packages/image-gen/src/prompts/hunyuan-knowledge.md)
 >
-> The rewriter (Mistral Small) reads this file at runtime and applies its
-> own intelligence based on the observations there. Update that file when
-> new patterns are validated or existing patterns fail — no code changes
-> needed, just redeploy. The summary below is a human-readable reference;
-> the knowledge file is what actually drives generation.
+> Update that file when new patterns are validated or existing patterns
+> fail. The summary below is a quick human-readable reference; the
+> knowledge file is the source of truth.
 
 The Hunyuan path through `assembleHunyuanPrompt` produces reliable explicit
-imagery only when scene prompts use specific compositional patterns. This was
-established by structured testing in April 2026. The prompt rewriter
-(`packages/image-gen/src/prompt-rewriter.ts`) targets these patterns and
-should be updated whenever new patterns are validated or existing patterns
-fail.
+imagery only when scene prompts use specific compositional patterns. This
+was established by structured testing in April 2026 under a text-only
+configuration on Replicate; the patterns may need re-validation now that
+generation runs through Siray's `instruct-i2i` variant with approved
+portraits supplied as reference images.
 
 ### Reliable patterns (use these)
 
