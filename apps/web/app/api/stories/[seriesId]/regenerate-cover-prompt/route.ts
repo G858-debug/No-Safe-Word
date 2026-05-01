@@ -13,8 +13,12 @@ export const maxDuration = 120;
 // ============================================================
 // POST /api/stories/[seriesId]/regenerate-cover-prompt
 // ============================================================
-// Calls claude-opus-4-7 to generate a new cover-image prompt for a
-// story, overwriting story_series.cover_prompt.
+// Calls Mistral Large to generate a new cover-image prompt for a
+// story, overwriting story_series.cover_prompt. The system prompt is
+// model-aware (image_model=hunyuan3 vs flux2_dev) and respects
+// cover_secondary_character_id when set: the override character is
+// re-labelled as "love_interest" in the rewriter input so the prompt
+// is written about THEM rather than the role-based love_interest.
 //
 // Does NOT auto-trigger cover variant generation — user reviews the
 // new prompt in the Cover tab and clicks "Generate 4 Variants"
@@ -37,7 +41,7 @@ export async function POST(
 
   const { data: series, error: seriesErr } = await supabase
     .from("story_series")
-    .select("id, title, image_model")
+    .select("id, title, image_model, cover_secondary_character_id")
     .eq("id", seriesId)
     .single();
 
@@ -47,6 +51,7 @@ export async function POST(
 
   const imageModel: "flux2_dev" | "hunyuan3" =
     (series.image_model as string | null) === "hunyuan3" ? "hunyuan3" : "flux2_dev";
+  const secondaryOverrideId = series.cover_secondary_character_id ?? null;
 
   const { count: postCount } = await supabase
     .from("story_posts")
@@ -140,11 +145,28 @@ export async function POST(
     }
   }
 
-  const characters: BlurbCharacterInput[] = chars.map((c) => ({
-    name: nameMap.get(c.character_id) ?? "Unknown",
-    role: c.role ?? "",
-    proseDescription: c.prose_description,
-  }));
+  // Re-label the cover-secondary override character as "love_interest" in
+  // the Mistral input so the rewriter writes about THEM as the secondary
+  // subject. The actual love_interest in the DB stays untouched (still
+  // drives scene generation), but for THIS cover prompt the rewriter
+  // treats the override character as the love interest.
+  const characters: BlurbCharacterInput[] = chars.map((c) => {
+    let role = c.role ?? "";
+    if (secondaryOverrideId) {
+      if (c.character_id === secondaryOverrideId) {
+        role = "love_interest";
+      } else if (c.role === "love_interest") {
+        // Demote the actual love_interest to supporting for this rewrite,
+        // so the rewriter doesn't try to feature both.
+        role = "supporting";
+      }
+    }
+    return {
+      name: nameMap.get(c.character_id) ?? "Unknown",
+      role,
+      proseDescription: c.prose_description,
+    };
+  });
 
   // Call Mistral (model-aware: Hunyuan vs Flux system prompt)
   const callInput: GenerateCoverPromptInput = {

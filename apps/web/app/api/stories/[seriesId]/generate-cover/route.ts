@@ -101,7 +101,7 @@ export async function POST(
   const { data: series, error: seriesErr } = await supabase
     .from("story_series")
     .select(
-      "id, slug, cover_prompt, cover_status, cover_variants, cover_base_url, cover_selected_variant, cover_sizes, image_model"
+      "id, slug, cover_prompt, cover_status, cover_variants, cover_base_url, cover_selected_variant, cover_sizes, image_model, cover_secondary_character_id"
     )
     .eq("id", seriesId)
     .single();
@@ -231,7 +231,39 @@ export async function POST(
   }
 
   const protagonist = protagonists[0];
-  const loveInterest = loveInterests[0];
+
+  // Secondary character resolution:
+  //   - If story_series.cover_secondary_character_id is set, use that
+  //     character (must be linked to this series and have an approved
+  //     portrait). Lets a series feature a non-love_interest character
+  //     on the cover (e.g. a workshop scene with a supporting character)
+  //     without mutating the global role assignments that drive scene
+  //     generation.
+  //   - Otherwise, fall back to the love_interest role.
+  const secondaryOverrideId = series.cover_secondary_character_id ?? null;
+  let loveInterest: CharWithBase | undefined;
+  if (secondaryOverrideId) {
+    loveInterest = approvedChars.find(
+      (c) => c.character_id === secondaryOverrideId
+    );
+    if (!loveInterest) {
+      return NextResponse.json(
+        {
+          error:
+            "Selected cover character has no approved portrait or is not linked to this series. Re-approve their portrait or clear the cover-character override and try again.",
+        },
+        { status: 400 }
+      );
+    }
+    if (loveInterest.character_id === protagonist.character_id) {
+      return NextResponse.json(
+        { error: "Secondary cover character must be different from the protagonist." },
+        { status: 400 }
+      );
+    }
+  } else {
+    loveInterest = loveInterests[0];
+  }
 
   // 6. Determine variant indices
   const variantIndices: number[] = isPartialRetry

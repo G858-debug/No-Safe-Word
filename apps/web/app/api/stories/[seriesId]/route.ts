@@ -41,13 +41,16 @@ export async function GET(
     .eq("series_id", seriesId)
     .order("part_number", { ascending: true });
 
-  // Fetch characters linked to this series
+  // Fetch characters linked to this series.
+  // approved_image_id is included so the cover-character dropdown can
+  // filter to characters that have approved portraits (only those can
+  // be used as cover reference images).
   const { data: storyCharacters } = await supabase
     .from("story_characters")
     .select(
       `
       *,
-      characters:character_id (id, name, description)
+      characters:character_id (id, name, description, approved_image_id)
     `
     )
     .eq("series_id", seriesId);

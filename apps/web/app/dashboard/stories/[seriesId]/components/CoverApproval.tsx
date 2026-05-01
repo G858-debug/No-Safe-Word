@@ -6,6 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { XCircle } from "lucide-react";
 import type { CoverStatus } from "@no-safe-word/shared";
 
@@ -24,10 +31,19 @@ interface CoverState {
     email?: string;
   } | null;
   cover_error: string | null;
+  cover_secondary_character_id: string | null;
   // Used by the polling-side recompose trigger to wait ~30s after
   // approval before firing a recompose-cover POST. Comes from
   // story_series.updated_at via the GET /api/stories/[seriesId] select("*").
   updated_at: string;
+}
+
+// Eligible characters for the cover-secondary dropdown.
+interface CoverEligibleCharacter {
+  character_id: string;
+  name: string;
+  role: string | null;
+  has_approved_portrait: boolean;
 }
 
 interface CoverJobState {
@@ -66,6 +82,8 @@ export default function CoverApproval({ seriesId }: Props) {
   const [pendingSelection, setPendingSelection] = useState<number | null>(null);
   const [regeneratingPrompt, setRegeneratingPrompt] = useState(false);
   const [promptRegenJustSucceeded, setPromptRegenJustSucceeded] = useState(false);
+  const [eligibleChars, setEligibleChars] = useState<CoverEligibleCharacter[]>([]);
+  const [savingCharacter, setSavingCharacter] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchCover = useCallback(async () => {
@@ -82,6 +100,29 @@ export default function CoverApproval({ seriesId }: Props) {
       if (!promptDirty) {
         setPromptDraft(s.cover_prompt ?? "");
       }
+
+      // Build eligible-characters list from the same response. Only
+      // characters with approved portraits can be used as cover refs.
+      const charsRaw = (data.characters ?? []) as Array<{
+        character_id: string | null;
+        role: string | null;
+        characters:
+          | { id: string; name: string; approved_image_id: string | null }
+          | { id: string; name: string; approved_image_id: string | null }[]
+          | null;
+      }>;
+      const eligible: CoverEligibleCharacter[] = [];
+      for (const row of charsRaw) {
+        const base = Array.isArray(row.characters) ? row.characters[0] : row.characters;
+        if (!base || !row.character_id) continue;
+        eligible.push({
+          character_id: row.character_id,
+          name: base.name,
+          role: row.role,
+          has_approved_portrait: Boolean(base.approved_image_id),
+        });
+      }
+      setEligibleChars(eligible);
     } catch {
       setError("Failed to load cover state");
     } finally {
@@ -348,6 +389,31 @@ export default function CoverApproval({ seriesId }: Props) {
     }
   }
 
+  // Save the secondary cover-character override. `value === ""` means
+  // clear the override and fall back to the love_interest role.
+  async function handleSecondaryCharacterChange(value: string) {
+    setSavingCharacter(true);
+    setError(null);
+    try {
+      const characterId = value === "" ? null : value;
+      const res = await fetch(`/api/stories/${seriesId}/cover-character`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ characterId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to update cover character");
+        return;
+      }
+      await fetchCover();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update cover character");
+    } finally {
+      setSavingCharacter(false);
+    }
+  }
+
   async function handleApprove() {
     if (pendingSelection === null) return;
     setBusy(true);
@@ -465,6 +531,62 @@ export default function CoverApproval({ seriesId }: Props) {
               />
             </div>
           )}
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-muted-foreground">
+              Secondary character on cover
+            </label>
+            <div className="flex items-center gap-3">
+              <Select
+                value={state.cover_secondary_character_id ?? "__default__"}
+                onValueChange={(v) =>
+                  handleSecondaryCharacterChange(v === "__default__" ? "" : v)
+                }
+                disabled={
+                  savingCharacter ||
+                  busy ||
+                  regeneratingPrompt ||
+                  isGenerating ||
+                  isCompositing ||
+                  state.cover_status === "approved" ||
+                  state.cover_status === "complete"
+                }
+              >
+                <SelectTrigger className="max-w-md">
+                  <SelectValue placeholder="Default (use love interest)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">
+                    Default (love interest)
+                    {(() => {
+                      const li = eligibleChars.find((c) => c.role === "love_interest");
+                      return li ? ` — ${li.name}` : "";
+                    })()}
+                  </SelectItem>
+                  {eligibleChars
+                    .filter(
+                      (c) =>
+                        c.has_approved_portrait && c.role !== "protagonist"
+                    )
+                    .map((c) => (
+                      <SelectItem key={c.character_id} value={c.character_id}>
+                        {c.name}
+                        {c.role ? ` (${c.role})` : ""}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {savingCharacter && (
+                <span className="text-xs text-muted-foreground">Saving…</span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Choose which character appears beside the protagonist on the cover.
+              Override only — the story&rsquo;s love-interest role is unchanged.
+              Changes take effect on the next prompt regeneration and the next
+              variant generation.
+            </p>
+          </div>
 
           <div>
             <div className="mb-1 flex items-center justify-between gap-3">

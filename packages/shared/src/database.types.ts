@@ -991,6 +991,7 @@ export type Database = {
           cover_base_url: string | null
           cover_error: string | null
           cover_prompt: string | null
+          cover_secondary_character_id: string | null
           cover_selected_variant: number | null
           cover_sizes: Json | null
           cover_status: string
@@ -1017,6 +1018,7 @@ export type Database = {
           cover_base_url?: string | null
           cover_error?: string | null
           cover_prompt?: string | null
+          cover_secondary_character_id?: string | null
           cover_selected_variant?: number | null
           cover_sizes?: Json | null
           cover_status?: string
@@ -1043,6 +1045,7 @@ export type Database = {
           cover_base_url?: string | null
           cover_error?: string | null
           cover_prompt?: string | null
+          cover_secondary_character_id?: string | null
           cover_selected_variant?: number | null
           cover_sizes?: Json | null
           cover_status?: string
@@ -1060,7 +1063,15 @@ export type Database = {
           total_parts?: number
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "story_series_cover_secondary_character_id_fkey"
+            columns: ["cover_secondary_character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       whatsapp_pins: {
         Row: {
