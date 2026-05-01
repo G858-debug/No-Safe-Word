@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const desc = (character.description as Record<string, string>) || {};
@@ -264,7 +266,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
                 <img
                   src={character.approved_image_url}
                   alt={`${name} — portrait`}
-                  className="w-24 h-32 object-cover rounded-md border"
+                  className="w-24 h-32 object-cover rounded-md border cursor-zoom-in"
+                  onClick={() => setLightboxUrl(character.approved_image_url ?? null)}
                 />
               </div>
             )}
@@ -274,7 +277,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
                 <img
                   src={character.approved_fullbody_image_url}
                   alt={`${name} — full body`}
-                  className="w-24 h-32 object-cover rounded-md border"
+                  className="w-24 h-32 object-cover rounded-md border cursor-zoom-in"
+                  onClick={() => setLightboxUrl(character.approved_fullbody_image_url ?? null)}
                 />
               </div>
             )}
@@ -349,7 +353,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
                 <img
                   src={pendingImageUrl}
                   alt="Preview"
-                  className="max-w-xs rounded-md border"
+                  className="max-w-xs rounded-md border cursor-zoom-in"
+                  onClick={() => setLightboxUrl(pendingImageUrl)}
                 />
               </div>
             )}
@@ -385,6 +390,26 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
       </CardContent>
+
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 transition-colors"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <img
+            src={lightboxUrl}
+            alt="Full size preview"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </Card>
   );
 }
