@@ -485,15 +485,20 @@ async function generateHunyuanCover(args: {
     referenceImageCount: referenceImageUrls.length,
   });
 
-  // Async submit-and-register: each Siray task returns immediately. The
-  // status route + siray-cover-variant-handler upload the image, write the
-  // URL into story_series.cover_variants[N], and advance cover_status when
-  // the last variant settles.
-  const jobIds: string[] = [];
-  const submissionFailures: Array<{ variantIndex: number; message: string }> = [];
-
-  for (const variantIndex of variantIndices) {
-    try {
+  // Async submit-and-register, all 4 variants in PARALLEL. Siray's async-
+  // submit endpoint validates and ingests reference image URLs server-side
+  // before returning the task_id, which can take 10–30s per call when i2i
+  // references are present. Doing this sequentially with `await` in a
+  // for-loop blew past the proxy's ~120s budget on cold paths and left
+  // story_series.cover_status='generating' with zero generation_jobs rows
+  // because the route was killed before the failure-handler ran. Running
+  // them concurrently keeps tail latency at ~30s, well inside the budget.
+  //
+  // Each task's status route + siray-cover-variant-handler upload the image,
+  // write the URL into story_series.cover_variants[N], and advance
+  // cover_status when the last variant settles.
+  const settled = await Promise.allSettled(
+    variantIndices.map(async (variantIndex) => {
       const submitted = await submitSirayImage({
         prompt: assembledPrompt,
         aspectRatio: "4:5",
@@ -540,9 +545,23 @@ async function generateHunyuanCover(args: {
         throw new Error(`Failed to register Siray cover job: ${jobErr.message}`);
       }
 
-      jobIds.push(jobId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error submitting job";
+      return { variantIndex, jobId };
+    })
+  );
+
+  const jobIds: string[] = [];
+  const submissionFailures: Array<{ variantIndex: number; message: string }> = [];
+
+  for (let i = 0; i < settled.length; i++) {
+    const variantIndex = variantIndices[i];
+    const result = settled[i];
+    if (result.status === "fulfilled") {
+      jobIds.push(result.value.jobId);
+    } else {
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
       console.error(
         `[generate-cover:hunyuan] variant ${variantIndex} submission failed:`,
         message
