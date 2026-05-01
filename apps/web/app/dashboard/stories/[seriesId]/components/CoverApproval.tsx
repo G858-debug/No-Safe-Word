@@ -373,32 +373,39 @@ export default function CoverApproval({ seriesId }: Props) {
   }
 
   async function handleGenerate() {
+    // Approved/complete: regenerating invalidates the user's selection AND
+    // any composited typography variants, so always do a FULL regenerate
+    // with confirm — clean slate.
     if (state?.cover_status === "approved" || state?.cover_status === "complete") {
       const ok = window.confirm(
         "Regenerating will reset the approved cover and discard all composited website/OG/email versions. You'll need to re-approve a new variant and wait for compositing to re-run. Continue?"
       );
       if (!ok) return;
-    }
-
-    // Two paths:
-    //   1. Full regenerate (resets all 4 slots): when the user has edited the
-    //      prompt OR the cover was already approved/complete. Either case
-    //      invalidates existing variants — start fresh.
-    //   2. Partial retry of available slots: when there are some empty/non-
-    //      active slots and we're not doing a full regenerate. Preserves any
-    //      already-completed variants and any in-flight ones.
-    const fullRegenerate =
-      promptDirty ||
-      state?.cover_status === "approved" ||
-      state?.cover_status === "complete";
-
-    if (fullRegenerate) {
       await generate(promptDirty ? { prompt: promptDraft } : {});
       return;
     }
 
-    if (availableSlots.length === 0) return;
-    await generate({ retryVariants: availableSlots });
+    // No available slots and dirty prompt: the user wants to apply new
+    // prompt edits but every slot is filled or in-flight. Confirm before
+    // full regenerate (which discards the existing art).
+    if (availableSlots.length === 0) {
+      if (!promptDirty) return;
+      const ok = window.confirm(
+        "All variants are filled and you have prompt edits. Regenerating will reset all 4 slots to apply your new prompt. Continue?"
+      );
+      if (!ok) return;
+      await generate({ prompt: promptDraft });
+      return;
+    }
+
+    // Partial regenerate of available slots — carries the user's textarea
+    // content if they've edited it, so per-cover prompt iteration works
+    // without every click reseting the slots they're keeping.
+    const body: { retryVariants: number[]; prompt?: string } = {
+      retryVariants: availableSlots,
+    };
+    if (promptDirty) body.prompt = promptDraft;
+    await generate(body);
   }
 
   async function handleRetryCompositing() {
@@ -430,7 +437,11 @@ export default function CoverApproval({ seriesId }: Props) {
 
   async function handleRetryMissing() {
     if (failedIndices.length === 0) return;
-    await generate({ retryVariants: failedIndices });
+    const body: { retryVariants: number[]; prompt?: string } = {
+      retryVariants: failedIndices,
+    };
+    if (promptDirty) body.prompt = promptDraft;
+    await generate(body);
   }
 
   async function handleRetrySingle(index: number) {
@@ -444,7 +455,16 @@ export default function CoverApproval({ seriesId }: Props) {
     });
     setError(null);
     try {
-      await submitGenerationRequest({ retryVariants: [index] });
+      // Send the textarea content along with the retry so the user's edits
+      // are applied. Without this, partial retries silently fall back to
+      // the previously-saved cover_prompt and the user's local edits get
+      // dropped.
+      const body: { retryVariants: number[]; prompt?: string } = {
+        retryVariants: [index],
+      };
+      if (promptDirty) body.prompt = promptDraft;
+      await submitGenerationRequest(body);
+      if (promptDirty) setPromptDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");
     } finally {
@@ -816,13 +836,18 @@ export default function CoverApproval({ seriesId }: Props) {
               disabled={(() => {
                 if (busy) return true;
                 if (!promptDraft && !state.cover_prompt) return true;
-                // Full regenerate paths always allowed (they reset everything)
-                const isFullRegenerate =
-                  promptDirty ||
+                // Approved/complete always allowed — full regen with confirm.
+                if (
                   state.cover_status === "approved" ||
-                  state.cover_status === "complete";
-                if (isFullRegenerate) return false;
-                // Partial generate path requires at least one available slot
+                  state.cover_status === "complete"
+                ) {
+                  return false;
+                }
+                // Dirty prompt always allowed — partial regen if slots
+                // available, full regen with confirm if not.
+                if (promptDirty) return false;
+                // Otherwise need at least one available slot to do a
+                // partial regen.
                 return availableSlots.length === 0;
               })()}
             >
@@ -923,13 +948,15 @@ function primaryButtonLabel(
   availableCount: number,
   promptDirty: boolean
 ): string {
-  // Prompt edits or already-approved covers always do a FULL regenerate
-  // (all 4 slots reset), so the label reflects that regardless of
-  // currently-available slot count.
-  if (promptDirty) return "Regenerate 4 Variants (new prompt)";
-  if (status === "approved" || status === "complete") return "Regenerate 4 Variants";
+  // Approved/complete: always full regen (selection invalidated).
+  if (status === "approved" || status === "complete") {
+    return promptDirty ? "Regenerate 4 Variants (new prompt)" : "Regenerate 4 Variants";
+  }
 
   if (availableCount === 0) {
+    // Dirty edits with no empty slots → user has to discard existing art
+    // to apply the new prompt. Show full-regen label.
+    if (promptDirty) return "Regenerate 4 Variants (new prompt)";
     if (status === "generating") {
       return `Generating... (${completedCount}/${VARIANT_COUNT} complete)`;
     }
@@ -937,6 +964,7 @@ function primaryButtonLabel(
   }
 
   const noun = availableCount === 1 ? "Variant" : "Variants";
+  if (promptDirty) return `Generate ${availableCount} ${noun} (new prompt)`;
   return `Generate ${availableCount} ${noun}`;
 }
 

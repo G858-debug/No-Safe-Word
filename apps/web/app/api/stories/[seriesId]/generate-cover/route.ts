@@ -178,8 +178,13 @@ export async function POST(
     );
   }
 
-  // 4. Persist prompt override on full regenerate
-  if (body.prompt && !isPartialRetry) {
+  // 4. Persist prompt override whenever the client supplies one — partial
+  // retries (per-slot Retry, "Generate N Variants" with some slots filled)
+  // need the textarea content to apply just like full regenerates do.
+  // Without this, edits in the textarea are silently dropped on partial
+  // retries: the server falls back to the previously-saved cover_prompt
+  // and the user gets art that doesn't match what they typed.
+  if (body.prompt) {
     await supabase
       .from("story_series")
       .update({ cover_prompt: effectivePrompt })
