@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRunPodJobStatus, base64ToBuffer } from "@no-safe-word/image-gen";
 import { handleCoverVariantCompletion } from "./cover-variant-handler";
+import { handleSirayJobStatus } from "./siray-job-handler";
 import { supabase } from "@no-safe-word/story-engine";
 
 /**
@@ -60,6 +61,19 @@ export async function GET(
           job_created_at: jobRow.created_at ?? null,
         },
         settings,
+      });
+    }
+
+    // Siray jobs (HunyuanImage 3.0 portraits + scenes) follow the
+    // submit-then-poll pattern; delegate to the Siray handler. Detect via
+    // the `siray-` prefix on job_id (mirrors the `runpod-` convention).
+    if (jobId.startsWith("siray-")) {
+      const sirayJobType =
+        jobRow?.job_type === "scene" ? "scene" : "portrait";
+      return await handleSirayJobStatus({
+        jobId,
+        imageId,
+        imageType: sirayJobType,
       });
     }
 

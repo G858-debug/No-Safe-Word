@@ -92,18 +92,21 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         if (!res.ok) return;
         const data = (await res.json()) as {
           completed: boolean;
-          imageUrl: string | null;
+          imageUrl?: string | null;
           error?: string;
         };
-        if (data.completed) {
+        if (data.completed && data.imageUrl) {
           stopPolling();
           setIsGenerating(false);
-          if (data.imageUrl) {
-            setPendingImageId(imageId);
-            setPendingImageUrl(data.imageUrl);
-          } else if (data.error) {
-            setError(data.error);
-          }
+          setPendingImageId(imageId);
+          setPendingImageUrl(data.imageUrl);
+        } else if (data.error) {
+          // Surface failures regardless of `completed` — both the RunPod and
+          // Siray handlers return { completed: false, error } on terminal
+          // failure, and an infinite spinner is worse than a clear error.
+          stopPolling();
+          setIsGenerating(false);
+          setError(data.error);
         }
       } catch {
         // transient — keep polling

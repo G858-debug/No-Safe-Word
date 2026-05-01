@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  generateSceneImage,
+  submitSirayImage,
   assembleHunyuanPrompt,
   generateFlux2Image,
   imageUrlToBase64,
@@ -10,7 +10,6 @@ import {
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
-import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
 import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
 
 /**
@@ -206,14 +205,16 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       prompt.secondary_character_id,
     ]);
 
-    const generatedUrl = await generateSceneImage(
-      assembledFinalPrompt,
+    // 6. Submit to Siray (async). The status route polls the task_id and
+    //    handles download/upload/DB-update when the generation completes.
+    const submitted = await submitSirayImage({
+      prompt: assembledFinalPrompt,
+      aspectRatio,
       referenceImageUrls,
-      aspectRatio
-    );
+    });
 
-    // 6. Create the images row first so we have a DB-generated UUID, then
-    // upload to Supabase Storage under that ID and back-fill stored_url.
+    // 7. Create the images row up-front (stored_url filled in later by the
+    //    status handler).
     const { data: imageRow, error: imageErr } = await supabase
       .from("images")
       .insert({
@@ -221,9 +222,11 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
         settings: {
           model: "hunyuan3",
           provider: "siray",
-          siray_model: "hunyuan3-instruct",
+          siray_model: submitted.model,
+          siray_task_id: submitted.taskId,
           aspect_ratio: aspectRatio,
-          reference_image_count: referenceImageUrls.length,
+          size: submitted.size,
+          reference_image_count: submitted.referenceImageCount,
         },
         mode: deriveMode(prompt.image_type),
       })
@@ -237,19 +240,24 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     }
 
     const imageId = imageRow.id;
-    const storagePath = `stories/${imageId}.jpeg`;
-    const storedUrl = await uploadRemoteImageToStorage(
-      generatedUrl,
-      storagePath
-    );
+    const jobId = `siray-${submitted.taskId}`;
 
-    await supabase
-      .from("images")
-      .update({ stored_url: storedUrl })
-      .eq("id", imageId);
+    // 8. Register the job so the polling endpoint can find it.
+    const { error: jobErr } = await supabase.from("generation_jobs").insert({
+      job_id: jobId,
+      image_id: imageId,
+      status: "pending",
+      cost: 0,
+      job_type: "scene",
+    });
 
-    // 7. Update prompt — link + mark generated. image_id swap is tracked via
-    // previous_image_id for the revert flow.
+    if (jobErr) {
+      throw new Error(`Failed to register Siray job: ${jobErr.message}`);
+    }
+
+    // 9. Link prompt → image, preserve previous_image_id for revert. Status
+    //    stays at "generating" until the status handler flips it to
+    //    "generated" on completion.
     const { data: currentPrompt } = await supabase
       .from("story_image_prompts")
       .select("image_id")
@@ -259,7 +267,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     await supabase
       .from("story_image_prompts")
       .update({
-        status: "generated",
+        status: "generating",
         image_id: imageId,
         previous_image_id: currentPrompt?.image_id ?? null,
         debug_data: {
@@ -278,7 +286,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       success: true,
       promptId,
       imageId,
-      imageUrl: storedUrl,
+      jobId,
       model: "hunyuan3",
     });
   } catch (err) {

@@ -11,7 +11,14 @@
  * `generateSceneImage`) exist for clarity at call sites.
  */
 
-import { getSirayClient, type SirayJobPayload, type SirayModelId } from "./siray-client";
+import {
+  getSirayClient,
+  type SirayJobPayload,
+  type SirayModelId,
+  type SirayJobStatus,
+} from "./siray-client";
+
+export type { SirayJobStatus };
 
 const T2I_MODEL: SirayModelId = "tencent/hunyuan-image-3-instruct-t2i";
 const I2I_MODEL: SirayModelId = "tencent/hunyuan-image-3-instruct-i2i";
@@ -32,22 +39,35 @@ export interface GenerateSirayImageParams {
   seed?: number;
 }
 
-/**
- * Submit a single Siray.ai generation and return the resulting image URL.
- *
- * t2i payloads omit the `images` field entirely. i2i payloads always include
- * a non-empty `images` array.
- */
-export async function generateSirayImage(
-  params: GenerateSirayImageParams
-): Promise<string> {
+/** Result of a submit-only call. The caller is responsible for polling. */
+export interface SubmitSirayImageResult {
+  /** Siray task_id — used as the unique handle to poll status. */
+  taskId: string;
+  /** The model variant the job was submitted to. */
+  model: SirayModelId;
+  /** The exact prompt sent. */
+  prompt: string;
+  /** Resolved size string (e.g. "768x1024"). */
+  size: string;
+  /** True if i2i (referenceImageUrls non-empty), false for t2i. */
+  isI2I: boolean;
+  /** How many reference images were attached, for telemetry. */
+  referenceImageCount: number;
+}
+
+function buildSirayPayload(params: GenerateSirayImageParams): {
+  payload: SirayJobPayload;
+  isI2I: boolean;
+  size: string;
+} {
   const prompt = params.prompt?.trim();
   if (!prompt) {
-    throw new Error("[siray] generateSirayImage: prompt is empty");
+    throw new Error("[siray] prompt is empty");
   }
 
   const size = mapAspectRatioToSize(params.aspectRatio);
-  const useI2I = Array.isArray(params.referenceImageUrls) && params.referenceImageUrls.length > 0;
+  const useI2I =
+    Array.isArray(params.referenceImageUrls) && params.referenceImageUrls.length > 0;
 
   const payload: SirayJobPayload = useI2I
     ? {
@@ -64,10 +84,52 @@ export async function generateSirayImage(
         ...(params.seed !== undefined ? { seed: params.seed } : {}),
       };
 
+  return { payload, isI2I: useI2I, size };
+}
+
+/**
+ * Submit a single Siray.ai generation, wait for completion, and return the
+ * resulting image URL. Synchronous from the caller's perspective. Use this
+ * for short-lived contexts (scripts, tests) or when wrapping in an external
+ * job runner. For HTTP routes prefer `submitSirayImage` + the `/api/status`
+ * polling pattern — Siray generations regularly cross HTTP-proxy timeouts.
+ *
+ * t2i payloads omit the `images` field entirely. i2i payloads always include
+ * a non-empty `images` array.
+ */
+export async function generateSirayImage(
+  params: GenerateSirayImageParams
+): Promise<string> {
+  const { payload } = buildSirayPayload(params);
   const client = getSirayClient();
   const taskId = await client.submitJob(payload);
-  const imageUrl = await client.pollForResult(taskId);
-  return imageUrl;
+  return client.pollForResult(taskId);
+}
+
+/**
+ * Submit a single Siray.ai generation and return the task_id immediately.
+ * The caller must poll `getSirayClient().getJobStatus(taskId)` (typically via
+ * `/api/status/siray-{taskId}`) until completion.
+ *
+ * This is the recommended path for HTTP routes — it decouples the Node
+ * request-handler lifetime from Siray's queue depth, which can occasionally
+ * push a single generation past 2-3 minutes (longer than browser/proxy
+ * timeouts in the 60–120s range).
+ */
+export async function submitSirayImage(
+  params: GenerateSirayImageParams
+): Promise<SubmitSirayImageResult> {
+  const { payload, isI2I, size } = buildSirayPayload(params);
+  const client = getSirayClient();
+  const taskId = await client.submitJob(payload);
+  return {
+    taskId,
+    model: payload.model,
+    prompt: payload.prompt,
+    size,
+    isI2I,
+    referenceImageCount: isI2I ? params.referenceImageUrls!.length : 0,
+  };
 }
 
 /**

@@ -66,9 +66,25 @@ interface SiraySubmitResponse {
   data?: { task_id?: string };
 }
 
+/** Result of a single one-shot Siray poll. */
+export interface SirayJobStatus {
+  /** Normalized state — `pending` while in-flight, `completed` on SUCCESS, `failed` on FAILED. */
+  state: "pending" | "completed" | "failed";
+  /** Output image URL (Siray CDN, single-use rotating token). Present iff state === "completed". */
+  imageUrl?: string;
+  /** Failure reason from Siray. Present iff state === "failed". */
+  failReason?: string;
+  /** Optional progress string like "30%" for UI. */
+  progress?: string;
+  /** Raw upstream status string ("IN_PROGRESS" | "SUCCESS" | "FAILED" | …). */
+  rawStatus: string;
+}
+
 interface SirayClient {
   submitJob: (payload: SirayJobPayload) => Promise<string>;
   pollForResult: (taskId: string, maxWaitMs?: number) => Promise<string>;
+  /** One-shot poll — returns the current job state without looping. */
+  getJobStatus: (taskId: string) => Promise<SirayJobStatus>;
 }
 
 let _client: SirayClient | null = null;
@@ -85,6 +101,7 @@ export function getSirayClient(): SirayClient {
     submitJob: (payload) => submitJob(apiKey, payload),
     pollForResult: (taskId, maxWaitMs) =>
       pollForResult(apiKey, taskId, maxWaitMs ?? DEFAULT_MAX_WAIT_MS),
+    getJobStatus: (taskId) => getJobStatus(apiKey, taskId),
   };
 
   return _client;
@@ -122,6 +139,63 @@ async function submitJob(
   return taskId;
 }
 
+/**
+ * One-shot poll. Reads the upstream `data` envelope, normalises the status
+ * to one of {pending, completed, failed}, and surfaces the output URL or
+ * failure reason as appropriate. Used by both the looping `pollForResult`
+ * and the async status handler that runs per browser-poll.
+ */
+async function getJobStatus(apiKey: string, taskId: string): Promise<SirayJobStatus> {
+  const res = await fetch(
+    `${SIRAY_BASE_URL}/images/generations/async/${taskId}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    }
+  );
+
+  if (!res.ok) {
+    const body = await safeReadText(res);
+    throw new Error(
+      `[siray] poll failed for task ${taskId}: HTTP ${res.status} ${res.statusText} — ${body}`
+    );
+  }
+
+  const body = (await res.json()) as SirayPollResponse;
+  const job = body.data;
+  if (!job) {
+    throw new Error(
+      `[siray] poll for task ${taskId} returned no data envelope (response: ${safeStringify(body)})`
+    );
+  }
+
+  // Siray uses uppercase status strings. Tolerate case + alternate spellings
+  // so a server-side rename doesn't silently break our state machine.
+  const rawStatus = job.status ?? "";
+  const upper = rawStatus.toUpperCase();
+
+  if (upper === "SUCCESS" || upper === "COMPLETED") {
+    const url = job.outputs?.[0];
+    if (!url) {
+      throw new Error(
+        `[siray] task ${taskId} succeeded with no outputs (response: ${safeStringify(body)})`
+      );
+    }
+    return { state: "completed", imageUrl: url, progress: job.progress, rawStatus };
+  }
+
+  if (upper === "FAILED" || upper === "FAILURE" || upper === "ERROR") {
+    return {
+      state: "failed",
+      failReason: job.fail_reason ?? "unknown reason",
+      progress: job.progress,
+      rawStatus,
+    };
+  }
+
+  return { state: "pending", progress: job.progress, rawStatus };
+}
+
 async function pollForResult(
   apiKey: string,
   taskId: string,
@@ -131,53 +205,16 @@ async function pollForResult(
   let lastProgress: string | undefined;
 
   while (Date.now() - startedAt < maxWaitMs) {
-    const res = await fetch(
-      `${SIRAY_BASE_URL}/images/generations/async/${taskId}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-      }
-    );
+    const status = await getJobStatus(apiKey, taskId);
 
-    if (!res.ok) {
-      const body = await safeReadText(res);
-      throw new Error(
-        `[siray] poll failed for task ${taskId}: HTTP ${res.status} ${res.statusText} — ${body}`
-      );
+    if (status.progress && status.progress !== lastProgress) {
+      console.log(`[siray] task ${taskId} progress=${status.progress}`);
+      lastProgress = status.progress;
     }
 
-    const body = (await res.json()) as SirayPollResponse;
-    const job = body.data;
-    if (!job) {
-      throw new Error(
-        `[siray] poll for task ${taskId} returned no data envelope (response: ${safeStringify(body)})`
-      );
-    }
-
-    if (job.progress && job.progress !== lastProgress) {
-      console.log(`[siray] task ${taskId} progress=${job.progress}`);
-      lastProgress = job.progress;
-    }
-
-    // Siray uses uppercase status strings. Normalize to be tolerant of
-    // future case changes; treat both SUCCESS and COMPLETED as terminal.
-    const status = (job.status ?? "").toUpperCase();
-    if (status === "SUCCESS" || status === "COMPLETED") {
-      const url = job.outputs?.[0];
-      if (!url) {
-        throw new Error(
-          `[siray] task ${taskId} succeeded with no outputs (response: ${safeStringify(body)})`
-        );
-      }
-      return url;
-    }
-
-    if (status === "FAILED" || status === "FAILURE" || status === "ERROR") {
-      throw new Error(
-        `[siray] task ${taskId} failed: ${job.fail_reason ?? "unknown reason"}`
-      );
+    if (status.state === "completed") return status.imageUrl!;
+    if (status.state === "failed") {
+      throw new Error(`[siray] task ${taskId} failed: ${status.failReason ?? "unknown reason"}`);
     }
 
     await sleep(POLL_INTERVAL_MS);

@@ -105,14 +105,20 @@ export { getSirayClient } from './siray-client';
 export type {
   SirayJobPayload,
   SirayPollResponse,
+  SirayJobState,
+  SirayJobStatus,
   SirayModelId,
 } from './siray-client';
 export {
   generateSirayImage,
+  submitSirayImage,
   generateCharacterPortrait,
   generateSceneImage,
 } from './siray-generator';
-export type { GenerateSirayImageParams } from './siray-generator';
+export type {
+  GenerateSirayImageParams,
+  SubmitSirayImageResult,
+} from './siray-generator';
 
 // Generated image critic (Pixtral 12B)
 export { critiqueGeneratedImage } from './image-critic';

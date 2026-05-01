@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  generateCharacterPortrait,
+  submitSirayImage,
   generateFlux2Image,
   buildCharacterPortraitPrompt,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
-import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
 import type { ImageModel } from "@no-safe-word/shared";
 
 type ImageType = "portrait" | "fullBody";
@@ -74,8 +73,11 @@ export async function POST(
     // flux2_dev → currently still uses the Juggernaut Ragnarok path on
     // RunPod. Phase 4 swaps this for Flux 2 Dev once the new endpoint +
     // Docker image are provisioned.
-    // hunyuan3 → synchronous Siray call, handled below. No reference
-    // images yet — this IS the portrait being created.
+    // hunyuan3 → async submit-and-poll via Siray. Submit returns a
+    // task_id immediately; the client polls /api/status/siray-{taskId}
+    // until the image is uploaded to Supabase Storage. Decouples the
+    // route's HTTP lifetime from Siray's queue depth (sometimes >2min,
+    // exceeding browser/proxy timeouts).
 
     // 2. Fetch the character's structured description
     const { data: character, error: charError } = await supabase
@@ -97,14 +99,20 @@ export async function POST(
 
     console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} [model=${imageModel}]`);
 
-    // ── hunyuan3 portrait path (synchronous Siray, t2i — no references) ──
+    // ── hunyuan3 portrait path (async submit-and-poll via Siray, t2i) ──
     if (imageModel === "hunyuan3") {
       const promptText =
         customPrompt ??
         buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, stage);
 
-      const generatedUrl = await generateCharacterPortrait(promptText);
+      // 1. Submit to Siray; returns immediately with a task_id.
+      const submitted = await submitSirayImage({
+        prompt: promptText,
+        aspectRatio: "3:4",
+      });
 
+      // 2. Insert the images row up-front (stored_url filled in later by
+      //    the status handler when the job completes).
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
@@ -113,8 +121,10 @@ export async function POST(
           settings: {
             model: "hunyuan3",
             provider: "siray",
-            siray_model: "hunyuan3-instruct",
+            siray_model: submitted.model,
+            siray_task_id: submitted.taskId,
             aspect_ratio: "3:4",
+            size: submitted.size,
             imageType,
             stage,
           },
@@ -127,22 +137,23 @@ export async function POST(
         throw new Error(`Failed to create image record: ${imgErr?.message}`);
       }
 
-      const imageId = imageRow.id;
-      const storagePath = `characters/${imageId}.jpeg`;
-      const storedUrl = await uploadRemoteImageToStorage(
-        generatedUrl,
-        storagePath
-      );
+      // 3. Register the job for the polling endpoint to find.
+      const jobId = `siray-${submitted.taskId}`;
+      const { error: jobErr } = await supabase.from("generation_jobs").insert({
+        job_id: jobId,
+        image_id: imageRow.id,
+        status: "pending",
+        cost: 0,
+        job_type: "portrait",
+      });
 
-      await supabase
-        .from("images")
-        .update({ stored_url: storedUrl })
-        .eq("id", imageId);
+      if (jobErr) {
+        throw new Error(`Failed to register Siray job: ${jobErr.message}`);
+      }
 
       return NextResponse.json({
-        jobId: `siray-${imageId}`,
-        imageId,
-        imageUrl: storedUrl,
+        jobId,
+        imageId: imageRow.id,
         model: "hunyuan3",
         promptUsed: promptText,
       });
