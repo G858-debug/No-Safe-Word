@@ -726,6 +726,7 @@ export default function SeriesDetailPage() {
           <CharacterApproval
             seriesId={seriesId}
             onAllReady={() => setActiveTab("cover")}
+            onCharactersChange={setCharacters}
           />
         </div>
 

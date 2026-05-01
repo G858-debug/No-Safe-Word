@@ -28,9 +28,17 @@ export interface CharacterFromAPI {
 interface Props {
   seriesId: string;
   onAllReady?: () => void;
+  /**
+   * Fired with the fresh character list every time this component re-fetches
+   * (initial mount + after any card-level update). Lets the parent page keep
+   * its own `characters` state in sync so cross-tab gates (e.g. "Approve
+   * Characters First" on the Cover tab) update immediately without a page
+   * refresh.
+   */
+  onCharactersChange?: (characters: CharacterFromAPI[]) => void;
 }
 
-export default function CharacterApproval({ seriesId, onAllReady }: Props) {
+export default function CharacterApproval({ seriesId, onAllReady, onCharactersChange }: Props) {
   const [characters, setCharacters] = useState<CharacterFromAPI[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -39,13 +47,15 @@ export default function CharacterApproval({ seriesId, onAllReady }: Props) {
       const res = await fetch(`/api/stories/${seriesId}/characters`);
       if (!res.ok) return;
       const data = await res.json();
-      setCharacters(data.characters || []);
+      const fresh = data.characters || [];
+      setCharacters(fresh);
+      onCharactersChange?.(fresh);
     } catch {
       // Silently fail — user can refresh
     } finally {
       setLoading(false);
     }
-  }, [seriesId]);
+  }, [seriesId, onCharactersChange]);
 
   useEffect(() => {
     fetchCharacters();
