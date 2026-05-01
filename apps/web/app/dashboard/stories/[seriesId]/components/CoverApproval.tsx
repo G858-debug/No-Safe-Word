@@ -84,6 +84,12 @@ export default function CoverApproval({ seriesId }: Props) {
   const [promptRegenJustSucceeded, setPromptRegenJustSucceeded] = useState(false);
   const [eligibleChars, setEligibleChars] = useState<CoverEligibleCharacter[]>([]);
   const [savingCharacter, setSavingCharacter] = useState(false);
+  // Per-slot busy set — tracks which variant indices are currently mid-flight
+  // on their own retry HTTP call, separate from the global `busy` flag (which
+  // covers full-batch operations). Lets the user click Retry on slot 0 and
+  // slot 3 in succession without slot 3's button locking out while slot 0's
+  // POST is still resolving.
+  const [retryingSlots, setRetryingSlots] = useState<Set<number>>(new Set());
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchCover = useCallback(async () => {
@@ -280,33 +286,51 @@ export default function CoverApproval({ seriesId }: Props) {
       .filter((i) => i >= 0);
   }, [state, variants]);
 
+  // Low-level: submits a generation request, merges returned jobIds into
+  // outstandingJobs (so concurrent retries don't clobber each other), and
+  // refreshes cover state. Throws on error so callers can wrap with their
+  // own busy/lock state.
+  async function submitGenerationRequest(body: {
+    prompt?: string;
+    retryVariants?: number[];
+  }) {
+    const res = await fetch(`/api/stories/${seriesId}/generate-cover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as GenerateCoverResponse;
+    if (!res.ok) {
+      if (res.status === 409) {
+        await fetchCover();
+        throw new Error(data.error || "Generation recovered");
+      }
+      throw new Error(data.error || "Generation failed");
+    }
+    const newIds = data.jobIds ?? [];
+    if (newIds.length > 0) {
+      // MERGE — preserve any in-flight jobs from prior submissions so the
+      // 3s polling loop continues to drive them. Replacing here would
+      // strand earlier retries with no client-side polling.
+      setOutstandingJobs((prev) =>
+        Array.from(new Set([...prev, ...newIds]))
+      );
+    }
+    const regeneratedIndices: number[] =
+      body.retryVariants ?? Array.from({ length: VARIANT_COUNT }, (_, i) => i);
+    const now = Date.now();
+    setVariantTs((prev) =>
+      prev.map((ts, i) => (regeneratedIndices.includes(i) ? now : ts))
+    );
+    await fetchCover();
+  }
+
   async function generate(body: { prompt?: string; retryVariants?: number[] }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/stories/${seriesId}/generate-cover`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as GenerateCoverResponse;
-      if (!res.ok) {
-        // 409 means the server recovered a stuck state — refresh to show what's there.
-        if (res.status === 409) {
-          await fetchCover();
-          setError(data.error || "Generation recovered");
-        } else {
-          setError(data.error || "Generation failed");
-        }
-        return;
-      }
-      setOutstandingJobs(data.jobIds ?? []);
+      await submitGenerationRequest(body);
       setPromptDirty(false);
-      // Bust cache for the regenerated slots so the browser loads the new image
-      const regeneratedIndices: number[] = body.retryVariants ?? Array.from({ length: VARIANT_COUNT }, (_, i) => i);
-      const now = Date.now();
-      setVariantTs((prev) => prev.map((ts, i) => regeneratedIndices.includes(i) ? now : ts));
-      await fetchCover();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
@@ -357,7 +381,26 @@ export default function CoverApproval({ seriesId }: Props) {
   }
 
   async function handleRetrySingle(index: number) {
-    await generate({ retryVariants: [index] });
+    // Per-slot retry uses the per-slot busy set instead of the global `busy`
+    // flag, so the user can fire off multiple slot retries in quick succession
+    // without each click locking the rest of the cover UI.
+    setRetryingSlots((prev) => {
+      const next = new Set(prev);
+      next.add(index);
+      return next;
+    });
+    setError(null);
+    try {
+      await submitGenerationRequest({ retryVariants: [index] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
+    } finally {
+      setRetryingSlots((prev) => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      });
+    }
   }
 
   async function handleCancelCover() {
@@ -670,6 +713,18 @@ export default function CoverApproval({ seriesId }: Props) {
           <div className="grid grid-cols-2 gap-3">
             {variants.map((url, i) => {
               const jobState = coverJobStates.find((j) => j.variant_index === i) ?? null;
+              const slotIsActive =
+                jobState?.status === "pending" || jobState?.status === "processing";
+              const slotIsBusy = retryingSlots.has(i);
+              // A slot can be retried if it's not currently being generated
+              // AND we're not mid-flight on its own retry HTTP call. This is
+              // independent of the global cover_status — partial retries can
+              // fire concurrently with other slots in flight.
+              const canRetryThisSlot =
+                !slotIsActive &&
+                !slotIsBusy &&
+                state.cover_status !== "compositing" &&
+                state.cover_status !== "pending";
               return (
                 <VariantSlot
                   key={i}
@@ -679,7 +734,7 @@ export default function CoverApproval({ seriesId }: Props) {
                   jobStatus={jobState?.status ?? null}
                   jobCreatedAtMs={jobState ? new Date(jobState.created_at).getTime() : null}
                   nowMs={nowMs}
-                  isGenerating={isGenerating}
+                  isGenerating={slotIsActive}
                   isSelected={selectedIdx === i}
                   canSelect={
                     state.cover_status === "variants_ready" ||
@@ -688,17 +743,14 @@ export default function CoverApproval({ seriesId }: Props) {
                   }
                   onSelect={() => setPendingSelection(i)}
                   onRegenerate={() => handleRetrySingle(i)}
-                  canRegenerate={
-                    !busy &&
-                    !isGenerating &&
-                    (state.cover_status === "variants_ready" ||
-                      state.cover_status === "approved" ||
-                      state.cover_status === "complete")
-                  }
+                  canRegenerate={canRetryThisSlot}
                   onRetry={() => handleRetrySingle(i)}
-                  retryDisabled={busy || isGenerating}
+                  retryDisabled={!canRetryThisSlot}
                   showFailed={
-                    state.cover_status === "variants_ready" && url === null
+                    !slotIsActive &&
+                    !slotIsBusy &&
+                    url === null &&
+                    state.cover_status !== "pending"
                   }
                 />
               );

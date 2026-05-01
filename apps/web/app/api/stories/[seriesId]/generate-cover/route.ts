@@ -86,56 +86,77 @@ export async function POST(
   }
 
   // 2. Guard in-flight states
-  if (series.cover_status === "generating" || series.cover_status === "compositing") {
-    if (series.cover_status === "compositing") {
-      return NextResponse.json(
-        { error: "Cover is currently compositing. Wait for compositing to finish before regenerating." },
-        { status: 400 }
-      );
-    }
+  if (series.cover_status === "compositing") {
+    return NextResponse.json(
+      { error: "Cover is currently compositing. Wait for compositing to finish before regenerating." },
+      { status: 400 }
+    );
+  }
 
-    // For 'generating': allow retrying if there are no pending RunPod jobs
-    // for this series. Hunyuan never creates generation_jobs rows, so a
-    // stuck Hunyuan request leaves cover_status='generating' forever.
-    // Flux jobs that time out have the same problem once their jobs expire.
-    const { count: pendingJobCount } = await supabase
+  if (series.cover_status === "generating") {
+    // Identify variants currently being generated so we can decide whether
+    // this request conflicts with in-flight work.
+    const { data: activeJobs } = await supabase
       .from("generation_jobs")
-      .select("id", { count: "exact", head: true })
+      .select("variant_index")
       .eq("series_id", seriesId)
       .eq("job_type", "cover_variant")
-      .in("status", ["pending"]);
+      .in("status", ["pending", "processing"]);
+    const activeIndices = new Set(
+      (activeJobs ?? [])
+        .map((j) => j.variant_index)
+        .filter((i): i is number => typeof i === "number")
+    );
 
-    if ((pendingJobCount ?? 0) > 0) {
+    if (isPartialRetry) {
+      // Partial retries can run concurrently with in-flight jobs as long as
+      // the SPECIFIC slots being retried aren't already active. Lets the user
+      // queue multiple per-slot retries from the dashboard without waiting
+      // for the first one to finish.
+      const conflicting = retryVariants!.filter((i) => activeIndices.has(i));
+      if (conflicting.length > 0) {
+        const plural = conflicting.length > 1;
+        return NextResponse.json(
+          {
+            error: `Variant${plural ? "s" : ""} ${conflicting.join(", ")} ${plural ? "are" : "is"} already generating. Wait for ${plural ? "those slots" : "that slot"} to complete before retrying.`,
+          },
+          { status: 400 }
+        );
+      }
+      // No conflict — fall through; the partial-retry path below will submit
+      // jobs for the requested slots while leaving the active ones alone.
+    } else if (activeIndices.size > 0) {
+      // Full regenerate while jobs are in flight — refuse.
       return NextResponse.json(
         { error: "Cover is currently generating. Wait for variants to complete before regenerating." },
         { status: 400 }
       );
+    } else {
+      // No active jobs — cover_status='generating' is stale. Recover:
+      // If any variants already exist and this is a full regeneration request,
+      // restore to variants_ready so the user can retry only the missing slots
+      // instead of discarding existing results.
+      const existingVariants = (series.cover_variants as (string | null)[] | null) ?? [];
+      const hasAnyVariant = existingVariants.some(Boolean);
+
+      if (hasAnyVariant) {
+        await supabase
+          .from("story_series")
+          .update({ cover_status: "variants_ready", cover_error: null })
+          .eq("id", seriesId);
+        return NextResponse.json(
+          {
+            error:
+              "Previous generation was interrupted. Existing variants have been restored — hover over a variant to regenerate individual slots, or click Generate 4 Variants to start fresh.",
+            coverStatus: "variants_ready",
+          },
+          { status: 409 }
+        );
+      }
+
+      // No variants at all — full regenerate falls through.
+      console.log(`[generate-cover] auto-recovering stuck 'generating' state for series ${seriesId}`);
     }
-
-    // No pending jobs — state is stale. Recover:
-    // If any variants already exist and this is a full regeneration request,
-    // restore to variants_ready so the user can retry only the missing slots
-    // instead of discarding existing results.
-    const existingVariants = (series.cover_variants as (string | null)[] | null) ?? [];
-    const hasAnyVariant = existingVariants.some(Boolean);
-
-    if (hasAnyVariant && !isPartialRetry) {
-      await supabase
-        .from("story_series")
-        .update({ cover_status: "variants_ready", cover_error: null })
-        .eq("id", seriesId);
-      return NextResponse.json(
-        {
-          error:
-            "Previous generation was interrupted. Existing variants have been restored — hover over a variant to regenerate individual slots, or click Generate 4 Variants to start fresh.",
-          coverStatus: "variants_ready",
-        },
-        { status: 409 }
-      );
-    }
-
-    // No variants at all (or explicit partial retry) — fall through.
-    console.log(`[generate-cover] auto-recovering stuck 'generating' state for series ${seriesId}`);
   }
 
   // 3. Resolve effective prompt
