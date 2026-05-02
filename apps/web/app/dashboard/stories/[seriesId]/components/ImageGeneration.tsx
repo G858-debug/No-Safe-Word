@@ -732,6 +732,27 @@ export default function ImageGeneration({
           return;
         }
 
+        // If the route auto-drafted final_prompt server-side (because the
+        // user clicked Generate before ever drafting), pull the new text
+        // into the editor so the textarea fills in immediately.
+        if (data?.auto_drafted) {
+          try {
+            const refetch = await fetch(`/api/stories/images/${promptId}`);
+            if (refetch.ok) {
+              const row = await refetch.json();
+              if (row?.final_prompt) {
+                updatePrompt(promptId, {
+                  finalPromptText: row.final_prompt,
+                  savedFinalPromptText: row.final_prompt,
+                  finalPromptDraftedAt: row.final_prompt_drafted_at ?? null,
+                });
+              }
+            }
+          } catch {
+            // non-fatal — the row will pick up final_prompt on next page load
+          }
+        }
+
         // Sync success path (Replicate-style) — response includes image URL.
         if (data?.imageUrl) {
           updatePrompt(promptId, {
