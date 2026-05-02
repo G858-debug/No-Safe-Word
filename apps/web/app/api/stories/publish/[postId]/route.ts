@@ -69,40 +69,86 @@ export async function POST(
       );
     }
 
-    // 2. Fetch the approved facebook_sfw image for this post
+    // 2. Fetch all approved facebook_sfw images for this post
     const { data: imagePrompts } = await supabase
       .from("story_image_prompts")
       .select("id, image_id, position")
       .eq("post_id", postId)
       .eq("image_type", "facebook_sfw")
       .eq("status", "approved")
-      .order("position", { ascending: true })
-      .limit(1);
+      .order("position", { ascending: true });
 
-    let imageUrl: string | null = null;
+    const imageUrls: string[] = [];
 
-    if (imagePrompts && imagePrompts.length > 0 && imagePrompts[0].image_id) {
-      const { data: image } = await supabase
-        .from("images")
-        .select("stored_url, sfw_url")
-        .eq("id", imagePrompts[0].image_id)
-        .single();
+    if (imagePrompts && imagePrompts.length > 0) {
+      const imageIds = imagePrompts
+        .map((p) => p.image_id)
+        .filter((id): id is string => !!id);
 
-      imageUrl = image?.stored_url || image?.sfw_url || null;
+      if (imageIds.length > 0) {
+        const { data: images } = await supabase
+          .from("images")
+          .select("id, stored_url, sfw_url")
+          .in("id", imageIds);
+
+        // Preserve prompt order (sorted by position above)
+        for (const id of imageIds) {
+          const image = images?.find((i) => i.id === id);
+          const url = image?.stored_url || image?.sfw_url;
+          if (!url) {
+            return NextResponse.json(
+              {
+                error: "Approved image is missing a stored URL",
+                details: `image ${id} has no stored_url or sfw_url`,
+              },
+              { status: 500 }
+            );
+          }
+          imageUrls.push(url);
+        }
+      }
     }
 
     // 3. Publish to Facebook
     let facebookPostId: string;
 
-    if (imageUrl) {
-      // Photo post with message
+    if (imageUrls.length === 0) {
+      // Text-only post (fallback if no approved image)
+      const feedResponse = await fetch(
+        `${GRAPH_API}/${pageId}/feed`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: post.facebook_content,
+            access_token: pageToken,
+          }),
+        }
+      );
+
+      if (!feedResponse.ok) {
+        const fbError = await feedResponse.text();
+        return NextResponse.json(
+          {
+            error: "Facebook API error",
+            details: fbError,
+            status_code: feedResponse.status,
+          },
+          { status: 502 }
+        );
+      }
+
+      const feedData: { id: string } = await feedResponse.json();
+      facebookPostId = feedData.id;
+    } else if (imageUrls.length === 1) {
+      // Single-photo post with message attached directly to the photo
       const photoResponse = await fetch(
         `${GRAPH_API}/${pageId}/photos`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            url: imageUrl,
+            url: imageUrls[0],
             message: post.facebook_content,
             access_token: pageToken,
           }),
@@ -124,7 +170,45 @@ export async function POST(
       const photoData: FacebookPhotoResponse = await photoResponse.json();
       facebookPostId = photoData.post_id || photoData.id;
     } else {
-      // Text-only post (fallback if no approved image)
+      // Multi-photo post: upload each photo unpublished, then attach to a feed post.
+      const mediaIds: string[] = [];
+
+      for (const url of imageUrls) {
+        const photoResponse = await fetch(
+          `${GRAPH_API}/${pageId}/photos`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url,
+              published: false,
+              access_token: pageToken,
+            }),
+          }
+        );
+
+        if (!photoResponse.ok) {
+          const fbError = await photoResponse.text();
+          return NextResponse.json(
+            {
+              error: "Facebook API error during multi-photo upload",
+              details: fbError,
+              status_code: photoResponse.status,
+              uploaded_so_far: mediaIds.length,
+            },
+            { status: 502 }
+          );
+        }
+
+        const photoData: FacebookPhotoResponse = await photoResponse.json();
+        mediaIds.push(photoData.id);
+      }
+
+      const attachedMedia: Record<string, { media_fbid: string }> = {};
+      mediaIds.forEach((id, idx) => {
+        attachedMedia[`attached_media[${idx}]`] = { media_fbid: id };
+      });
+
       const feedResponse = await fetch(
         `${GRAPH_API}/${pageId}/feed`,
         {
@@ -133,6 +217,7 @@ export async function POST(
           body: JSON.stringify({
             message: post.facebook_content,
             access_token: pageToken,
+            ...attachedMedia,
           }),
         }
       );
@@ -141,7 +226,7 @@ export async function POST(
         const fbError = await feedResponse.text();
         return NextResponse.json(
           {
-            error: "Facebook API error",
+            error: "Facebook API error during multi-photo feed publish",
             details: fbError,
             status_code: feedResponse.status,
           },

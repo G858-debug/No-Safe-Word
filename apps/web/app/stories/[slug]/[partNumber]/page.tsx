@@ -147,8 +147,10 @@ export default async function ChapterPage({ params }: PageProps) {
     ? post.website_content
     : truncateToWords(post.website_content, 300);
 
-  // 6. Fetch approved website images for this post (only if has access)
+  // 6. Fetch approved website images for this post (only if has access).
+  //    Hero SFW images render above the story body; everything else is inline.
   let inlineImages: { url: string; afterWord: number; alt: string }[] = [];
+  let heroImages: { url: string; alt: string }[] = [];
 
   if (hasAccess) {
     const { data: imagePrompts } = await supabase
@@ -158,7 +160,11 @@ export default async function ChapterPage({ params }: PageProps) {
       )
       .eq("post_id", post.id)
       .eq("status", "approved")
-      .in("image_type", ["website_nsfw_paired", "website_only"]);
+      .in("image_type", [
+        "facebook_sfw",
+        "website_nsfw_paired",
+        "website_only",
+      ]);
 
     const imageIds = (imagePrompts || [])
       .map((ip) => ip.image_id)
@@ -182,7 +188,12 @@ export default async function ChapterPage({ params }: PageProps) {
 
     // For paired images without position_after_word, look up the paired prompt
     const pairedIds = (imagePrompts || [])
-      .filter((ip) => ip.pairs_with && ip.position_after_word == null)
+      .filter(
+        (ip) =>
+          ip.image_type === "website_nsfw_paired" &&
+          ip.pairs_with &&
+          ip.position_after_word == null
+      )
       .map((ip) => ip.pairs_with!);
 
     let pairedPositions: Record<string, number | null> = {};
@@ -199,8 +210,20 @@ export default async function ChapterPage({ params }: PageProps) {
       }
     }
 
-    inlineImages = (imagePrompts || [])
-      .filter((ip) => ip.image_id && imageUrlMap[ip.image_id])
+    const usableImagePrompts = (imagePrompts || []).filter(
+      (ip) => ip.image_id && imageUrlMap[ip.image_id]
+    );
+
+    heroImages = usableImagePrompts
+      .filter((ip) => ip.image_type === "facebook_sfw")
+      .sort((a, b) => a.position - b.position)
+      .map((ip) => ({
+        url: imageUrlMap[ip.image_id!],
+        alt: ip.character_name || "Story illustration",
+      }));
+
+    inlineImages = usableImagePrompts
+      .filter((ip) => ip.image_type !== "facebook_sfw")
       .map((ip) => {
         let afterWord: number | null = ip.position_after_word;
 
@@ -260,6 +283,21 @@ export default async function ChapterPage({ params }: PageProps) {
 
         {/* Story content */}
         <div className="mx-auto max-w-reader">
+          {heroImages.length > 0 && (
+            <div className="mb-10">
+              {heroImages.map((img, idx) => (
+                <figure key={`hero-${idx}`} className="my-10">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.url}
+                    alt={img.alt}
+                    className="story-image"
+                    loading={idx === 0 ? "eager" : "lazy"}
+                  />
+                </figure>
+              ))}
+            </div>
+          )}
           <StoryRenderer text={displayContent} images={inlineImages} />
         </div>
 

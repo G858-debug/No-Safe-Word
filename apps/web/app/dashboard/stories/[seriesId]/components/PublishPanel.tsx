@@ -184,15 +184,24 @@ export default function PublishPanel({
   // Helpers
   // ---------------------------------------------------------------------------
 
-  const getPostSfwImage = useCallback(
-    (post: PostData): string | null => {
-      const sfwPrompt = post.story_image_prompts.find(
-        (ip) =>
-          ip.image_type === "facebook_sfw" &&
-          ip.status === "approved" &&
-          ip.image_id
-      );
-      return sfwPrompt?.image_id ? imageUrls[sfwPrompt.image_id] || null : null;
+  const getPostSfwImages = useCallback(
+    (
+      post: PostData
+    ): Array<{ promptId: string; url: string; alt: string }> => {
+      return post.story_image_prompts
+        .filter(
+          (ip) =>
+            ip.image_type === "facebook_sfw" &&
+            ip.status === "approved" &&
+            ip.image_id &&
+            imageUrls[ip.image_id]
+        )
+        .sort((a, b) => a.position - b.position)
+        .map((ip) => ({
+          promptId: ip.id,
+          url: imageUrls[ip.image_id as string],
+          alt: ip.character_name || post.title,
+        }));
     },
     [imageUrls]
   );
@@ -409,18 +418,24 @@ export default function PublishPanel({
 
   const downloadImage = useCallback(
     (post: PostData) => {
-      const sfwUrl = getPostSfwImage(post);
-      if (!sfwUrl) return;
+      const sfwImages = getPostSfwImages(post);
+      if (sfwImages.length === 0) return;
 
-      const a = document.createElement("a");
-      a.href = sfwUrl;
-      a.download = `${post.title.replace(/[^a-z0-9]/gi, "_")}_sfw.jpg`;
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const safeTitle = post.title.replace(/[^a-z0-9]/gi, "_");
+      sfwImages.forEach((img, idx) => {
+        const a = document.createElement("a");
+        a.href = img.url;
+        a.download =
+          sfwImages.length === 1
+            ? `${safeTitle}_sfw.jpg`
+            : `${safeTitle}_sfw_${idx + 1}.jpg`;
+        a.target = "_blank";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
     },
-    [getPostSfwImage]
+    [getPostSfwImages]
   );
 
   const handleSchedule = useCallback(async () => {
@@ -512,22 +527,44 @@ export default function PublishPanel({
   function renderWebsiteContent(post: PostData) {
     const text = post.website_content;
     const images = getWebsiteImages(post);
+    const sfwImages = getPostSfwImages(post);
     const paragraphs = text.split(/\n\n+/);
 
-    if (images.length === 0) {
-      return paragraphs.map((para, i) => (
-        <p key={i} className="mb-4 leading-relaxed text-zinc-300">
-          {para.split("\n").map((line, j) => (
-            <span key={j}>
-              {j > 0 && <br />}
-              {line}
-            </span>
-          ))}
-        </p>
-      ));
+    const result: React.ReactNode[] = [];
+
+    // Hero SFW images at the top of the post, in `position` order.
+    for (const img of sfwImages) {
+      result.push(
+        <figure
+          key={`sfw-${img.promptId}`}
+          className="my-6 mx-auto max-w-md"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={img.url}
+            alt={img.alt}
+            className="rounded-lg w-full shadow-lg shadow-black/40"
+          />
+        </figure>
+      );
     }
 
-    const result: React.ReactNode[] = [];
+    if (images.length === 0) {
+      paragraphs.forEach((para, i) => {
+        result.push(
+          <p key={`p-${i}`} className="mb-4 leading-relaxed text-zinc-300">
+            {para.split("\n").map((line, j) => (
+              <span key={j}>
+                {j > 0 && <br />}
+                {line}
+              </span>
+            ))}
+          </p>
+        );
+      });
+      return result;
+    }
+
     let cumulativeWords = 0;
     let imageIdx = 0;
 
@@ -594,7 +631,7 @@ export default function PublishPanel({
   // ---------------------------------------------------------------------------
 
   function renderFacebookPreview(post: PostData) {
-    const sfwImageUrl = getPostSfwImage(post);
+    const sfwImages = getPostSfwImages(post);
     const isEditing =
       editingField?.postId === post.id &&
       editingField.field === "facebook_content";
@@ -675,15 +712,18 @@ export default function PublishPanel({
             </div>
           )}
 
-          {/* Image */}
-          {sfwImageUrl && (
+          {/* Image(s) — multi-photo posts stack vertically, matching Facebook's layout */}
+          {sfwImages.length > 0 && (
             <div className="w-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={sfwImageUrl}
-                alt={post.title}
-                className="w-full object-cover"
-              />
+              {sfwImages.map((img, idx) => (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  key={img.promptId}
+                  src={img.url}
+                  alt={img.alt}
+                  className={`w-full object-cover ${idx > 0 ? "border-t border-white" : ""}`}
+                />
+              ))}
             </div>
           )}
 
@@ -1016,7 +1056,7 @@ export default function PublishPanel({
         const isExpanded = expandedPosts.has(post.id);
         const postStatus =
           POST_STATUS_CONFIG[post.status] || POST_STATUS_CONFIG.draft;
-        const sfwImageUrl = getPostSfwImage(post);
+        const sfwImages = getPostSfwImages(post);
         const imagesReady = postImagesReady(post);
         const isPublishing = publishing === post.id;
         const isCopied = copied === post.id;
@@ -1149,15 +1189,17 @@ export default function PublishPanel({
                       {isCopied ? "Copied!" : "Copy Text"}
                     </Button>
 
-                    {/* Download image */}
-                    {sfwImageUrl && (
+                    {/* Download image(s) */}
+                    {sfwImages.length > 0 && (
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => downloadImage(post)}
                       >
                         <Download className="mr-2 h-4 w-4" />
-                        Image
+                        {sfwImages.length > 1
+                          ? `Images (${sfwImages.length})`
+                          : "Image"}
                       </Button>
                     )}
                   </div>
