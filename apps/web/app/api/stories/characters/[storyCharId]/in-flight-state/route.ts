@@ -181,6 +181,7 @@ export async function GET(
                 candidateBody?.sfw_url || candidateBody?.stored_url || null,
               body_job_id: bodyJob?.job_id ?? null,
               body_status: bodyJob?.status ?? null,
+              body_prompt: candidateBody?.prompt ?? null,
               body_created_at: candidateBody?.created_at ?? null,
             }
           : null,

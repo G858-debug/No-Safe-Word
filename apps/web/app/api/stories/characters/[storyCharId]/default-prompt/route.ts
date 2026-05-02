@@ -5,11 +5,19 @@ import {
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 
+// GET /api/stories/characters/[storyCharId]/default-prompt?stage=face|body
+//
+// Returns the auto-built prompt for the requested stage. Stage defaults to
+// "face" so existing callers are unaffected; "body" is used by the body
+// textarea introduced for editable per-stage prompts.
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
   const { storyCharId } = await props.params;
+  const url = new URL(request.url);
+  const stage: "face" | "body" =
+    url.searchParams.get("stage") === "body" ? "body" : "face";
 
   const { data: storyChar } = await supabase
     .from("story_characters")
@@ -33,8 +41,8 @@ export async function GET(
 
   const prompt = buildCharacterPortraitPrompt(
     character.description as PortraitCharacterDescription,
-    "face"
+    stage
   );
 
-  return NextResponse.json({ prompt });
+  return NextResponse.json({ prompt, stage });
 }

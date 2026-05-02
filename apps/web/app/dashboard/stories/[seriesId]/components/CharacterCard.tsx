@@ -41,16 +41,18 @@ interface Props {
 
 type CardState =
   | { kind: "loading_default_prompt" }
-  | { kind: "idle"; prompt: string; error?: string }
+  | { kind: "idle"; prompt: string; bodyPrompt: string; error?: string }
   | {
       kind: "generating_face";
       prompt: string;
+      bodyPrompt: string;
       faceJobId: string;
       faceImageId: string;
     }
   | {
       kind: "generating_body";
       prompt: string;
+      bodyPrompt: string;
       faceImageId: string;
       faceUrl: string;
       bodyJobId?: string;
@@ -59,6 +61,7 @@ type CardState =
   | {
       kind: "pre_approval";
       prompt: string;
+      bodyPrompt: string;
       faceImageId: string;
       faceUrl: string;
       bodyImageId: string;
@@ -67,6 +70,7 @@ type CardState =
   | {
       kind: "approving";
       prompt: string;
+      bodyPrompt: string;
       faceImageId: string;
       faceUrl: string;
       bodyImageId: string;
@@ -169,8 +173,9 @@ type CardState =
 type HydrationPayload = { state: CardState };
 
 type Action =
-  | { type: "DEFAULT_PROMPT_LOADED"; prompt: string }
+  | { type: "DEFAULT_PROMPT_LOADED"; prompt: string; bodyPrompt: string }
   | { type: "PROMPT_EDITED"; prompt: string }
+  | { type: "BODY_PROMPT_EDITED"; bodyPrompt: string }
   | { type: "GENERATE_CLICKED" }
   | { type: "FACE_STARTED"; faceJobId: string; faceImageId: string }
   | { type: "FACE_COMPLETED"; faceUrl: string }
@@ -187,6 +192,7 @@ type Action =
       faceImageId: string;
       faceUrl: string;
       prompt: string;
+      bodyPrompt: string;
     }
   | { type: "CANDIDATE_FACE_STARTED"; jobId: string; imageId: string }
   | { type: "CANDIDATE_FACE_COMPLETED"; url: string }
@@ -214,7 +220,7 @@ type Action =
 function computeRecoveryState(state: CardState): CardState {
   switch (state.kind) {
     case "loading_default_prompt":
-      return { kind: "idle", prompt: "" };
+      return { kind: "idle", prompt: "", bodyPrompt: "" };
     case "idle":
       return state;
     case "approved":
@@ -223,7 +229,11 @@ function computeRecoveryState(state: CardState): CardState {
     case "generating_body":
     case "pre_approval":
     case "approving":
-      return { kind: "idle", prompt: state.prompt };
+      return {
+        kind: "idle",
+        prompt: state.prompt,
+        bodyPrompt: state.bodyPrompt,
+      };
     case "regenerating_full_face":
     case "regenerating_full_body":
     case "regenerating_body_only":
@@ -269,11 +279,19 @@ function reducer(state: CardState, action: Action): CardState {
 
     case "DEFAULT_PROMPT_LOADED":
       if (state.kind !== "loading_default_prompt") return state;
-      return { kind: "idle", prompt: action.prompt };
+      return {
+        kind: "idle",
+        prompt: action.prompt,
+        bodyPrompt: action.bodyPrompt,
+      };
 
     case "PROMPT_EDITED":
       if (state.kind !== "idle") return state;
       return { ...state, prompt: action.prompt };
+
+    case "BODY_PROMPT_EDITED":
+      if (state.kind !== "idle") return state;
+      return { ...state, bodyPrompt: action.bodyPrompt };
 
     case "GENERATE_CLICKED":
       // Marker — clears any inline error on idle. The real transition
@@ -286,6 +304,7 @@ function reducer(state: CardState, action: Action): CardState {
       return {
         kind: "generating_face",
         prompt: state.prompt,
+        bodyPrompt: state.bodyPrompt,
         faceJobId: action.faceJobId,
         faceImageId: action.faceImageId,
       };
@@ -295,6 +314,7 @@ function reducer(state: CardState, action: Action): CardState {
       return {
         kind: "generating_body",
         prompt: state.prompt,
+        bodyPrompt: state.bodyPrompt,
         faceImageId: state.faceImageId,
         faceUrl: action.faceUrl,
       };
@@ -313,6 +333,7 @@ function reducer(state: CardState, action: Action): CardState {
       return {
         kind: "pre_approval",
         prompt: state.prompt,
+        bodyPrompt: state.bodyPrompt,
         faceImageId: state.faceImageId,
         faceUrl: state.faceUrl,
         bodyImageId: state.bodyImageId,
@@ -340,7 +361,11 @@ function reducer(state: CardState, action: Action): CardState {
 
     case "CANCELLED":
       if (state.kind !== "pre_approval") return state;
-      return { kind: "idle", prompt: state.prompt };
+      return {
+        kind: "idle",
+        prompt: state.prompt,
+        bodyPrompt: state.bodyPrompt,
+      };
 
     case "REGEN_FULL_CLICKED":
     case "REGEN_BODY_ONLY_CLICKED":
@@ -353,6 +378,7 @@ function reducer(state: CardState, action: Action): CardState {
       return {
         kind: "generating_body",
         prompt: action.prompt,
+        bodyPrompt: action.bodyPrompt,
         faceImageId: action.faceImageId,
         faceUrl: action.faceUrl,
       };
@@ -615,6 +641,16 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       try {
         let faceImageId: string;
         let faceJobId: string;
+        // Capture bodyPrompt up-front. Reducer state may change between now
+        // and the /generate-body POST; the closure value is stable.
+        let bodyPromptToSend: string | undefined;
+        if (
+          initial.kind === "idle" ||
+          initial.kind === "generating_face" ||
+          initial.kind === "generating_body"
+        ) {
+          bodyPromptToSend = initial.bodyPrompt.trim() || undefined;
+        }
 
         if (initial.kind === "idle") {
           const res = await fetch(
@@ -666,7 +702,10 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ face_image_id: faceImageId }),
+            body: JSON.stringify({
+              face_image_id: faceImageId,
+              prompt: bodyPromptToSend,
+            }),
           }
         );
         const bodyData = (await bodyRes.json()) as {
@@ -957,7 +996,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     submittingRef.current = true;
     try {
       if (current.kind === "pre_approval") {
-        const { faceImageId, faceUrl, prompt, bodyImageId } = current;
+        const { faceImageId, faceUrl, prompt, bodyPrompt, bodyImageId } =
+          current;
         dispatch({ type: "REGEN_BODY_ONLY_CLICKED" });
         await cleanupImage(bodyImageId);
         dispatch({
@@ -965,6 +1005,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           faceImageId,
           faceUrl,
           prompt,
+          bodyPrompt,
         });
 
         try {
@@ -973,7 +1014,10 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ face_image_id: faceImageId }),
+              body: JSON.stringify({
+                face_image_id: faceImageId,
+                prompt: bodyPrompt.trim() || undefined,
+              }),
             }
           );
           const data = (await res.json()) as {
@@ -1083,19 +1127,30 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       // loading_default_prompt spinner indefinitely — mount-time
       // hydration is gated by hydratedRef and only runs once.
       try {
-        const dpRes = await fetch(
-          `/api/stories/characters/${character.id}/default-prompt`
-        );
-        const dpData = (await dpRes.json()) as { prompt?: string };
+        const [faceRes, bodyRes] = await Promise.all([
+          fetch(
+            `/api/stories/characters/${character.id}/default-prompt?stage=face`
+          ),
+          fetch(
+            `/api/stories/characters/${character.id}/default-prompt?stage=body`
+          ),
+        ]);
+        const faceData = (await faceRes.json()) as { prompt?: string };
+        const bodyData = (await bodyRes.json()) as { prompt?: string };
         if (isMountedRef.current) {
           dispatch({
             type: "DEFAULT_PROMPT_LOADED",
-            prompt: dpData.prompt ?? "",
+            prompt: faceData.prompt ?? "",
+            bodyPrompt: bodyData.prompt ?? "",
           });
         }
       } catch {
         if (isMountedRef.current) {
-          dispatch({ type: "DEFAULT_PROMPT_LOADED", prompt: "" });
+          dispatch({
+            type: "DEFAULT_PROMPT_LOADED",
+            prompt: "",
+            bodyPrompt: "",
+          });
         }
       }
     } catch (err) {
@@ -1109,6 +1164,10 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
 
   const handlePromptEdit = useCallback((prompt: string) => {
     dispatch({ type: "PROMPT_EDITED", prompt });
+  }, []);
+
+  const handleBodyPromptEdit = useCallback((bodyPrompt: string) => {
+    dispatch({ type: "BODY_PROMPT_EDITED", bodyPrompt });
   }, []);
 
   // ───────────────────────────────────────────────────────────
@@ -1133,6 +1192,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       body_url: string | null;
       body_job_id: string | null;
       body_status: string | null;
+      body_prompt: string | null;
       body_created_at: string | null;
     } | null;
   };
@@ -1143,10 +1203,12 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       const p = resp.pending;
       const lockedPrompt = character.portrait_prompt_locked ?? "";
 
-      const fetchDefault = async (): Promise<string> => {
+      const fetchDefault = async (
+        stage: "face" | "body" = "face"
+      ): Promise<string> => {
         try {
           const r = await fetch(
-            `/api/stories/characters/${character.id}/default-prompt`
+            `/api/stories/characters/${character.id}/default-prompt?stage=${stage}`
           );
           const d = (await r.json()) as { prompt?: string };
           return d.prompt ?? "";
@@ -1245,6 +1307,11 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       // Not approved + pending
       if (!a.face_url && p) {
         const prompt = p.face_prompt ?? "";
+        // The body prompt that was actually submitted is on the body image
+        // row (or its in-flight twin). Falls back to the auto-built body
+        // default for hydration paths where body hasn't started yet.
+        const bodyPrompt =
+          p.body_prompt ?? (await fetchDefault("body"));
         const faceDone = p.face_status === "completed" && p.face_url;
         const bodyDone = p.body_status === "completed" && p.body_url;
         const faceInFlight =
@@ -1256,6 +1323,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           return {
             kind: "pre_approval",
             prompt,
+            bodyPrompt,
             faceImageId: p.face_image_id!,
             faceUrl: p.face_url!,
             bodyImageId: p.body_image_id!,
@@ -1266,6 +1334,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           return {
             kind: "generating_body",
             prompt,
+            bodyPrompt,
             faceImageId: p.face_image_id!,
             faceUrl: p.face_url!,
             bodyJobId: p.body_job_id,
@@ -1276,6 +1345,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           return {
             kind: "generating_face",
             prompt,
+            bodyPrompt,
             faceJobId: p.face_job_id,
             faceImageId: p.face_image_id,
           };
@@ -1285,12 +1355,23 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           "[hydrate] ambiguous pre-approval pending — falling back to idle",
           p
         );
-        return { kind: "idle", prompt: prompt || (await fetchDefault()) };
+        return {
+          kind: "idle",
+          prompt: prompt || (await fetchDefault("face")),
+          bodyPrompt,
+        };
       }
 
       // Not approved + no pending
-      const prompt = await fetchDefault();
-      return { kind: "idle", prompt };
+      const [facePromptDefault, bodyPromptDefault] = await Promise.all([
+        fetchDefault("face"),
+        fetchDefault("body"),
+      ]);
+      return {
+        kind: "idle",
+        prompt: facePromptDefault,
+        bodyPrompt: bodyPromptDefault,
+      };
     },
     [character.id, character.portrait_prompt_locked]
   );
@@ -1305,14 +1386,21 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           `/api/stories/characters/${character.id}/in-flight-state`
         );
         if (!res.ok) {
-          const dpRes = await fetch(
-            `/api/stories/characters/${character.id}/default-prompt`
-          );
-          const dpData = (await dpRes.json()) as { prompt?: string };
+          const [faceRes, bodyRes] = await Promise.all([
+            fetch(
+              `/api/stories/characters/${character.id}/default-prompt?stage=face`
+            ),
+            fetch(
+              `/api/stories/characters/${character.id}/default-prompt?stage=body`
+            ),
+          ]);
+          const faceData = (await faceRes.json()) as { prompt?: string };
+          const bodyData = (await bodyRes.json()) as { prompt?: string };
           if (!isMountedRef.current) return;
           dispatch({
             type: "DEFAULT_PROMPT_LOADED",
-            prompt: dpData.prompt ?? "",
+            prompt: faceData.prompt ?? "",
+            bodyPrompt: bodyData.prompt ?? "",
           });
           return;
         }
@@ -1339,7 +1427,11 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         if (isUnmounted(err)) return;
         console.error("[hydrate] failed:", err);
         if (isMountedRef.current) {
-          dispatch({ type: "DEFAULT_PROMPT_LOADED", prompt: "" });
+          dispatch({
+            type: "DEFAULT_PROMPT_LOADED",
+            prompt: "",
+            bodyPrompt: "",
+          });
         }
       }
     })();
@@ -1439,19 +1531,33 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
 
       case "idle":
         return (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Generate a portrait</p>
-            <Textarea
-              value={s.prompt}
-              onChange={(e) => handlePromptEdit(e.target.value)}
-              className="text-sm font-mono"
-              rows={6}
-              placeholder="Generation prompt — edit freely."
-              disabled={disabled}
-            />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Face prompt</p>
+              <Textarea
+                value={s.prompt}
+                onChange={(e) => handlePromptEdit(e.target.value)}
+                className="text-sm font-mono"
+                rows={6}
+                placeholder="Face prompt — sent verbatim to /generate. Clear to fall back to the default."
+                disabled={disabled}
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Body prompt</p>
+              <Textarea
+                value={s.bodyPrompt}
+                onChange={(e) => handleBodyPromptEdit(e.target.value)}
+                className="text-sm font-mono"
+                rows={6}
+                placeholder="Body prompt — sent to /generate-body. Clear to fall back to the default body framing."
+                disabled={disabled}
+              />
+            </div>
             <p className="text-[11px] text-muted-foreground">
-              Edits are sent to the model on Generate and persisted to the
-              character row on Approve.
+              Both prompts are sent on Generate. The face prompt is locked
+              onto the character row at Approve; the body prompt is not
+              persisted.
             </p>
             <div className="flex gap-2">
               <Button
