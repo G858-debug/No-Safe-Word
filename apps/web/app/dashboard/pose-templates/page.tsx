@@ -11,6 +11,7 @@ interface PoseTemplate {
   name: string;
   pose_description: string;
   reference_url: string | null;
+  send_image_to_model: boolean;
   created_at: string;
 }
 
@@ -86,6 +87,25 @@ export default function PoseTemplatesPage() {
     } else {
       const data = await res.json().catch(() => ({}));
       alert(data?.error ?? "Delete failed");
+    }
+  }
+
+  async function toggleSendImage(id: string, next: boolean) {
+    setTemplates((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, send_image_to_model: next } : t))
+    );
+    const res = await fetch(`/api/pose-templates/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ send_image_to_model: next }),
+    });
+    if (!res.ok) {
+      // revert on failure
+      setTemplates((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, send_image_to_model: !next } : t))
+      );
+      const data = await res.json().catch(() => ({}));
+      alert(data?.error ?? "Failed to update flag");
     }
   }
 
@@ -213,6 +233,22 @@ export default function PoseTemplatesPage() {
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
                         {t.pose_description}
                       </p>
+                      <label className="mt-2 flex items-start gap-2 text-[11px] cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={t.send_image_to_model}
+                          onChange={(e) => void toggleSendImage(t.id, e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span className="text-muted-foreground">
+                          Send reference image to Siray as 3rd i2i input
+                          <span className="block text-[10px] text-amber-400/80">
+                            {t.send_image_to_model
+                              ? "ON: image will be sent. Use only for identity-safe references (silhouettes, line drawings)."
+                              : "OFF (recommended): only the pose description text is sent. Reference image is for your visual context only."}
+                          </span>
+                        </span>
+                      </label>
                     </div>
                   </div>
                 </CardContent>

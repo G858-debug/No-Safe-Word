@@ -117,21 +117,28 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
       prompt.secondary_character_id,
     ]);
 
-    // 5b. If a pose template is attached, also send its reference image as
-    //     an additional i2i input. Hunyuan i2i accepts up to 3 references.
+    // 5b. If a pose template is attached AND the template explicitly opts
+    //     in via send_image_to_model, also append its reference image as a
+    //     3rd i2i input. Default is OFF because Hunyuan i2i bleeds the
+    //     reference person's identity into the rendered character — only
+    //     identity-safe references (silhouettes, line drawings) should be
+    //     sent. The pose's text description is consumed by Mistral
+    //     unconditionally; this flag controls only the image channel.
     if (prompt.pose_template_id) {
       const { data: poseRow } = await supabase
         .from("pose_templates")
-        .select("images:image_id(stored_url)")
+        .select("send_image_to_model, images:image_id(stored_url)")
         .eq("id", prompt.pose_template_id)
         .single();
-      const linked = poseRow?.images as
-        | { stored_url: string | null }
-        | { stored_url: string | null }[]
-        | null;
-      const poseImage = Array.isArray(linked) ? linked[0] : linked;
-      if (poseImage?.stored_url) {
-        referenceImageUrls.push(poseImage.stored_url);
+      if (poseRow?.send_image_to_model) {
+        const linked = poseRow.images as
+          | { stored_url: string | null }
+          | { stored_url: string | null }[]
+          | null;
+        const poseImage = Array.isArray(linked) ? linked[0] : linked;
+        if (poseImage?.stored_url) {
+          referenceImageUrls.push(poseImage.stored_url);
+        }
       }
     }
 

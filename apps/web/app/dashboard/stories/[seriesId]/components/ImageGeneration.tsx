@@ -154,6 +154,7 @@ export interface PoseTemplate {
   name: string;
   pose_description: string;
   reference_url: string | null;
+  send_image_to_model: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -2301,23 +2302,30 @@ function PoseTemplatePicker({
         ))}
       </select>
       {selected && (
-        <div className="flex gap-3">
-          {selected.reference_url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={selected.reference_url}
-              alt={selected.name}
-              className="h-20 w-20 rounded border border-border/50 object-cover"
-            />
-          )}
-          <p className="flex-1 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">
-            {selected.pose_description}
+        <div className="space-y-2">
+          <div className="flex gap-3">
+            {selected.reference_url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={selected.reference_url}
+                alt={selected.name}
+                className="h-20 w-20 rounded border border-border/50 object-cover"
+              />
+            )}
+            <p className="flex-1 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">
+              {selected.pose_description}
+            </p>
+          </div>
+          <p className="text-[10px] leading-relaxed text-amber-400/80">
+            {selected.send_image_to_model
+              ? "Reference image WILL be sent to Siray as a 3rd i2i input — only safe for silhouettes / line drawings, otherwise the reference person's identity will bleed into the rendered character."
+              : "Pose description text only — reference image is NOT sent to Siray (recommended for any photo-style reference). Toggle on the management page if your reference is identity-safe."}
           </p>
         </div>
       )}
       <p className="text-[10px] text-muted-foreground">
-        When a template is selected, Mistral writes the prompt around the chosen
-        pose and the template&apos;s reference image is sent to Siray as a 3rd i2i input.
+        Mistral writes the prompt around the chosen pose. The image-vs-text-only
+        behaviour for Siray is controlled per-template on the management page.
       </p>
     </div>
   );

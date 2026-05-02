@@ -10,7 +10,7 @@ import { supabase } from "@no-safe-word/story-engine";
 export async function GET() {
   const { data, error } = await supabase
     .from("pose_templates")
-    .select("id, name, pose_description, image_id, created_at, updated_at, images:image_id(stored_url)")
+    .select("id, name, pose_description, image_id, send_image_to_model, created_at, updated_at, images:image_id(stored_url)")
     .order("name", { ascending: true });
 
   if (error) {
@@ -22,6 +22,7 @@ export async function GET() {
     name: string;
     pose_description: string;
     image_id: string;
+    send_image_to_model: boolean;
     created_at: string;
     updated_at: string;
     images: { stored_url: string | null } | { stored_url: string | null }[] | null;
@@ -35,6 +36,7 @@ export async function GET() {
       name: row.name,
       pose_description: row.pose_description,
       image_id: row.image_id,
+      send_image_to_model: row.send_image_to_model,
       reference_url: image?.stored_url ?? null,
       created_at: row.created_at,
       updated_at: row.updated_at,

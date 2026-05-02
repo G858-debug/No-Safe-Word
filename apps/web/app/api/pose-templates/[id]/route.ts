@@ -2,6 +2,60 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
 /**
+ * PATCH /api/pose-templates/[id]
+ *
+ * Update editable fields on a pose template. Currently:
+ *   - send_image_to_model (boolean)
+ *   - pose_description (string)
+ *   - name (string)
+ */
+export async function PATCH(
+  request: NextRequest,
+  props: { params: Promise<{ id: string }> }
+) {
+  const { id } = await props.params;
+  let body: {
+    send_image_to_model?: boolean;
+    pose_description?: string;
+    name?: string;
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (typeof body.send_image_to_model === "boolean") {
+    updates.send_image_to_model = body.send_image_to_model;
+  }
+  if (typeof body.pose_description === "string" && body.pose_description.trim()) {
+    updates.pose_description = body.pose_description.trim();
+  }
+  if (typeof body.name === "string" && body.name.trim()) {
+    updates.name = body.name.trim();
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No editable fields supplied" }, { status: 400 });
+  }
+
+  const { data, error } = await supabase
+    .from("pose_templates")
+    .update(updates)
+    .eq("id", id)
+    .select("id, name, pose_description, image_id, send_image_to_model, created_at, updated_at")
+    .single();
+
+  if (error) {
+    const status = /duplicate key|unique/i.test(error.message) ? 409 : 500;
+    return NextResponse.json({ error: error.message }, { status });
+  }
+
+  return NextResponse.json({ template: data });
+}
+
+/**
  * DELETE /api/pose-templates/[id]
  *
  * Removes the pose template, its underlying images row, and the file in

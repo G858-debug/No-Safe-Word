@@ -699,6 +699,7 @@ export type Database = {
           image_id: string
           name: string
           pose_description: string
+          send_image_to_model: boolean
           updated_at: string
         }
         Insert: {
@@ -707,6 +708,7 @@ export type Database = {
           image_id: string
           name: string
           pose_description: string
+          send_image_to_model?: boolean
           updated_at?: string
         }
         Update: {
@@ -715,6 +717,7 @@ export type Database = {
           image_id?: string
           name?: string
           pose_description?: string
+          send_image_to_model?: boolean
           updated_at?: string
         }
         Relationships: [
