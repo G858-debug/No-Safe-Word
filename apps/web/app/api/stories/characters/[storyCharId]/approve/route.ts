@@ -126,6 +126,13 @@ export async function POST(
           approved_fullbody_image_id: image_id,
           approved_fullbody_seed: resolvedSeed,
           approved_fullbody_prompt: prompt ?? null,
+          // Body approval also rewrites the locked text used by Hunyuan
+          // scene generation, so a re-approved body propagates to scenes.
+          // `?? undefined` (not `?? null`) means Supabase skips the column
+          // when no prompt was supplied, preserving any existing
+          // face-derived locked text. Re-approving the face is the undo
+          // path when a body's locked text is no longer wanted.
+          portrait_prompt_locked: prompt ?? undefined,
         }
       : {
           approved_image_id: image_id,
