@@ -169,6 +169,8 @@ interface PromptState {
   showFullPromptPreview: boolean;
   critiqueText: string | null;
   critiqueLoading: boolean;
+  savingPrompt: boolean;
+  promptSavedJust: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +319,8 @@ export default function ImageGeneration({
           showFullPromptPreview: false,
           critiqueText: null,
           critiqueLoading: false,
+          savingPrompt: false,
+          promptSavedJust: false,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -329,11 +333,17 @@ export default function ImageGeneration({
     promptPositionMap.current = posMap;
     setPromptStates(initial);
 
-    // For prompts stuck as "generating" from a previous session, check their
-    // actual status via the prompt status endpoint (which also persists
-    // completed images). We don't have jobIds for these, so normal polling
-    // would just leave them stuck.
+    // For prompts stuck as "generating" from a previous session, check
+    // their actual status via the prompt status endpoint. Three branches:
+    //   1. Job has completed since the page was last open → mark generated.
+    //   2. Job has failed → mark failed.
+    //   3. Job is still in flight → resume client-side polling so we
+    //      pick up the result when it lands. Without this, the previous
+    //      version reset the prompt to 'pending' even when the job was
+    //      genuinely still running on Siray, abandoning it silently —
+    //      the result would land server-side but the UI never updated.
     if (staleGeneratingIds.length > 0) {
+      let anyResumed = false;
       Promise.allSettled(
         staleGeneratingIds.map(async (promptId) => {
           try {
@@ -360,8 +370,23 @@ export default function ImageGeneration({
                   error: "Generation failed",
                 },
               }));
+            } else if (data.status === "generating" && data.jobId) {
+              // Job still running — wire it back into the polling loop
+              // so the eventual completion lands in this UI.
+              promptToJobIdRef.current.set(promptId, data.jobId);
+              pollingIdsRef.current.add(promptId);
+              anyResumed = true;
+              setPromptStates((prev) => ({
+                ...prev,
+                [promptId]: {
+                  ...prev[promptId],
+                  status: "generating",
+                  error: null,
+                },
+              }));
             } else {
-              // Still "generating" but no active job — reset to pending so user can retry
+              // 'generating' with no jobId, or 'pending' — nothing to
+              // resume; let the user retry.
               setPromptStates((prev) => ({
                 ...prev,
                 [promptId]: {
@@ -383,7 +408,9 @@ export default function ImageGeneration({
             }));
           }
         })
-      );
+      ).then(() => {
+        if (anyResumed) setIsPolling(true);
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -404,6 +431,48 @@ export default function ImageGeneration({
       }));
     },
     []
+  );
+
+  // Persist textarea edits without triggering generation. Mirrors the
+  // cover-page Save button — without it, edits are lost on refresh
+  // because they only get PATCHed as a side effect of clicking Generate.
+  const handleSavePrompt = useCallback(
+    async (promptId: string) => {
+      const state = promptStates[promptId];
+      if (!state) return;
+      if (state.promptText === state.savedPromptText) return;
+
+      updatePrompt(promptId, { savingPrompt: true, error: null });
+      try {
+        const res = await fetch(`/api/stories/images/${promptId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: state.promptText }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          updatePrompt(promptId, {
+            savingPrompt: false,
+            error: err.error || "Failed to save prompt",
+          });
+          return;
+        }
+        updatePrompt(promptId, {
+          savingPrompt: false,
+          savedPromptText: state.promptText,
+          promptSavedJust: true,
+        });
+        setTimeout(() => {
+          updatePrompt(promptId, { promptSavedJust: false });
+        }, 2500);
+      } catch (err) {
+        updatePrompt(promptId, {
+          savingPrompt: false,
+          error: err instanceof Error ? err.message : "Failed to save prompt",
+        });
+      }
+    },
+    [promptStates, updatePrompt]
   );
 
   // ---- Polling ----
@@ -1197,6 +1266,7 @@ export default function ImageGeneration({
                             onImageClick={setLightboxUrl}
                             onArtDirector={handleRegenerate}
                             onDelete={handleDelete}
+                            onSavePrompt={handleSavePrompt}
                             batchGenerating={batchGenerating}
                             imageModel={imageModel}
                             characterIdentityMap={characterIdentityMap}
@@ -1698,6 +1768,7 @@ interface ImageCardProps {
   onImageClick: (url: string) => void;
   onArtDirector: (promptId: string) => void;
   onDelete: (promptId: string) => void;
+  onSavePrompt: (promptId: string) => void;
   batchGenerating: boolean;
   imageModel: ImageModel;
   characterIdentityMap: Record<string, CharacterIdentity>;
@@ -1718,6 +1789,7 @@ function ImageCard({
   onImageClick,
   onArtDirector,
   onDelete,
+  onSavePrompt,
   batchGenerating,
   imageModel,
   characterIdentityMap,
@@ -1954,8 +2026,37 @@ function ImageCard({
                 }
                 rows={10}
                 className="leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
-                disabled={isGenerating || isApproved}
+                disabled={isGenerating || isApproved || state.savingPrompt}
               />
+              {/* Save button — persists prompt edits without triggering
+                  generation. Without this, edits are lost on refresh because
+                  they only get PATCHed as a side effect of clicking Generate.
+                  Generate still saves+generates in one click. */}
+              <div className="flex items-center justify-between gap-2 mt-1">
+                <div className="text-[11px]">
+                  {state.promptText !== state.savedPromptText && (
+                    <span className="text-amber-400">Unsaved edits</span>
+                  )}
+                  {state.promptSavedJust &&
+                    state.promptText === state.savedPromptText && (
+                      <span className="text-green-400">Saved</span>
+                    )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSavePrompt(ip.id)}
+                  disabled={
+                    state.savingPrompt ||
+                    state.promptText === state.savedPromptText ||
+                    isGenerating ||
+                    isApproved
+                  }
+                  className="h-7 text-[11px]"
+                >
+                  {state.savingPrompt ? "Saving..." : "Save"}
+                </Button>
+              </div>
               <div className="rounded-md border border-zinc-700/40 bg-zinc-900/30 p-2 space-y-1">
                 <div className="text-[10px] uppercase tracking-wide text-zinc-400">
                   Per-image prompt overrides
