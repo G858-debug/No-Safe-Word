@@ -23,7 +23,10 @@ RULES:
 - Include specific lighting SOURCE (never "warm lighting" — name it: "candlelight", "single amber streetlight", "golden hour through window")
 - Include camera angle and composition (medium shot, close-up, low angle, etc.)
 - Do NOT include: quality tags, character identity (hair, skin, body — handled by LoRA), character count tags (1girl, 1boy)
-- Output ONLY the prompt text. No explanations, no formatting.`;
+- Output ONLY the prompt text. No explanations, no formatting.
+
+BRAND COLOUR — apply where it fits, never force it:
+No Safe Word's visual palette is crimson, burgundy, amber, and gold. When the scene allows, weave at least one of these in naturally — through wardrobe (a burgundy slip dress, an amber silk shirt), practical lighting (candlelight, a warm amber lamp, golden-hour wash), or set dressing (a crimson throw, gold jewellery, a brass lamp). Never apply brand colours to permanent character features (hair, eyes, skin). If the scene offers no natural opportunity, omit entirely.`;
 
   if (nsfw) {
     return `${base}

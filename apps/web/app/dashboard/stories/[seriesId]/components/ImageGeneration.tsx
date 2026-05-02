@@ -10,7 +10,6 @@ import { Textarea } from "@/components/ui/textarea";
 // fetch helpers) which would otherwise be dragged into the client bundle.
 // `portrait-prompt-builder` is pure (no Node deps after Phase D's
 // extraction of prompt-constants), so it's safe to import here.
-import { buildSceneCharacterBlockFromLocked } from "@no-safe-word/image-gen/portrait-prompt-builder";
 import { VISUAL_SIGNATURE } from "@no-safe-word/image-gen/prompt-constants";
 import type { ImageModel } from "@no-safe-word/shared";
 import type { CharacterFromAPI } from "./CharacterApproval";
@@ -34,7 +33,6 @@ import {
   Zap,
   CheckCircle2,
   Undo2,
-  Lock,
   Eye,
   Trash2,
 } from "lucide-react";
@@ -75,6 +73,8 @@ export interface ImagePromptData {
   clothing_override: string | null;
   sfw_constraint_override: string | null;
   visual_signature_override: string | null;
+  final_prompt: string | null;
+  final_prompt_drafted_at: string | null;
 }
 
 export interface PostWithPrompts {
@@ -134,6 +134,15 @@ interface PromptState {
   critiqueLoading: boolean;
   savingPrompt: boolean;
   promptSavedJust: boolean;
+  // ── Mistral-drafted final prompt ───────────────────────────────────
+  // The text Mistral has drafted (and the user may have edited) that
+  // gets sent verbatim to Siray. Source of truth lives at
+  // story_image_prompts.final_prompt.
+  finalPromptText: string;
+  savedFinalPromptText: string;
+  finalPromptDraftedAt: string | null;
+  isDraftingFinalPrompt: boolean;
+  draftError: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +308,11 @@ export default function ImageGeneration({
           critiqueLoading: false,
           savingPrompt: false,
           promptSavedJust: false,
+          finalPromptText: ip.final_prompt ?? "",
+          savedFinalPromptText: ip.final_prompt ?? "",
+          finalPromptDraftedAt: ip.final_prompt_drafted_at ?? null,
+          isDraftingFinalPrompt: false,
+          draftError: null,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -411,6 +425,44 @@ export default function ImageGeneration({
     []
   );
 
+  // Trigger a Mistral re-draft of the final prompt for this image.
+  // Persists server-side and updates the textarea on success.
+  const draftFinalPrompt = useCallback(
+    async (promptId: string): Promise<void> => {
+      updatePrompt(promptId, { isDraftingFinalPrompt: true, draftError: null });
+      try {
+        const res = await fetch(
+          `/api/stories/images/${promptId}/draft-prompt`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          updatePrompt(promptId, {
+            isDraftingFinalPrompt: false,
+            draftError: data?.error ?? "Drafting failed",
+          });
+          return;
+        }
+        updatePrompt(promptId, {
+          isDraftingFinalPrompt: false,
+          finalPromptText: data.final_prompt,
+          savedFinalPromptText: data.final_prompt,
+          finalPromptDraftedAt: data.final_prompt_drafted_at,
+          draftError: null,
+        });
+      } catch (err) {
+        updatePrompt(promptId, {
+          isDraftingFinalPrompt: false,
+          draftError: err instanceof Error ? err.message : "Drafting failed",
+        });
+      }
+    },
+    [updatePrompt]
+  );
+
   // Persist textarea edits without triggering generation. Mirrors the
   // cover-page Save button — without it, edits are lost on refresh
   // because they only get PATCHed as a side effect of clicking Generate.
@@ -442,6 +494,7 @@ export default function ImageGeneration({
       queue(state.clothingOverride, state.savedClothingOverride, "clothing_override", "savedClothingOverride");
       queue(state.sfwConstraintOverride, state.savedSfwConstraintOverride, "sfw_constraint_override", "savedSfwConstraintOverride");
       queue(state.visualSignatureOverride, state.savedVisualSignatureOverride, "visual_signature_override", "savedVisualSignatureOverride");
+      queue(state.finalPromptText, state.savedFinalPromptText, "final_prompt", "savedFinalPromptText");
 
       if (dirty.length === 0) return true;
 
@@ -632,134 +685,31 @@ export default function ImageGeneration({
       try {
         const state = promptStates[promptId];
 
-        // ── Prompt PATCH ─────────────────────────────────────────────────
-        // Persist any user edits to the prompt textbox before generating.
-        if (state && state.promptText !== state.savedPromptText) {
+        // ── Final-prompt PATCH ──────────────────────────────────────────
+        // The user edits final_prompt directly on the card. Persist any
+        // pending edits before kicking off generation so Siray sees the
+        // exact text the user is looking at. The other override fields
+        // (character block, clothing, SFW constraint, visual signature)
+        // are now consumed by Mistral as inputs and are not editable from
+        // the card, so they don't need PATCHing here.
+        if (state && state.finalPromptText !== state.savedFinalPromptText) {
           const patchRes = await fetch(
             `/api/stories/images/${promptId}`,
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt: state.promptText }),
+              body: JSON.stringify({ final_prompt: state.finalPromptText }),
             }
           );
           if (!patchRes.ok) {
             const patchErr = await patchRes.json().catch(() => ({}));
             updatePrompt(promptId, {
               status: "failed",
-              error: patchErr?.error ?? "Failed to save prompt edit",
+              error: patchErr?.error ?? "Failed to save final prompt edit",
             });
             return;
           }
-          updatePrompt(promptId, { savedPromptText: state.promptText });
-        }
-
-        if (state && state.characterBlockOverride !== state.savedCharacterBlockOverride) {
-          const overrideRes = await fetch(
-            `/api/stories/images/${promptId}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ character_block_override: state.characterBlockOverride }),
-            }
-          );
-          if (!overrideRes.ok) {
-            const overrideErr = await overrideRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: overrideErr?.error ?? "Failed to save character block override",
-            });
-            return;
-          }
-          updatePrompt(promptId, { savedCharacterBlockOverride: state.characterBlockOverride });
-        }
-
-        if (state.secondaryCharacterBlockOverride !== state.savedSecondaryCharacterBlockOverride) {
-          const secOverrideRes = await fetch(
-            `/api/stories/images/${promptId}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ secondary_character_block_override: state.secondaryCharacterBlockOverride }),
-            }
-          );
-          if (!secOverrideRes.ok) {
-            const secOverrideErr = await secOverrideRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: secOverrideErr?.error ?? "Failed to save secondary character block override",
-            });
-            return;
-          }
-          updatePrompt(promptId, { savedSecondaryCharacterBlockOverride: state.secondaryCharacterBlockOverride });
-        }
-
-        if (state.suppressCharacterBlock !== state.savedSuppressCharacterBlock) {
-          const suppressRes = await fetch(`/api/stories/images/${promptId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ suppress_character_block: state.suppressCharacterBlock }),
-          });
-          if (!suppressRes.ok) {
-            const suppressErr = await suppressRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: suppressErr?.error ?? "Failed to save character block suppression",
-            });
-            return;
-          }
-          updatePrompt(promptId, { savedSuppressCharacterBlock: state.suppressCharacterBlock });
-        }
-
-        if (state.clothingOverride !== state.savedClothingOverride) {
-          const clothingRes = await fetch(`/api/stories/images/${promptId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ clothing_override: state.clothingOverride }),
-          });
-          if (!clothingRes.ok) {
-            const clothingErr = await clothingRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: clothingErr?.error ?? "Failed to save clothing override",
-            });
-            return;
-          }
-          updatePrompt(promptId, { savedClothingOverride: state.clothingOverride });
-        }
-
-        if (state.sfwConstraintOverride !== state.savedSfwConstraintOverride) {
-          const sfwRes = await fetch(`/api/stories/images/${promptId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sfw_constraint_override: state.sfwConstraintOverride }),
-          });
-          if (!sfwRes.ok) {
-            const sfwErr = await sfwRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: sfwErr?.error ?? "Failed to save SFW constraint override",
-            });
-            return;
-          }
-          updatePrompt(promptId, { savedSfwConstraintOverride: state.sfwConstraintOverride });
-        }
-
-        if (state.visualSignatureOverride !== state.savedVisualSignatureOverride) {
-          const sigRes = await fetch(`/api/stories/images/${promptId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ visual_signature_override: state.visualSignatureOverride }),
-          });
-          if (!sigRes.ok) {
-            const sigErr = await sigRes.json().catch(() => ({}));
-            updatePrompt(promptId, {
-              status: "failed",
-              error: sigErr?.error ?? "Failed to save visual signature override",
-            });
-            return;
-          }
-          updatePrompt(promptId, { savedVisualSignatureOverride: state.visualSignatureOverride });
+          updatePrompt(promptId, { savedFinalPromptText: state.finalPromptText });
         }
 
         const res = await fetch(
@@ -1340,6 +1290,7 @@ export default function ImageGeneration({
               setSelectedPromptId(null);
             }}
             onLightbox={setLightboxUrl}
+            onDraftFinalPrompt={draftFinalPrompt}
             batchGenerating={batchGenerating}
             imageModel={imageModel}
             characterIdentityMap={characterIdentityMap}
@@ -1361,343 +1312,17 @@ export default function ImageGeneration({
 }
 
 // ---------------------------------------------------------------------------
-// LockedCharacterBlock — read-only preview of the character text the model
-// will receive for a given prompt.
+// (LockedCharacterBlock + assembleFullPrompt removed)
 //
-// Renders ONLY when the story uses Hunyuan; for Flux 2 Dev, character
-// identity is carried by PuLID reference images and no character text is
-// injected (see Phase C model-aware injection comments in
-// /api/stories/[seriesId]/generate-image/route.ts and /generate-cover/route.ts).
-//
-// The text shown is the SAME string the server-side scene route prepends
-// to the scene prompt (Phase B): `buildSceneCharacterBlockFromLocked`
-// applied to the character's `portrait_prompt_locked`. To change it, the
-// user re-approves the portrait — there is no per-scene override.
+// The modal no longer renders the per-image character-block override UI —
+// Mistral now drafts the final prompt from the structured character
+// description + scene description. The "Inputs Mistral consumed" disclosure
+// in the modal shows the same context as read-only text. The override fields
+// (character_block_override, secondary_character_block_override, suppress_character_block,
+// clothing_override, sfw_constraint_override, visual_signature_override) still
+// exist on the DB row but are no longer surfaced for editing in the dashboard.
 // ---------------------------------------------------------------------------
 
-interface LockedCharacterBlockProps {
-  imageModel: ImageModel;
-  primaryCharacterId: string | null;
-  primaryCharacterName: string | null;
-  secondaryCharacterId: string | null;
-  secondaryCharacterName: string | null;
-  characterIdentityMap: Record<string, CharacterIdentity>;
-  onNavigateToCharacters: () => void;
-  characterBlockOverride: string | null;
-  showOverride: boolean;
-  onOverrideChange: (text: string) => void;
-  onToggleOverride: (prefilledText: string) => void;
-  onClearOverride: () => void;
-  secondaryCharacterBlockOverride: string | null;
-  showSecondaryOverride: boolean;
-  onSecondaryOverrideChange: (text: string) => void;
-  onSecondaryToggleOverride: (prefilledText: string) => void;
-  onSecondaryClearOverride: () => void;
-  suppressCharacterBlock: boolean;
-  onToggleSuppressCharacterBlock: () => void;
-}
-
-function LockedCharacterBlock({
-  imageModel,
-  primaryCharacterId,
-  primaryCharacterName,
-  secondaryCharacterId,
-  secondaryCharacterName,
-  characterIdentityMap,
-  onNavigateToCharacters,
-  characterBlockOverride,
-  showOverride,
-  onOverrideChange,
-  onToggleOverride,
-  onClearOverride,
-  secondaryCharacterBlockOverride,
-  showSecondaryOverride,
-  onSecondaryOverrideChange,
-  onSecondaryToggleOverride,
-  onSecondaryClearOverride,
-  suppressCharacterBlock,
-  onToggleSuppressCharacterBlock,
-}: LockedCharacterBlockProps) {
-  if (imageModel !== "hunyuan3") return null;
-  if (!primaryCharacterId && !secondaryCharacterId) return null;
-
-  const primaryIdent = primaryCharacterId
-    ? characterIdentityMap[primaryCharacterId]
-    : null;
-  const primaryEntry = primaryCharacterId
-    ? {
-        id: primaryCharacterId,
-        name: primaryIdent?.name ?? primaryCharacterName ?? "Character",
-        locked: primaryIdent?.portraitPromptLocked ?? null,
-      }
-    : null;
-
-  const secondaryIdent = secondaryCharacterId
-    ? characterIdentityMap[secondaryCharacterId]
-    : null;
-  const secondaryEntry = secondaryCharacterId
-    ? {
-        id: secondaryCharacterId,
-        name: secondaryIdent?.name ?? secondaryCharacterName ?? "Character",
-        locked: secondaryIdent?.portraitPromptLocked ?? null,
-      }
-    : null;
-
-  const defaultPrimaryLocked = primaryEntry?.locked
-    ? buildSceneCharacterBlockFromLocked(primaryEntry.name, primaryEntry.locked)
-    : "";
-  const defaultSecondaryLocked = secondaryEntry?.locked
-    ? buildSceneCharacterBlockFromLocked(secondaryEntry.name, secondaryEntry.locked)
-    : "";
-
-  const eitherOverrideActive =
-    characterBlockOverride !== null || secondaryCharacterBlockOverride !== null;
-
-  return (
-    <div className="mt-1.5 rounded border border-zinc-700/40 bg-zinc-900/40 p-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
-          <Lock className="h-3 w-3" />
-          Locked character text (Hunyuan)
-          {eitherOverrideActive && !suppressCharacterBlock && (
-            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-400">
-              Custom
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onToggleSuppressCharacterBlock}
-            className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-colors ${
-              suppressCharacterBlock
-                ? "border-red-700/40 bg-red-900/30 text-red-400 hover:bg-red-900/50"
-                : "border-zinc-700/30 bg-zinc-800/40 text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            {suppressCharacterBlock ? "Suppressed" : "Inject"}
-          </button>
-          <button
-            onClick={onNavigateToCharacters}
-            className="text-[10px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
-          >
-            Edit in Characters
-          </button>
-        </div>
-      </div>
-
-      {suppressCharacterBlock ? (
-        <p className="mt-1.5 rounded bg-zinc-900/60 px-2 py-1.5 text-[10px] italic text-zinc-500">
-          No character description will be sent for this image. Use this for detail shots, hands, objects, and atmospheric images.
-        </p>
-      ) : (
-        <>
-        <div className="mt-1.5 space-y-2.5">
-        {primaryEntry && (
-          <div>
-            <div className="text-[10px] font-medium text-zinc-300">
-              {primaryEntry.name}
-            </div>
-            {!showOverride && (
-              characterBlockOverride !== null ? (
-                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-amber-950/30 px-2 py-1 font-mono text-[10px] leading-relaxed text-amber-300/80">
-                  {characterBlockOverride}
-                </div>
-              ) : primaryEntry.locked ? (
-                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
-                  {buildSceneCharacterBlockFromLocked(primaryEntry.name, primaryEntry.locked)}
-                </div>
-              ) : (
-                <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
-                  No portrait approved yet — falls back to description-derived
-                  identity at generation time.
-                </div>
-              )
-            )}
-            {showOverride && (
-              <div className="mt-0.5 space-y-1">
-                <div className="text-[10px] text-amber-400/80">
-                  This override applies to this image only. Other images using{" "}
-                  <span className="font-medium text-amber-300">{primaryEntry.name}</span>{" "}
-                  are not affected.
-                </div>
-                <Textarea
-                  value={characterBlockOverride ?? ""}
-                  onChange={(e) => onOverrideChange(e.target.value)}
-                  rows={4}
-                  className="leading-relaxed resize-y border-amber-700/40 bg-amber-950/20 font-mono text-[11px]"
-                  placeholder="Enter custom character block for this image only…"
-                />
-              </div>
-            )}
-            <div className="mt-1 flex items-center justify-end gap-2">
-              {characterBlockOverride !== null && !showOverride && (
-                <button
-                  onClick={onClearOverride}
-                  className="text-[10px] text-zinc-400 transition-colors hover:text-red-400"
-                >
-                  Clear override
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  if (!showOverride && characterBlockOverride === null) {
-                    onToggleOverride(defaultPrimaryLocked);
-                  } else {
-                    onToggleOverride(characterBlockOverride ?? defaultPrimaryLocked);
-                  }
-                }}
-                className="text-[10px] text-blue-400 transition-colors hover:text-blue-300"
-              >
-                {showOverride ? "Hide editor" : "Override for this image only"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {secondaryEntry && (
-          <div>
-            <div className="text-[10px] font-medium text-zinc-300">
-              {secondaryEntry.name}
-            </div>
-            {!showSecondaryOverride && (
-              secondaryCharacterBlockOverride !== null ? (
-                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-amber-950/30 px-2 py-1 font-mono text-[10px] leading-relaxed text-amber-300/80">
-                  {secondaryCharacterBlockOverride}
-                </div>
-              ) : secondaryEntry.locked ? (
-                <div className="mt-0.5 whitespace-pre-wrap break-words rounded bg-zinc-950/60 px-2 py-1 font-mono text-[10px] leading-relaxed text-zinc-400">
-                  {buildSceneCharacterBlockFromLocked(secondaryEntry.name, secondaryEntry.locked)}
-                </div>
-              ) : (
-                <div className="mt-0.5 rounded bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400/90">
-                  No portrait approved yet — falls back to description-derived
-                  identity at generation time.
-                </div>
-              )
-            )}
-            {showSecondaryOverride && (
-              <div className="mt-0.5 space-y-1">
-                <div className="text-[10px] text-amber-400/80">
-                  This override applies to this image only. Other images using{" "}
-                  <span className="font-medium text-amber-300">{secondaryEntry.name}</span>{" "}
-                  are not affected.
-                </div>
-                <Textarea
-                  value={secondaryCharacterBlockOverride ?? ""}
-                  onChange={(e) => onSecondaryOverrideChange(e.target.value)}
-                  rows={4}
-                  className="leading-relaxed resize-y border-amber-700/40 bg-amber-950/20 font-mono text-[11px]"
-                  placeholder="Enter custom character block for this image only…"
-                />
-              </div>
-            )}
-            <div className="mt-1 flex items-center justify-end gap-2">
-              {secondaryCharacterBlockOverride !== null && !showSecondaryOverride && (
-                <button
-                  onClick={onSecondaryClearOverride}
-                  className="text-[10px] text-zinc-400 transition-colors hover:text-red-400"
-                >
-                  Clear override
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  if (!showSecondaryOverride && secondaryCharacterBlockOverride === null) {
-                    onSecondaryToggleOverride(defaultSecondaryLocked);
-                  } else {
-                    onSecondaryToggleOverride(secondaryCharacterBlockOverride ?? defaultSecondaryLocked);
-                  }
-                }}
-                className="text-[10px] text-blue-400 transition-colors hover:text-blue-300"
-              >
-                {showSecondaryOverride ? "Hide editor" : "Override for this image only"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {!showOverride && !showSecondaryOverride && (
-        <div className="mt-1.5 text-[10px] text-zinc-500">
-          Edits propagate to every image using this character. The scene
-          prompt below is appended to this text.
-        </div>
-      )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Prompt assembly — mirrors the server-side assembleHunyuanPrompt logic so
-// the preview is accurate without a round-trip.
-// ---------------------------------------------------------------------------
-
-function assembleFullPrompt(
-  state: PromptState,
-  ip: ImagePromptData,
-  characterIdentityMap: Record<string, CharacterIdentity>,
-  imageModel: ImageModel
-): string {
-  const isSfw = ip.image_type === "facebook_sfw" || ip.image_type === "shared";
-  const suppress =
-    state.suppressCharacterBlock || state.characterBlockOverride === "";
-  const parts: string[] = [];
-
-  if (imageModel === "hunyuan3" && !suppress) {
-    if (state.characterBlockOverride) {
-      parts.push(state.characterBlockOverride);
-    } else if (ip.character_id) {
-      const ident = characterIdentityMap[ip.character_id];
-      if (ident?.name && ident?.portraitPromptLocked) {
-        parts.push(buildSceneCharacterBlockFromLocked(ident.name, ident.portraitPromptLocked));
-      }
-    }
-
-    if (state.secondaryCharacterBlockOverride) {
-      parts.push(state.secondaryCharacterBlockOverride);
-    } else if (ip.secondary_character_id) {
-      const ident = characterIdentityMap[ip.secondary_character_id];
-      if (ident?.name && ident?.portraitPromptLocked) {
-        parts.push(buildSceneCharacterBlockFromLocked(ident.name, ident.portraitPromptLocked));
-      }
-    }
-
-    if (isSfw) {
-      if (state.clothingOverride !== null) {
-        if (state.clothingOverride.trim()) parts.push(state.clothingOverride.trim());
-      } else {
-        for (const charId of [ip.character_id, ip.secondary_character_id]) {
-          if (!charId) continue;
-          const ident = characterIdentityMap[charId];
-          if (ident?.name && ident?.clothing) {
-            parts.push(`${ident.name} is wearing ${ident.clothing}.`);
-          }
-        }
-      }
-    }
-  }
-
-  if (state.promptText.trim()) parts.push(state.promptText.trim());
-
-  if (isSfw) {
-    if (state.sfwConstraintOverride !== null) {
-      if (state.sfwConstraintOverride.trim()) parts.push(state.sfwConstraintOverride.trim());
-    } else {
-      parts.push("Both characters fully clothed. No nudity.");
-    }
-  }
-
-  if (state.visualSignatureOverride !== null) {
-    if (state.visualSignatureOverride.trim()) parts.push(state.visualSignatureOverride.trim());
-  } else {
-    parts.push(VISUAL_SIGNATURE);
-  }
-
-  return parts.join(" ");
-}
 
 // ---------------------------------------------------------------------------
 // ImageCard sub-component
@@ -2020,6 +1645,7 @@ interface ImageDetailModalProps {
   onRevert: (id: string) => void;
   onDelete: (id: string) => void;
   onLightbox: (url: string) => void;
+  onDraftFinalPrompt: (id: string) => Promise<void>;
   batchGenerating: boolean;
   imageModel: ImageModel;
   characterIdentityMap: Record<string, CharacterIdentity>;
@@ -2044,10 +1670,11 @@ function ImageDetailModal({
   onRevert,
   onDelete,
   onLightbox,
+  onDraftFinalPrompt,
   batchGenerating,
-  imageModel,
+  imageModel: _imageModel,
   characterIdentityMap,
-  onNavigateToCharacters,
+  onNavigateToCharacters: _onNavigateToCharacters,
 }: ImageDetailModalProps) {
   const isGenerating = state.status === "generating";
   const isGenerated = state.status === "generated";
@@ -2055,17 +1682,11 @@ function ImageDetailModal({
   const isFailed = state.status === "failed";
   const isPending = state.status === "pending";
   const isSfw = imageType === "facebook_sfw" || imageType === "shared";
-  const isCharBlockSuppressed =
-    state.suppressCharacterBlock || state.characterBlockOverride === "";
 
-  const isDirty =
-    state.promptText !== state.savedPromptText ||
-    state.characterBlockOverride !== state.savedCharacterBlockOverride ||
-    state.secondaryCharacterBlockOverride !== state.savedSecondaryCharacterBlockOverride ||
-    state.suppressCharacterBlock !== state.savedSuppressCharacterBlock ||
-    state.clothingOverride !== state.savedClothingOverride ||
-    state.sfwConstraintOverride !== state.savedSfwConstraintOverride ||
-    state.visualSignatureOverride !== state.savedVisualSignatureOverride;
+  // Only the editable final_prompt textarea contributes to "dirty" now —
+  // every other field on this card is read-only context that Mistral
+  // consumed when drafting.
+  const isDirty = state.finalPromptText !== state.savedFinalPromptText;
 
   const isTwoCharacter = Boolean(ip.character_id && ip.secondary_character_id);
   const ratioLabel = isTwoCharacter ? "5:4" : "4:5";
@@ -2077,12 +1698,7 @@ function ImageDetailModal({
     .filter(Boolean)
     .join(" + ");
 
-  const assembledPrompt = assembleFullPrompt(
-    state,
-    ip,
-    characterIdentityMap,
-    imageModel
-  );
+  const hasFinalPrompt = state.finalPromptText.trim().length > 0;
 
   const closeWithConfirm = useCallback(() => {
     if (isDirty) {
@@ -2286,197 +1902,140 @@ function ImageDetailModal({
 
           {/* Editor pane */}
           <div className="flex w-1/2 min-w-0 flex-col">
-            <div className="flex-1 overflow-y-auto p-4 space-y-5">
-              <LockedCharacterBlock
-                imageModel={imageModel}
-                primaryCharacterId={ip.character_id}
-                primaryCharacterName={ip.character_name}
-                secondaryCharacterId={ip.secondary_character_id}
-                secondaryCharacterName={ip.secondary_character_name}
-                characterIdentityMap={characterIdentityMap}
-                onNavigateToCharacters={onNavigateToCharacters}
-                characterBlockOverride={state.characterBlockOverride}
-                showOverride={state.showOverride}
-                onOverrideChange={(text) =>
-                  onUpdatePrompt(ip.id, { characterBlockOverride: text })
-                }
-                onToggleOverride={(prefilledText) => {
-                  if (!state.showOverride && state.characterBlockOverride === null) {
-                    onUpdatePrompt(ip.id, {
-                      showOverride: true,
-                      characterBlockOverride: prefilledText,
-                    });
-                  } else {
-                    onUpdatePrompt(ip.id, { showOverride: !state.showOverride });
-                  }
-                }}
-                onClearOverride={() =>
-                  onUpdatePrompt(ip.id, {
-                    characterBlockOverride: null,
-                    showOverride: false,
-                  })
-                }
-                secondaryCharacterBlockOverride={state.secondaryCharacterBlockOverride}
-                showSecondaryOverride={state.showSecondaryOverride}
-                onSecondaryOverrideChange={(text) =>
-                  onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: text })
-                }
-                onSecondaryToggleOverride={(prefilledText) => {
-                  if (
-                    !state.showSecondaryOverride &&
-                    state.secondaryCharacterBlockOverride === null
-                  ) {
-                    onUpdatePrompt(ip.id, {
-                      showSecondaryOverride: true,
-                      secondaryCharacterBlockOverride: prefilledText,
-                    });
-                  } else {
-                    onUpdatePrompt(ip.id, {
-                      showSecondaryOverride: !state.showSecondaryOverride,
-                    });
-                  }
-                }}
-                onSecondaryClearOverride={() =>
-                  onUpdatePrompt(ip.id, {
-                    secondaryCharacterBlockOverride: null,
-                    showSecondaryOverride: false,
-                  })
-                }
-                suppressCharacterBlock={state.suppressCharacterBlock}
-                onToggleSuppressCharacterBlock={() =>
-                  onUpdatePrompt(ip.id, {
-                    suppressCharacterBlock: !state.suppressCharacterBlock,
-                  })
-                }
-              />
-
-              <div>
-                <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Scene prompt
-                </label>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* PRIMARY EDITABLE SURFACE — Mistral-drafted final prompt */}
+              <div className="flex flex-col">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <div className="flex items-baseline gap-2">
+                    <label className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+                      Final prompt — sent to Siray
+                    </label>
+                    {state.finalPromptDraftedAt && (
+                      <span className="text-[10px] text-muted-foreground">
+                        drafted {new Date(state.finalPromptDraftedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {hasFinalPrompt && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() =>
+                          navigator.clipboard.writeText(state.finalPromptText)
+                        }
+                      >
+                        Copy
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => onDraftFinalPrompt(ip.id)}
+                      disabled={
+                        state.isDraftingFinalPrompt ||
+                        isGenerating ||
+                        isApproved
+                      }
+                    >
+                      <Sparkles className="mr-1 h-3 w-3" />
+                      {state.isDraftingFinalPrompt
+                        ? "Drafting…"
+                        : hasFinalPrompt
+                          ? "Re-draft with Mistral"
+                          : "Draft with Mistral"}
+                    </Button>
+                  </div>
+                </div>
+                {state.draftError && (
+                  <div className="mb-1.5 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">
+                    {state.draftError}
+                  </div>
+                )}
                 <Textarea
-                  value={state.promptText}
+                  value={state.finalPromptText}
                   onChange={(e) =>
-                    onUpdatePrompt(ip.id, { promptText: e.target.value })
+                    onUpdatePrompt(ip.id, { finalPromptText: e.target.value })
                   }
-                  rows={10}
-                  className="mt-1.5 resize-y bg-muted/30 text-xs leading-relaxed min-h-[180px]"
-                  disabled={isGenerating || isApproved || state.savingPrompt}
+                  placeholder={
+                    hasFinalPrompt
+                      ? ""
+                      : "No prompt yet — click \"Draft with Mistral\" to generate one from the inputs below, or just click Generate (it will auto-draft first)."
+                  }
+                  className="resize-y bg-muted/30 text-xs leading-relaxed min-h-[420px]"
+                  disabled={
+                    isGenerating ||
+                    isApproved ||
+                    state.savingPrompt ||
+                    state.isDraftingFinalPrompt
+                  }
                 />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  This text is sent verbatim to Siray when you click Generate. Edit it
+                  freely — the inputs below are read-only context that Mistral consumed.
+                </p>
               </div>
 
-              {/* Clothing override — SFW only, hidden when character blocks are suppressed */}
-              {isSfw && !isCharBlockSuppressed && (
-                <ModalOverrideSection
-                  label="Clothing"
-                  isActive={state.clothingOverride !== null}
-                  defaultPreview={
-                    [ip.character_id, ip.secondary_character_id]
-                      .filter(Boolean)
-                      .map((id) => {
-                        const ident = characterIdentityMap[id as string];
-                        return ident?.name && ident?.clothing
-                          ? `${ident.name} is wearing ${ident.clothing}.`
-                          : null;
-                      })
-                      .filter(Boolean)
-                      .join(" ") || "(no clothing in character description)"
-                  }
-                  onActivate={() => {
-                    const autoClothing = [ip.character_id, ip.secondary_character_id]
-                      .filter(Boolean)
-                      .map((id) => {
-                        const ident = characterIdentityMap[id as string];
-                        return ident?.name && ident?.clothing
-                          ? `${ident.name} is wearing ${ident.clothing}.`
-                          : null;
-                      })
-                      .filter(Boolean)
-                      .join(" ");
-                    onUpdatePrompt(ip.id, { clothingOverride: autoClothing });
-                  }}
-                  onClear={() => onUpdatePrompt(ip.id, { clothingOverride: null })}
-                  value={state.clothingOverride ?? ""}
-                  onChange={(v) =>
-                    onUpdatePrompt(ip.id, { clothingOverride: v || null })
-                  }
-                  placeholder="Custom clothing sentence…"
-                  helper="Empty = suppress."
-                  rows={3}
-                />
-              )}
+              {/* READ-ONLY INPUTS — what Mistral consumed when drafting */}
+              <details className="rounded border border-border/50 bg-muted/10" open>
+                <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Inputs Mistral consumed
+                </summary>
+                <div className="space-y-3 px-3 pb-3 pt-1">
+                  <ReadOnlyField label="Scene description" value={state.promptText} />
 
-              {/* SFW constraint override — SFW only */}
-              {isSfw && (
-                <ModalOverrideSection
-                  label="SFW constraint"
-                  isActive={state.sfwConstraintOverride !== null}
-                  defaultPreview="Both characters fully clothed. No nudity."
-                  onActivate={() =>
-                    onUpdatePrompt(ip.id, {
-                      sfwConstraintOverride: "Both characters fully clothed. No nudity.",
-                    })
-                  }
-                  onClear={() =>
-                    onUpdatePrompt(ip.id, { sfwConstraintOverride: null })
-                  }
-                  value={state.sfwConstraintOverride ?? ""}
-                  onChange={(v) =>
-                    onUpdatePrompt(ip.id, {
-                      sfwConstraintOverride: v === "" ? "" : v,
-                    })
-                  }
-                  placeholder="Both characters fully clothed. No nudity."
-                  helper="Empty = suppress entirely."
-                  rows={3}
-                />
-              )}
+                  <ReadOnlyCharacterBlock
+                    label="Primary character (approved description)"
+                    characterId={ip.character_id}
+                    characterIdentityMap={characterIdentityMap}
+                  />
 
-              {/* Visual signature override — always shown */}
-              <ModalOverrideSection
-                label="Visual signature"
-                isActive={state.visualSignatureOverride !== null}
-                defaultPreview={VISUAL_SIGNATURE}
-                onActivate={() =>
-                  onUpdatePrompt(ip.id, {
-                    visualSignatureOverride: VISUAL_SIGNATURE,
-                  })
-                }
-                onClear={() =>
-                  onUpdatePrompt(ip.id, { visualSignatureOverride: null })
-                }
-                value={state.visualSignatureOverride ?? ""}
-                onChange={(v) =>
-                  onUpdatePrompt(ip.id, {
-                    visualSignatureOverride: v === "" ? "" : v,
-                  })
-                }
-                placeholder={VISUAL_SIGNATURE}
-                helper="Empty = suppress entirely."
-                rows={4}
-              />
-            </div>
+                  {ip.secondary_character_id && (
+                    <ReadOnlyCharacterBlock
+                      label="Secondary character (approved description)"
+                      characterId={ip.secondary_character_id}
+                      characterIdentityMap={characterIdentityMap}
+                    />
+                  )}
 
-            {/* Pinned full-prompt preview */}
-            <div className="border-t border-border/50 bg-muted/10 shrink-0">
-              <div className="flex items-center justify-between px-4 py-1.5">
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  Preview full prompt — sent to model
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-[10px]"
-                  onClick={() => navigator.clipboard.writeText(assembledPrompt)}
-                >
-                  Copy
-                </Button>
-              </div>
-              <Textarea
-                value={assembledPrompt}
-                readOnly
-                className="resize-none border-0 bg-transparent px-4 pb-3 pt-0 font-mono text-[10px] leading-relaxed h-32 focus-visible:ring-0"
-              />
+                  {isSfw && (
+                    <ReadOnlyField
+                      label="Clothing"
+                      value={
+                        state.clothingOverride !== null
+                          ? state.clothingOverride
+                          : [ip.character_id, ip.secondary_character_id]
+                              .filter(Boolean)
+                              .map((id) => {
+                                const ident = characterIdentityMap[id as string];
+                                return ident?.name && ident?.clothing
+                                  ? `${ident.name} is wearing ${ident.clothing}.`
+                                  : null;
+                              })
+                              .filter(Boolean)
+                              .join(" ") || "(no clothing in character description)"
+                      }
+                    />
+                  )}
+
+                  {isSfw && (
+                    <ReadOnlyField
+                      label="SFW constraint"
+                      value={
+                        state.sfwConstraintOverride ??
+                        "Both characters fully clothed. No nudity."
+                      }
+                    />
+                  )}
+
+                  <ReadOnlyField
+                    label="Visual signature"
+                    value={state.visualSignatureOverride ?? VISUAL_SIGNATURE}
+                  />
+                </div>
+              </details>
             </div>
           </div>
         </div>
@@ -2597,78 +2156,46 @@ function ImageDetailModal({
 }
 
 // ---------------------------------------------------------------------------
-// ModalOverrideSection — visual wrapper for one of the per-image override
-// fields (clothing / SFW / visual signature). Always visible: shows the
-// default text in muted style when no override is set, and the editable
-// textarea when one is.
+// ReadOnlyField — small read-only display for one of Mistral's input
+// fields (scene description, clothing, SFW constraint, visual signature).
+// All shown together inside the "Inputs Mistral consumed" disclosure on
+// the image card. Editing happens via the final_prompt textarea above.
 // ---------------------------------------------------------------------------
 
-function ModalOverrideSection({
-  label,
-  isActive,
-  defaultPreview,
-  onActivate,
-  onClear,
-  value,
-  onChange,
-  placeholder,
-  helper,
-  rows,
-}: {
-  label: string;
-  isActive: boolean;
-  defaultPreview: string;
-  onActivate: () => void;
-  onClear: () => void;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  helper: string;
-  rows: number;
-}) {
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {label}
-          {isActive && (
-            <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] text-amber-400 normal-case tracking-normal">
-              Override
-            </span>
-          )}
-        </label>
-        {isActive ? (
-          <button
-            onClick={onClear}
-            className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-          >
-            Clear override
-          </button>
-        ) : (
-          <button
-            onClick={onActivate}
-            className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            Override for this image
-          </button>
-        )}
+      <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </label>
+      <div className="mt-1 rounded bg-zinc-900/40 px-2 py-1.5 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">
+        {value || "(empty)"}
       </div>
-      {isActive ? (
-        <>
-          <Textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={rows}
-            placeholder={placeholder}
-            className="mt-1.5 resize-y bg-muted/30 text-xs leading-relaxed"
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">{helper}</p>
-        </>
-      ) : (
-        <div className="mt-1.5 rounded bg-zinc-900/40 px-2 py-1.5 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">
-          {defaultPreview}
-        </div>
-      )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// ReadOnlyCharacterBlock — read-only display of a linked character's
+// approved description (sourced from `characters.description` via the
+// page-level identity map). This is the same data Mistral receives when
+// drafting; shown here so the user can see what context Mistral had.
+// ---------------------------------------------------------------------------
+
+function ReadOnlyCharacterBlock({
+  label,
+  characterId,
+  characterIdentityMap,
+}: {
+  label: string;
+  characterId: string | null;
+  characterIdentityMap: Record<string, CharacterIdentity>;
+}) {
+  if (!characterId) return null;
+  const ident = characterIdentityMap[characterId];
+  const text =
+    ident?.portraitPromptLocked ??
+    (ident?.name ? `${ident.name} (no approved description on file)` : "(unknown character)");
+  return <ReadOnlyField label={label} value={text} />;
+}
+

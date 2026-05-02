@@ -91,6 +91,8 @@ interface SeriesData {
       clothing_override: string | null;
       sfw_constraint_override: string | null;
       visual_signature_override: string | null;
+      final_prompt: string | null;
+      final_prompt_drafted_at: string | null;
     }[];
   })[];
   characters: CharacterFromAPI[];

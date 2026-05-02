@@ -1,6 +1,11 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { BlurbCharacterInput } from "./generate-blurbs";
+import {
+  BRAND_PREFERENCE_NOTE,
+  VISUAL_SIGNATURE,
+  callMistral,
+  endsWithVisualSignature,
+  loadHunyuanKnowledge,
+} from "./mistral-prompt-helpers";
 
 // ============================================================
 // Cover prompt generation service
@@ -30,9 +35,6 @@ import type { BlurbCharacterInput } from "./generate-blurbs";
 // broken prompt.
 // ============================================================
 
-const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
-const MISTRAL_MODEL = "mistral-large-latest";
-
 export type CoverPromptImageModel = "flux2_dev" | "hunyuan3";
 
 export interface GenerateCoverPromptInput {
@@ -42,12 +44,6 @@ export interface GenerateCoverPromptInput {
   characters: BlurbCharacterInput[];
   imageModel: CoverPromptImageModel;
 }
-
-const VISUAL_SIGNATURE =
-  "Cinematic shallow depth of field. Rich shadows with luminous highlights. Soft skin glow. Intimate framing. Editorial photography quality. Photorealistic.";
-
-const BRAND_PREFERENCE_NOTE = `BRAND PREFERENCE — apply where it fits the scene, do not force it:
-No Safe Word's visual identity favours crimson, burgundy, amber, and gold. Try to weave at least one of these into the cover naturally — through wardrobe (a burgundy slip dress, an amber silk shirt), practical lighting (candlelight, a warm amber lamp, golden-hour wash), or set dressing (a crimson throw on the bed, gold jewellery, a brass lamp). Do not force a brand colour into a scene where it would look implausible — but if there's a natural opportunity, take it. The reader should feel the brand without seeing a logo.`;
 
 const FLUX_SYSTEM_PROMPT = `You write image generation prompts for No Safe Word book covers. Each cover is a two-character intimate composition depicting the protagonist and primary love interest, rendered photorealistically via Flux 2 Dev.
 
@@ -121,102 +117,6 @@ Full story text:
 ${input.fullStoryText}
 
 Write the cover prompt.`;
-}
-
-let cachedHunyuanKnowledge: string | null = null;
-
-/**
- * Load `packages/image-gen/src/prompts/hunyuan-knowledge.md` from disk
- * once and cache. Resolves relative to the monorepo root via
- * `process.cwd()` (which is `apps/web` at runtime in both dev and the
- * Railway production build, since Next.js runs from the app directory).
- *
- * Falls back to an empty string if the file isn't found — the Hunyuan
- * branch will still work, just without the embedded knowledge. Logs a
- * warning so the drift is visible.
- */
-function loadHunyuanKnowledge(): string {
-  if (cachedHunyuanKnowledge !== null) return cachedHunyuanKnowledge;
-  const candidates = [
-    path.join(process.cwd(), "..", "..", "packages", "image-gen", "src", "prompts", "hunyuan-knowledge.md"),
-    path.join(process.cwd(), "packages", "image-gen", "src", "prompts", "hunyuan-knowledge.md"),
-  ];
-  for (const p of candidates) {
-    try {
-      const text = fs.readFileSync(p, "utf-8");
-      cachedHunyuanKnowledge = text;
-      return text;
-    } catch {
-      // try next candidate
-    }
-  }
-  console.warn(
-    "[generate-cover-prompt] hunyuan-knowledge.md not found at any candidate path; Hunyuan rewrites will run without embedded knowledge"
-  );
-  cachedHunyuanKnowledge = "";
-  return "";
-}
-
-/**
- * Loose-match check that the prompt ends with the Visual Signature.
- * The model occasionally paraphrases or adds trailing punctuation;
- * we normalise whitespace/punctuation before comparing. Matches on
- * the final sentence starting with "Cinematic shallow depth of field"
- * through "Photorealistic" — if that exact cadence is present
- * anywhere in the last ~400 chars, accept.
- */
-function endsWithVisualSignature(prompt: string): boolean {
-  const tail = prompt.slice(-400).toLowerCase();
-  return (
-    tail.includes("cinematic shallow depth of field") &&
-    tail.includes("editorial photography quality") &&
-    tail.includes("photorealistic")
-  );
-}
-
-interface MistralChoice {
-  message?: { content?: string };
-}
-interface MistralResponse {
-  choices?: MistralChoice[];
-}
-
-async function callMistral(systemPrompt: string, userPrompt: string): Promise<string> {
-  const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) {
-    throw new Error("MISTRAL_API_KEY is not set");
-  }
-
-  const response = await fetch(MISTRAL_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MISTRAL_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 2048,
-      temperature: 0.7,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Mistral API ${response.status}: ${body || response.statusText}`);
-  }
-
-  const data = (await response.json()) as MistralResponse;
-  const text = data.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!text) {
-    throw new Error(
-      `Mistral response had no text content. Raw: ${JSON.stringify(data)}`
-    );
-  }
-  return text;
 }
 
 export async function generateCoverPromptForStory(

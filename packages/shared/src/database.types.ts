@@ -796,6 +796,8 @@ export type Database = {
           clothing_override: string | null
           created_at: string
           debug_data: Json | null
+          final_prompt: string | null
+          final_prompt_drafted_at: string | null
           id: string
           image_id: string | null
           image_type: string
@@ -822,6 +824,8 @@ export type Database = {
           clothing_override?: string | null
           created_at?: string
           debug_data?: Json | null
+          final_prompt?: string | null
+          final_prompt_drafted_at?: string | null
           id?: string
           image_id?: string | null
           image_type: string
@@ -848,6 +852,8 @@ export type Database = {
           clothing_override?: string | null
           created_at?: string
           debug_data?: Json | null
+          final_prompt?: string | null
+          final_prompt_drafted_at?: string | null
           id?: string
           image_id?: string | null
           image_type?: string

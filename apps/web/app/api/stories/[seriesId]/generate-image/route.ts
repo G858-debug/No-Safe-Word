@@ -2,15 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
   submitSirayImage,
-  assembleHunyuanPrompt,
   generateFlux2Image,
   imageUrlToBase64,
-  buildSceneCharacterBlock,
-  buildSceneCharacterBlockFromLocked,
-  type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
 import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
+import { draftAndPersistScenePrompt } from "@/lib/server/draft-scene-prompt-from-db";
 
 /**
  * POST /api/stories/[seriesId]/generate-image
@@ -72,12 +69,15 @@ export async function POST(
   }
 }
 
-async function runHunyuanGeneration(seriesId: string, promptId: string) {
-  // 1. Fetch the prompt row + linked character IDs
+async function runHunyuanGeneration(_seriesId: string, promptId: string) {
+  // 1. Fetch the prompt row. The final_prompt column is the source of
+  //    truth for what gets sent to Siray — it is drafted by Mistral (see
+  //    draft-scene-prompt-from-db.ts) and optionally edited by the user
+  //    on the image card.
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, character_block_override, secondary_character_block_override, suppress_character_block, clothing_override, sfw_constraint_override, visual_signature_override"
+      "id, character_id, secondary_character_id, image_type, final_prompt"
     )
     .eq("id", promptId)
     .single();
@@ -93,113 +93,25 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     .eq("id", promptId);
 
   try {
-    // 3. Resolve locked portrait prompts for linked characters from the
-    //    base `characters` table. Portrait approval is canonical per identity
-    //    (not per story), so any story using this character inherits it.
-    const charIds = [
-      prompt.character_id,
-      prompt.secondary_character_id,
-    ].filter((id): id is string => Boolean(id));
-
-    // Build scene character blocks from `portrait_prompt_locked` (the exact
-    // text that produced the approved portrait), stripped of portrait framing
-    // and prepended with the character's name. Same source of truth as the
-    // cover Hunyuan path. Falls back to the structured description only when
-    // the locked prompt is missing (e.g. legacy approvals before the column
-    // was populated) — that path emits a warning so we can spot drift.
-    const charBlocks: Record<string, string> = {};
-    const charApproved: Record<string, boolean> = {};
-    const clothingMap: Record<string, string> = {};
-    if (charIds.length > 0) {
-      const { data: chars } = await supabase
-        .from("characters")
-        .select("id, name, description, approved_image_id, portrait_prompt_locked")
-        .in("id", charIds);
-
-      for (const c of chars ?? []) {
-        charApproved[c.id] = Boolean(c.approved_image_id);
-        if (!c.name) continue;
-        if (c.portrait_prompt_locked) {
-          charBlocks[c.id] = buildSceneCharacterBlockFromLocked(
-            c.name,
-            c.portrait_prompt_locked
-          );
-        } else if (c.description) {
-          console.warn(
-            `[generate-image:hunyuan] character ${c.id} (${c.name}) has no portrait_prompt_locked; falling back to description-derived scene block`
-          );
-          charBlocks[c.id] = buildSceneCharacterBlock(
-            c.name,
-            c.description as PortraitCharacterDescription
-          );
-        }
-        const clothing = (c.description as Record<string, string>)?.clothing;
-        if (clothing) {
-          clothingMap[c.id] = `${c.name} is wearing ${clothing}.`;
-        }
-      }
+    // 3. Auto-draft if the user has never run Mistral on this prompt.
+    //    draftAndPersistScenePrompt also validates that linked characters
+    //    have approved descriptions + portraits, and writes final_prompt
+    //    back to the DB.
+    let finalPrompt = prompt.final_prompt?.trim();
+    let autoDrafted = false;
+    if (!finalPrompt) {
+      const drafted = await draftAndPersistScenePrompt(promptId);
+      finalPrompt = drafted.finalPrompt;
+      autoDrafted = true;
     }
 
-    let primaryBlock: string | undefined;
-    let secondaryBlock: string | undefined;
-
-    if (!prompt.suppress_character_block) {
-      primaryBlock = prompt.character_block_override?.trim()
-        ? prompt.character_block_override.trim()
-        : prompt.character_id && prompt.character_block_override === null
-          ? charBlocks[prompt.character_id]
-          : undefined;
-      secondaryBlock = prompt.secondary_character_block_override?.trim()
-        ? prompt.secondary_character_block_override.trim()
-        : prompt.secondary_character_id && prompt.secondary_character_block_override === null
-          ? charBlocks[prompt.secondary_character_id]
-          : undefined;
-    }
-
-    // Guard — require portrait approval before generating scenes so the
-    // character's appearance is anchored in the system.
-    if (prompt.character_id && !charApproved[prompt.character_id]) {
-      throw new Error(
-        `Character "${prompt.character_name ?? prompt.character_id}" has no approved portrait yet — approve the portrait before generating scenes under hunyuan3.`
-      );
-    }
-    if (prompt.secondary_character_id && !charApproved[prompt.secondary_character_id]) {
-      throw new Error(
-        `Secondary character "${prompt.secondary_character_name ?? prompt.secondary_character_id}" has no approved portrait yet.`
-      );
-    }
-
-    // 4. Aspect ratio — two-character scenes get landscape, single/none get portrait
+    // 4. Aspect ratio — two-character scenes get landscape, single/none get portrait.
     const aspectRatio =
       prompt.character_id && prompt.secondary_character_id ? "5:4" : "4:5";
 
-    // Apply clothing_override: null = use auto clothingMap, "" = suppress, non-empty = replace
-    let resolvedClothingMap = clothingMap;
-    if (prompt.clothing_override !== null && prompt.clothing_override !== undefined) {
-      resolvedClothingMap = prompt.clothing_override
-        ? { _: prompt.clothing_override }
-        : {};
-    }
-
-    // 5. Assemble the final prompt + resolve reference image URLs, then
-    //    dispatch to Siray.
-    //
-    // Identity reinforcement runs through TWO channels:
-    //   - text: portrait_prompt_locked is injected into the assembled
-    //     prompt via primaryBlock/secondaryBlock.
-    //   - image: approved portrait URLs are passed as i2i reference images.
-    // Flux 2 Dev uses image-only (no character text). See runFlux2Generation.
-    const assembledFinalPrompt = assembleHunyuanPrompt({
-      scenePrompt: prompt.prompt,
-      characterBlock: primaryBlock,
-      secondaryCharacterBlock: secondaryBlock,
-      aspectRatio,
-      imageType: prompt.image_type,
-      clothingMap: Object.keys(resolvedClothingMap).length ? resolvedClothingMap : undefined,
-      sfwConstraint: prompt.sfw_constraint_override ?? undefined,
-      visualSignature: prompt.visual_signature_override ?? undefined,
-    });
-
+    // 5. Resolve i2i reference image URLs from the linked characters' approved
+    //    portraits. Identity flows through these references; the text prompt
+    //    that Mistral wrote intentionally avoids re-describing faces/skin/hair.
     const referenceImageUrls = await getPortraitUrlsForScene([
       prompt.character_id,
       prompt.secondary_character_id,
@@ -208,7 +120,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     // 6. Submit to Siray (async). The status route polls the task_id and
     //    handles download/upload/DB-update when the generation completes.
     const submitted = await submitSirayImage({
-      prompt: assembledFinalPrompt,
+      prompt: finalPrompt,
       aspectRatio,
       referenceImageUrls,
     });
@@ -218,7 +130,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
     const { data: imageRow, error: imageErr } = await supabase
       .from("images")
       .insert({
-        prompt: assembledFinalPrompt,
+        prompt: finalPrompt,
         settings: {
           model: "hunyuan3",
           provider: "siray",
@@ -271,13 +183,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
         image_id: imageId,
         previous_image_id: currentPrompt?.image_id ?? null,
         debug_data: {
-          primary_block_source: prompt.suppress_character_block
-            ? "suppressed"
-            : prompt.character_block_override?.trim() ? "override" : "db",
-          secondary_block_source: prompt.suppress_character_block
-            ? "suppressed"
-            : prompt.secondary_character_block_override?.trim() ? "override" : "db",
-          suppressed: Boolean(prompt.suppress_character_block),
+          prompt_source: autoDrafted ? "mistral_auto_draft" : "stored_final_prompt",
         },
       })
       .eq("id", promptId);
@@ -288,6 +194,7 @@ async function runHunyuanGeneration(seriesId: string, promptId: string) {
       imageId,
       jobId,
       model: "hunyuan3",
+      auto_drafted: autoDrafted,
     });
   } catch (err) {
     await supabase

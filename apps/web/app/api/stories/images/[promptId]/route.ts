@@ -54,6 +54,7 @@ export async function PATCH(
       clothing_override,
       sfw_constraint_override,
       visual_signature_override,
+      final_prompt,
     } = body as {
       prompt?: string;
       character_block_override?: string | null;
@@ -62,6 +63,7 @@ export async function PATCH(
       clothing_override?: string | null;
       sfw_constraint_override?: string | null;
       visual_signature_override?: string | null;
+      final_prompt?: string | null;
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
@@ -71,6 +73,7 @@ export async function PATCH(
     const hasClothingOverrideUpdate = clothing_override !== undefined;
     const hasSfwConstraintOverrideUpdate = sfw_constraint_override !== undefined;
     const hasVisualSignatureOverrideUpdate = visual_signature_override !== undefined;
+    const hasFinalPromptUpdate = final_prompt !== undefined;
 
     if (
       !hasPromptUpdate &&
@@ -79,7 +82,8 @@ export async function PATCH(
       !hasSuppressUpdate &&
       !hasClothingOverrideUpdate &&
       !hasSfwConstraintOverrideUpdate &&
-      !hasVisualSignatureOverrideUpdate
+      !hasVisualSignatureOverrideUpdate &&
+      !hasFinalPromptUpdate
     ) {
       return NextResponse.json(
         { error: "At least one field to update is required" },
@@ -109,9 +113,25 @@ export async function PATCH(
     if (hasClothingOverrideUpdate) updates.clothing_override = clothing_override;
     if (hasSfwConstraintOverrideUpdate) updates.sfw_constraint_override = sfw_constraint_override;
     if (hasVisualSignatureOverrideUpdate) updates.visual_signature_override = visual_signature_override;
+    if (hasFinalPromptUpdate) updates.final_prompt = final_prompt;
 
-    // Reset to pending on any content change so the next generation uses fresh data
-    if (existing.status === "generated" || existing.status === "approved") {
+    // Reset to pending on any content change EXCEPT a pure final_prompt edit —
+    // that's the user intentionally tweaking the about-to-be-sent text and
+    // shouldn't bump the row out of "approved" or "generated".
+    const onlyFinalPromptChanged =
+      hasFinalPromptUpdate &&
+      !hasPromptUpdate &&
+      !hasOverrideUpdate &&
+      !hasSecondaryOverrideUpdate &&
+      !hasSuppressUpdate &&
+      !hasClothingOverrideUpdate &&
+      !hasSfwConstraintOverrideUpdate &&
+      !hasVisualSignatureOverrideUpdate;
+
+    if (
+      !onlyFinalPromptChanged &&
+      (existing.status === "generated" || existing.status === "approved")
+    ) {
       updates.status = "pending";
     }
 
