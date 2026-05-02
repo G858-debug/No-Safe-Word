@@ -197,6 +197,11 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
       auto_drafted: autoDrafted,
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[generate-image:hunyuan] prompt=${promptId} failed: ${message}`,
+      err
+    );
     await supabase
       .from("story_image_prompts")
       .update({ status: "failed" })
@@ -204,7 +209,7 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
 
     return NextResponse.json(
       {
-        error: err instanceof Error ? err.message : "Generation failed",
+        error: message,
         model: "hunyuan3",
         promptId,
       },

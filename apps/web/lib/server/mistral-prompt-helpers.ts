@@ -80,6 +80,12 @@ interface MistralResponse {
  * Call Mistral Large with the given system + user messages. Returns the
  * assistant text content. Throws on auth failure, HTTP error, or empty
  * response.
+ *
+ * Automatically retries on 429 (rate limit) and 5xx errors with
+ * exponential backoff. Batch scene-prompt drafting can fire ~1 request
+ * every 1.5 seconds, which can trip Mistral's per-second rate limit on
+ * mistral-large-latest — without retries, the user sees random failures
+ * scattered through a batch run.
  */
 export async function callMistral(
   systemPrompt: string,
@@ -91,34 +97,87 @@ export async function callMistral(
     throw new Error("MISTRAL_API_KEY is not set");
   }
 
-  const response = await fetch(MISTRAL_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MISTRAL_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: opts?.maxTokens ?? 2048,
-      temperature: opts?.temperature ?? 0.7,
-    }),
-  });
+  const maxAttempts = 4;
+  const baseDelayMs = 750;
 
-  if (!response.ok) {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(MISTRAL_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: MISTRAL_MODEL,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: opts?.maxTokens ?? 2048,
+          temperature: opts?.temperature ?? 0.7,
+        }),
+      });
+    } catch (networkErr) {
+      lastError =
+        networkErr instanceof Error
+          ? networkErr
+          : new Error(`Mistral fetch failed: ${String(networkErr)}`);
+      console.error(
+        `[mistral] network error on attempt ${attempt}/${maxAttempts}: ${lastError.message}`
+      );
+      if (attempt < maxAttempts) {
+        await sleep(baseDelayMs * 2 ** (attempt - 1));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (response.ok) {
+      const data = (await response.json()) as MistralResponse;
+      const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+      if (!text) {
+        throw new Error(
+          `Mistral response had no text content. Raw: ${JSON.stringify(data)}`
+        );
+      }
+      return text;
+    }
+
     const body = await response.text().catch(() => "");
-    throw new Error(`Mistral API ${response.status}: ${body || response.statusText}`);
+    const status = response.status;
+    const isRetryable = status === 429 || status === 503 || status === 504 || status >= 500;
+    lastError = new Error(
+      `Mistral API ${status}: ${body || response.statusText}`
+    );
+
+    if (!isRetryable || attempt === maxAttempts) {
+      console.error(
+        `[mistral] giving up after ${attempt} attempt(s): ${lastError.message}`
+      );
+      throw lastError;
+    }
+
+    // Honour Retry-After header if present, otherwise exponential backoff
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSec = retryAfterHeader ? parseFloat(retryAfterHeader) : NaN;
+    const delay = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+      ? retryAfterSec * 1000
+      : baseDelayMs * 2 ** (attempt - 1);
+
+    console.warn(
+      `[mistral] ${status} on attempt ${attempt}/${maxAttempts}; retrying in ${Math.round(delay)}ms`
+    );
+    await sleep(delay);
   }
 
-  const data = (await response.json()) as MistralResponse;
-  const text = data.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!text) {
-    throw new Error(
-      `Mistral response had no text content. Raw: ${JSON.stringify(data)}`
-    );
-  }
-  return text;
+  // Unreachable — the loop either returns or throws
+  throw lastError ?? new Error("Mistral call failed for unknown reason");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
