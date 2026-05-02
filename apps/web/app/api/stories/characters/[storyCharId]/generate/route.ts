@@ -4,15 +4,11 @@ import {
   submitSirayImage,
   generateFlux2Image,
   buildCharacterPortraitPrompt,
-  imageUrlToBase64,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
 
-type ImageType = "portrait" | "fullBody";
-type GenerationStage = "face" | "body";
-
-// POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait or full body
+// POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait.
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
@@ -21,18 +17,10 @@ export async function POST(
   const { storyCharId } = params;
 
   try {
-    // Parse optional type, stage, and customPrompt from request body
-    let imageType: ImageType = "portrait";
-    let stage: GenerationStage = "face";
+    // Parse optional customPrompt from request body
     let customPrompt: string | undefined;
     try {
       const body = await request.json();
-      if (body.type === "fullBody") {
-        imageType = "fullBody";
-      }
-      if (body.stage === "body") {
-        stage = "body";
-      }
       if (typeof body.customPrompt === 'string' && body.customPrompt.trim().length > 20) {
         customPrompt = body.customPrompt.trim();
       }
@@ -83,7 +71,7 @@ export async function POST(
     // 2. Fetch the character's structured description
     const { data: character, error: charError } = await supabase
       .from("characters")
-      .select("id, name, description, approved_image_id")
+      .select("id, name, description")
       .eq("id", storyChar.character_id)
       .single();
 
@@ -98,41 +86,24 @@ export async function POST(
     const desc = character.description as Record<string, string>;
     const isMale = desc.gender === 'male';
 
-    console.log(`[StoryPublisher] Generating ${stage} (${isMale ? 'male' : 'female'}) for: ${character.name} [model=${imageModel}]`);
-
-    // For body stage, look up the approved face portrait so we can pass it
-    // as a reference image (PuLID for Flux 2, i2i for Hunyuan/Siray). Falls
-    // through silently if no approved face exists yet — body generation will
-    // run as plain t2i. Face stage never references anything (this IS the
-    // reference being created).
-    let approvedFaceUrl: string | null = null;
-    if (stage === "body" && character.approved_image_id) {
-      const { data: faceImg } = await supabase
-        .from("images")
-        .select("stored_url, sfw_url")
-        .eq("id", character.approved_image_id)
-        .single();
-      approvedFaceUrl = faceImg?.stored_url ?? faceImg?.sfw_url ?? null;
-    }
+    console.log(`[StoryPublisher] Generating portrait (${isMale ? 'male' : 'female'}) for: ${character.name} [model=${imageModel}]`);
 
     // ── hunyuan3 portrait path (async submit-and-poll via Siray, t2i) ──
     if (imageModel === "hunyuan3") {
       const promptText =
         customPrompt ??
-        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, stage);
+        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription);
 
-      // 1. Submit to Siray; returns immediately with a task_id.
-      // For body stage, pass the approved face as an i2i reference so the
-      // body image inherits identity. For face stage, plain t2i.
-      const referenceImageUrls = approvedFaceUrl ? [approvedFaceUrl] : [];
+      // Submit to Siray (plain t2i — no reference image); returns immediately
+      // with a task_id.
       const submitted = await submitSirayImage({
         prompt: promptText,
         aspectRatio: "4:5",
-        referenceImageUrls,
+        referenceImageUrls: [],
       });
 
-      // 2. Insert the images row up-front (stored_url filled in later by
-      //    the status handler when the job completes).
+      // Insert the images row up-front (stored_url filled in later by the
+      // status handler when the job completes).
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
@@ -145,8 +116,6 @@ export async function POST(
             siray_task_id: submitted.taskId,
             aspect_ratio: "4:5",
             size: submitted.size,
-            imageType,
-            stage,
             reference_image_count: submitted.referenceImageCount,
           },
           mode: "sfw",
@@ -181,26 +150,15 @@ export async function POST(
     }
 
     // ── flux2_dev portrait path (async RunPod on Flux 2 Dev endpoint) ──
-    // Face stage: no references — this IS the reference being created.
-    // Body stage: PuLID-injects the approved face so the body inherits identity.
+    // Plain t2i — this IS the reference being created.
     if (imageModel === "flux2_dev") {
       const promptText =
         customPrompt ??
-        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, stage);
-
-      // For body stage, inject the approved face via PuLID so the body
-      // image inherits the locked identity. Face stage has no reference yet.
-      const references: Array<{ name: string; base64: string }> = [];
-      if (approvedFaceUrl) {
-        references.push({
-          name: `ref_face_${character.id}.jpeg`,
-          base64: await imageUrlToBase64(approvedFaceUrl),
-        });
-      }
+        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription);
 
       const flux2Result = await generateFlux2Image({
         scenePrompt: promptText,
-        references,
+        references: [],
         // Portraits are always 3:4 (768×1024) per the standard portrait framing.
         width: 768,
         height: 1024,
@@ -218,8 +176,6 @@ export async function POST(
             seed: flux2Result.seed,
             width: 768,
             height: 1024,
-            imageType,
-            stage,
           },
           mode: "sfw",
         })

@@ -18,8 +18,7 @@ export async function GET(
       id, role, prose_description,
       characters:character_id (
         id, name, description,
-        approved_image_id, approved_seed, approved_prompt, portrait_prompt_locked,
-        approved_fullbody_image_id, approved_fullbody_seed, approved_fullbody_prompt
+        approved_image_id, approved_seed, approved_prompt, portrait_prompt_locked
       )
     `
     )
@@ -42,9 +41,6 @@ export async function GET(
     approved_seed: number | null;
     approved_prompt: string | null;
     portrait_prompt_locked: string | null;
-    approved_fullbody_image_id: string | null;
-    approved_fullbody_seed: number | null;
-    approved_fullbody_prompt: string | null;
   };
 
   const baseOf = (row: unknown): BaseChar | null => {
@@ -56,7 +52,7 @@ export async function GET(
   const imageIds = storyCharacters
     .flatMap((sc) => {
       const base = baseOf(sc.characters);
-      return [base?.approved_image_id, base?.approved_fullbody_image_id];
+      return [base?.approved_image_id];
     })
     .filter((id): id is string => Boolean(id));
 
@@ -89,16 +85,9 @@ export async function GET(
       approved_image_url: base?.approved_image_id
         ? imageUrls[base.approved_image_id] || null
         : null,
-      approved_fullbody_image_id: base?.approved_fullbody_image_id ?? null,
-      approved_fullbody_seed: base?.approved_fullbody_seed ?? null,
-      approved_fullbody_prompt: base?.approved_fullbody_prompt ?? null,
-      approved_fullbody_image_url: base?.approved_fullbody_image_id
-        ? imageUrls[base.approved_fullbody_image_id] || null
-        : null,
       portrait_prompt_locked: base?.portrait_prompt_locked ?? null,
-      // Derived flags — the UI previously read `approved` / `approved_fullbody`.
+      // Derived flag — the UI reads `approved`.
       approved: Boolean(base?.approved_image_id),
-      approved_fullbody: Boolean(base?.approved_fullbody_image_id),
     };
   });
 

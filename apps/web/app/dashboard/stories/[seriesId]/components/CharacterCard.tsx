@@ -14,20 +14,12 @@ interface Props {
   onUpdate: () => void;
 }
 
-type Stage = "face" | "body";
-
-// Simple character approval card:
-//   1. Generate portrait → preview → approve   (stage = "face")
-//   2. Generate full-body → preview → approve  (stage = "body")
-//
-// Both approvals persist to the base `characters` row so the face reused in
-// any story that features this character. Polling handles async flux2_dev
+// Simple character approval card: generate portrait → preview → approve.
+// The approval persists to the base `characters` row so the face is reused in
+// every story that features this character. Polling handles async flux2_dev
 // jobs; hunyuan3 returns synchronously.
 export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   void seriesId;
-  const [stage, setStage] = useState<Stage>(
-    character.approved ? "body" : "face"
-  );
   const [customPrompt, setCustomPrompt] = useState("");
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -44,8 +36,6 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
   const name = character.name ?? "(unnamed)";
 
   const portraitApproved = character.approved;
-  const fullbodyApproved = character.approved_fullbody;
-  const fullyApproved = portraitApproved && fullbodyApproved;
 
   useEffect(() => {
     return () => {
@@ -53,18 +43,17 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     };
   }, []);
 
-  // Pre-load the default generation prompt for the current stage on mount
-  // and whenever the stage transitions (face → body after face approval).
-  // The textarea then becomes the single edit surface — no separate
-  // override block, no "Load default prompt" button to click first.
+  // Pre-load the default generation prompt on mount. The textarea is the
+  // single edit surface — no separate override block, no "Load default
+  // prompt" button to click first.
   useEffect(() => {
-    if (fullyApproved) return; // form is hidden, no need to fetch
+    if (portraitApproved) return; // form is hidden, no need to fetch
     let cancelled = false;
     setIsLoadingPrompt(true);
     (async () => {
       try {
         const res = await fetch(
-          `/api/stories/characters/${character.id}/default-prompt?stage=${stage}`
+          `/api/stories/characters/${character.id}/default-prompt`
         );
         if (cancelled) return;
         const data = (await res.json()) as { prompt?: string };
@@ -78,7 +67,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [character.id, stage, fullyApproved]);
+  }, [character.id, portraitApproved]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -132,8 +121,6 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            type: stage === "face" ? "portrait" : "fullBody",
-            stage,
             customPrompt: customPrompt.trim() || undefined,
           }),
         }
@@ -176,7 +163,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       setError(err instanceof Error ? err.message : "Generation failed");
       setIsGenerating(false);
     }
-  }, [character.id, customPrompt, pollJob, stage, stopPolling]);
+  }, [character.id, customPrompt, pollJob, stopPolling]);
 
   const handleApprove = useCallback(async () => {
     if (!pendingImageId) return;
@@ -191,56 +178,48 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           body: JSON.stringify({
             image_id: pendingImageId,
             prompt: pendingPrompt,
-            type: stage === "face" ? "portrait" : "fullBody",
           }),
         }
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Approval failed");
 
-      // Clear in-flight state and advance the stage. customPrompt is
-      // re-populated by the default-prompt effect when stage flips —
-      // no need to blank it manually here.
+      // Clear in-flight state. The form hides itself once portraitApproved
+      // flips to true on the next data refresh.
       setPendingImageId(null);
       setPendingImageUrl(null);
       setPendingJobId(null);
       setPendingPrompt(null);
-      if (stage === "face") setStage("body");
       onUpdate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Approval failed");
     } finally {
       setIsApproving(false);
     }
-  }, [character.id, onUpdate, pendingImageId, pendingPrompt, stage]);
+  }, [character.id, onUpdate, pendingImageId, pendingPrompt]);
 
-  const handleReset = useCallback(
-    async (resetFace: boolean) => {
-      setError(null);
-      try {
-        const res = await fetch(
-          `/api/stories/characters/${character.id}/reset-portrait`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ resetFace }),
-          }
-        );
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || "Reset failed");
+  const handleReset = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${character.id}/reset-portrait`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
         }
-        setPendingImageId(null);
-        setPendingImageUrl(null);
-        setPendingJobId(null);
-        setStage(resetFace ? "face" : "body");
-        onUpdate();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Reset failed");
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Reset failed");
       }
-    },
-    [character.id, onUpdate]
-  );
+      setPendingImageId(null);
+      setPendingImageUrl(null);
+      setPendingJobId(null);
+      onUpdate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    }
+  }, [character.id, onUpdate]);
 
   return (
     <Card className="border-2 border-zinc-400 dark:border-zinc-500">
@@ -249,10 +228,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           <CardTitle className="text-lg">{name}</CardTitle>
           <div className="flex items-center gap-1">
             <Badge variant={portraitApproved ? "default" : "outline"}>
-              {portraitApproved ? "✓ Face" : "Face"}
-            </Badge>
-            <Badge variant={fullbodyApproved ? "default" : "outline"}>
-              {fullbodyApproved ? "✓ Body" : "Body"}
+              {portraitApproved ? "✓ Approved" : "Pending"}
             </Badge>
           </div>
         </div>
@@ -262,23 +238,12 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           <div className="flex flex-col gap-2">
             {character.approved_image_url && (
               <div>
-                <p className="text-xs text-muted-foreground mb-1">Face</p>
+                <p className="text-xs text-muted-foreground mb-1">Portrait</p>
                 <img
                   src={character.approved_image_url}
                   alt={`${name} — portrait`}
                   className="w-24 h-32 object-cover rounded-md border cursor-zoom-in"
                   onClick={() => setLightboxUrl(character.approved_image_url ?? null)}
-                />
-              </div>
-            )}
-            {character.approved_fullbody_image_url && (
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Body</p>
-                <img
-                  src={character.approved_fullbody_image_url}
-                  alt={`${name} — full body`}
-                  className="w-24 h-32 object-cover rounded-md border cursor-zoom-in"
-                  onClick={() => setLightboxUrl(character.approved_fullbody_image_url ?? null)}
                 />
               </div>
             )}
@@ -299,13 +264,9 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           </div>
         </div>
 
-        {!fullyApproved && (
+        {!portraitApproved && (
           <div className="space-y-2">
-            <p className="text-sm font-medium">
-              {stage === "face"
-                ? "Generate a portrait"
-                : "Generate a full-body shot"}
-            </p>
+            <p className="text-sm font-medium">Generate a portrait</p>
             <Textarea
               placeholder={
                 isLoadingPrompt
@@ -329,7 +290,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
                 disabled={isGenerating || isApproving}
                 size="sm"
               >
-                {isGenerating ? "Generating…" : `Generate ${stage === "face" ? "portrait" : "full body"}`}
+                {isGenerating ? "Generating…" : "Generate portrait"}
               </Button>
               {pendingImageUrl && (
                 <Button
@@ -361,30 +322,20 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
           </div>
         )}
 
-        {fullyApproved && (
+        {portraitApproved && (
           <p className="text-sm text-green-600">
             Character ready for story images.
           </p>
         )}
 
-        {(portraitApproved || fullbodyApproved) && (
+        {portraitApproved && (
           <div className="flex gap-2 text-xs">
-            {fullbodyApproved && (
-              <button
-                onClick={() => handleReset(false)}
-                className="underline text-muted-foreground hover:text-foreground"
-              >
-                Reset body only
-              </button>
-            )}
-            {portraitApproved && (
-              <button
-                onClick={() => handleReset(true)}
-                className="underline text-muted-foreground hover:text-foreground"
-              >
-                Reset face + body
-              </button>
-            )}
+            <button
+              onClick={handleReset}
+              className="underline text-muted-foreground hover:text-foreground"
+            >
+              Reset portrait
+            </button>
           </div>
         )}
 

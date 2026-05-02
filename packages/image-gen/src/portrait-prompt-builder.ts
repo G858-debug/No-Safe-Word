@@ -1,7 +1,6 @@
 import {
   VISUAL_SIGNATURE,
   PORTRAIT_COMPOSITION,
-  FULLBODY_COMPOSITION,
 } from "./prompt-constants";
 
 /**
@@ -29,12 +28,9 @@ export interface PortraitCharacterDescription {
  * output is a single paragraph that describes the character, then a fixed
  * portrait framing, then the shared visual signature. Safe to pass directly
  * to either backend.
- *
- * Pass `stage: "body"` to get a full-length framing instead of a close-up.
  */
 export function buildCharacterPortraitPrompt(
-  description: PortraitCharacterDescription,
-  stage: "face" | "body" = "face"
+  description: PortraitCharacterDescription
 ): string {
   const parts: string[] = [];
 
@@ -78,7 +74,7 @@ export function buildCharacterPortraitPrompt(
     parts.push(`${capitalize(description.expression.trim())}.`);
   }
 
-  parts.push(stage === "body" ? FULLBODY_COMPOSITION : PORTRAIT_COMPOSITION);
+  parts.push(PORTRAIT_COMPOSITION);
   parts.push(VISUAL_SIGNATURE);
 
   return parts.join(" ");
@@ -149,17 +145,16 @@ export function resolvePortraitText(
 
 const PORTRAIT_FRAMING_FRAGMENTS: readonly string[] = [
   PORTRAIT_COMPOSITION,
-  FULLBODY_COMPOSITION,
   VISUAL_SIGNATURE,
 ];
 
 /**
  * Strip portrait framing/lighting/signature text from a portrait prompt.
  *
- * Removes any occurrence of `PORTRAIT_COMPOSITION`, `FULLBODY_COMPOSITION`,
- * and `VISUAL_SIGNATURE` (handles duplicates from a historical bug where the
- * signature was concatenated twice). Leaves the structural identity prefix
- * intact. Tolerates absent fragments.
+ * Removes any occurrence of `PORTRAIT_COMPOSITION` and `VISUAL_SIGNATURE`
+ * (handles duplicates from a historical bug where the signature was
+ * concatenated twice). Leaves the structural identity prefix intact.
+ * Tolerates absent fragments.
  */
 export function stripPortraitFraming(text: string): string {
   let out = text;
@@ -167,23 +162,6 @@ export function stripPortraitFraming(text: string): string {
     out = out.split(fragment).join(" ");
   }
   return out.replace(/\s+/g, " ").trim();
-}
-
-/**
- * Derive a full-body portrait prompt from an approved face prompt.
- *
- * Strips the face's framing/composition/signature, then re-appends the
- * full-body framing + signature. Preserves any descriptive edits the user
- * made to the face prompt (skin, hair, distinguishing features, expression),
- * so the body inherits the same identity prose rather than rebuilding from
- * the structured `description` JSONB.
- *
- * Caller should fall back to `buildCharacterPortraitPrompt(desc, "body")`
- * when there is no locked face prompt.
- */
-export function deriveBodyPromptFromFace(lockedFacePrompt: string): string {
-  const identity = stripPortraitFraming(lockedFacePrompt);
-  return [identity, FULLBODY_COMPOSITION, VISUAL_SIGNATURE].join(" ");
 }
 
 /**

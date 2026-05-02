@@ -17,11 +17,6 @@ export interface CharacterFromAPI {
   approved_image_url: string | null;
   approved_seed: number | null;
   approved_prompt: string | null;
-  approved_fullbody: boolean;
-  approved_fullbody_image_id: string | null;
-  approved_fullbody_image_url: string | null;
-  approved_fullbody_seed: number | null;
-  approved_fullbody_prompt: string | null;
   portrait_prompt_locked: string | null;
 }
 

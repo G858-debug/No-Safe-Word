@@ -4,23 +4,21 @@ import { supabase } from "@no-safe-word/story-engine";
 /**
  * POST /api/stories/characters/[storyCharId]/reset-portrait
  *
- * Clear approved portrait / full-body state on the base `characters` row so
- * the user can regenerate. Because portraits are canonical per identity, this
- * affects every story that features this character.
+ * Clears the approved portrait on the base `characters` row so the user can
+ * regenerate. Because portraits are canonical per identity, this affects
+ * every story that features this character.
  *
- * Body: { resetFace?: boolean }
- *   - resetFace: true  → clear BOTH portrait AND full-body (default)
- *   - resetFace: false → clear only full-body, keep portrait
+ * No body parameters. There is no body-stage to reset — that flow has been
+ * retired. Dormant `approved_fullbody_*` columns on existing rows are left
+ * untouched.
  */
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
   try {
     const params = await props.params;
     const { storyCharId } = params;
-    const body = await request.json().catch(() => ({}));
-    const { resetFace = true } = body as { resetFace?: boolean };
 
     const { data: storyChar, error: scErr } = await supabase
       .from("story_characters")
@@ -35,22 +33,14 @@ export async function POST(
       );
     }
 
-    const updateFields: Record<string, unknown> = {
-      approved_fullbody_image_id: null,
-      approved_fullbody_seed: null,
-      approved_fullbody_prompt: null,
-    };
-
-    if (resetFace) {
-      updateFields.approved_image_id = null;
-      updateFields.approved_seed = null;
-      updateFields.approved_prompt = null;
-      updateFields.portrait_prompt_locked = null;
-    }
-
     const { error: updateErr } = await supabase
       .from("characters")
-      .update(updateFields)
+      .update({
+        approved_image_id: null,
+        approved_seed: null,
+        approved_prompt: null,
+        portrait_prompt_locked: null,
+      })
       .eq("id", storyChar.character_id);
 
     if (updateErr) {
@@ -60,7 +50,7 @@ export async function POST(
       );
     }
 
-    return NextResponse.json({ ok: true, resetFace });
+    return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[ResetPortrait] Error:", err);
     return NextResponse.json(

@@ -11,7 +11,7 @@ export async function GET() {
       story_posts (id, part_number, title, status),
       story_characters (
         id, role,
-        characters:character_id (id, name, approved_image_id, approved_fullbody_image_id)
+        characters:character_id (id, name, approved_image_id)
       )
     `
     )

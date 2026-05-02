@@ -269,7 +269,7 @@ export default function SeriesDetailPage() {
 
   // Derived state
   const allCharsApproved =
-    characters.length > 0 && characters.every((c) => c.approved && c.approved_fullbody);
+    characters.length > 0 && characters.every((c) => c.approved);
   const allReadyForImages = allCharsApproved;
 
   // Cover approval gates the Blurbs tab (must be at least approved). The

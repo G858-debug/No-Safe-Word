@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 
 // POST /api/stories/characters/[storyCharId]/approve — Approve a character
-// portrait or full-body image. Writes to the base `characters` table so the
-// approval persists across every story that features this character.
+// portrait. Writes to the base `characters` table so the approval persists
+// across every story that features this character.
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
@@ -13,13 +13,11 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const { image_id, seed, prompt, type: imageType } = body as {
+    const { image_id, seed, prompt } = body as {
       image_id: string;
       seed?: number;
       prompt?: string;
-      type?: "portrait" | "fullBody";
     };
-    const isFullBody = imageType === "fullBody";
 
     if (!image_id) {
       return NextResponse.json(
@@ -115,31 +113,16 @@ export async function POST(
         .eq("id", image_id);
     }
 
-    // 4. Write portrait/fullbody state to the BASE `characters` row.
-    //    This makes the approved face reusable across every story.
-    const lockedPortraitPrompt = isFullBody
-      ? null
-      : prompt ?? image.prompt ?? null;
+    // 4. Write portrait state to the BASE `characters` row. This makes the
+    //    approved face reusable across every story.
+    const lockedPortraitPrompt = prompt ?? image.prompt ?? null;
 
-    const updateFields = isFullBody
-      ? {
-          approved_fullbody_image_id: image_id,
-          approved_fullbody_seed: resolvedSeed,
-          approved_fullbody_prompt: prompt ?? null,
-          // Body approval also rewrites the locked text used by Hunyuan
-          // scene generation, so a re-approved body propagates to scenes.
-          // `?? undefined` (not `?? null`) means Supabase skips the column
-          // when no prompt was supplied, preserving any existing
-          // face-derived locked text. Re-approving the face is the undo
-          // path when a body's locked text is no longer wanted.
-          portrait_prompt_locked: prompt ?? undefined,
-        }
-      : {
-          approved_image_id: image_id,
-          approved_seed: resolvedSeed,
-          approved_prompt: prompt ?? null,
-          portrait_prompt_locked: lockedPortraitPrompt,
-        };
+    const updateFields = {
+      approved_image_id: image_id,
+      approved_seed: resolvedSeed,
+      approved_prompt: prompt ?? null,
+      portrait_prompt_locked: lockedPortraitPrompt,
+    };
 
     const { error: updateError } = await supabase
       .from("characters")
@@ -153,24 +136,24 @@ export async function POST(
       );
     }
 
-    // 5. If every character in this series has both portrait + fullbody
-    //    approved on the base row, advance series to images_pending.
+    // 5. If every character in this series has a portrait approved on the
+    //    base row, advance series to images_pending.
     const { data: seriesChars } = await supabase
       .from("story_characters")
       .select(
-        "character_id, characters:character_id ( approved_image_id, approved_fullbody_image_id )"
+        "character_id, characters:character_id ( approved_image_id )"
       )
       .eq("series_id", storyChar.series_id);
 
     if (seriesChars && seriesChars.length > 0) {
       const allReady = seriesChars.every((sc) => {
         const base = sc.characters as
-          | { approved_image_id: string | null; approved_fullbody_image_id: string | null }
-          | { approved_image_id: string | null; approved_fullbody_image_id: string | null }[]
+          | { approved_image_id: string | null }
+          | { approved_image_id: string | null }[]
           | null;
         // PostgREST returns a single row here, but TS types it as array. Normalize.
         const row = Array.isArray(base) ? base[0] : base;
-        return Boolean(row?.approved_image_id && row?.approved_fullbody_image_id);
+        return Boolean(row?.approved_image_id);
       });
 
       if (allReady) {

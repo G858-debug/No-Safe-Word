@@ -13,7 +13,3 @@ export const VISUAL_SIGNATURE =
 /** Framing/lighting clause for a face portrait (medium close-up). */
 export const PORTRAIT_COMPOSITION =
   "Portrait, looking directly at the camera with a confident expression. Warm side-lighting, dark background with soft bokeh. Medium close-up, eye-level.";
-
-/** Framing/lighting clause for a full-body portrait (head-to-feet). */
-export const FULLBODY_COMPOSITION =
-  "Full body shot, standing upright, looking directly at the camera with a confident expression. Warm side-lighting, plain dark background. Full-length from head to feet, showing entire figure including legs and feet.";

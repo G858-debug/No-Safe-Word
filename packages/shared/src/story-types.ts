@@ -316,18 +316,15 @@ export interface StoryCharacterRow {
 /**
  * Base-roster character row. One row per unique identity; reused across every
  * story that features them. Portrait approval writes here — not to
- * story_characters — so approved faces/bodies persist across stories.
+ * story_characters — so approved faces persist across stories.
  */
 export interface CharacterRow {
   id: string;
   name: string;
   description: Record<string, unknown>;
   approved_image_id: string | null;
-  approved_fullbody_image_id: string | null;
   approved_seed: number | null;
-  approved_fullbody_seed: number | null;
   approved_prompt: string | null;
-  approved_fullbody_prompt: string | null;
   /** Exact prompt text that produced the approved portrait. Injected verbatim into scene prompts for hunyuan3. Null until portrait approved. */
   portrait_prompt_locked: string | null;
   created_at: string;
