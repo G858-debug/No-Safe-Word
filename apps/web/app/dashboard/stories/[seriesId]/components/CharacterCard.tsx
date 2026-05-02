@@ -1079,6 +1079,25 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
       }
       dispatch({ type: "RESET_COMPLETED" });
       onUpdate();
+      // Without this follow-up fetch the card would sit on the
+      // loading_default_prompt spinner indefinitely — mount-time
+      // hydration is gated by hydratedRef and only runs once.
+      try {
+        const dpRes = await fetch(
+          `/api/stories/characters/${character.id}/default-prompt`
+        );
+        const dpData = (await dpRes.json()) as { prompt?: string };
+        if (isMountedRef.current) {
+          dispatch({
+            type: "DEFAULT_PROMPT_LOADED",
+            prompt: dpData.prompt ?? "",
+          });
+        }
+      } catch {
+        if (isMountedRef.current) {
+          dispatch({ type: "DEFAULT_PROMPT_LOADED", prompt: "" });
+        }
+      }
     } catch (err) {
       dispatch({ type: "ERROR", message: errorMessage(err) });
     }
