@@ -694,9 +694,21 @@ export default function CoverApproval({ seriesId }: Props) {
 
           {state.cover_status === "complete" && heroUrl && (
             <div className="rounded-md border border-border bg-muted/30 p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Composited hero preview
-              </p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Composited hero preview
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryCompositing}
+                  disabled={busy || isCompositing}
+                  title="Re-render typography on top of the selected cover variant. Use after a title or hashtag change — the underlying base image stays the same."
+                  className="text-xs"
+                >
+                  {busy || isCompositing ? "Recomposing…" : "Recompose typography"}
+                </Button>
+              </div>
               <img
                 src={heroUrl}
                 alt="Composited hero cover"
