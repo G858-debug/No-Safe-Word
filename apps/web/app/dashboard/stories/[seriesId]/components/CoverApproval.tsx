@@ -82,6 +82,8 @@ export default function CoverApproval({ seriesId }: Props) {
   const [pendingSelection, setPendingSelection] = useState<number | null>(null);
   const [regeneratingPrompt, setRegeneratingPrompt] = useState(false);
   const [promptRegenJustSucceeded, setPromptRegenJustSucceeded] = useState(false);
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [promptSavedJust, setPromptSavedJust] = useState(false);
   const [eligibleChars, setEligibleChars] = useState<CoverEligibleCharacter[]>([]);
   const [savingCharacter, setSavingCharacter] = useState(false);
   // Per-slot busy set — tracks which variant indices are currently mid-flight
@@ -501,6 +503,36 @@ export default function CoverApproval({ seriesId }: Props) {
     }
   }
 
+  // Save the current textarea content to story_series.cover_prompt without
+  // triggering generation. Lets the user iterate on the prompt text across
+  // page reloads without spending GPU. After save, clear the dirty flag so
+  // the polling fetchCover doesn't fight the save.
+  async function handleSavePrompt() {
+    if (!promptDirty) return;
+    setSavingPrompt(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/cover-prompt`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: promptDraft }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to save prompt");
+        return;
+      }
+      setPromptDirty(false);
+      setPromptSavedJust(true);
+      await fetchCover();
+      setTimeout(() => setPromptSavedJust(false), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save prompt");
+    } finally {
+      setSavingPrompt(false);
+    }
+  }
+
   async function handleRegeneratePrompt() {
     setRegeneratingPrompt(true);
     setError(null);
@@ -734,26 +766,43 @@ export default function CoverApproval({ seriesId }: Props) {
               <label className="text-sm font-medium text-muted-foreground">
                 Cover prompt
               </label>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRegeneratePrompt}
-                disabled={
-                  regeneratingPrompt ||
-                  busy ||
-                  isGenerating ||
-                  isCompositing
-                }
-              >
-                {regeneratingPrompt
-                  ? "Regenerating with Mistral..."
-                  : "Regenerate prompt with Mistral"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSavePrompt}
+                  disabled={
+                    !promptDirty ||
+                    savingPrompt ||
+                    busy ||
+                    regeneratingPrompt ||
+                    isCompositing
+                  }
+                >
+                  {savingPrompt ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRegeneratePrompt}
+                  disabled={
+                    regeneratingPrompt ||
+                    busy ||
+                    isGenerating ||
+                    isCompositing ||
+                    savingPrompt
+                  }
+                >
+                  {regeneratingPrompt
+                    ? "Regenerating with Mistral..."
+                    : "Regenerate prompt with Mistral"}
+                </Button>
+              </div>
             </div>
             <Textarea
               value={promptDraft}
               placeholder={COVER_PROMPT_PLACEHOLDER}
-              disabled={!canEditPrompt || busy || regeneratingPrompt}
+              disabled={!canEditPrompt || busy || regeneratingPrompt || savingPrompt}
               onChange={(e) => {
                 setPromptDraft(e.target.value);
                 setPromptDirty(e.target.value !== (state.cover_prompt ?? ""));
@@ -771,11 +820,17 @@ export default function CoverApproval({ seriesId }: Props) {
               pose, setting, lighting, and composition.
             </p>
             {promptDirty && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Prompt edited — will be saved on next generation.
+              <p className="mt-1 text-xs text-amber-400">
+                Unsaved edits — click Save to persist, or click any Generate
+                button to apply and generate at the same time.
               </p>
             )}
-            {promptRegenJustSucceeded && !promptDirty && (
+            {promptSavedJust && !promptDirty && (
+              <p className="mt-1 text-xs text-green-400">
+                Prompt saved.
+              </p>
+            )}
+            {promptRegenJustSucceeded && !promptDirty && !promptSavedJust && (
               <p className="mt-1 text-xs text-green-400">
                 New prompt generated. Review it, then click &ldquo;Generate 4
                 Variants&rdquo; to spend RunPod time.
