@@ -19,6 +19,7 @@ import {
   Users,
   Image as ImageIcon,
   Calendar,
+  Activity,
 } from "lucide-react";
 
 interface SeriesSummary {
@@ -102,12 +103,20 @@ export default function StoriesPage() {
             ? "Loading..."
             : `${series.length} ${series.length === 1 ? "series" : "series"}`}
         </p>
-        <Link href="/dashboard/stories/import">
-          <Button>
-            <Upload className="mr-2 h-4 w-4" />
-            Import New Story
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/dashboard/pose-templates">
+            <Button variant="outline">
+              <Activity className="mr-2 h-4 w-4" />
+              Pose Templates
+            </Button>
+          </Link>
+          <Link href="/dashboard/stories/import">
+            <Button>
+              <Upload className="mr-2 h-4 w-4" />
+              Import New Story
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Loading state */}
