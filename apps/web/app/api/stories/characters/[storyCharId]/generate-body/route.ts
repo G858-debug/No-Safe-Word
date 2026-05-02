@@ -3,107 +3,122 @@ import { supabase } from "@no-safe-word/story-engine";
 import {
   submitSirayImage,
   generateFlux2Image,
+  imageUrlToBase64,
   buildCharacterPortraitPrompt,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
 
-// POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait.
+// POST /api/stories/characters/[storyCharId]/generate-body
+//
+// Submits a body generation conditioned on the just-completed face image as
+// i2i reference. Mirrors /generate but body-specific, kept as a separate
+// route for clean face/body separation. The new images row carries
+// settings.imageType = "body" so /in-flight-state and other consumers can
+// distinguish face vs body without inspecting prompt text.
 export async function POST(
   request: NextRequest,
   props: { params: Promise<{ storyCharId: string }> }
 ) {
-  const params = await props.params;
-  const { storyCharId } = params;
+  const { storyCharId } = await props.params;
 
   try {
-    // Parse optional customPrompt from request body
-    let customPrompt: string | undefined;
-    try {
-      const body = await request.json();
-      if (typeof body.customPrompt === 'string' && body.customPrompt.trim().length > 20) {
-        customPrompt = body.customPrompt.trim();
-      }
-    } catch {
-      // No body or invalid JSON — use defaults
+    const body = await request.json().catch(() => ({}));
+    const faceImageId: string | undefined =
+      typeof body.face_image_id === "string" ? body.face_image_id : undefined;
+    const promptOverride: string | undefined =
+      typeof body.prompt === "string" && body.prompt.trim().length > 20
+        ? body.prompt.trim()
+        : undefined;
+
+    if (!faceImageId) {
+      return NextResponse.json(
+        { error: "face_image_id is required" },
+        { status: 400 }
+      );
     }
 
-    // 1. Fetch the story_character row (including its series for model lookup)
-    const { data: storyChar, error: scError } = await supabase
+    // Resolve the linked base character + active image_model.
+    const { data: storyChar } = await supabase
       .from("story_characters")
       .select("id, character_id, series_id")
       .eq("id", storyCharId)
       .single();
-
-    if (scError || !storyChar) {
-      console.error(`[StoryPublisher] Story character not found: ${storyCharId}`, scError);
+    if (!storyChar) {
       return NextResponse.json(
         { error: "Story character not found" },
         { status: 404 }
       );
     }
 
-    // 1b. Fetch the parent series to resolve the active image_model
-    const { data: series, error: seriesErr } = await supabase
+    const { data: series } = await supabase
       .from("story_series")
       .select("id, image_model")
       .eq("id", storyChar.series_id)
       .single();
-
-    if (seriesErr || !series) {
+    if (!series) {
       return NextResponse.json(
         { error: "Parent series not found" },
         { status: 404 }
       );
     }
-
     const imageModel = series.image_model as ImageModel;
 
-    // flux2_dev → currently still uses the Juggernaut Ragnarok path on
-    // RunPod. Phase 4 swaps this for Flux 2 Dev once the new endpoint +
-    // Docker image are provisioned.
-    // hunyuan3 → async submit-and-poll via Siray. Submit returns a
-    // task_id immediately; the client polls /api/status/siray-{taskId}
-    // until the image is uploaded to Supabase Storage. Decouples the
-    // route's HTTP lifetime from Siray's queue depth (sometimes >2min,
-    // exceeding browser/proxy timeouts).
-
-    // 2. Fetch the character's structured description
-    const { data: character, error: charError } = await supabase
+    const { data: character } = await supabase
       .from("characters")
       .select("id, name, description")
       .eq("id", storyChar.character_id)
       .single();
-
-    if (charError || !character) {
-      console.error(`[StoryPublisher] Character not found: ${storyChar.character_id}`, charError);
+    if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
         { status: 404 }
       );
     }
 
+    // Verify the face image is complete + belongs to this character. Without
+    // a stored_url the i2i reference would be empty and we'd silently fall
+    // back to t2i.
+    const { data: faceImage } = await supabase
+      .from("images")
+      .select("id, character_id, stored_url")
+      .eq("id", faceImageId)
+      .single();
+    if (!faceImage) {
+      return NextResponse.json(
+        { error: "face_image_id not found" },
+        { status: 400 }
+      );
+    }
+    if (faceImage.character_id !== character.id) {
+      return NextResponse.json(
+        { error: "face_image_id does not belong to this character" },
+        { status: 403 }
+      );
+    }
+    if (!faceImage.stored_url) {
+      return NextResponse.json(
+        { error: "Face image not yet uploaded — wait for completion" },
+        { status: 400 }
+      );
+    }
+
     const desc = character.description as Record<string, string>;
-    const isMale = desc.gender === 'male';
+    const promptText =
+      promptOverride ??
+      buildCharacterPortraitPrompt(
+        desc as PortraitCharacterDescription,
+        "body"
+      );
 
-    console.log(`[StoryPublisher] Generating portrait (${isMale ? 'male' : 'female'}) for: ${character.name} [model=${imageModel}]`);
-
-    // ── hunyuan3 portrait path (async submit-and-poll via Siray, t2i) ──
     if (imageModel === "hunyuan3") {
-      const promptText =
-        customPrompt ??
-        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, "face");
-
-      // Submit to Siray (plain t2i — no reference image); returns immediately
-      // with a task_id.
+      // Siray i2i — auto-selected when referenceImageUrls is non-empty.
       const submitted = await submitSirayImage({
         prompt: promptText,
         aspectRatio: "4:5",
-        referenceImageUrls: [],
+        referenceImageUrls: [faceImage.stored_url],
       });
 
-      // Insert the images row up-front (stored_url filled in later by the
-      // status handler when the job completes).
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
         .insert({
@@ -117,18 +132,17 @@ export async function POST(
             aspect_ratio: "4:5",
             size: submitted.size,
             reference_image_count: submitted.referenceImageCount,
-            imageType: "face",
+            imageType: "body",
+            face_image_id: faceImageId,
           },
           mode: "sfw",
         })
         .select("id")
         .single();
-
       if (imgErr || !imageRow) {
         throw new Error(`Failed to create image record: ${imgErr?.message}`);
       }
 
-      // 3. Register the job for the polling endpoint to find.
       const jobId = `siray-${submitted.taskId}`;
       const { error: jobErr } = await supabase.from("generation_jobs").insert({
         job_id: jobId,
@@ -137,7 +151,6 @@ export async function POST(
         cost: 0,
         job_type: "character_portrait",
       });
-
       if (jobErr) {
         throw new Error(`Failed to register Siray job: ${jobErr.message}`);
       }
@@ -150,20 +163,19 @@ export async function POST(
       });
     }
 
-    // ── flux2_dev portrait path (async RunPod on Flux 2 Dev endpoint) ──
-    // Plain t2i — this IS the reference being created.
     if (imageModel === "flux2_dev") {
-      const promptText =
-        customPrompt ??
-        buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, "face");
-
+      const refBase64 = await imageUrlToBase64(faceImage.stored_url);
       const flux2Result = await generateFlux2Image({
         scenePrompt: promptText,
-        references: [],
-        // Portraits are always 3:4 (768×1024) per the standard portrait framing.
+        references: [
+          {
+            name: `ref_face_${faceImageId}.jpeg`,
+            base64: refBase64,
+          },
+        ],
         width: 768,
         height: 1024,
-        filenamePrefix: "flux2_portrait",
+        filenamePrefix: "flux2_body",
       });
 
       const { data: imageRow, error: imgErr } = await supabase
@@ -177,13 +189,13 @@ export async function POST(
             seed: flux2Result.seed,
             width: 768,
             height: 1024,
-            imageType: "face",
+            imageType: "body",
+            face_image_id: faceImageId,
           },
           mode: "sfw",
         })
         .select("id")
         .single();
-
       if (imgErr || !imageRow) {
         throw new Error(`Failed to create image record: ${imgErr?.message}`);
       }
@@ -208,10 +220,10 @@ export async function POST(
       { status: 400 }
     );
   } catch (err) {
-    console.error("Character portrait generation failed:", err);
+    console.error("Character body generation failed:", err);
     return NextResponse.json(
       {
-        error: "Generation failed",
+        error: "Body generation failed",
         details: err instanceof Error ? err.message : "Unknown error",
       },
       { status: 500 }

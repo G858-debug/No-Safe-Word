@@ -8,9 +8,10 @@ import { supabase } from "@no-safe-word/story-engine";
  * regenerate. Because portraits are canonical per identity, this affects
  * every story that features this character.
  *
- * No body parameters. There is no body-stage to reset — that flow has been
- * retired. Dormant `approved_fullbody_*` columns on existing rows are left
- * untouched.
+ * No body parameters. Pass 3 ties face + body together, so reset clears
+ * `approved_fullbody_image_id` alongside the face fields. The dormant
+ * `approved_fullbody_seed` / `approved_fullbody_prompt` columns are left
+ * null since Pass 3 doesn't write them.
  */
 export async function POST(
   _request: NextRequest,
@@ -40,6 +41,7 @@ export async function POST(
         approved_seed: null,
         approved_prompt: null,
         portrait_prompt_locked: null,
+        approved_fullbody_image_id: null,
       })
       .eq("id", storyChar.character_id);
 

@@ -18,7 +18,8 @@ export async function GET(
       id, role, prose_description,
       characters:character_id (
         id, name, description,
-        approved_image_id, approved_seed, approved_prompt, portrait_prompt_locked
+        approved_image_id, approved_fullbody_image_id,
+        approved_seed, approved_prompt, portrait_prompt_locked
       )
     `
     )
@@ -38,6 +39,7 @@ export async function GET(
     name: string;
     description: unknown;
     approved_image_id: string | null;
+    approved_fullbody_image_id: string | null;
     approved_seed: number | null;
     approved_prompt: string | null;
     portrait_prompt_locked: string | null;
@@ -52,7 +54,7 @@ export async function GET(
   const imageIds = storyCharacters
     .flatMap((sc) => {
       const base = baseOf(sc.characters);
-      return [base?.approved_image_id];
+      return [base?.approved_image_id, base?.approved_fullbody_image_id];
     })
     .filter((id): id is string => Boolean(id));
 
@@ -80,10 +82,14 @@ export async function GET(
       name: base?.name ?? null,
       description: base?.description ?? null,
       approved_image_id: base?.approved_image_id ?? null,
+      approved_fullbody_image_id: base?.approved_fullbody_image_id ?? null,
       approved_seed: base?.approved_seed ?? null,
       approved_prompt: base?.approved_prompt ?? null,
       approved_image_url: base?.approved_image_id
         ? imageUrls[base.approved_image_id] || null
+        : null,
+      approved_fullbody_image_url: base?.approved_fullbody_image_id
+        ? imageUrls[base.approved_fullbody_image_id] || null
         : null,
       portrait_prompt_locked: base?.portrait_prompt_locked ?? null,
       // Derived flag — the UI reads `approved`.

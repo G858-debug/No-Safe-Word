@@ -1,6 +1,7 @@
 import {
   VISUAL_SIGNATURE,
   PORTRAIT_COMPOSITION,
+  FULLBODY_COMPOSITION,
 } from "./prompt-constants";
 
 /**
@@ -25,12 +26,16 @@ export interface PortraitCharacterDescription {
  * Build a natural-language portrait prompt from structured character fields.
  *
  * Used by BOTH flux2_dev and hunyuan3 character-portrait generation. The
- * output is a single paragraph that describes the character, then a fixed
- * portrait framing, then the shared visual signature. Safe to pass directly
- * to either backend.
+ * output is a single paragraph that describes the character, then either a
+ * face- or body-framing clause, then the shared visual signature.
+ *
+ * `stage` defaults to "face" so existing callers are unaffected. Pass "body"
+ * for the head-to-mid-thigh framing (introduced for the dual-output
+ * face+body flow in PR-3b).
  */
 export function buildCharacterPortraitPrompt(
-  description: PortraitCharacterDescription
+  description: PortraitCharacterDescription,
+  stage: "face" | "body" = "face"
 ): string {
   const parts: string[] = [];
 
@@ -74,7 +79,7 @@ export function buildCharacterPortraitPrompt(
     parts.push(`${capitalize(description.expression.trim())}.`);
   }
 
-  parts.push(PORTRAIT_COMPOSITION);
+  parts.push(stage === "body" ? FULLBODY_COMPOSITION : PORTRAIT_COMPOSITION);
   parts.push(VISUAL_SIGNATURE);
 
   return parts.join(" ");

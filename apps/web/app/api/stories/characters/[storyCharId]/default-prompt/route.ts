@@ -32,7 +32,8 @@ export async function GET(
   }
 
   const prompt = buildCharacterPortraitPrompt(
-    character.description as PortraitCharacterDescription
+    character.description as PortraitCharacterDescription,
+    "face"
   );
 
   return NextResponse.json({ prompt });

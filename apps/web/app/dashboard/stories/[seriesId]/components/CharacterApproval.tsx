@@ -14,7 +14,9 @@ export interface CharacterFromAPI {
   prose_description: string | null;
   approved: boolean;
   approved_image_id: string | null;
+  approved_fullbody_image_id: string | null;
   approved_image_url: string | null;
+  approved_fullbody_image_url: string | null;
   approved_seed: number | null;
   approved_prompt: string | null;
   portrait_prompt_locked: string | null;
