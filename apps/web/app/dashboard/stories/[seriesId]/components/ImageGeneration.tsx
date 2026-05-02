@@ -75,6 +75,7 @@ export interface ImagePromptData {
   visual_signature_override: string | null;
   final_prompt: string | null;
   final_prompt_drafted_at: string | null;
+  pose_template_id: string | null;
 }
 
 export interface PostWithPrompts {
@@ -143,6 +144,16 @@ interface PromptState {
   finalPromptDraftedAt: string | null;
   isDraftingFinalPrompt: boolean;
   draftError: string | null;
+  // ── Pose template ──────────────────────────────────────────────────
+  poseTemplateId: string | null;
+  savedPoseTemplateId: string | null;
+}
+
+export interface PoseTemplate {
+  id: string;
+  name: string;
+  pose_description: string;
+  reference_url: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +258,28 @@ export default function ImageGeneration({
   // Detail modal — currently selected prompt (null = closed).
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
 
+  // Pose templates (loaded once when the page mounts; refreshed when the
+  // user adds/removes one via the dedicated management page).
+  const [poseTemplates, setPoseTemplates] = useState<PoseTemplate[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/pose-templates");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data?.templates)) {
+          setPoseTemplates(data.templates);
+        }
+      } catch {
+        // non-fatal — dropdown just stays empty
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Build a lookup: promptId → position (for pairing indicators)
   const promptPositionMap = useRef<Record<string, number>>({});
 
@@ -313,6 +346,8 @@ export default function ImageGeneration({
           finalPromptDraftedAt: ip.final_prompt_drafted_at ?? null,
           isDraftingFinalPrompt: false,
           draftError: null,
+          poseTemplateId: ip.pose_template_id ?? null,
+          savedPoseTemplateId: ip.pose_template_id ?? null,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -1316,6 +1351,7 @@ export default function ImageGeneration({
             imageModel={imageModel}
             characterIdentityMap={characterIdentityMap}
             onNavigateToCharacters={onNavigateToCharacters}
+            poseTemplates={poseTemplates}
           />
         );
       })()}
@@ -1671,6 +1707,7 @@ interface ImageDetailModalProps {
   imageModel: ImageModel;
   characterIdentityMap: Record<string, CharacterIdentity>;
   onNavigateToCharacters: () => void;
+  poseTemplates: PoseTemplate[];
 }
 
 function ImageDetailModal({
@@ -1696,6 +1733,7 @@ function ImageDetailModal({
   imageModel: _imageModel,
   characterIdentityMap,
   onNavigateToCharacters: _onNavigateToCharacters,
+  poseTemplates,
 }: ImageDetailModalProps) {
   const isGenerating = state.status === "generating";
   const isGenerated = state.status === "generated";
@@ -2006,6 +2044,36 @@ function ImageDetailModal({
                 </p>
               </div>
 
+              {/* POSE TEMPLATE picker — editable, persists on change */}
+              <PoseTemplatePicker
+                templates={poseTemplates}
+                selectedId={state.poseTemplateId}
+                disabled={isGenerating || isApproved || state.savingPrompt}
+                onChange={async (newId) => {
+                  // Optimistically update local state, then PATCH.
+                  onUpdatePrompt(ip.id, { poseTemplateId: newId });
+                  try {
+                    const res = await fetch(`/api/stories/images/${ip.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ pose_template_id: newId }),
+                    });
+                    if (res.ok) {
+                      onUpdatePrompt(ip.id, { savedPoseTemplateId: newId });
+                    } else {
+                      // revert on failure
+                      onUpdatePrompt(ip.id, {
+                        poseTemplateId: state.savedPoseTemplateId,
+                      });
+                    }
+                  } catch {
+                    onUpdatePrompt(ip.id, {
+                      poseTemplateId: state.savedPoseTemplateId,
+                    });
+                  }
+                }}
+              />
+
               {/* READ-ONLY INPUTS — what Mistral consumed when drafting */}
               <details className="rounded border border-border/50 bg-muted/10" open>
                 <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -2179,6 +2247,78 @@ function ImageDetailModal({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PoseTemplatePicker — dropdown of available pose templates plus a small
+// preview of the selected template's reference image. Persists immediately
+// on change via PATCH /api/stories/images/[promptId].
+// ---------------------------------------------------------------------------
+
+function PoseTemplatePicker({
+  templates,
+  selectedId,
+  disabled,
+  onChange,
+}: {
+  templates: PoseTemplate[];
+  selectedId: string | null;
+  disabled?: boolean;
+  onChange: (newId: string | null) => void;
+}) {
+  const selected = selectedId
+    ? templates.find((t) => t.id === selectedId) ?? null
+    : null;
+
+  return (
+    <div className="rounded border border-border/50 bg-muted/10 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          Pose template
+        </label>
+        <a
+          href="/dashboard/pose-templates"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[10px] text-blue-400 hover:text-blue-300"
+        >
+          Manage templates →
+        </a>
+      </div>
+      <select
+        value={selectedId ?? ""}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+        className="w-full rounded border border-border/50 bg-muted/30 px-2 py-1.5 text-xs"
+      >
+        <option value="">— No pose template (Mistral picks pose) —</option>
+        {templates.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      {selected && (
+        <div className="flex gap-3">
+          {selected.reference_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={selected.reference_url}
+              alt={selected.name}
+              className="h-20 w-20 rounded border border-border/50 object-cover"
+            />
+          )}
+          <p className="flex-1 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">
+            {selected.pose_description}
+          </p>
+        </div>
+      )}
+      <p className="text-[10px] text-muted-foreground">
+        When a template is selected, Mistral writes the prompt around the chosen
+        pose and the template&apos;s reference image is sent to Siray as a 3rd i2i input.
+      </p>
     </div>
   );
 }

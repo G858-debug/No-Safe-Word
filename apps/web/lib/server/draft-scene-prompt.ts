@@ -72,6 +72,13 @@ export interface DraftScenePromptInput {
    */
   previousFinalPrompt?: string | null;
   previousCritique?: string | null;
+  /**
+   * Optional pose template. When supplied, Mistral treats it as the
+   * canonical body position / camera framing and only fills in setting,
+   * wardrobe, lighting, and mood around it. The pose's reference image
+   * is sent to Siray as a 3rd i2i input (see generate-image route).
+   */
+  poseTemplate?: { name: string; description: string } | null;
 }
 
 const DEFAULT_SFW_CONSTRAINT = "Both characters fully clothed. No nudity.";
@@ -106,6 +113,11 @@ COMPOSITION:
 - Specify the South African setting (Soweto bedroom, Sandton apartment, Middelburg, township kitchen) — never generic "African".
 
 ${BRAND_PREFERENCE_NOTE}
+
+POSE TEMPLATE (when supplied):
+- If the user message includes a "Pose template" section, that text is the canonical pose for this image. The user has chosen it deliberately. Use it as the body-position spine of your prompt — describe both characters' positions, camera angle, and framing exactly as the template dictates.
+- Your job is to wrap that pose with: the South African setting from the scene description, wardrobe (or undress) appropriate to the image type, lighting source, props, mood, and the SFW constraint or anatomical detail. Do not contradict the template's body positions or camera angle.
+- The pose's reference image is also being passed to the model as a 3rd i2i input alongside the character face portraits, so the pose will land visually too.
 
 ITERATIVE IMPROVEMENT — PREVIOUS-IMAGE CRITIQUE:
 - If the user message includes a "Previous prompt" + "AI critique of previous image" section, the user has already generated this scene at least once and Pixtral 12B has reviewed the result. Treat the critique as concrete, factual feedback about what went wrong in the previous image (wrong shot type, missing body proportions, wrong wardrobe, incorrect setting, etc.).
@@ -186,6 +198,16 @@ function buildUserPrompt(input: DraftScenePromptInput): string {
   const signature = input.visualSignatureOverride?.trim() || VISUAL_SIGNATURE;
   lines.push("");
   lines.push(`Visual Signature (must appear VERBATIM at the very end): ${signature}`);
+
+  if (input.poseTemplate?.description?.trim()) {
+    lines.push("");
+    lines.push("================================================================");
+    lines.push(`Pose template: ${input.poseTemplate.name}`);
+    lines.push("================================================================");
+    lines.push("This is the canonical pose for this image. Use it as the body-position spine of the prompt; only fill in setting, wardrobe, lighting, props and mood around it. The corresponding reference image is also being sent to the generator.");
+    lines.push("");
+    lines.push(input.poseTemplate.description.trim());
+  }
 
   if (input.previousFinalPrompt?.trim() && input.previousCritique?.trim()) {
     lines.push("");

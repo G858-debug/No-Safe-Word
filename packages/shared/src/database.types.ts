@@ -692,6 +692,41 @@ export type Database = {
         }
         Relationships: []
       }
+      pose_templates: {
+        Row: {
+          created_at: string
+          id: string
+          image_id: string
+          name: string
+          pose_description: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          image_id: string
+          name: string
+          pose_description: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          image_id?: string
+          name?: string
+          pose_description?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pose_templates_image_id_fkey"
+            columns: ["image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payfast_itn_events: {
         Row: {
           m_payment_id: string | null
@@ -802,6 +837,7 @@ export type Database = {
           image_id: string | null
           image_type: string
           pairs_with: string | null
+          pose_template_id: string | null
           position: number
           position_after_word: number | null
           post_id: string
@@ -830,6 +866,7 @@ export type Database = {
           image_id?: string | null
           image_type: string
           pairs_with?: string | null
+          pose_template_id?: string | null
           position?: number
           position_after_word?: number | null
           post_id: string
@@ -858,6 +895,7 @@ export type Database = {
           image_id?: string | null
           image_type?: string
           pairs_with?: string | null
+          pose_template_id?: string | null
           position?: number
           position_after_word?: number | null
           post_id?: string

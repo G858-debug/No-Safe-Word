@@ -33,13 +33,28 @@ export async function draftAndPersistScenePrompt(
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, clothing_override, sfw_constraint_override, visual_signature_override, post_id, image_id"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, clothing_override, sfw_constraint_override, visual_signature_override, post_id, image_id, pose_template_id"
     )
     .eq("id", promptId)
     .single();
 
   if (promptErr || !prompt) {
     throw new Error(`Prompt ${promptId} not found`);
+  }
+
+  // Optional pose template — when set, Mistral writes the prompt around
+  // the template's pose_description. The image side of the template
+  // (reference URL) is sent to Siray separately by the generation route.
+  let poseTemplate: { name: string; description: string } | null = null;
+  if (prompt.pose_template_id) {
+    const { data: pose } = await supabase
+      .from("pose_templates")
+      .select("name, pose_description")
+      .eq("id", prompt.pose_template_id)
+      .single();
+    if (pose) {
+      poseTemplate = { name: pose.name, description: pose.pose_description };
+    }
   }
 
   // If a previous image exists for this prompt, fetch its critique +
@@ -157,6 +172,7 @@ export async function draftAndPersistScenePrompt(
     visualSignatureOverride: prompt.visual_signature_override,
     previousFinalPrompt,
     previousCritique,
+    poseTemplate,
   });
 
   const draftedAt = new Date().toISOString();

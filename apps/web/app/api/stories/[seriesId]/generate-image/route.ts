@@ -77,7 +77,7 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, character_id, secondary_character_id, image_type, final_prompt"
+      "id, character_id, secondary_character_id, image_type, final_prompt, pose_template_id"
     )
     .eq("id", promptId)
     .single();
@@ -116,6 +116,24 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
       prompt.character_id,
       prompt.secondary_character_id,
     ]);
+
+    // 5b. If a pose template is attached, also send its reference image as
+    //     an additional i2i input. Hunyuan i2i accepts up to 3 references.
+    if (prompt.pose_template_id) {
+      const { data: poseRow } = await supabase
+        .from("pose_templates")
+        .select("images:image_id(stored_url)")
+        .eq("id", prompt.pose_template_id)
+        .single();
+      const linked = poseRow?.images as
+        | { stored_url: string | null }
+        | { stored_url: string | null }[]
+        | null;
+      const poseImage = Array.isArray(linked) ? linked[0] : linked;
+      if (poseImage?.stored_url) {
+        referenceImageUrls.push(poseImage.stored_url);
+      }
+    }
 
     // 6. Submit to Siray (async). The status route polls the task_id and
     //    handles download/upload/DB-update when the generation completes.

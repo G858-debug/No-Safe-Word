@@ -55,6 +55,7 @@ export async function PATCH(
       sfw_constraint_override,
       visual_signature_override,
       final_prompt,
+      pose_template_id,
     } = body as {
       prompt?: string;
       character_block_override?: string | null;
@@ -64,6 +65,7 @@ export async function PATCH(
       sfw_constraint_override?: string | null;
       visual_signature_override?: string | null;
       final_prompt?: string | null;
+      pose_template_id?: string | null;
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
@@ -74,6 +76,7 @@ export async function PATCH(
     const hasSfwConstraintOverrideUpdate = sfw_constraint_override !== undefined;
     const hasVisualSignatureOverrideUpdate = visual_signature_override !== undefined;
     const hasFinalPromptUpdate = final_prompt !== undefined;
+    const hasPoseTemplateUpdate = pose_template_id !== undefined;
 
     if (
       !hasPromptUpdate &&
@@ -83,7 +86,8 @@ export async function PATCH(
       !hasClothingOverrideUpdate &&
       !hasSfwConstraintOverrideUpdate &&
       !hasVisualSignatureOverrideUpdate &&
-      !hasFinalPromptUpdate
+      !hasFinalPromptUpdate &&
+      !hasPoseTemplateUpdate
     ) {
       return NextResponse.json(
         { error: "At least one field to update is required" },
@@ -114,6 +118,7 @@ export async function PATCH(
     if (hasSfwConstraintOverrideUpdate) updates.sfw_constraint_override = sfw_constraint_override;
     if (hasVisualSignatureOverrideUpdate) updates.visual_signature_override = visual_signature_override;
     if (hasFinalPromptUpdate) updates.final_prompt = final_prompt;
+    if (hasPoseTemplateUpdate) updates.pose_template_id = pose_template_id;
 
     // Reset to pending on any content change EXCEPT a pure final_prompt edit —
     // that's the user intentionally tweaking the about-to-be-sent text and

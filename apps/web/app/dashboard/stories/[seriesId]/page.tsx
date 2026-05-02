@@ -93,6 +93,7 @@ interface SeriesData {
       visual_signature_override: string | null;
       final_prompt: string | null;
       final_prompt_drafted_at: string | null;
+      pose_template_id: string | null;
     }[];
   })[];
   characters: CharacterFromAPI[];
