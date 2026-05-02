@@ -33,13 +33,31 @@ export async function draftAndPersistScenePrompt(
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, clothing_override, sfw_constraint_override, visual_signature_override, post_id"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, clothing_override, sfw_constraint_override, visual_signature_override, post_id, image_id"
     )
     .eq("id", promptId)
     .single();
 
   if (promptErr || !prompt) {
     throw new Error(`Prompt ${promptId} not found`);
+  }
+
+  // If a previous image exists for this prompt, fetch its critique +
+  // the prompt text that was actually sent. Mistral uses both as
+  // iterative-improvement context: "here's what you wrote last, here's
+  // what Pixtral 12B said went wrong, fix it."
+  let previousFinalPrompt: string | null = null;
+  let previousCritique: string | null = null;
+  if (prompt.image_id) {
+    const { data: priorImage } = await supabase
+      .from("images")
+      .select("prompt, critique")
+      .eq("id", prompt.image_id)
+      .single();
+    if (priorImage) {
+      previousFinalPrompt = priorImage.prompt ?? null;
+      previousCritique = priorImage.critique ?? null;
+    }
   }
 
   const { data: post, error: postErr } = await supabase
@@ -137,6 +155,8 @@ export async function draftAndPersistScenePrompt(
     clothingOverride: prompt.clothing_override,
     sfwConstraintOverride: prompt.sfw_constraint_override,
     visualSignatureOverride: prompt.visual_signature_override,
+    previousFinalPrompt,
+    previousCritique,
   });
 
   const draftedAt = new Date().toISOString();

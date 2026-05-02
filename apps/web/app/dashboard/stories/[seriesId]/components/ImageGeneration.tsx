@@ -1960,12 +1960,19 @@ function ImageDetailModal({
                         isGenerating ||
                         isApproved
                       }
+                      title={
+                        state.critiqueText
+                          ? "Mistral will receive the previous prompt + the AI critique and rewrite to address the issues"
+                          : undefined
+                      }
                     >
                       <Sparkles className="mr-1 h-3 w-3" />
                       {state.isDraftingFinalPrompt
                         ? "Drafting…"
                         : hasFinalPrompt
-                          ? "Re-draft with Mistral"
+                          ? state.critiqueText
+                            ? "Re-draft with critique"
+                            : "Re-draft with Mistral"
                           : "Draft with Mistral"}
                     </Button>
                   </div>

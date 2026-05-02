@@ -64,6 +64,14 @@ export interface DraftScenePromptInput {
   clothingOverride?: string | null;
   sfwConstraintOverride?: string | null;
   visualSignatureOverride?: string | null;
+  /**
+   * If a previous image was generated and an AI critique exists,
+   * passing both lets Mistral iteratively improve — the previous prompt
+   * is what was sent, the critique is what Pixtral 12B said went wrong.
+   * Both must be present for the critique block to be sent.
+   */
+  previousFinalPrompt?: string | null;
+  previousCritique?: string | null;
 }
 
 const DEFAULT_SFW_CONSTRAINT = "Both characters fully clothed. No nudity.";
@@ -98,6 +106,12 @@ COMPOSITION:
 - Specify the South African setting (Soweto bedroom, Sandton apartment, Middelburg, township kitchen) — never generic "African".
 
 ${BRAND_PREFERENCE_NOTE}
+
+ITERATIVE IMPROVEMENT — PREVIOUS-IMAGE CRITIQUE:
+- If the user message includes a "Previous prompt" + "AI critique of previous image" section, the user has already generated this scene at least once and Pixtral 12B has reviewed the result. Treat the critique as concrete, factual feedback about what went wrong in the previous image (wrong shot type, missing body proportions, wrong wardrobe, incorrect setting, etc.).
+- Your job in that case is NOT to start from scratch — keep what worked, fix what the critique flagged. Read the previous prompt, identify which clauses produced the problems the critique describes, and rewrite ONLY those clauses. Preserve everything the critique didn't complain about.
+- If the critique is positive (no issues raised), keep the previous prompt's structure but introduce small composition/lighting variations so a re-roll has a chance of producing a different acceptable result.
+- Never repeat the previous prompt verbatim — the user clicked Re-draft because they want a change.
 
 COMPOSITION ORDER (earlier tokens carry more weight):
 [character names + what they're doing] → [setting + props] → [lighting source] → [camera angle / framing] → [atmosphere] → [SFW constraint if applicable] → [Visual Signature]
@@ -172,6 +186,18 @@ function buildUserPrompt(input: DraftScenePromptInput): string {
   const signature = input.visualSignatureOverride?.trim() || VISUAL_SIGNATURE;
   lines.push("");
   lines.push(`Visual Signature (must appear VERBATIM at the very end): ${signature}`);
+
+  if (input.previousFinalPrompt?.trim() && input.previousCritique?.trim()) {
+    lines.push("");
+    lines.push("================================================================");
+    lines.push("ITERATIVE RE-DRAFT — previous attempt + Pixtral 12B critique:");
+    lines.push("================================================================");
+    lines.push("Previous prompt that was sent to the model:");
+    lines.push(input.previousFinalPrompt.trim());
+    lines.push("");
+    lines.push("AI critique of the resulting image (treat as concrete feedback to apply):");
+    lines.push(input.previousCritique.trim());
+  }
   lines.push("");
   lines.push("Write the final image generation prompt now. One block of natural-language prose. No JSON, no labels, no preamble.");
 
