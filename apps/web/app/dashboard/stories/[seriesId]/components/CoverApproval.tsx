@@ -1090,6 +1090,24 @@ function VariantSlot({
         <div className="absolute top-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white pointer-events-none">
           {index + 1}
         </div>
+        {/* Hover hint — only when the variant is selectable and not already
+            the current selection. Sits centered, fades in with the rest of
+            the hover affordances, doesn't intercept clicks (button below
+            handles them). */}
+        {canSelect && !isSelected && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="rounded-full bg-black/70 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+              Click to select
+            </div>
+          </div>
+        )}
+        {/* Persistent badge on the currently-selected variant so the user
+            sees the selected state even when not hovering. */}
+        {isSelected && (
+          <div className="pointer-events-none absolute top-1 right-1 rounded-full bg-blue-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+            Selected
+          </div>
+        )}
         {canRegenerate && (
           <div className="absolute bottom-2 inset-x-0 flex justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <button
