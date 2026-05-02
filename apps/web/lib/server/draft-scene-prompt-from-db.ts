@@ -74,13 +74,19 @@ export async function draftAndPersistScenePrompt(
 
   const charById = new Map<
     string,
-    { name: string; description: PortraitCharacterDescription & { clothing?: string }; hasApprovedPortrait: boolean }
+    {
+      name: string;
+      lockedPromptText: string | null;
+      fallbackBodyType?: string;
+      defaultClothing?: string;
+      hasApprovedPortrait: boolean;
+    }
   >();
 
   if (charIds.length > 0) {
     const { data: chars, error: charsErr } = await supabase
       .from("characters")
-      .select("id, name, description, approved_image_id")
+      .select("id, name, description, portrait_prompt_locked, approved_image_id")
       .in("id", charIds);
 
     if (charsErr) {
@@ -88,21 +94,24 @@ export async function draftAndPersistScenePrompt(
     }
 
     for (const c of chars ?? []) {
-      if (!c.description) {
-        throw new Error(
-          `Character ${c.name ?? c.id} has no approved description (characters.description is empty). Approve the character before drafting.`
-        );
-      }
       if (!c.approved_image_id) {
         throw new Error(
           `Character ${c.name ?? c.id} has no approved portrait yet — approve the portrait before drafting scene prompts.`
         );
       }
+      if (!c.portrait_prompt_locked && !c.description) {
+        throw new Error(
+          `Character ${c.name ?? c.id} has neither portrait_prompt_locked nor description. Approve the character's portrait before drafting.`
+        );
+      }
+      const desc = (c.description ?? {}) as PortraitCharacterDescription & {
+        clothing?: string;
+      };
       charById.set(c.id, {
         name: c.name,
-        description: c.description as PortraitCharacterDescription & {
-          clothing?: string;
-        },
+        lockedPromptText: c.portrait_prompt_locked,
+        fallbackBodyType: desc.bodyType,
+        defaultClothing: desc.clothing,
         hasApprovedPortrait: Boolean(c.approved_image_id),
       });
     }
@@ -111,7 +120,8 @@ export async function draftAndPersistScenePrompt(
   const primaryCharacter: DraftSceneCharacter | undefined = prompt.character_id
     ? toDraftCharacter(charById.get(prompt.character_id))
     : undefined;
-  const secondaryCharacter: DraftSceneCharacter | undefined = prompt.secondary_character_id
+  const secondaryCharacter: DraftSceneCharacter | undefined = prompt
+    .secondary_character_id
     ? toDraftCharacter(charById.get(prompt.secondary_character_id))
     : undefined;
 
@@ -150,7 +160,9 @@ function toDraftCharacter(
   c:
     | {
         name: string;
-        description: PortraitCharacterDescription & { clothing?: string };
+        lockedPromptText: string | null;
+        fallbackBodyType?: string;
+        defaultClothing?: string;
         hasApprovedPortrait: boolean;
       }
     | undefined
@@ -158,7 +170,9 @@ function toDraftCharacter(
   if (!c) return undefined;
   return {
     name: c.name,
-    description: c.description,
+    lockedPromptText: c.lockedPromptText,
+    fallbackBodyType: c.fallbackBodyType,
+    defaultClothing: c.defaultClothing,
     hasApprovedPortrait: c.hasApprovedPortrait,
   };
 }

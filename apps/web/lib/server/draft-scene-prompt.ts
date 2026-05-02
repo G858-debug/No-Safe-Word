@@ -5,10 +5,6 @@ import {
   endsWithVisualSignature,
   loadHunyuanKnowledge,
 } from "./mistral-prompt-helpers";
-import {
-  buildSceneCharacterBlock,
-  type PortraitCharacterDescription,
-} from "@no-safe-word/image-gen";
 
 // ============================================================
 // Scene image prompt drafting service (Hunyuan)
@@ -43,8 +39,18 @@ export type DraftSceneImageType =
 
 export interface DraftSceneCharacter {
   name: string;
-  /** characters.description — structured/approved seed JSON. */
-  description: PortraitCharacterDescription & { clothing?: string };
+  /**
+   * characters.portrait_prompt_locked — the exact text behind the
+   * approved portrait. This is the canonical character description and
+   * captures any edits the user made at portrait-approval time. It also
+   * includes portrait framing/lighting language at the end which Mistral
+   * is instructed to ignore.
+   */
+  lockedPromptText: string | null;
+  /** characters.description.bodyType — structured body-type field, used as a fallback when lockedPromptText is missing. */
+  fallbackBodyType?: string;
+  /** characters.description.clothing — default wardrobe across the story. */
+  defaultClothing?: string;
   /** True iff characters.approved_image_id is set (i2i reference will be sent). */
   hasApprovedPortrait: boolean;
 }
@@ -72,9 +78,14 @@ CRITICAL — THE i2i REFERENCE IS A FACE PORTRAIT ONLY:
 - That reference is a head-and-shoulders FACE PORTRAIT. It carries the character's face, skin, eyes, hair, and head/shoulders only — NOT their body proportions, NOT their wardrobe, NOT the setting.
 - For characters WITH a reference image:
   - Do NOT redescribe their face, skin, eyes, hair, or distinguishing facial features. The reference handles those — competing text degrades likeness.
-  - DO describe their BODY using the body type / silhouette / build supplied in the user message (e.g. "curvaceous, very large heavy breasts, deep cleavage, narrow waist, very wide hips, thick thighs, large round protruding butt"). The reference image is FACE-ONLY, so body proportions only land if you state them explicitly. Place this description near the start of the character's clause so it carries weight.
+  - DO describe their BODY using the body type / silhouette / build / proportions in the canonical character text supplied in the user message (e.g. "curvaceous, very large heavy breasts, deep cleavage, narrow waist, very wide hips, thick thighs, large round protruding backside"). The reference image is FACE-ONLY, so body proportions only land if you state them explicitly. Place this description near the start of the character's clause so it carries weight.
   - DO describe what they are WEARING for this scene, where they are LOOKING, and HOW they are positioned.
 - For background figures or unnamed extras: describe them inline (no reference exists for them).
+
+CHARACTER TEXT SOURCE:
+- For each linked character the user message includes a "Canonical character text" — this is the EXACT prompt the user approved when generating that character's portrait. It captures any edits the user made at approval time, so it is the source of truth for body type, build, hair colour/style, distinguishing features, and any other identity beats.
+- That canonical text usually ends with portrait framing/lighting language ("Full body shot, standing upright, plain dark background, looking directly at the camera, warm side-lighting"). IGNORE that framing language — it belongs to the original portrait, not to this scene. Use the scene's own composition (from the scene description) and lighting (from the scene description) instead.
+- Use the wardrobe in the canonical text only if the scene description doesn't specify what the character is wearing. If the user message includes a separate "Default wardrobe" line, prefer that. If a clothing override is present, prefer the override.
 
 IMAGE-TYPE RULES:
 - facebook_sfw / shared: characters MUST be fully clothed and clothing MUST be described specifically. No nudity. Use the "moment before" — anticipation, tension, revealing-but-covered clothing. Add the SFW constraint sentence verbatim near the end: "Both characters fully clothed. No nudity." (or the override the user has set).
@@ -106,19 +117,25 @@ ${knowledgeDoc}`;
 }
 
 function describeCharacter(c: DraftSceneCharacter): string {
-  const prose = buildSceneCharacterBlock(c.name, c.description);
-  const bodyType = c.description.bodyType?.trim();
-  const clothing = c.description.clothing?.trim();
+  const lockedText = c.lockedPromptText?.trim();
+  const fallbackBody = c.fallbackBodyType?.trim();
+  const clothing = c.defaultClothing?.trim();
+
   const refNote = c.hasApprovedPortrait
-    ? "    (FACE-ONLY i2i reference image will be sent — do not redescribe face/skin/eyes/hair, but DO describe body/silhouette/build because the reference does not carry those)"
+    ? "    (FACE-ONLY i2i reference image will be sent — do NOT redescribe face/skin/eyes/hair, but DO describe body/silhouette/build because the reference does not carry those)"
     : "    (no i2i reference — describe the character inline including face)";
-  const bodyLine = bodyType
-    ? `    Body type / silhouette to render in this image (REQUIRED in your prompt): ${bodyType}`
-    : "";
+
+  const lockedLine = lockedText
+    ? `    Canonical character text (this is the EXACT prompt the user approved when generating this character's portrait — extract identity, body type, hair, distinguishing features from it; IGNORE any portrait framing/lighting/composition language at the end such as "Full body shot, plain dark background, looking directly at the camera"): ${lockedText}`
+    : fallbackBody
+      ? `    Body type / silhouette to render (REQUIRED in your prompt — no locked portrait text on file): ${fallbackBody}`
+      : "    (no canonical character text and no fallback body type — describe the character based on what the scene needs)";
+
   const clothingLine = clothing
     ? `    Default wardrobe (use unless the scene needs different clothing): ${clothing}`
     : "";
-  return [`  - ${c.name}: ${prose}`, refNote, bodyLine, clothingLine]
+
+  return [`  - ${c.name}:`, refNote, lockedLine, clothingLine]
     .filter(Boolean)
     .join("\n");
 }
