@@ -1,13 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 // Deep import from the specific submodule rather than the package barrel —
 // the barrel re-exports server-only modules (Replicate SDK, sharp, RunPod
 // fetch helpers) which would otherwise be dragged into the client bundle.
@@ -36,8 +33,6 @@ import {
   Users,
   Zap,
   CheckCircle2,
-  Bug,
-  Settings2,
   Undo2,
   Lock,
   Eye,
@@ -55,35 +50,6 @@ import {
 // <ArtDirectorModal /> render block further down.
 // ══════════════════════════════════════════════════════════════
 // import ArtDirectorModal from "./ArtDirectorModal";
-
-// ---------------------------------------------------------------------------
-// Diagnostic flags for isolating scene generation components
-// ---------------------------------------------------------------------------
-
-interface DiagnosticFlags {
-  characterLora: boolean;
-  promptEnhancement: boolean;
-  styleLoras: boolean;
-  bodyShapeLora: boolean;
-}
-
-const DEFAULT_DIAGNOSTIC_FLAGS: DiagnosticFlags = {
-  characterLora: true,
-  promptEnhancement: true,
-  styleLoras: true,
-  bodyShapeLora: true,
-};
-
-const DIAGNOSTIC_TOGGLE_CONFIG: Array<{
-  key: keyof DiagnosticFlags;
-  label: string;
-  group: string;
-}> = [
-  { key: "characterLora", label: "Character LoRA", group: "Character Identity" },
-  { key: "promptEnhancement", label: "AI Enhancement", group: "Prompt Processing" },
-  { key: "styleLoras", label: "Style LoRAs", group: "LoRA Stack" },
-  { key: "bodyShapeLora", label: "Body Shape LoRA", group: "LoRA Stack" },
-];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,10 +109,7 @@ interface PromptState {
   imageUrl: string | null;
   promptText: string;
   savedPromptText: string;
-  showPrompt: boolean;
   error: string | null;
-  diagnosticFlags: DiagnosticFlags;
-  showDiagnostic: boolean;
   previousImageId: string | null;
   isReverting: boolean;
   characterBlockOverride: string | null;
@@ -272,8 +235,26 @@ export default function ImageGeneration({
   // Art Director queue.
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
+  // Detail modal — currently selected prompt (null = closed).
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+
   // Build a lookup: promptId → position (for pairing indicators)
   const promptPositionMap = useRef<Record<string, number>>({});
+
+  // Ordered list of {prompt, imageType, postTitle} mirroring the grid render
+  // order — drives ←/→ navigation in the detail modal.
+  const orderedPromptList = useMemo(() => {
+    const out: Array<{ ip: ImagePromptData; imageType: string; postTitle: string }> = [];
+    for (const post of posts) {
+      const live = post.story_image_prompts.filter((ip) => !deletedPromptIds.has(ip.id));
+      for (const imageType of ["facebook_sfw", "website_nsfw_paired", "website_only"] as const) {
+        for (const ip of live.filter((p) => p.image_type === imageType)) {
+          out.push({ ip, imageType, postTitle: post.title });
+        }
+      }
+    }
+    return out;
+  }, [posts, deletedPromptIds]);
 
   // ---- Initialize state from props ----
   useEffect(() => {
@@ -293,10 +274,7 @@ export default function ImageGeneration({
           imageUrl: url,
           promptText: ip.prompt,
           savedPromptText: ip.prompt,
-          showPrompt: false,
           error: null,
-          diagnosticFlags: { ...DEFAULT_DIAGNOSTIC_FLAGS },
-          showDiagnostic: false,
           previousImageId: ip.previous_image_id || null,
           isReverting: false,
           characterBlockOverride: ip.character_block_override ?? null,
@@ -436,41 +414,67 @@ export default function ImageGeneration({
   // Persist textarea edits without triggering generation. Mirrors the
   // cover-page Save button — without it, edits are lost on refresh
   // because they only get PATCHed as a side effect of clicking Generate.
-  const handleSavePrompt = useCallback(
-    async (promptId: string) => {
+  // Save every dirty field on a prompt (text + all overrides) without
+  // triggering generation. Used by the detail modal's Save button.
+  // Generate's own auto-save block in handleRegenerate is unchanged.
+  const handleSaveAll = useCallback(
+    async (promptId: string): Promise<boolean> => {
       const state = promptStates[promptId];
-      if (!state) return;
-      if (state.promptText === state.savedPromptText) return;
+      if (!state) return true;
+
+      const dirty: Array<{
+        body: Record<string, unknown>;
+        savedKey: keyof PromptState;
+        value: PromptState[keyof PromptState];
+      }> = [];
+      const queue = (
+        cur: PromptState[keyof PromptState],
+        saved: PromptState[keyof PromptState],
+        apiKey: string,
+        savedKey: keyof PromptState,
+      ) => {
+        if (cur !== saved) dirty.push({ body: { [apiKey]: cur }, savedKey, value: cur });
+      };
+      queue(state.promptText, state.savedPromptText, "prompt", "savedPromptText");
+      queue(state.characterBlockOverride, state.savedCharacterBlockOverride, "character_block_override", "savedCharacterBlockOverride");
+      queue(state.secondaryCharacterBlockOverride, state.savedSecondaryCharacterBlockOverride, "secondary_character_block_override", "savedSecondaryCharacterBlockOverride");
+      queue(state.suppressCharacterBlock, state.savedSuppressCharacterBlock, "suppress_character_block", "savedSuppressCharacterBlock");
+      queue(state.clothingOverride, state.savedClothingOverride, "clothing_override", "savedClothingOverride");
+      queue(state.sfwConstraintOverride, state.savedSfwConstraintOverride, "sfw_constraint_override", "savedSfwConstraintOverride");
+      queue(state.visualSignatureOverride, state.savedVisualSignatureOverride, "visual_signature_override", "savedVisualSignatureOverride");
+
+      if (dirty.length === 0) return true;
 
       updatePrompt(promptId, { savingPrompt: true, error: null });
-      try {
-        const res = await fetch(`/api/stories/images/${promptId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: state.promptText }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
+      for (const { body, savedKey, value } of dirty) {
+        try {
+          const res = await fetch(`/api/stories/images/${promptId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              savingPrompt: false,
+              error: err?.error || "Failed to save edits",
+            });
+            return false;
+          }
+          updatePrompt(promptId, { [savedKey]: value } as Partial<PromptState>);
+        } catch (err) {
           updatePrompt(promptId, {
             savingPrompt: false,
-            error: err.error || "Failed to save prompt",
+            error: err instanceof Error ? err.message : "Failed to save edits",
           });
-          return;
+          return false;
         }
-        updatePrompt(promptId, {
-          savingPrompt: false,
-          savedPromptText: state.promptText,
-          promptSavedJust: true,
-        });
-        setTimeout(() => {
-          updatePrompt(promptId, { promptSavedJust: false });
-        }, 2500);
-      } catch (err) {
-        updatePrompt(promptId, {
-          savingPrompt: false,
-          error: err instanceof Error ? err.message : "Failed to save prompt",
-        });
       }
+      updatePrompt(promptId, { savingPrompt: false, promptSavedJust: true });
+      setTimeout(() => {
+        updatePrompt(promptId, { promptSavedJust: false });
+      }, 2500);
+      return true;
     },
     [promptStates, updatePrompt]
   );
@@ -1256,21 +1260,14 @@ export default function ImageGeneration({
                             prompt={ip}
                             state={promptStates[ip.id]}
                             imageType={imageType}
-                            seriesId={seriesId}
                             promptPositionMap={promptPositionMap.current}
-                            onUpdatePrompt={updatePrompt}
                             onRegenerate={handleRegenerate}
                             onApprove={handleApprove}
                             onRevert={handleRevert}
-                            onGenerate={() => handleRegenerate(ip.id)}
-                            onImageClick={setLightboxUrl}
                             onArtDirector={handleRegenerate}
                             onDelete={handleDelete}
-                            onSavePrompt={handleSavePrompt}
+                            onOpenDetail={setSelectedPromptId}
                             batchGenerating={batchGenerating}
-                            imageModel={imageModel}
-                            characterIdentityMap={characterIdentityMap}
-                            onNavigateToCharacters={onNavigateToCharacters}
                           />
                         ))}
                       </div>
@@ -1286,7 +1283,7 @@ export default function ImageGeneration({
       {/* ======== LIGHTBOX ======== */}
       {lightboxUrl && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm"
           onClick={() => setLightboxUrl(null)}
         >
           <button
@@ -1299,11 +1296,57 @@ export default function ImageGeneration({
           <img
             src={lightboxUrl}
             alt="Full size preview"
-            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            className="max-h-[95vh] max-w-[95vw] rounded-lg object-contain"
             onClick={(e) => e.stopPropagation()}
           />
         </div>
       )}
+
+      {/* ======== DETAIL MODAL ======== */}
+      {(() => {
+        if (!selectedPromptId) return null;
+        const idx = orderedPromptList.findIndex(
+          (p) => p.ip.id === selectedPromptId
+        );
+        if (idx === -1) return null;
+        const entry = orderedPromptList[idx];
+        const detailState = promptStates[selectedPromptId];
+        if (!detailState) return null;
+        return (
+          <ImageDetailModal
+            ip={entry.ip}
+            imageType={entry.imageType}
+            postTitle={entry.postTitle}
+            state={detailState}
+            hasPrev={idx > 0}
+            hasNext={idx < orderedPromptList.length - 1}
+            indexLabel={`${idx + 1} of ${orderedPromptList.length}`}
+            onClose={() => setSelectedPromptId(null)}
+            onPrev={async () => {
+              await handleSaveAll(selectedPromptId);
+              setSelectedPromptId(orderedPromptList[idx - 1].ip.id);
+            }}
+            onNext={async () => {
+              await handleSaveAll(selectedPromptId);
+              setSelectedPromptId(orderedPromptList[idx + 1].ip.id);
+            }}
+            onUpdatePrompt={updatePrompt}
+            onSaveAll={handleSaveAll}
+            onRegenerate={handleRegenerate}
+            onApprove={handleApprove}
+            onRevert={handleRevert}
+            onDelete={(id) => {
+              handleDelete(id);
+              setSelectedPromptId(null);
+            }}
+            onLightbox={setLightboxUrl}
+            batchGenerating={batchGenerating}
+            imageModel={imageModel}
+            characterIdentityMap={characterIdentityMap}
+            onNavigateToCharacters={onNavigateToCharacters}
+          />
+        );
+      })()}
 
       {/* ======== ART DIRECTOR MODAL ========
           DEACTIVATED 2026-04-19. The modal has been replaced by direct
@@ -1316,100 +1359,6 @@ export default function ImageGeneration({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// DiagnosticPanel sub-component
-// ---------------------------------------------------------------------------
-
-function DiagnosticPanel({
-  flags,
-  onChange,
-}: {
-  flags: DiagnosticFlags;
-  onChange: (flags: DiagnosticFlags) => void;
-}) {
-  const allOn = Object.values(flags).every(Boolean);
-  const allOff = Object.values(flags).every((v) => !v);
-
-  const groups = DIAGNOSTIC_TOGGLE_CONFIG.reduce<
-    Record<string, Array<{ key: keyof DiagnosticFlags; label: string }>>
-  >((acc, item) => {
-    if (!acc[item.group]) acc[item.group] = [];
-    acc[item.group].push({ key: item.key, label: item.label });
-    return acc;
-  }, {});
-
-  return (
-    <div className="space-y-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-amber-400">
-          Diagnostic Toggles
-        </span>
-        <div className="flex gap-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              const allTrue = {} as DiagnosticFlags;
-              for (const k of Object.keys(flags) as Array<keyof DiagnosticFlags>) {
-                allTrue[k] = true;
-              }
-              onChange(allTrue);
-            }}
-            disabled={allOn}
-          >
-            All On
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              const allFalse = {} as DiagnosticFlags;
-              for (const k of Object.keys(flags) as Array<keyof DiagnosticFlags>) {
-                allFalse[k] = false;
-              }
-              onChange(allFalse);
-            }}
-            disabled={allOff}
-          >
-            All Off
-          </Button>
-        </div>
-      </div>
-
-      {Object.entries(groups).map(([group, items]) => (
-        <div key={group}>
-          <p className="mb-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            {group}
-          </p>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-            {items.map(({ key, label }) => (
-              <div key={key} className="flex items-center gap-2">
-                <Switch
-                  id={`diag-${key}`}
-                  checked={flags[key]}
-                  onCheckedChange={(checked) =>
-                    onChange({ ...flags, [key]: checked })
-                  }
-                  className="h-4 w-7 data-[state=checked]:bg-amber-500"
-                />
-                <Label
-                  htmlFor={`diag-${key}`}
-                  className="text-[11px] text-muted-foreground cursor-pointer"
-                >
-                  {label}
-                </Label>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 
 // ---------------------------------------------------------------------------
 // LockedCharacterBlock — read-only preview of the character text the model
@@ -1758,42 +1707,28 @@ interface ImageCardProps {
   prompt: ImagePromptData;
   state: PromptState | undefined;
   imageType: string;
-  seriesId: string;
   promptPositionMap: Record<string, number>;
-  onUpdatePrompt: (id: string, updates: Partial<PromptState>) => void;
   onRegenerate: (id: string) => void;
   onApprove: (id: string) => void;
   onRevert: (id: string) => void;
-  onGenerate: () => void;
-  onImageClick: (url: string) => void;
   onArtDirector: (promptId: string) => void;
   onDelete: (promptId: string) => void;
-  onSavePrompt: (promptId: string) => void;
+  onOpenDetail: (promptId: string) => void;
   batchGenerating: boolean;
-  imageModel: ImageModel;
-  characterIdentityMap: Record<string, CharacterIdentity>;
-  onNavigateToCharacters: () => void;
 }
 
 function ImageCard({
   prompt: ip,
   state,
   imageType,
-  seriesId,
   promptPositionMap,
-  onUpdatePrompt,
   onRegenerate,
   onApprove,
   onRevert,
-  onGenerate,
-  onImageClick,
   onArtDirector,
   onDelete,
-  onSavePrompt,
+  onOpenDetail,
   batchGenerating,
-  imageModel,
-  characterIdentityMap,
-  onNavigateToCharacters,
 }: ImageCardProps) {
   if (!state) return null;
 
@@ -1805,9 +1740,6 @@ function ImageCard({
   const isApproved = state.status === "approved";
   const isFailed = state.status === "failed";
   const isPending = state.status === "pending";
-  const isSfw = imageType === "facebook_sfw" || imageType === "shared";
-  const isCharBlockSuppressed =
-    state.suppressCharacterBlock || state.characterBlockOverride === "";
 
   // Build meta indicator
   let metaLabel: string | null = null;
@@ -1827,6 +1759,12 @@ function ImageCard({
       ? state.promptText.slice(0, 100) + "..."
       : state.promptText;
 
+  // Aspect ratio mirrors the rule in /api/stories/[seriesId]/generate-image/route.ts:
+  // two-character scenes are landscape 5:4, single/none are portrait 4:5.
+  const isTwoCharacter = Boolean(ip.character_id && ip.secondary_character_id);
+  const ratioLabel = isTwoCharacter ? "5:4" : "4:5";
+  const ratioCss = isTwoCharacter ? "5 / 4" : "4 / 5";
+
   return (
     <Card
       className={`overflow-visible transition-colors ${
@@ -1840,24 +1778,25 @@ function ImageCard({
       }`}
     >
       <div>
-        {/* Image area */}
-        <div className="relative bg-muted/30 aspect-[2/3]">
+        {/* Image area — clicking anywhere opens the detail modal where
+            the user can edit prompts and see the enlarged image. */}
+        <div
+          className="relative bg-muted/30 cursor-pointer"
+          style={{ aspectRatio: ratioCss }}
+          onClick={() => onOpenDetail(ip.id)}
+        >
           {isGenerating ? (
             <div className="flex flex-col items-center justify-center absolute inset-0">
               <Loader2 className="mb-2 h-8 w-8 animate-spin text-blue-400" />
               <p className="text-xs text-blue-400">Generating...</p>
             </div>
           ) : hasImage ? (
-            <div
-              className="relative h-full w-full cursor-pointer"
-              onClick={() => onImageClick(state.imageUrl!)}
-            >
+            <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={state.imageUrl!}
                 alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
-                className="w-full object-contain h-full"
-                style={{ aspectRatio: "2/3" }}
+                className="h-full w-full object-cover"
               />
               {isApproved && (
                 <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-green-600/90 px-2 py-1 text-[10px] font-medium text-white shadow backdrop-blur-sm">
@@ -1865,7 +1804,7 @@ function ImageCard({
                   Approved
                 </div>
               )}
-            </div>
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center absolute inset-0">
               <div className="mb-2 h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
@@ -1874,6 +1813,11 @@ function ImageCard({
               <p className="text-xs text-muted-foreground">Not generated</p>
             </div>
           )}
+          {/* Aspect-ratio badge — bottom-left so it doesn't collide with the
+              top-right Approved pill. */}
+          <div className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+            {ratioLabel}
+          </div>
         </div>
 
         {/* Controls area */}
@@ -1900,14 +1844,6 @@ function ImageCard({
               <span className="text-[10px] text-muted-foreground">
                 {metaLabel}
               </span>
-            )}
-            {state.diagnosticFlags && Object.values(state.diagnosticFlags).some((v) => !v) && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30"
-              >
-                Diagnostic
-              </Badge>
             )}
             {(state.characterBlockOverride !== null || state.secondaryCharacterBlockOverride !== null) && (
               <Badge
@@ -1956,331 +1892,17 @@ function ImageCard({
             </div>
           )}
 
-          {/* Prompt toggle */}
+          {/* Prompt preview — clicking opens the detail modal where the
+              user edits all prompt fields. */}
           <button
-            onClick={() =>
-              onUpdatePrompt(ip.id, { showPrompt: !state.showPrompt })
-            }
-            className="text-muted-foreground hover:text-foreground transition-colors text-[11px]"
+            onClick={() => onOpenDetail(ip.id)}
+            className="block w-full text-left text-[11px] leading-relaxed text-muted-foreground hover:text-foreground transition-colors"
           >
-            {state.showPrompt ? "Hide prompt" : truncatedPrompt}
+            {truncatedPrompt}
           </button>
           </div>
 
           {/* Zone 2: scrollable editing area */}
-          {state.showPrompt && (
-            <div className="max-h-[60vh] overflow-y-auto px-3 pb-1 space-y-2">
-              <LockedCharacterBlock
-                imageModel={imageModel}
-                primaryCharacterId={ip.character_id}
-                primaryCharacterName={ip.character_name}
-                secondaryCharacterId={ip.secondary_character_id}
-                secondaryCharacterName={ip.secondary_character_name}
-                characterIdentityMap={characterIdentityMap}
-                onNavigateToCharacters={onNavigateToCharacters}
-                characterBlockOverride={state.characterBlockOverride}
-                showOverride={state.showOverride}
-                onOverrideChange={(text) =>
-                  onUpdatePrompt(ip.id, { characterBlockOverride: text })
-                }
-                onToggleOverride={(prefilledText) => {
-                  if (!state.showOverride && state.characterBlockOverride === null) {
-                    onUpdatePrompt(ip.id, {
-                      showOverride: true,
-                      characterBlockOverride: prefilledText,
-                    });
-                  } else {
-                    onUpdatePrompt(ip.id, { showOverride: !state.showOverride });
-                  }
-                }}
-                onClearOverride={() =>
-                  onUpdatePrompt(ip.id, { characterBlockOverride: null, showOverride: false })
-                }
-                secondaryCharacterBlockOverride={state.secondaryCharacterBlockOverride}
-                showSecondaryOverride={state.showSecondaryOverride}
-                onSecondaryOverrideChange={(text) =>
-                  onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: text })
-                }
-                onSecondaryToggleOverride={(prefilledText) => {
-                  if (!state.showSecondaryOverride && state.secondaryCharacterBlockOverride === null) {
-                    onUpdatePrompt(ip.id, {
-                      showSecondaryOverride: true,
-                      secondaryCharacterBlockOverride: prefilledText,
-                    });
-                  } else {
-                    onUpdatePrompt(ip.id, { showSecondaryOverride: !state.showSecondaryOverride });
-                  }
-                }}
-                onSecondaryClearOverride={() =>
-                  onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: null, showSecondaryOverride: false })
-                }
-                suppressCharacterBlock={state.suppressCharacterBlock}
-                onToggleSuppressCharacterBlock={() =>
-                  onUpdatePrompt(ip.id, { suppressCharacterBlock: !state.suppressCharacterBlock })
-                }
-              />
-              <Textarea
-                value={state.promptText}
-                onChange={(e) =>
-                  onUpdatePrompt(ip.id, { promptText: e.target.value })
-                }
-                rows={10}
-                className="leading-relaxed resize-y bg-muted/30 text-[11px] min-h-[160px]"
-                disabled={isGenerating || isApproved || state.savingPrompt}
-              />
-              {/* Save button — persists prompt edits without triggering
-                  generation. Without this, edits are lost on refresh because
-                  they only get PATCHed as a side effect of clicking Generate.
-                  Generate still saves+generates in one click. */}
-              <div className="flex items-center justify-between gap-2 mt-1">
-                <div className="text-[11px]">
-                  {state.promptText !== state.savedPromptText && (
-                    <span className="text-amber-400">Unsaved edits</span>
-                  )}
-                  {state.promptSavedJust &&
-                    state.promptText === state.savedPromptText && (
-                      <span className="text-green-400">Saved</span>
-                    )}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onSavePrompt(ip.id)}
-                  disabled={
-                    state.savingPrompt ||
-                    state.promptText === state.savedPromptText ||
-                    isGenerating ||
-                    isApproved
-                  }
-                  className="h-7 text-[11px]"
-                >
-                  {state.savingPrompt ? "Saving..." : "Save"}
-                </Button>
-              </div>
-              <div className="rounded-md border border-zinc-700/40 bg-zinc-900/30 p-2 space-y-1">
-                <div className="text-[10px] uppercase tracking-wide text-zinc-400">
-                  Per-image prompt overrides
-                </div>
-                <p className="text-[10px] text-zinc-500 leading-relaxed">
-                  Every section the model sees is editable here. &ldquo;Preview full prompt&rdquo;
-                  shows the exact text sent to the model. Each override applies to
-                  this image only.
-                </p>
-
-              {/* Full prompt preview — first so it's the most visible */}
-              <div>
-                <button
-                  onClick={() =>
-                    onUpdatePrompt(ip.id, { showFullPromptPreview: !state.showFullPromptPreview })
-                  }
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Eye className="h-3 w-3" />
-                  {state.showFullPromptPreview ? "Hide full prompt" : "Preview full prompt"}
-                </button>
-                {state.showFullPromptPreview && (
-                  <div className="relative mt-1.5">
-                    <p className="mb-1 text-[10px] text-muted-foreground">
-                      This is the prompt sent to the model
-                    </p>
-                    <Textarea
-                      value={assembleFullPrompt(state, ip, characterIdentityMap, imageModel)}
-                      readOnly
-                      rows={8}
-                      className="resize-y bg-muted/50 font-mono text-[10px] leading-relaxed pr-16"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="absolute right-1 top-6 h-6 px-2 text-[10px]"
-                      onClick={() =>
-                        navigator.clipboard.writeText(
-                          assembleFullPrompt(state, ip, characterIdentityMap, imageModel)
-                        )
-                      }
-                    >
-                      Copy
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Clothing override — SFW only, hidden when character blocks are suppressed */}
-              {isSfw && !isCharBlockSuppressed && (
-                <div>
-                  <button
-                    onClick={() => {
-                      if (!state.showClothingOverride && state.clothingOverride === null) {
-                        const autoClothing = [ip.character_id, ip.secondary_character_id]
-                          .filter(Boolean)
-                          .map((id) => {
-                            const ident = characterIdentityMap[id as string];
-                            return ident?.name && ident?.clothing
-                              ? `${ident.name} is wearing ${ident.clothing}.`
-                              : null;
-                          })
-                          .filter(Boolean)
-                          .join(" ");
-                        onUpdatePrompt(ip.id, {
-                          showClothingOverride: true,
-                          clothingOverride: autoClothing,
-                        });
-                      } else {
-                        onUpdatePrompt(ip.id, { showClothingOverride: !state.showClothingOverride });
-                      }
-                    }}
-                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ChevronRight className={`h-3 w-3 transition-transform ${state.showClothingOverride ? "rotate-90" : ""}`} />
-                    {state.clothingOverride !== null ? "Clothing override (active)" : "Override clothing"}
-                  </button>
-                  {state.showClothingOverride && (
-                    <div className="mt-1 space-y-1">
-                      <Textarea
-                        value={state.clothingOverride ?? ""}
-                        onChange={(e) =>
-                          onUpdatePrompt(ip.id, { clothingOverride: e.target.value || null })
-                        }
-                        rows={2}
-                        placeholder={[ip.character_id, ip.secondary_character_id]
-                          .filter(Boolean)
-                          .map((id) => {
-                            const ident = characterIdentityMap[id as string];
-                            return ident?.name && ident?.clothing
-                              ? `${ident.name} is wearing ${ident.clothing}.`
-                              : null;
-                          })
-                          .filter(Boolean)
-                          .join(" ") || "Custom clothing sentence…"}
-                        className="resize-y bg-muted/30 text-[11px]"
-                      />
-                      <p className="text-[10px] text-muted-foreground">Empty = auto. Set to suppress.</p>
-                      {state.clothingOverride !== null && (
-                        <button
-                          onClick={() => onUpdatePrompt(ip.id, { clothingOverride: null, showClothingOverride: false })}
-                          className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          Clear override (restore auto)
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* SFW constraint override — SFW only */}
-              {isSfw && (
-                <div>
-                  <button
-                    onClick={() => {
-                      if (!state.showSfwConstraintOverride && state.sfwConstraintOverride === null) {
-                        onUpdatePrompt(ip.id, {
-                          showSfwConstraintOverride: true,
-                          sfwConstraintOverride: "Both characters fully clothed. No nudity.",
-                        });
-                      } else {
-                        onUpdatePrompt(ip.id, { showSfwConstraintOverride: !state.showSfwConstraintOverride });
-                      }
-                    }}
-                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ChevronRight className={`h-3 w-3 transition-transform ${state.showSfwConstraintOverride ? "rotate-90" : ""}`} />
-                    {state.sfwConstraintOverride !== null ? "SFW constraint (active)" : "Override SFW constraint"}
-                  </button>
-                  {state.showSfwConstraintOverride && (
-                    <div className="mt-1 space-y-1">
-                      <Textarea
-                        value={state.sfwConstraintOverride ?? ""}
-                        onChange={(e) =>
-                          onUpdatePrompt(ip.id, { sfwConstraintOverride: e.target.value === "" ? "" : e.target.value })
-                        }
-                        rows={2}
-                        placeholder="Both characters fully clothed. No nudity."
-                        className="resize-y bg-muted/30 text-[11px]"
-                      />
-                      <p className="text-[10px] text-muted-foreground">Empty = suppress entirely.</p>
-                      {state.sfwConstraintOverride !== null && (
-                        <button
-                          onClick={() => onUpdatePrompt(ip.id, { sfwConstraintOverride: null, showSfwConstraintOverride: false })}
-                          className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          Clear override (restore default)
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Visual signature override — always shown */}
-              <div>
-                <button
-                  onClick={() => {
-                    if (!state.showVisualSignatureOverride && state.visualSignatureOverride === null) {
-                      onUpdatePrompt(ip.id, {
-                        showVisualSignatureOverride: true,
-                        visualSignatureOverride: VISUAL_SIGNATURE,
-                      });
-                    } else {
-                      onUpdatePrompt(ip.id, { showVisualSignatureOverride: !state.showVisualSignatureOverride });
-                    }
-                  }}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ChevronRight className={`h-3 w-3 transition-transform ${state.showVisualSignatureOverride ? "rotate-90" : ""}`} />
-                  {state.visualSignatureOverride !== null ? "Visual signature (active)" : "Override visual signature"}
-                </button>
-                {state.showVisualSignatureOverride && (
-                  <div className="mt-1 space-y-1">
-                    <Textarea
-                      value={state.visualSignatureOverride ?? ""}
-                      onChange={(e) =>
-                        onUpdatePrompt(ip.id, { visualSignatureOverride: e.target.value === "" ? "" : e.target.value })
-                      }
-                      rows={3}
-                      placeholder={VISUAL_SIGNATURE}
-                      className="resize-y bg-muted/30 text-[11px]"
-                    />
-                    <p className="text-[10px] text-muted-foreground">Empty = suppress entirely.</p>
-                    {state.visualSignatureOverride !== null && (
-                      <button
-                        onClick={() => onUpdatePrompt(ip.id, { visualSignatureOverride: null, showVisualSignatureOverride: false })}
-                        className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                      >
-                        Clear override (restore default)
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              </div>
-              {/* end of Per-image prompt overrides group */}
-
-              {/* Diagnostic toggles */}
-              <div>
-                <button
-                  onClick={() =>
-                    onUpdatePrompt(ip.id, { showDiagnostic: !state.showDiagnostic })
-                  }
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-amber-400 transition-colors"
-                >
-                  <Settings2 className="h-3 w-3" />
-                  {state.showDiagnostic ? "Hide diagnostics" : "Diagnostics"}
-                </button>
-                {state.showDiagnostic && (
-                  <div className="mt-1.5">
-                    <DiagnosticPanel
-                      flags={state.diagnosticFlags}
-                      onChange={(newFlags) =>
-                        onUpdatePrompt(ip.id, { diagnosticFlags: newFlags })
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Zone 3: sticky action buttons */}
           <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-border/50 bg-card/95 px-3 py-2 backdrop-blur-sm">
             {/* Generate / Regenerate — calls the unified /generate-image route (dispatches on image_model) */}
@@ -2355,23 +1977,10 @@ function ImageCard({
                 </Button>
               </>
             )}
-            <Link
-              href={`/dashboard/stories/${seriesId}/debug/${ip.id}`}
-              className="ml-auto"
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-zinc-600 hover:text-zinc-400"
-                title="Debug"
-              >
-                <Bug className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 text-[11px] gap-1"
+              className="ml-auto h-7 px-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 text-[11px] gap-1"
               title="Remove from story"
               onClick={() => onDelete(ip.id)}
             >
@@ -2382,5 +1991,684 @@ function ImageCard({
         </CardContent>
       </div>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ImageDetailModal — full-screen editor surface for a single prompt.
+// Click a card to open. Image + AI critique on the left, all prompt fields
+// expanded on the right, the assembled prompt-to-model pinned below the
+// editor at all times. Keyboard: Esc to close, ⌘S to save, ⌘↵ to generate,
+// ←/→ to switch prompts (auto-saves first).
+// ---------------------------------------------------------------------------
+
+interface ImageDetailModalProps {
+  ip: ImagePromptData;
+  imageType: string;
+  postTitle: string;
+  state: PromptState;
+  hasPrev: boolean;
+  hasNext: boolean;
+  indexLabel: string;
+  onClose: () => void;
+  onPrev: () => Promise<void> | void;
+  onNext: () => Promise<void> | void;
+  onUpdatePrompt: (id: string, updates: Partial<PromptState>) => void;
+  onSaveAll: (id: string) => Promise<boolean>;
+  onRegenerate: (id: string) => void;
+  onApprove: (id: string) => void;
+  onRevert: (id: string) => void;
+  onDelete: (id: string) => void;
+  onLightbox: (url: string) => void;
+  batchGenerating: boolean;
+  imageModel: ImageModel;
+  characterIdentityMap: Record<string, CharacterIdentity>;
+  onNavigateToCharacters: () => void;
+}
+
+function ImageDetailModal({
+  ip,
+  imageType,
+  postTitle,
+  state,
+  hasPrev,
+  hasNext,
+  indexLabel,
+  onClose,
+  onPrev,
+  onNext,
+  onUpdatePrompt,
+  onSaveAll,
+  onRegenerate,
+  onApprove,
+  onRevert,
+  onDelete,
+  onLightbox,
+  batchGenerating,
+  imageModel,
+  characterIdentityMap,
+  onNavigateToCharacters,
+}: ImageDetailModalProps) {
+  const isGenerating = state.status === "generating";
+  const isGenerated = state.status === "generated";
+  const isApproved = state.status === "approved";
+  const isFailed = state.status === "failed";
+  const isPending = state.status === "pending";
+  const isSfw = imageType === "facebook_sfw" || imageType === "shared";
+  const isCharBlockSuppressed =
+    state.suppressCharacterBlock || state.characterBlockOverride === "";
+
+  const isDirty =
+    state.promptText !== state.savedPromptText ||
+    state.characterBlockOverride !== state.savedCharacterBlockOverride ||
+    state.secondaryCharacterBlockOverride !== state.savedSecondaryCharacterBlockOverride ||
+    state.suppressCharacterBlock !== state.savedSuppressCharacterBlock ||
+    state.clothingOverride !== state.savedClothingOverride ||
+    state.sfwConstraintOverride !== state.savedSfwConstraintOverride ||
+    state.visualSignatureOverride !== state.savedVisualSignatureOverride;
+
+  const isTwoCharacter = Boolean(ip.character_id && ip.secondary_character_id);
+  const ratioLabel = isTwoCharacter ? "5:4" : "4:5";
+  const ratioCss = isTwoCharacter ? "5 / 4" : "4 / 5";
+
+  const statusStyle = STATUS_STYLES[state.status] || STATUS_STYLES.pending;
+  const cfg = IMAGE_TYPE_CONFIG[imageType];
+  const charNames = [ip.character_name, ip.secondary_character_name]
+    .filter(Boolean)
+    .join(" + ");
+
+  const assembledPrompt = assembleFullPrompt(
+    state,
+    ip,
+    characterIdentityMap,
+    imageModel
+  );
+
+  const closeWithConfirm = useCallback(() => {
+    if (isDirty) {
+      const ok = window.confirm(
+        "You have unsaved edits. Discard them and close?"
+      );
+      if (!ok) return;
+    }
+    onClose();
+  }, [isDirty, onClose]);
+
+  // Keyboard shortcuts. ←/→ is suppressed when the user is typing in a
+  // textarea/input so it doesn't fight cursor movement.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      const inField =
+        tgt &&
+        (tgt.tagName === "TEXTAREA" ||
+          tgt.tagName === "INPUT" ||
+          tgt.isContentEditable);
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeWithConfirm();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (isDirty && !state.savingPrompt) onSaveAll(ip.id);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (!isGenerating && !batchGenerating) onRegenerate(ip.id);
+        return;
+      }
+      if (!inField) {
+        if (e.key === "ArrowLeft" && hasPrev) {
+          e.preventDefault();
+          onPrev();
+        } else if (e.key === "ArrowRight" && hasNext) {
+          e.preventDefault();
+          onNext();
+        }
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [
+    ip.id,
+    isDirty,
+    isGenerating,
+    batchGenerating,
+    hasPrev,
+    hasNext,
+    state.savingPrompt,
+    closeWithConfirm,
+    onSaveAll,
+    onRegenerate,
+    onPrev,
+    onNext,
+  ]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={closeWithConfirm}
+    >
+      <div
+        className="flex w-full max-w-[1500px] max-h-[95vh] flex-col rounded-lg border bg-card shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 border-b border-border/50 px-4 py-2.5 shrink-0">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
+              <span className="font-medium text-foreground truncate">{postTitle}</span>
+              <span>·</span>
+              <span>{cfg?.emoji} {cfg?.label || imageType}</span>
+              <span>·</span>
+              <span>{ratioLabel}</span>
+              {charNames && (
+                <>
+                  <span>·</span>
+                  <span>{charNames}</span>
+                </>
+              )}
+            </div>
+            <div className="mt-1 flex items-center gap-2">
+              <Badge
+                variant="outline"
+                className={`text-[10px] px-1.5 py-0 ${statusStyle.className}`}
+              >
+                {statusStyle.label}
+              </Badge>
+              <span className="text-[10px] text-muted-foreground">{indexLabel}</span>
+              {isDirty && (
+                <span className="text-[10px] text-amber-400">• Unsaved</span>
+              )}
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            disabled={!hasPrev}
+            onClick={() => onPrev()}
+            title="Previous (←)"
+          >
+            <ChevronRight className="h-4 w-4 rotate-180" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            disabled={!hasNext}
+            onClick={() => onNext()}
+            title="Next (→)"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={closeWithConfirm}
+            title="Close (Esc)"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Body */}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {/* Image pane */}
+          <div className="flex w-1/2 flex-col gap-3 overflow-y-auto bg-muted/5 p-4 border-r border-border/50">
+            <div
+              className="relative overflow-hidden rounded-lg bg-muted/30"
+              style={{ aspectRatio: ratioCss }}
+            >
+              {isGenerating ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <Loader2 className="mb-2 h-10 w-10 animate-spin text-blue-400" />
+                  <p className="text-sm text-blue-400">Generating...</p>
+                </div>
+              ) : state.imageUrl ? (
+                <button
+                  type="button"
+                  onClick={() => onLightbox(state.imageUrl!)}
+                  className="block h-full w-full"
+                  title="Click to view full size"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={state.imageUrl}
+                    alt={`${imageType} image${ip.character_name ? ` - ${ip.character_name}` : ""}`}
+                    className="h-full w-full object-contain"
+                  />
+                </button>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="mb-2 h-12 w-12 rounded-lg bg-muted/50 flex items-center justify-center">
+                    <Sparkles className="h-6 w-6 text-muted-foreground/50" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">Not generated</p>
+                </div>
+              )}
+              <div className="absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+                {ratioLabel}
+              </div>
+            </div>
+
+            {state.error && (
+              <div className="flex items-start gap-1.5 rounded bg-red-500/10 p-2 text-xs text-red-400">
+                <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                {state.error}
+              </div>
+            )}
+
+            {(state.critiqueLoading || state.critiqueText) && (
+              <div className="rounded border border-zinc-700/40 bg-zinc-900/40 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                  <Eye className="h-3 w-3" />
+                  AI Critique
+                  <span className="text-zinc-600">· Pixtral</span>
+                </div>
+                {state.critiqueLoading ? (
+                  <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Analysing image…
+                  </div>
+                ) : (
+                  <p className="text-xs leading-relaxed text-zinc-300">
+                    {state.critiqueText}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Editor pane */}
+          <div className="flex w-1/2 min-w-0 flex-col">
+            <div className="flex-1 overflow-y-auto p-4 space-y-5">
+              <LockedCharacterBlock
+                imageModel={imageModel}
+                primaryCharacterId={ip.character_id}
+                primaryCharacterName={ip.character_name}
+                secondaryCharacterId={ip.secondary_character_id}
+                secondaryCharacterName={ip.secondary_character_name}
+                characterIdentityMap={characterIdentityMap}
+                onNavigateToCharacters={onNavigateToCharacters}
+                characterBlockOverride={state.characterBlockOverride}
+                showOverride={state.showOverride}
+                onOverrideChange={(text) =>
+                  onUpdatePrompt(ip.id, { characterBlockOverride: text })
+                }
+                onToggleOverride={(prefilledText) => {
+                  if (!state.showOverride && state.characterBlockOverride === null) {
+                    onUpdatePrompt(ip.id, {
+                      showOverride: true,
+                      characterBlockOverride: prefilledText,
+                    });
+                  } else {
+                    onUpdatePrompt(ip.id, { showOverride: !state.showOverride });
+                  }
+                }}
+                onClearOverride={() =>
+                  onUpdatePrompt(ip.id, {
+                    characterBlockOverride: null,
+                    showOverride: false,
+                  })
+                }
+                secondaryCharacterBlockOverride={state.secondaryCharacterBlockOverride}
+                showSecondaryOverride={state.showSecondaryOverride}
+                onSecondaryOverrideChange={(text) =>
+                  onUpdatePrompt(ip.id, { secondaryCharacterBlockOverride: text })
+                }
+                onSecondaryToggleOverride={(prefilledText) => {
+                  if (
+                    !state.showSecondaryOverride &&
+                    state.secondaryCharacterBlockOverride === null
+                  ) {
+                    onUpdatePrompt(ip.id, {
+                      showSecondaryOverride: true,
+                      secondaryCharacterBlockOverride: prefilledText,
+                    });
+                  } else {
+                    onUpdatePrompt(ip.id, {
+                      showSecondaryOverride: !state.showSecondaryOverride,
+                    });
+                  }
+                }}
+                onSecondaryClearOverride={() =>
+                  onUpdatePrompt(ip.id, {
+                    secondaryCharacterBlockOverride: null,
+                    showSecondaryOverride: false,
+                  })
+                }
+                suppressCharacterBlock={state.suppressCharacterBlock}
+                onToggleSuppressCharacterBlock={() =>
+                  onUpdatePrompt(ip.id, {
+                    suppressCharacterBlock: !state.suppressCharacterBlock,
+                  })
+                }
+              />
+
+              <div>
+                <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Scene prompt
+                </label>
+                <Textarea
+                  value={state.promptText}
+                  onChange={(e) =>
+                    onUpdatePrompt(ip.id, { promptText: e.target.value })
+                  }
+                  rows={10}
+                  className="mt-1.5 resize-y bg-muted/30 text-xs leading-relaxed min-h-[180px]"
+                  disabled={isGenerating || isApproved || state.savingPrompt}
+                />
+              </div>
+
+              {/* Clothing override — SFW only, hidden when character blocks are suppressed */}
+              {isSfw && !isCharBlockSuppressed && (
+                <ModalOverrideSection
+                  label="Clothing"
+                  isActive={state.clothingOverride !== null}
+                  defaultPreview={
+                    [ip.character_id, ip.secondary_character_id]
+                      .filter(Boolean)
+                      .map((id) => {
+                        const ident = characterIdentityMap[id as string];
+                        return ident?.name && ident?.clothing
+                          ? `${ident.name} is wearing ${ident.clothing}.`
+                          : null;
+                      })
+                      .filter(Boolean)
+                      .join(" ") || "(no clothing in character description)"
+                  }
+                  onActivate={() => {
+                    const autoClothing = [ip.character_id, ip.secondary_character_id]
+                      .filter(Boolean)
+                      .map((id) => {
+                        const ident = characterIdentityMap[id as string];
+                        return ident?.name && ident?.clothing
+                          ? `${ident.name} is wearing ${ident.clothing}.`
+                          : null;
+                      })
+                      .filter(Boolean)
+                      .join(" ");
+                    onUpdatePrompt(ip.id, { clothingOverride: autoClothing });
+                  }}
+                  onClear={() => onUpdatePrompt(ip.id, { clothingOverride: null })}
+                  value={state.clothingOverride ?? ""}
+                  onChange={(v) =>
+                    onUpdatePrompt(ip.id, { clothingOverride: v || null })
+                  }
+                  placeholder="Custom clothing sentence…"
+                  helper="Empty = suppress."
+                  rows={3}
+                />
+              )}
+
+              {/* SFW constraint override — SFW only */}
+              {isSfw && (
+                <ModalOverrideSection
+                  label="SFW constraint"
+                  isActive={state.sfwConstraintOverride !== null}
+                  defaultPreview="Both characters fully clothed. No nudity."
+                  onActivate={() =>
+                    onUpdatePrompt(ip.id, {
+                      sfwConstraintOverride: "Both characters fully clothed. No nudity.",
+                    })
+                  }
+                  onClear={() =>
+                    onUpdatePrompt(ip.id, { sfwConstraintOverride: null })
+                  }
+                  value={state.sfwConstraintOverride ?? ""}
+                  onChange={(v) =>
+                    onUpdatePrompt(ip.id, {
+                      sfwConstraintOverride: v === "" ? "" : v,
+                    })
+                  }
+                  placeholder="Both characters fully clothed. No nudity."
+                  helper="Empty = suppress entirely."
+                  rows={3}
+                />
+              )}
+
+              {/* Visual signature override — always shown */}
+              <ModalOverrideSection
+                label="Visual signature"
+                isActive={state.visualSignatureOverride !== null}
+                defaultPreview={VISUAL_SIGNATURE}
+                onActivate={() =>
+                  onUpdatePrompt(ip.id, {
+                    visualSignatureOverride: VISUAL_SIGNATURE,
+                  })
+                }
+                onClear={() =>
+                  onUpdatePrompt(ip.id, { visualSignatureOverride: null })
+                }
+                value={state.visualSignatureOverride ?? ""}
+                onChange={(v) =>
+                  onUpdatePrompt(ip.id, {
+                    visualSignatureOverride: v === "" ? "" : v,
+                  })
+                }
+                placeholder={VISUAL_SIGNATURE}
+                helper="Empty = suppress entirely."
+                rows={4}
+              />
+            </div>
+
+            {/* Pinned full-prompt preview */}
+            <div className="border-t border-border/50 bg-muted/10 shrink-0">
+              <div className="flex items-center justify-between px-4 py-1.5">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Preview full prompt — sent to model
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={() => navigator.clipboard.writeText(assembledPrompt)}
+                >
+                  Copy
+                </Button>
+              </div>
+              <Textarea
+                value={assembledPrompt}
+                readOnly
+                className="resize-none border-0 bg-transparent px-4 pb-3 pt-0 font-mono text-[10px] leading-relaxed h-32 focus-visible:ring-0"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/50 bg-card px-4 py-2.5 shrink-0">
+          {(isPending || isFailed) && (
+            <Button
+              size="sm"
+              onClick={() => onRegenerate(ip.id)}
+              disabled={batchGenerating}
+              className="text-xs"
+            >
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              {isFailed ? "Retry" : "Generate"}
+              <span className="ml-1.5 text-[9px] opacity-70">⌘↵</span>
+            </Button>
+          )}
+          {isGenerated && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onRegenerate(ip.id)}
+              disabled={batchGenerating}
+              className="text-xs"
+            >
+              <RefreshCw className="mr-1.5 h-4 w-4" />
+              Regenerate
+              <span className="ml-1.5 text-[9px] opacity-70">⌘↵</span>
+            </Button>
+          )}
+          {isGenerated && state.previousImageId && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onRevert(ip.id)}
+              disabled={state.isReverting}
+              className="text-xs text-orange-400 border-orange-500/30 hover:bg-orange-500/10"
+            >
+              {state.isReverting ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Undo2 className="mr-1.5 h-4 w-4" />
+              )}
+              Revert
+            </Button>
+          )}
+          {isGenerated && (
+            <Button
+              size="sm"
+              className="bg-green-600 hover:bg-green-700 text-xs"
+              onClick={() => onApprove(ip.id)}
+            >
+              <Check className="mr-1.5 h-4 w-4" />
+              Approve
+            </Button>
+          )}
+          {isApproved && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled
+                className="text-green-400 border-green-500/30 text-xs"
+              >
+                <Check className="mr-1.5 h-4 w-4" />
+                Approved
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onRegenerate(ip.id)}
+                disabled={batchGenerating}
+                className="text-xs"
+              >
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+                Regenerate
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onSaveAll(ip.id)}
+            disabled={
+              !isDirty ||
+              state.savingPrompt ||
+              isGenerating ||
+              isApproved
+            }
+            className="text-xs"
+          >
+            {state.savingPrompt
+              ? "Saving..."
+              : isDirty
+                ? "Save"
+                : state.promptSavedJust
+                  ? "Saved"
+                  : "Saved"}
+            {isDirty && !state.savingPrompt && (
+              <span className="ml-1.5 text-[9px] opacity-70">⌘S</span>
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 px-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 text-[11px] gap-1"
+            onClick={() => onDelete(ip.id)}
+            title="Remove from story"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ModalOverrideSection — visual wrapper for one of the per-image override
+// fields (clothing / SFW / visual signature). Always visible: shows the
+// default text in muted style when no override is set, and the editable
+// textarea when one is.
+// ---------------------------------------------------------------------------
+
+function ModalOverrideSection({
+  label,
+  isActive,
+  defaultPreview,
+  onActivate,
+  onClear,
+  value,
+  onChange,
+  placeholder,
+  helper,
+  rows,
+}: {
+  label: string;
+  isActive: boolean;
+  defaultPreview: string;
+  onActivate: () => void;
+  onClear: () => void;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  helper: string;
+  rows: number;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+          {isActive && (
+            <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] text-amber-400 normal-case tracking-normal">
+              Override
+            </span>
+          )}
+        </label>
+        {isActive ? (
+          <button
+            onClick={onClear}
+            className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+          >
+            Clear override
+          </button>
+        ) : (
+          <button
+            onClick={onActivate}
+            className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Override for this image
+          </button>
+        )}
+      </div>
+      {isActive ? (
+        <>
+          <Textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={rows}
+            placeholder={placeholder}
+            className="mt-1.5 resize-y bg-muted/30 text-xs leading-relaxed"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">{helper}</p>
+        </>
+      ) : (
+        <div className="mt-1.5 rounded bg-zinc-900/40 px-2 py-1.5 text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap">
+          {defaultPreview}
+        </div>
+      )}
+    </div>
   );
 }

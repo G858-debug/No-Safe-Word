@@ -31,10 +31,6 @@ export { enhancePromptForScene } from './prompt-enhancer';
 // Anthropic API retry wrapper
 export { anthropicCreateWithRetry } from './anthropic-retry';
 
-// Diagnostic flags for isolating scene generation components
-export { DEFAULT_DIAGNOSTIC_FLAGS } from './diagnostic-flags';
-export type { DiagnosticFlags } from './diagnostic-flags';
-
 // Scene profiles
 export { getDefaultProfile, deriveCompositionType, deriveContentMode, applyProfileOverrides } from './scene-profiles';
 export type { SceneProfile, CompositionType } from './scene-profiles';
