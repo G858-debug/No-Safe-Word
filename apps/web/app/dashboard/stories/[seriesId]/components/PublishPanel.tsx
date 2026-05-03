@@ -36,7 +36,12 @@ import {
   Eye,
   CheckCircle2,
   Play,
+  Star,
 } from "lucide-react";
+import WebsitePreview, {
+  type WebsiteImagePrompt,
+} from "./WebsitePreview";
+import { setExcluded } from "@/lib/publisher-actions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,9 +55,12 @@ interface ImagePromptData {
   position_after_word: number | null;
   character_name: string | null;
   character_id: string | null;
+  secondary_character_name?: string | null;
   prompt: string;
   image_id: string | null;
   status: string;
+  is_chapter_hero: boolean;
+  excluded_from_publish: boolean;
 }
 
 interface PostData {
@@ -174,9 +182,15 @@ export default function PublishPanel({
     return { total, published, scheduled };
   }, [posts]);
 
+  // Excluded images are soft-hidden from publish and don't gate the
+  // "ready to publish" state: an editor can fix a bad SFW image by
+  // excluding it instead of regenerating, and the chapter should still
+  // ship as long as the rest is approved.
   const allImagesApproved = useMemo(() => {
     return posts.every((post) =>
-      post.story_image_prompts.every((ip) => ip.status === "approved")
+      post.story_image_prompts.every(
+        (ip) => ip.excluded_from_publish || ip.status === "approved"
+      )
     );
   }, [posts]);
 
@@ -184,10 +198,13 @@ export default function PublishPanel({
   // Helpers
   // ---------------------------------------------------------------------------
 
+  // Approved, non-excluded SFW images for the Facebook composer (and
+  // download-as-image action). Excluded rows ship neither to FB nor
+  // to the website. Approval gating still lives on the Images tab.
   const getPostSfwImages = useCallback(
     (
       post: PostData
-    ): Array<{ promptId: string; url: string; alt: string }> => {
+    ): Array<{ promptId: string; url: string; alt: string; excluded: boolean }> => {
       return post.story_image_prompts
         .filter(
           (ip) =>
@@ -201,47 +218,72 @@ export default function PublishPanel({
           promptId: ip.id,
           url: imageUrls[ip.image_id as string],
           alt: ip.character_name || post.title,
+          excluded: ip.excluded_from_publish,
         }));
     },
     [imageUrls]
   );
 
-  const getWebsiteImages = useCallback(
-    (
-      post: PostData
-    ): Array<{ url: string; afterWord: number; alt: string }> => {
-      const images: Array<{
-        url: string;
-        afterWord: number;
-        alt: string;
-      }> = [];
+  const postImagesReady = useCallback((post: PostData): boolean => {
+    return post.story_image_prompts.every(
+      (ip) => ip.excluded_from_publish || ip.status === "approved"
+    );
+  }, []);
 
-      for (const ip of post.story_image_prompts) {
-        if (ip.status !== "approved" || !ip.image_id) continue;
-        const url = imageUrls[ip.image_id];
-        if (!url) continue;
-
-        if (
-          (ip.image_type === "website_only" ||
-            ip.image_type === "website_nsfw_paired") &&
-          ip.position_after_word != null
-        ) {
-          images.push({
-            url,
-            afterWord: ip.position_after_word,
-            alt: ip.character_name || "Story illustration",
-          });
-        }
-      }
-
-      return images.sort((a, b) => a.afterWord - b.afterWord);
+  // Apply a partial patch to a single image prompt within the local
+  // posts state. Used by WebsitePreview's optimistic updates and by
+  // the Facebook preview's exclude toggle.
+  const patchPrompt = useCallback(
+    (postId: string, promptId: string, patch: Partial<ImagePromptData>) => {
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id !== postId
+            ? p
+            : {
+                ...p,
+                story_image_prompts: p.story_image_prompts.map((ip) =>
+                  ip.id === promptId ? { ...ip, ...patch } : ip
+                ),
+              }
+        )
+      );
     },
-    [imageUrls]
+    []
   );
 
-  const postImagesReady = useCallback((post: PostData): boolean => {
-    return post.story_image_prompts.every((ip) => ip.status === "approved");
-  }, []);
+  // Toggle excluded_from_publish on a Facebook-side image. Same
+  // optimistic+rollback pattern as WebsitePreview, but inlined here
+  // because the Facebook preview is much smaller and doesn't need the
+  // dnd-kit machinery.
+  const handleToggleFacebookExclude = useCallback(
+    async (postId: string, prompt: ImagePromptData) => {
+      const wasExcluded = prompt.excluded_from_publish;
+      const wasHero = prompt.is_chapter_hero;
+      const next = !wasExcluded;
+
+      patchPrompt(postId, prompt.id, {
+        excluded_from_publish: next,
+        is_chapter_hero: next ? false : wasHero,
+      });
+
+      try {
+        const result = await setExcluded(postId, prompt.id, next);
+        patchPrompt(postId, prompt.id, {
+          excluded_from_publish: result.excluded,
+          is_chapter_hero: result.heroCleared ? false : wasHero && !next,
+        });
+      } catch (e) {
+        patchPrompt(postId, prompt.id, {
+          excluded_from_publish: wasExcluded,
+          is_chapter_hero: wasHero,
+        });
+        setActionError(
+          e instanceof Error ? e.message : "Failed to update exclude flag"
+        );
+      }
+    },
+    [patchPrompt]
+  );
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -521,117 +563,14 @@ export default function PublishPanel({
   }, [posts, scheduleStartDate, scheduleInterval, scheduleTime]);
 
   // ---------------------------------------------------------------------------
-  // Website content renderer — inserts images at word positions
-  // ---------------------------------------------------------------------------
-
-  function renderWebsiteContent(post: PostData) {
-    const text = post.website_content;
-    const images = getWebsiteImages(post);
-    const sfwImages = getPostSfwImages(post);
-    const paragraphs = text.split(/\n\n+/);
-
-    const result: React.ReactNode[] = [];
-
-    // Hero SFW images at the top of the post, in `position` order.
-    for (const img of sfwImages) {
-      result.push(
-        <figure
-          key={`sfw-${img.promptId}`}
-          className="my-6 mx-auto max-w-md"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={img.url}
-            alt={img.alt}
-            className="rounded-lg w-full shadow-lg shadow-black/40"
-          />
-        </figure>
-      );
-    }
-
-    if (images.length === 0) {
-      paragraphs.forEach((para, i) => {
-        result.push(
-          <p key={`p-${i}`} className="mb-4 leading-relaxed text-zinc-300">
-            {para.split("\n").map((line, j) => (
-              <span key={j}>
-                {j > 0 && <br />}
-                {line}
-              </span>
-            ))}
-          </p>
-        );
-      });
-      return result;
-    }
-
-    let cumulativeWords = 0;
-    let imageIdx = 0;
-
-    for (let p = 0; p < paragraphs.length; p++) {
-      const para = paragraphs[p].trim();
-      if (!para) continue;
-
-      const wordCount = para.split(/\s+/).length;
-      cumulativeWords += wordCount;
-
-      result.push(
-        <p key={`p-${p}`} className="mb-4 leading-relaxed text-zinc-300">
-          {para.split("\n").map((line, j) => (
-            <span key={j}>
-              {j > 0 && <br />}
-              {line}
-            </span>
-          ))}
-        </p>
-      );
-
-      // Insert images whose position falls within accumulated words
-      while (
-        imageIdx < images.length &&
-        images[imageIdx].afterWord <= cumulativeWords
-      ) {
-        result.push(
-          <figure key={`img-${imageIdx}`} className="my-6 mx-auto max-w-md">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={images[imageIdx].url}
-              alt={images[imageIdx].alt}
-              className="rounded-lg w-full shadow-lg shadow-black/40"
-            />
-          </figure>
-        );
-        imageIdx++;
-      }
-    }
-
-    // Append remaining images
-    while (imageIdx < images.length) {
-      result.push(
-        <figure
-          key={`img-tail-${imageIdx}`}
-          className="my-6 mx-auto max-w-md"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={images[imageIdx].url}
-            alt={images[imageIdx].alt}
-            className="rounded-lg w-full shadow-lg shadow-black/40"
-          />
-        </figure>
-      );
-      imageIdx++;
-    }
-
-    return result;
-  }
-
-  // ---------------------------------------------------------------------------
   // Sub-renders: Facebook & Website previews
   // ---------------------------------------------------------------------------
 
   function renderFacebookPreview(post: PostData) {
     const sfwImages = getPostSfwImages(post);
+    const promptById = new Map(
+      post.story_image_prompts.map((ip) => [ip.id, ip])
+    );
     const isEditing =
       editingField?.postId === post.id &&
       editingField.field === "facebook_content";
@@ -712,18 +651,55 @@ export default function PublishPanel({
             </div>
           )}
 
-          {/* Image(s) — multi-photo posts stack vertically, matching Facebook's layout */}
+          {/* Image(s) — multi-photo posts stack vertically, matching Facebook's layout.
+              The ✕ overlay toggles excluded_from_publish; excluded rows render
+              dimmed but stay visible so editors see what they removed. */}
           {sfwImages.length > 0 && (
             <div className="w-full">
-              {sfwImages.map((img, idx) => (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  key={img.promptId}
-                  src={img.url}
-                  alt={img.alt}
-                  className={`w-full object-cover ${idx > 0 ? "border-t border-white" : ""}`}
-                />
-              ))}
+              {sfwImages.map((img, idx) => {
+                const prompt = promptById.get(img.promptId);
+                const isHero = prompt?.is_chapter_hero === true;
+                return (
+                  <div
+                    key={img.promptId}
+                    className={`group relative ${idx > 0 ? "border-t border-white" : ""}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.url}
+                      alt={img.alt}
+                      className={`w-full object-cover transition-opacity ${
+                        img.excluded ? "opacity-40" : ""
+                      }`}
+                    />
+                    {img.excluded && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <button
+                          onClick={() => prompt && handleToggleFacebookExclude(post.id, prompt)}
+                          className="pointer-events-auto px-3 py-1.5 rounded-md bg-zinc-900/90 text-xs font-medium text-zinc-100 line-through hover:bg-zinc-800"
+                        >
+                          Excluded — click to restore
+                        </button>
+                      </div>
+                    )}
+                    {!img.excluded && prompt && (
+                      <button
+                        onClick={() => handleToggleFacebookExclude(post.id, prompt)}
+                        className="absolute top-2 right-2 z-10 rounded-full bg-black/70 hover:bg-black/90 text-white p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Exclude from publish"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {isHero && (
+                      <div className="absolute top-2 left-2 inline-flex items-center gap-1 rounded bg-amber-500/90 text-amber-950 px-1.5 py-0.5 text-[10px] font-semibold">
+                        <Star className="h-3 w-3 fill-amber-950" />
+                        Hero
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -775,69 +751,24 @@ export default function PublishPanel({
       editingField.field === "website_content";
 
     return (
-      <div className="space-y-3">
-        <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-6 sm:p-8">
-          {/* Title */}
-          <h2 className="text-xl font-bold text-zinc-100 mb-1">
-            {post.title}
-          </h2>
-          <p className="text-sm text-zinc-500 mb-6">
-            Part {post.part_number}
-          </p>
-
-          <Separator className="mb-6 bg-zinc-800" />
-
-          {/* Content with inline images */}
-          {isEditing ? (
-            <div className="space-y-2">
-              <Textarea
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                rows={16}
-                className="text-sm bg-zinc-900 text-zinc-200 border-zinc-700 font-serif leading-relaxed"
-              />
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={saveEdit}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  ) : (
-                    <Check className="mr-1 h-3 w-3" />
-                  )}
-                  Save
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={cancelEditing}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="group relative font-serif">
-              {renderWebsiteContent(post)}
-              <button
-                onClick={() => startEditing(post.id, "website_content")}
-                className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-700 text-zinc-200 rounded-full p-1.5"
-                title="Edit website content"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-        </div>
-
-        <p className="text-center text-xs text-muted-foreground">
-          Hover over text to edit &middot; Website reading preview
-        </p>
-      </div>
+      <WebsitePreview
+        postId={post.id}
+        partNumber={post.part_number}
+        title={post.title}
+        websiteContent={post.website_content}
+        prompts={post.story_image_prompts as WebsiteImagePrompt[]}
+        imageUrls={imageUrls}
+        onPromptPatch={(promptId, patch) =>
+          patchPrompt(post.id, promptId, patch as Partial<ImagePromptData>)
+        }
+        isEditing={isEditing}
+        editValue={editValue}
+        onEditValueChange={setEditValue}
+        onStartEditing={() => startEditing(post.id, "website_content")}
+        onSaveEdit={saveEdit}
+        onCancelEditing={cancelEditing}
+        saving={saving}
+      />
     );
   }
 

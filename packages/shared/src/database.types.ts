@@ -834,6 +834,7 @@ export type Database = {
           clothing_override: string | null
           created_at: string
           debug_data: Json | null
+          excluded_from_publish: boolean
           final_prompt: string | null
           final_prompt_drafted_at: string | null
           id: string
@@ -864,6 +865,7 @@ export type Database = {
           clothing_override?: string | null
           created_at?: string
           debug_data?: Json | null
+          excluded_from_publish?: boolean
           final_prompt?: string | null
           final_prompt_drafted_at?: string | null
           id?: string
@@ -894,6 +896,7 @@ export type Database = {
           clothing_override?: string | null
           created_at?: string
           debug_data?: Json | null
+          excluded_from_publish?: boolean
           final_prompt?: string | null
           final_prompt_drafted_at?: string | null
           id?: string
@@ -1303,6 +1306,15 @@ export type Database = {
       set_chapter_hero: {
         Args: { p_post_id: string; p_prompt_id: string }
         Returns: undefined
+      }
+      set_image_excluded: {
+        Args: { p_excluded: boolean; p_post_id: string; p_prompt_id: string }
+        Returns: {
+          out_id: string
+          out_excluded_from_publish: boolean
+          out_is_chapter_hero: boolean
+          out_hero_was_cleared: boolean
+        }[]
       }
       verify_trainer_client_relationship: {
         Args: { p_client_id: string; p_trainer_id: string }

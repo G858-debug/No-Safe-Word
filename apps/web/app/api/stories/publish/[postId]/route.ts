@@ -69,13 +69,16 @@ export async function POST(
       );
     }
 
-    // 2. Fetch all approved facebook_sfw images for this post
+    // 2. Fetch all approved facebook_sfw images for this post.
+    // Excluded rows are soft-hidden by the editor and must not ship
+    // to Facebook.
     const { data: imagePrompts } = await supabase
       .from("story_image_prompts")
       .select("id, image_id, position")
       .eq("post_id", postId)
       .eq("image_type", "facebook_sfw")
       .eq("status", "approved")
+      .eq("excluded_from_publish", false)
       .order("position", { ascending: true });
 
     const imageUrls: string[] = [];

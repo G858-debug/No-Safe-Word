@@ -1,4 +1,5 @@
 import React from "react";
+import { splitBlocks } from "@/lib/story-text";
 
 interface InlineImage {
   url: string;
@@ -8,7 +9,9 @@ interface InlineImage {
 
 /**
  * Renders story text with inline images positioned by word count.
- * Handles scene breaks (---), headings (## Title), and paragraphs.
+ * Word counting (paragraphs only, no headings or scene breaks) is
+ * shared with the Publisher preview via lib/story-text.ts so an image
+ * at position_after_word=N lands in the same paragraph in both views.
  */
 export default function StoryRenderer({
   text,
@@ -17,7 +20,7 @@ export default function StoryRenderer({
   text: string;
   images: InlineImage[];
 }) {
-  const blocks = text.split(/\n\n+/);
+  const blocks = splitBlocks(text);
   const positioned = images
     .filter((i) => i.afterWord !== Infinity)
     .sort((a, b) => a.afterWord - b.afterWord);
@@ -27,12 +30,8 @@ export default function StoryRenderer({
   let cumulativeWords = 0;
   let imageIdx = 0;
 
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i].trim();
-    if (!block) continue;
-
-    // Scene break: ---- or --- or ___
-    if (/^[-_]{3,}$/.test(block)) {
+  blocks.forEach((block, i) => {
+    if (block.kind === "scene-break") {
       elements.push(
         <div
           key={`break-${i}`}
@@ -44,33 +43,30 @@ export default function StoryRenderer({
           <span className="h-px w-16 bg-amber-900/40" />
         </div>
       );
-      continue;
+      return;
     }
 
-    // Heading: ## Title
-    if (block.startsWith("## ")) {
+    if (block.kind === "heading") {
       elements.push(
         <h2
           key={`h-${i}`}
           className="mb-6 mt-14 text-2xl font-bold text-amber-50 sm:text-3xl"
           style={{ fontFamily: "var(--font-serif)" }}
         >
-          {block.slice(3)}
+          {block.text}
         </h2>
       );
-      continue;
+      return;
     }
 
-    // Regular paragraph
-    const wordCount = block.split(/\s+/).length;
-    cumulativeWords += wordCount;
+    cumulativeWords += block.words;
 
     elements.push(
       <p
         key={`p-${i}`}
         className="mb-6 text-base leading-[1.9] text-warm-100 sm:text-lg sm:leading-[1.9]"
       >
-        {block.split("\n").map((line, j) => (
+        {block.text.split("\n").map((line, j) => (
           <span key={j}>
             {j > 0 && <br />}
             {line}
@@ -79,7 +75,6 @@ export default function StoryRenderer({
       </p>
     );
 
-    // Insert images whose position falls within accumulated word count
     while (
       imageIdx < positioned.length &&
       positioned[imageIdx].afterWord <= cumulativeWords
@@ -97,9 +92,8 @@ export default function StoryRenderer({
       );
       imageIdx++;
     }
-  }
+  });
 
-  // Remaining positioned images
   while (imageIdx < positioned.length) {
     elements.push(
       <figure key={`img-tail-${imageIdx}`} className="my-10">
@@ -115,7 +109,6 @@ export default function StoryRenderer({
     imageIdx++;
   }
 
-  // Trailing images (no position data — appended at end)
   for (let i = 0; i < trailing.length; i++) {
     elements.push(
       <figure key={`img-end-${i}`} className="my-10">

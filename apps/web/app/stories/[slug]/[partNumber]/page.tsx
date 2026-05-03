@@ -160,6 +160,7 @@ export default async function ChapterPage({ params }: PageProps) {
       )
       .eq("post_id", post.id)
       .eq("status", "approved")
+      .eq("excluded_from_publish", false)
       .in("image_type", [
         "facebook_sfw",
         "website_nsfw_paired",
@@ -198,10 +199,14 @@ export default async function ChapterPage({ params }: PageProps) {
 
     let pairedPositions: Record<string, number | null> = {};
     if (pairedIds.length > 0) {
+      // Mirror the main filter: an excluded SFW partner must not
+      // contribute a position_after_word, otherwise we'd render the
+      // unexcluded NSFW companion at a phantom location.
       const { data: pairedPrompts } = await supabase
         .from("story_image_prompts")
         .select("id, position_after_word")
-        .in("id", pairedIds);
+        .in("id", pairedIds)
+        .eq("excluded_from_publish", false);
 
       if (pairedPrompts) {
         pairedPositions = Object.fromEntries(

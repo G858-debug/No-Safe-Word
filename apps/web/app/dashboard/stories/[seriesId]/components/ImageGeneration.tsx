@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +35,6 @@ import {
   Undo2,
   Eye,
   Trash2,
-  Star,
 } from "lucide-react";
 // ══════════════════════════════════════════════════════════════
 // ART DIRECTOR — DEACTIVATED 2026-04-19
@@ -260,25 +259,6 @@ export default function ImageGeneration({
 
   // Detail modal — currently selected prompt (null = closed).
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
-
-  // Per-post chapter-hero state. Hydrated from props; mutated optimistically
-  // by handleSetHero. The server is the source of truth (set_chapter_hero
-  // RPC + partial unique index); this map mirrors the flag for UI
-  // responsiveness so editors don't wait on a round trip to see the badge
-  // move.
-  const [heroByPost, setHeroByPost] = useState<Record<string, string | null>>(
-    () => {
-      const m: Record<string, string | null> = {};
-      for (const post of posts) {
-        const hero = post.story_image_prompts.find(
-          (ip) =>
-            ip.image_type === "facebook_sfw" && ip.is_chapter_hero === true
-        );
-        m[post.id] = hero?.id ?? null;
-      }
-      return m;
-    }
-  );
 
   // Pose templates (loaded once when the page mounts; refreshed when the
   // user adds/removes one via the dedicated management page).
@@ -973,41 +953,6 @@ export default function ImageGeneration({
     [promptStates, updatePrompt]
   );
 
-  const handleSetHero = useCallback(
-    async (postId: string, promptId: string) => {
-      // Toggle: clicking the currently-flagged hero clears it; clicking
-      // any other facebook_sfw image promotes it to hero.
-      const current = heroByPost[postId] ?? null;
-      const nextHero = current === promptId ? null : promptId;
-
-      // Optimistic update so the badge moves immediately. We roll back
-      // on failure.
-      setHeroByPost((prev) => ({ ...prev, [postId]: nextHero }));
-
-      try {
-        const res = await fetch(
-          `/api/stories/posts/${postId}/set-hero`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ promptId: nextHero }),
-          }
-        );
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err?.error || "Failed to set hero");
-        }
-      } catch (err) {
-        setHeroByPost((prev) => ({ ...prev, [postId]: current }));
-        updatePrompt(promptId, {
-          error:
-            err instanceof Error ? err.message : "Failed to set chapter hero",
-        });
-      }
-    },
-    [heroByPost, updatePrompt]
-  );
-
   const handleDelete = useCallback(async (promptId: string) => {
     if (!window.confirm("Remove this image from the story? This cannot be undone.")) return;
     const res = await fetch(`/api/stories/images/${promptId}`, { method: "DELETE" });
@@ -1294,125 +1239,51 @@ export default function ImageGeneration({
               </span>
             </button>
 
-            {/* Post content */}
-            {!isCollapsed && (() => {
-              // Per-post helper map for orphan detection. Used by the
-              // website_nsfw_paired cards to flag rows whose own
-              // position_after_word is null AND whose paired SFW
-              // partner has no position_after_word either — those would
-              // be silently skipped by the website chapter renderer.
-              const positionAfterWordById: Record<string, number | null> = {};
-              for (const ip of prompts) {
-                positionAfterWordById[ip.id] = ip.position_after_word;
-              }
-              const heroPromptId = heroByPost[post.id] ?? null;
+            {/* Post content. Hero selection and orphan/positioning
+                warnings now live on the Publish tab — the Images tab
+                only handles generation/approval/deletion of assets. */}
+            {!isCollapsed && (
+              <div className="mt-3 space-y-5 pl-2">
+                {(
+                  ["facebook_sfw", "website_nsfw_paired", "website_only"] as const
+                ).map((imageType) => {
+                  const typePrompts = prompts.filter(
+                    (ip) => ip.image_type === imageType
+                  );
+                  if (typePrompts.length === 0) return null;
 
-              return (
-                <div className="mt-3 space-y-5 pl-2">
-                  {(
-                    ["facebook_sfw", "website_nsfw_paired", "website_only"] as const
-                  ).map((imageType) => {
-                    const typePrompts = prompts.filter(
-                      (ip) => ip.image_type === imageType
-                    );
-                    if (typePrompts.length === 0) return null;
+                  const cfg = IMAGE_TYPE_CONFIG[imageType];
 
-                    const cfg = IMAGE_TYPE_CONFIG[imageType];
+                  return (
+                    <div key={imageType}>
+                      <h4 className="mb-3 text-sm font-medium text-muted-foreground">
+                        {cfg.emoji} {cfg.label}{" "}
+                        <span className="text-xs">({typePrompts.length})</span>
+                      </h4>
 
-                    // For the SFW header: show the currently-flagged hero
-                    // (or a warning when none is set). Hero is a facebook_sfw
-                    // concept — the badge only renders on that subgroup.
-                    let heroSummary: ReactNode = null;
-                    if (imageType === "facebook_sfw") {
-                      const heroPrompt = heroPromptId
-                        ? typePrompts.find((ip) => ip.id === heroPromptId)
-                        : null;
-                      if (heroPrompt) {
-                        const names = [
-                          heroPrompt.character_name,
-                          heroPrompt.secondary_character_name,
-                        ]
-                          .filter(Boolean)
-                          .join(" + ");
-                        heroSummary = (
-                          <span className="ml-2 inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
-                            <Star className="h-3 w-3 fill-amber-300" />
-                            Hero: {names || "selected"}
-                          </span>
-                        );
-                      } else {
-                        heroSummary = (
-                          <span className="ml-2 inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-300">
-                            <AlertCircle className="h-3 w-3" />
-                            No hero set
-                          </span>
-                        );
-                      }
-                    }
-
-                    return (
-                      <div key={imageType}>
-                        {/* Type header */}
-                        <h4 className="mb-3 text-sm font-medium text-muted-foreground">
-                          {cfg.emoji} {cfg.label}{" "}
-                          <span className="text-xs">({typePrompts.length})</span>
-                          {heroSummary}
-                        </h4>
-
-                        {/* Image grid */}
-                        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                          {typePrompts.map((ip) => {
-                            const isHero =
-                              imageType === "facebook_sfw" &&
-                              heroPromptId === ip.id;
-
-                            // Orphan: paired NSFW image with no resolvable
-                            // position. Will be silently skipped by the
-                            // website renderer; surface that here so
-                            // editors can spot it before publish.
-                            let isOrphan = false;
-                            if (imageType === "website_nsfw_paired") {
-                              const ownPos = ip.position_after_word;
-                              if (ownPos == null) {
-                                if (!ip.pairs_with) {
-                                  isOrphan = true;
-                                } else {
-                                  const partnerPos =
-                                    positionAfterWordById[ip.pairs_with];
-                                  if (partnerPos == null) isOrphan = true;
-                                }
-                              }
-                            }
-
-                            return (
-                              <ImageCard
-                                key={ip.id}
-                                prompt={ip}
-                                state={promptStates[ip.id]}
-                                imageType={imageType}
-                                promptPositionMap={promptPositionMap.current}
-                                onRegenerate={handleRegenerate}
-                                onApprove={handleApprove}
-                                onRevert={handleRevert}
-                                onArtDirector={handleRegenerate}
-                                onDelete={handleDelete}
-                                onOpenDetail={setSelectedPromptId}
-                                onSetHero={() =>
-                                  void handleSetHero(post.id, ip.id)
-                                }
-                                isHero={isHero}
-                                isOrphan={isOrphan}
-                                batchGenerating={batchGenerating}
-                              />
-                            );
-                          })}
-                        </div>
+                      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                        {typePrompts.map((ip) => (
+                          <ImageCard
+                            key={ip.id}
+                            prompt={ip}
+                            state={promptStates[ip.id]}
+                            imageType={imageType}
+                            promptPositionMap={promptPositionMap.current}
+                            onRegenerate={handleRegenerate}
+                            onApprove={handleApprove}
+                            onRevert={handleRevert}
+                            onArtDirector={handleRegenerate}
+                            onDelete={handleDelete}
+                            onOpenDetail={setSelectedPromptId}
+                            batchGenerating={batchGenerating}
+                          />
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}
@@ -1527,9 +1398,6 @@ interface ImageCardProps {
   onArtDirector: (promptId: string) => void;
   onDelete: (promptId: string) => void;
   onOpenDetail: (promptId: string) => void;
-  onSetHero?: () => void;
-  isHero?: boolean;
-  isOrphan?: boolean;
   batchGenerating: boolean;
 }
 
@@ -1544,9 +1412,6 @@ function ImageCard({
   onArtDirector,
   onDelete,
   onOpenDetail,
-  onSetHero,
-  isHero = false,
-  isOrphan = false,
   batchGenerating,
 }: ImageCardProps) {
   if (!state) return null;
@@ -1587,9 +1452,7 @@ function ImageCard({
   return (
     <Card
       className={`overflow-visible transition-colors ${
-        isHero
-          ? "border-amber-400 ring-2 ring-amber-400/40"
-          : isApproved
+        isApproved
           ? "border-green-500/30"
           : isGenerated
             ? "border-amber-500/30"
@@ -1682,25 +1545,6 @@ function ImageCard({
                 No char injection
               </Badge>
             )}
-            {isHero && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-300 border-amber-500/40"
-              >
-                <Star className="mr-1 h-3 w-3 fill-amber-300" />
-                Chapter hero
-              </Badge>
-            )}
-            {isOrphan && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0 bg-red-500/15 text-red-300 border-red-500/40"
-                title="This NSFW image has no resolvable position — neither its own position_after_word nor its paired SFW partner's. The website chapter renderer will skip it."
-              >
-                <AlertCircle className="mr-1 h-3 w-3" />
-                Won&apos;t render — no position
-              </Badge>
-            )}
           </div>
 
           {/* Error */}
@@ -1745,28 +1589,6 @@ function ImageCard({
           {/* Zone 2: scrollable editing area */}
           {/* Zone 3: sticky action buttons */}
           <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-border/50 bg-card/95 px-3 py-2 backdrop-blur-sm">
-            {imageType === "facebook_sfw" && onSetHero && (
-              <Button
-                variant={isHero ? "default" : "outline"}
-                size="sm"
-                className={`h-7 text-xs ${
-                  isHero
-                    ? "bg-amber-500 text-amber-950 hover:bg-amber-400"
-                    : ""
-                }`}
-                onClick={onSetHero}
-                title={
-                  isHero
-                    ? "Click to unset as chapter hero"
-                    : "Set this image as the chapter hero (replaces any other hero on this chapter)"
-                }
-              >
-                <Star
-                  className={`mr-1.5 h-4 w-4 ${isHero ? "fill-amber-950" : ""}`}
-                />
-                {isHero ? "Hero" : "Set as hero"}
-              </Button>
-            )}
             {/* Generate / Regenerate — calls the unified /generate-image route (dispatches on image_model) */}
             {(isPending || isFailed) && (
               <Button
