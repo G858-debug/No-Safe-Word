@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { supabase } from "@no-safe-word/story-engine";
 
 const UUID_RE =
@@ -41,7 +42,7 @@ export async function POST(
     const { data: series, error: seriesErr } = await supabase
       .from("story_series")
       .select(
-        "id, status, cover_status, blurb_short_selected, blurb_long_selected"
+        "id, slug, status, cover_status, blurb_short_selected, blurb_long_selected"
       )
       .eq("id", seriesId)
       .single();
@@ -244,6 +245,15 @@ export async function POST(
     }
 
     const result = rpcData?.[0];
+
+    // Bust ISR caches for surfaces that list/show this series. The
+    // listing page (/stories), homepage Featured Stories section (/),
+    // and series detail page all use revalidate = 3600, so without
+    // these calls a freshly-published story stays invisible for up to
+    // an hour.
+    revalidatePath("/stories");
+    revalidatePath("/");
+    revalidatePath(`/stories/${series.slug}`);
 
     return NextResponse.json({
       series_id: result?.out_series_id ?? seriesId,
