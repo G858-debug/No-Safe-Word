@@ -110,7 +110,7 @@ export async function sendMagicLinkEmail(
   const unsubscribeUrl = new URL("/unsubscribe", siteUrl);
   unsubscribeUrl.searchParams.set("token", unsubscribeToken);
 
-  const subject = "Read the rest of The Wrong One";
+  const subject = "Read the rest of the story - The Wrong One";
   const html = renderHtml({
     confirmUrl: confirmUrl.toString(),
     unsubscribeUrl: unsubscribeUrl.toString(),
@@ -184,7 +184,7 @@ function renderHtml({ confirmUrl, unsubscribeUrl }: TemplateVars): string {
             <td style="padding:24px 32px;border-top:1px solid rgba(180,83,9,0.2);">
               <p style="margin:0;font-size:12px;line-height:1.5;color:#8a7860;">
                 You're receiving this because you signed up to read on No Safe Word.
-                <a href="${escapeAttr(unsubscribeUrl)}" style="color:#d4b896;text-decoration:underline;">Unsubscribe from marketing emails</a>.
+                <a href="${escapeAttr(unsubscribeUrl)}" style="color:#d4b896;text-decoration:underline;">Unsubscribe</a>.
               </p>
             </td>
           </tr>
@@ -211,7 +211,7 @@ function renderText({ confirmUrl, unsubscribeUrl }: TemplateVars): string {
     "---",
     "",
     "You're receiving this because you signed up to read on No Safe Word.",
-    `Unsubscribe from marketing emails: ${unsubscribeUrl}`,
+    `Unsubscribe: ${unsubscribeUrl}`,
   ].join("\n");
 }
 

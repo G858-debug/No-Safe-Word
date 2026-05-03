@@ -114,6 +114,12 @@ export default function EmailGate({
 
   return (
     <div className="relative">
+      {/* Deep-link anchor — magic-link emails redirect to
+          `#gate-position` so the reader lands at the gate instead of
+          the top of the chapter, and GatePulse highlights the
+          paragraph above the gate to mark "this is where you left off". */}
+      <span id="gate-position" aria-hidden="true" />
+
       {/* Soft fade overlay sits over the last paragraph of the truncated
           prose, easing the reader into the gate rather than cutting
           mid-sentence. The chapter page is responsible for placing the

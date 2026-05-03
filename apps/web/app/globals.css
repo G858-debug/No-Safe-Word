@@ -100,4 +100,22 @@
       transform: scale(1);
     }
   }
+
+  /* Briefly outlines the paragraph the reader was on before the
+     gate fired, so they can locate where they left off after
+     returning from the magic-link click. amber-700 (#b45309)
+     matches the gate CTA button. */
+  @keyframes gate-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(180, 83, 9, 0.5);
+    }
+    100% {
+      box-shadow: 0 0 0 12px rgba(180, 83, 9, 0);
+    }
+  }
+
+  .gate-pulse {
+    animation: gate-pulse 2s ease-out;
+    border-radius: 4px;
+  }
 }

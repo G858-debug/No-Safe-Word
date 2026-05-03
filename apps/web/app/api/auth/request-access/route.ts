@@ -186,8 +186,11 @@ export async function POST(request: NextRequest) {
       : 1;
   const siteUrl =
     process.env.NEXT_PUBLIC_SITE_URL || "https://nosafeword.co.za";
+  // Append #gate-position so the post-auth landing scrolls to where
+  // the gate was rendered. GatePulse picks this up to flash the
+  // paragraph above the (now-removed) gate.
   const next = slug
-    ? `/stories/${encodeURIComponent(slug)}/${chapter}`
+    ? `/stories/${encodeURIComponent(slug)}/${chapter}#gate-position`
     : "/";
 
   let emailSent = false;

@@ -1043,6 +1043,7 @@ export type Database = {
       }
       story_series: {
         Row: {
+          access_tier: string
           author_notes: Json | null
           blurb_long_selected: number | null
           blurb_long_variants: Json | null
@@ -1071,6 +1072,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          access_tier?: string
           author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
@@ -1099,6 +1101,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          access_tier?: string
           author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null

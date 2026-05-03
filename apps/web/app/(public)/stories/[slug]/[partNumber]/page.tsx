@@ -11,6 +11,7 @@ import StoryRenderer from "@/components/StoryRenderer";
 import ChapterNav from "@/components/ChapterNav";
 import ReadingProgress from "@/components/ReadingProgress";
 import EmailGate from "@/components/EmailGate";
+import { GatePulse } from "@/components/GatePulse";
 import { createClient } from "@/lib/supabase/server";
 import { checkSeriesAccess, truncateToWords } from "@/lib/access";
 import { logEvent } from "@/lib/server/events";
@@ -362,6 +363,7 @@ export default async function ChapterPage({ params }: PageProps) {
               partNumber={partNumber}
               heroImageUrl={heroImages[0]?.url ?? null}
             />
+            <GatePulse />
           </div>
         )}
 
