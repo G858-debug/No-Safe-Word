@@ -1063,6 +1063,7 @@ export type Database = {
           image_engine: string
           image_model: string
           marketing: Json | null
+          published_at: string | null
           slug: string
           status: string
           title: string
@@ -1090,6 +1091,7 @@ export type Database = {
           image_engine?: string
           image_model?: string
           marketing?: Json | null
+          published_at?: string | null
           slug: string
           status?: string
           title: string
@@ -1117,6 +1119,7 @@ export type Database = {
           image_engine?: string
           image_model?: string
           marketing?: Json | null
+          published_at?: string | null
           slug?: string
           status?: string
           title?: string
@@ -1303,6 +1306,14 @@ export type Database = {
       get_payment_gateway: { Args: { p_country_code: string }; Returns: string }
       increment: { Args: { row_id: string; x: number }; Returns: number }
       mask_account_number: { Args: { account_number: string }; Returns: string }
+      publish_story_to_website: {
+        Args: { p_series_id: string }
+        Returns: {
+          out_posts_updated: number
+          out_published_at: string
+          out_series_id: string
+        }[]
+      }
       set_chapter_hero: {
         Args: { p_post_id: string; p_prompt_id: string }
         Returns: undefined
@@ -1310,10 +1321,10 @@ export type Database = {
       set_image_excluded: {
         Args: { p_excluded: boolean; p_post_id: string; p_prompt_id: string }
         Returns: {
-          out_id: string
           out_excluded_from_publish: boolean
-          out_is_chapter_hero: boolean
           out_hero_was_cleared: boolean
+          out_id: string
+          out_is_chapter_hero: boolean
         }[]
       }
       verify_trainer_client_relationship: {

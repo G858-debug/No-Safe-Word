@@ -291,6 +291,7 @@ export default function SeriesDetailPage() {
         blurb_long_selected?: number | null;
         blurb_short_variants?: string[] | null;
         blurb_long_variants?: string[] | null;
+        published_at?: string | null;
       })
     | undefined;
   const shortBlurbSelected =
@@ -827,6 +828,22 @@ export default function SeriesDetailPage() {
             imageUrls={data.image_urls}
             coverStatus={coverStatus}
             authorNotes={data.series.author_notes ?? null}
+            seriesStatus={series.status}
+            publishedAt={rawSeries?.published_at ?? null}
+            onSeriesPublished={(publishedAt) =>
+              setData((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      series: {
+                        ...prev.series,
+                        status: "published",
+                        ...({ published_at: publishedAt } as Partial<StorySeriesRow>),
+                      },
+                    }
+                  : prev
+              )
+            }
           />
         </div>
       </Tabs>

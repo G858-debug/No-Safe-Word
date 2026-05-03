@@ -87,6 +87,17 @@ interface PublishPanelProps {
   coverStatus: CoverStatus;
   /** Optional editorial reflection block. When non-null, renders the Author's Notes review panel. */
   authorNotes: AuthorNotes | null;
+  /** Series-level status — drives the Website Publishing badge + button enable. */
+  seriesStatus: string;
+  /** When the series went live on the public website. NULL until publish-website succeeds. */
+  publishedAt: string | null;
+  /** Lift series-published state up to the page so the header badge updates without a refetch. */
+  onSeriesPublished?: (publishedAt: string) => void;
+}
+
+interface PreconditionFailure {
+  key: string;
+  message: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +142,9 @@ export default function PublishPanel({
   imageUrls,
   coverStatus,
   authorNotes,
+  seriesStatus: initialSeriesStatus,
+  publishedAt: initialPublishedAt,
+  onSeriesPublished,
 }: PublishPanelProps) {
   const coverApproved =
     coverStatus === "approved" ||
@@ -170,6 +184,19 @@ export default function PublishPanel({
   // Feedback
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Website-publish state. Series status + timestamp shadow the props
+  // so a successful publish reflects in the badge without waiting for a
+  // parent refetch. The parent is also notified via onSeriesPublished.
+  const [seriesStatus, setSeriesStatus] = useState(initialSeriesStatus);
+  const [publishedAt, setPublishedAt] = useState<string | null>(
+    initialPublishedAt
+  );
+  const [websitePublishing, setWebsitePublishing] = useState(false);
+  const [websiteFailures, setWebsiteFailures] = useState<
+    PreconditionFailure[] | null
+  >(null);
+  const isWebsitePublished = seriesStatus === "published";
 
   // ---------------------------------------------------------------------------
   // Derived state
@@ -348,6 +375,74 @@ export default function PublishPanel({
       setSaving(false);
     }
   }, [editingField, editValue]);
+
+  const publishWebsite = useCallback(async () => {
+    if (isWebsitePublished || websitePublishing) return;
+
+    const ok = window.confirm(
+      "This will make the entire story visible on nosafeword.co.za immediately. This cannot be undone via this UI. Continue?"
+    );
+    if (!ok) return;
+
+    setWebsitePublishing(true);
+    setActionError(null);
+    setWebsiteFailures(null);
+
+    try {
+      const res = await fetch(
+        `/api/stories/${seriesId}/publish-website`,
+        { method: "POST" }
+      );
+
+      if (res.status === 422) {
+        const body = (await res.json().catch(() => ({}))) as {
+          failures?: PreconditionFailure[];
+        };
+        setWebsiteFailures(body.failures ?? []);
+        return;
+      }
+
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error || "Publish failed");
+      }
+
+      const body = (await res.json()) as {
+        published_at: string | null;
+        posts_updated: number;
+      };
+      const stamp = body.published_at ?? new Date().toISOString();
+
+      setSeriesStatus("published");
+      setPublishedAt(stamp);
+      // Mirror on every post we know about so the per-post status pills
+      // flip immediately. The RPC promotes every status except
+      // 'published' itself.
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.status === "published"
+            ? p
+            : { ...p, status: "published", published_at: stamp }
+        )
+      );
+      onSeriesPublished?.(stamp);
+      setActionSuccess(
+        `Story is live. ${body.posts_updated} chapter${body.posts_updated === 1 ? "" : "s"} promoted to published.`
+      );
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Publish failed");
+    } finally {
+      setWebsitePublishing(false);
+    }
+  }, [
+    seriesId,
+    isWebsitePublished,
+    websitePublishing,
+    onSeriesPublished,
+  ]);
 
   const publishPost = useCallback(async (postId: string) => {
     setPublishing(postId);
@@ -796,11 +891,107 @@ export default function PublishPanel({
         </div>
       )}
 
-      {/* =================== SERIES-LEVEL CONTROLS =================== */}
+      {/* ================ SECTION 1: WEBSITE PUBLISHING ================ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Globe className="h-4 w-4" />
+                Website Publishing
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Publishes the entire story to nosafeword.co.za immediately.
+                Decoupled from Facebook scheduling.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {isWebsitePublished ? (
+                <Badge
+                  variant="outline"
+                  className="bg-green-500/20 text-green-300 border-green-500/30 text-xs"
+                >
+                  Published
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="bg-zinc-500/20 text-zinc-400 border-zinc-500/30 text-xs"
+                >
+                  Draft
+                </Badge>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {publishedAt && isWebsitePublished && (
+            <p className="text-xs text-muted-foreground">
+              Live since{" "}
+              <span className="font-medium text-foreground">
+                {new Date(publishedAt).toLocaleString()}
+              </span>
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={publishWebsite}
+              disabled={isWebsitePublished || websitePublishing}
+            >
+              {websitePublishing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : isWebsitePublished ? (
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+              ) : (
+                <Globe className="mr-2 h-4 w-4" />
+              )}
+              {isWebsitePublished
+                ? "Already Published"
+                : websitePublishing
+                  ? "Publishing..."
+                  : "Publish Whole Story to Website Now"}
+            </Button>
+          </div>
+
+          {websiteFailures && websiteFailures.length > 0 && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm">
+              <div className="mb-2 flex items-center gap-2 text-red-300">
+                <AlertCircle className="h-4 w-4" />
+                <span className="font-medium">
+                  Cannot publish — {websiteFailures.length} precondition
+                  {websiteFailures.length === 1 ? "" : "s"} not met
+                </span>
+              </div>
+              <ul className="space-y-1.5 pl-6">
+                {websiteFailures.map((f) => (
+                  <li
+                    key={f.key}
+                    className="list-disc text-red-400/90"
+                  >
+                    {f.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ================ SECTION 2: FACEBOOK SCHEDULING =============== */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Publishing Controls</CardTitle>
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Send className="h-4 w-4" />
+                Facebook Scheduling
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Stagger Facebook posts over time, or push them out now.
+                Independent of website publishing.
+              </p>
+            </div>
             <div className="flex items-center gap-3 text-sm">
               <span className="text-muted-foreground">
                 {statusSummary.published}/{statusSummary.total} published
