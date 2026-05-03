@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { supabase as serviceClient } from "@no-safe-word/story-engine";
-import { logEvent } from "@/lib/server/events";
-import { dispatchUserCreatedEvent } from "@/lib/server/resend-nurture";
+import { runPostLoginSideEffects } from "@/lib/server/auth-post-login";
+
+// /auth/callback — Supabase OAuth code-exchange flow.
+//
+// Reads `?code=`, exchanges it for a session, runs shared post-login
+// side effects, redirects to the story deep-link or `next`.
+//
+// The token_hash flow (Resend-delivered magic-link emails) lives at
+// /auth/confirm. Both routes share `runPostLoginSideEffects` so
+// instrumentation can't drift.
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -20,50 +27,11 @@ export async function GET(request: Request) {
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (!error && data.user) {
-        // Upsert nsw_users record using service role client
-        const { email, id: authUserId } = data.user;
-        if (email) {
-          await serviceClient.from("nsw_users").upsert(
-            {
-              auth_user_id: authUserId,
-              email,
-              has_email: true,
-            },
-            { onConflict: "auth_user_id" }
-          );
-        }
-
-        // Analytics: successful sign-in via magic-link flow.
-        await logEvent({
-          eventType: "auth.sign_in_verified",
-          userId: authUserId,
-          metadata: { method: "magic_link" },
+        await runPostLoginSideEffects({
+          user: data.user,
+          host: request.headers.get("host"),
+          method: "magic_link",
         });
-
-        // Nurture first-time guard. Atomic UPDATE with WHERE nurture_started_at IS NULL
-        // returns the row only on the first matching call, so dispatch fires exactly once.
-        // WhatsApp PIN sign-ups are not instrumented (synthetic emails are not real inboxes).
-        if (email) {
-          const { data: guardRow } = await serviceClient
-            .from("nsw_users")
-            .update({ nurture_started_at: new Date().toISOString() })
-            .eq("auth_user_id", authUserId)
-            .is("nurture_started_at", null)
-            .select("id, display_name")
-            .maybeSingle();
-
-          if (guardRow) {
-            const host = request.headers.get("host") ?? "";
-            const source: "access" | "main" = host.startsWith("access.")
-              ? "access"
-              : "main";
-            await dispatchUserCreatedEvent({
-              email,
-              firstName: guardRow.display_name,
-              source,
-            });
-          }
-        }
 
         // Deep link to story if params present
         if (storySlug && chapter) {

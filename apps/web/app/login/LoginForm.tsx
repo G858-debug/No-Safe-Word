@@ -12,6 +12,13 @@ export default function LoginForm() {
   const [errorMsg, setErrorMsg] = useState("");
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/";
+  const urlError = searchParams.get("error");
+  const urlErrorMsg =
+    urlError === "link_expired"
+      ? "That sign-in link has expired or already been used. Enter your email below for a fresh one."
+      : urlError === "auth"
+        ? "We couldn't sign you in. Please request a new link."
+        : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -89,6 +96,12 @@ export default function LoginForm() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+              {urlErrorMsg && status !== "error" && (
+                <p className="rounded-md border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+                  {urlErrorMsg}
+                </p>
+              )}
+
               <div>
                 <label htmlFor="email" className="sr-only">
                   Email address

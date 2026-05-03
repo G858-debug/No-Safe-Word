@@ -23,11 +23,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabase as serviceClient } from "@no-safe-word/story-engine";
-import { createClient } from "@/lib/supabase/server";
 import { take, clientIp } from "@/lib/server/rate-limit";
 import { parsePhone } from "@/lib/phone";
 import { geminiParsePhone } from "@/lib/phone-gemini";
 import { sendWhatsAppCode } from "@/lib/server/email-gate-auth";
+import { sendMagicLinkEmail } from "@/lib/server/magic-link-email";
 import { logEvent } from "@/lib/server/events";
 
 export const runtime = "nodejs";
@@ -177,31 +177,25 @@ export async function POST(request: NextRequest) {
   }
 
   // ---------------------------------------------------------------------
-  // 5. Email magic link via Supabase OTP.
+  // 5. Magic-link email via Resend (token_hash → /auth/confirm flow).
   // ---------------------------------------------------------------------
   const slug = body.source_series_slug ?? "";
   const chapter =
     typeof body.source_chapter_number === "number"
       ? body.source_chapter_number
       : 1;
-  const origin =
+  const siteUrl =
     process.env.NEXT_PUBLIC_SITE_URL || "https://nosafeword.co.za";
-  const redirectTo = `${origin}/auth/callback?story=${encodeURIComponent(slug)}&chapter=${chapter}`;
+  const next = slug
+    ? `/stories/${encodeURIComponent(slug)}/${chapter}`
+    : "/";
 
   let emailSent = false;
-  try {
-    const supabase = await createClient();
-    const { error: otpErr } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    });
-    if (otpErr) {
-      console.error("[request-access] magic link send failed:", otpErr);
-    } else {
-      emailSent = true;
-    }
-  } catch (err) {
-    console.error("[request-access] magic link threw:", err);
+  const sendResult = await sendMagicLinkEmail({ email, next, siteUrl });
+  if (sendResult.ok) {
+    emailSent = true;
+  } else {
+    console.error("[request-access] magic link send failed:", sendResult.error);
   }
 
   // ---------------------------------------------------------------------
