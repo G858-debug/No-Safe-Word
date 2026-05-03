@@ -66,6 +66,13 @@ FACEBOOK_PAGE_TOKEN=your_facebook_page_access_token
 
 # Webhook (optional)
 WEBHOOK_SECRET=your_webhook_secret
+
+# Gemini (used as fallback when the deterministic phone parser can't
+# disambiguate a number entered in the email-gate WhatsApp field).
+# Same key the OpenClaw chatbot uses on Railway. If unset, the gate
+# still works — ambiguous numbers will surface a generic error instead
+# of being parsed by Gemini.
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
 ### Database Setup

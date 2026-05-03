@@ -1136,11 +1136,51 @@ export type Database = {
           },
         ]
       }
+      subscribers: {
+        Row: {
+          consent_recorded_at: string | null
+          created_at: string
+          email: string
+          email_marketing_consent: boolean
+          id: string
+          source_chapter_number: number | null
+          source_series_slug: string | null
+          unsubscribed_at: string | null
+          whatsapp_marketing_consent: boolean
+          whatsapp_number: string | null
+        }
+        Insert: {
+          consent_recorded_at?: string | null
+          created_at?: string
+          email: string
+          email_marketing_consent?: boolean
+          id?: string
+          source_chapter_number?: number | null
+          source_series_slug?: string | null
+          unsubscribed_at?: string | null
+          whatsapp_marketing_consent?: boolean
+          whatsapp_number?: string | null
+        }
+        Update: {
+          consent_recorded_at?: string | null
+          created_at?: string
+          email?: string
+          email_marketing_consent?: boolean
+          id?: string
+          source_chapter_number?: number | null
+          source_series_slug?: string | null
+          unsubscribed_at?: string | null
+          whatsapp_marketing_consent?: boolean
+          whatsapp_number?: string | null
+        }
+        Relationships: []
+      }
       whatsapp_pins: {
         Row: {
           attempts: number
           chapter: number
           created_at: string
+          email: string | null
           expires_at: string
           id: string
           locked_until: string | null
@@ -1153,6 +1193,7 @@ export type Database = {
           attempts?: number
           chapter: number
           created_at?: string
+          email?: string | null
           expires_at: string
           id?: string
           locked_until?: string | null
@@ -1165,6 +1206,7 @@ export type Database = {
           attempts?: number
           chapter?: number
           created_at?: string
+          email?: string | null
           expires_at?: string
           id?: string
           locked_until?: string | null

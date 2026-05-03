@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatChapterTitle } from "@/lib/format";
 
 interface Chapter {
   partNumber: number;
@@ -28,7 +29,7 @@ export default function ChapterNav({
           </span>
           <span>
             <span className="block text-xs text-warm-500">Previous</span>
-            <span>{prev.title}</span>
+            <span>{formatChapterTitle(prev.partNumber, prev.title)}</span>
           </span>
         </Link>
       ) : (
@@ -41,7 +42,7 @@ export default function ChapterNav({
         >
           <span>
             <span className="block text-xs text-warm-500">Next</span>
-            <span>{next.title}</span>
+            <span>{formatChapterTitle(next.partNumber, next.title)}</span>
           </span>
           <span className="transition-transform group-hover:translate-x-0.5">
             &rarr;

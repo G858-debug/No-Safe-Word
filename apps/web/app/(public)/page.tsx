@@ -1,8 +1,5 @@
 import Link from "next/link";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
 import StoryCard from "@/components/StoryCard";
-import AgeGate from "@/components/AgeGate";
 import {
   getPublishedSeriesList,
   resolveShortBlurb,
@@ -14,9 +11,7 @@ export default async function HomePage() {
   const stories = await getPublishedSeriesList({ limit: 6 });
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-
+    <>
       {/* Hero */}
       <section className="relative overflow-hidden border-b border-amber-900/20">
         <div className="absolute inset-0 bg-gradient-to-b from-amber-950/30 via-amber-950/10 to-[#0a0a0a]" />
@@ -117,9 +112,6 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <div className="flex-1" />
-      <Footer />
-      <AgeGate />
-    </div>
+    </>
   );
 }

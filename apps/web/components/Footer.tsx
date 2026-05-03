@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SOCIAL_LINKS } from "@/lib/social-links";
 
 export default function Footer() {
   return (
@@ -49,12 +50,24 @@ export default function Footer() {
               Terms
             </Link>
             <a
-              href="https://www.facebook.com/nosafeword"
+              href={SOCIAL_LINKS.facebook_brand}
               target="_blank"
               rel="noopener noreferrer"
               className="text-warm-300 transition-colors hover:text-amber-400"
             >
               Facebook
+            </a>
+          </nav>
+
+          {/* Personal social row */}
+          <nav className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+            <a
+              href={SOCIAL_LINKS.facebook_ntsiki}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-warm-300 transition-colors hover:text-amber-400"
+            >
+              Nontsikelelo on Facebook
             </a>
           </nav>
 

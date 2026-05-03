@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { runCoverCompositing } from "@/lib/server/run-cover-compositing";
+import { revalidateSeriesById } from "@/lib/server/revalidate-series";
 
 // Node runtime — the supabase client and runCoverCompositing both need
 // Node APIs (sharp/satori/resvg native bindings, fs reads).
@@ -117,6 +118,8 @@ export async function POST(
       ? { ok: true }
       : { ok: false, error: result.error };
   }
+
+  await revalidateSeriesById(seriesId);
 
   return NextResponse.json({
     [selectedCol]: idx,

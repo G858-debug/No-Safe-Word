@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
+import { SOCIAL_LINKS } from "@/lib/social-links";
 
 export const metadata: Metadata = {
   title: "About",
@@ -10,9 +9,7 @@ export const metadata: Metadata = {
 
 export default function AboutPage() {
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-12 sm:px-6">
+    <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-12 sm:px-6">
         <h1
           className="text-3xl font-bold text-amber-50 sm:text-4xl"
           style={{ fontFamily: "var(--font-serif)" }}
@@ -50,18 +47,26 @@ export default function AboutPage() {
           <div className="mt-4 space-y-2 text-sm">
             <p>
               <a
-                href="https://www.facebook.com/nosafeword"
+                href={SOCIAL_LINKS.facebook_brand}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-amber-600 transition-colors hover:text-amber-400"
               >
-                Facebook — @nosafeword
+                No Safe Word on Facebook
+              </a>
+            </p>
+            <p>
+              <a
+                href={SOCIAL_LINKS.facebook_ntsiki}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-amber-600 transition-colors hover:text-amber-400"
+              >
+                Find Nontsikelelo on Facebook
               </a>
             </p>
           </div>
         </div>
-      </main>
-      <Footer />
     </div>
   );
 }

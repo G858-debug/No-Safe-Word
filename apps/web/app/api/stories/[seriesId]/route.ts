@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { logEvent } from "@/lib/server/events";
+import { revalidateSeriesPublicPaths } from "@/lib/server/revalidate-series";
 
 // GET /api/stories/[seriesId] — Full series with all related data
 export async function GET(
@@ -270,6 +271,8 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  revalidateSeriesPublicPaths(data?.slug ?? null);
+
   return NextResponse.json({ series: data });
 }
 
@@ -281,6 +284,14 @@ export async function DELETE(
   const params = await props.params;
   const { seriesId } = params;
 
+  // Capture the slug before flipping status so we can revalidate the
+  // public detail page (so the archived story disappears from cache).
+  const { data: existing } = await supabase
+    .from("story_series")
+    .select("slug")
+    .eq("id", seriesId)
+    .maybeSingle();
+
   const { error } = await supabase
     .from("story_series")
     .update({ status: "archived" })
@@ -289,6 +300,8 @@ export async function DELETE(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  revalidateSeriesPublicPaths(existing?.slug ?? null);
 
   return NextResponse.json({ success: true });
 }

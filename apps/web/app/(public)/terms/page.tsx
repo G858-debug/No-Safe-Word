@@ -87,6 +87,19 @@ export default function TermsPage() {
                 Notify us immediately of any unauthorised use of your account
               </li>
             </ul>
+            <p>
+              When you sign up to read a story, you can opt in to receive
+              email and/or WhatsApp updates from us. The choices you make
+              there — and how to unsubscribe — are described in section 10
+              (Marketing Communications) of our{" "}
+              <a
+                href="/privacy#marketing-communications"
+                className="text-amber-500 transition-colors hover:text-amber-400"
+              >
+                Privacy Policy
+              </a>
+              .
+            </p>
           </div>
         </section>
 

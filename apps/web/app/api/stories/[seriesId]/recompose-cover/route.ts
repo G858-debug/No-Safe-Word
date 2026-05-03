@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import { runCoverCompositing } from "@/lib/server/run-cover-compositing";
 import { logEvent } from "@/lib/server/events";
+import { revalidateSeriesById } from "@/lib/server/revalidate-series";
 
 // sharp, satori, and resvg all require native bindings and fs access —
 // Node.js runtime only, never edge.
@@ -98,6 +99,7 @@ export async function POST(
       eventType: "cover.recomposite_completed",
       metadata: { series_id: seriesId },
     });
+    await revalidateSeriesById(seriesId);
     return NextResponse.json({
       coverStatus: "complete",
       coverSizes: result.coverSizes,

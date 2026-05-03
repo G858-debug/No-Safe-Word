@@ -44,6 +44,7 @@ import {
   setHero,
   setImagePosition,
 } from "@/lib/publisher-actions";
+import { formatChapterTitle } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Public types — match the prompt shape passed in from PublishPanel
@@ -387,7 +388,9 @@ export default function WebsitePreview({
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
           {/* === Reading column === */}
           <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-6 sm:p-8">
-            <h2 className="text-xl font-bold text-zinc-100 mb-1">{title}</h2>
+            <h2 className="text-xl font-bold text-zinc-100 mb-1">
+              {formatChapterTitle(partNumber, title)}
+            </h2>
             <p className="text-sm text-zinc-500 mb-6">Part {partNumber}</p>
             <Separator className="mb-6 bg-zinc-800" />
 

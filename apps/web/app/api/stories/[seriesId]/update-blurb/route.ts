@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
+import { revalidateSeriesById } from "@/lib/server/revalidate-series";
 
 export const runtime = "nodejs";
 
@@ -80,6 +81,8 @@ export async function POST(
       { status: 500 }
     );
   }
+
+  await revalidateSeriesById(seriesId);
 
   return NextResponse.json({ [variantsCol]: updated });
 }

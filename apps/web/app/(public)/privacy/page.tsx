@@ -249,12 +249,66 @@ export default function PrivacyPage() {
           </p>
         </section>
 
+        <section id="marketing-communications">
+          <h2
+            className="text-xl font-bold text-amber-50"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            10. Marketing Communications
+          </h2>
+          <p className="mt-3">
+            When you subscribe to access a story, you can optionally consent
+            to receive marketing communications from us. This includes:
+          </p>
+          <ul className="mt-3 list-disc space-y-2 pl-6">
+            <li>
+              <span className="font-semibold text-amber-50">Email</span>:
+              notifications when a new story is published, and occasional
+              special promotions.
+            </li>
+            <li>
+              <span className="font-semibold text-amber-50">WhatsApp</span>:
+              same notifications via WhatsApp, if you provided your WhatsApp
+              number.
+            </li>
+          </ul>
+          <p className="mt-3">
+            You can unsubscribe from either channel at any time:
+          </p>
+          <ul className="mt-3 list-disc space-y-2 pl-6">
+            <li>
+              <span className="font-semibold text-amber-50">Email</span>:
+              every email contains an unsubscribe link.
+            </li>
+            <li>
+              <span className="font-semibold text-amber-50">WhatsApp</span>:
+              reply <span className="font-mono text-amber-200">STOP</span> to
+              any of our messages to stop WhatsApp communications.
+            </li>
+          </ul>
+          <p className="mt-3">
+            Unsubscribing from one channel does not unsubscribe you from the
+            other. To remove your data entirely, contact us at{" "}
+            <a
+              href="mailto:ntsiki@nosafeword.co.za"
+              className="text-amber-500 transition-colors hover:text-amber-400"
+            >
+              ntsiki@nosafeword.co.za
+            </a>
+            .
+          </p>
+          <p className="mt-3">
+            We process your personal information in accordance with the
+            Protection of Personal Information Act, 2013 (POPIA).
+          </p>
+        </section>
+
         <section>
           <h2
             className="text-xl font-bold text-amber-50"
             style={{ fontFamily: "var(--font-serif)" }}
           >
-            10. Contact
+            11. Contact
           </h2>
           <p className="mt-3">
             If you have any questions about this Privacy Policy or our data

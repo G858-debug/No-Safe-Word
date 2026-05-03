@@ -6,6 +6,7 @@ import {
   generateBlurbsForStory,
   type BlurbCharacterInput,
 } from "@/lib/server/generate-blurbs";
+import { revalidateSeriesById } from "@/lib/server/revalidate-series";
 
 // Node runtime — the Anthropic SDK and the assemble-story helper both
 // use Node APIs.
@@ -151,6 +152,8 @@ export async function POST(
       { status: 500 }
     );
   }
+
+  await revalidateSeriesById(seriesId);
 
   return NextResponse.json({
     seriesId,

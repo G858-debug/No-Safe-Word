@@ -10,10 +10,11 @@ import type {
 import StoryRenderer from "@/components/StoryRenderer";
 import ChapterNav from "@/components/ChapterNav";
 import ReadingProgress from "@/components/ReadingProgress";
-import PaywallGate from "@/components/PaywallGate";
+import EmailGate from "@/components/EmailGate";
 import { createClient } from "@/lib/supabase/server";
 import { checkSeriesAccess, truncateToWords } from "@/lib/access";
 import { logEvent } from "@/lib/server/events";
+import { formatChapterTitle } from "@/lib/format";
 
 export const revalidate = 3600;
 
@@ -53,12 +54,13 @@ export async function generateMetadata({
   const post = postData as Pick<StoryPostRow, "title"> | null;
   if (!post) return { title: "Not Found" };
 
+  const chapterLabel = formatChapterTitle(partNumber, post.title);
   return {
-    title: `${post.title} — ${series.title}`,
-    description: `Part ${partNumber} of ${series.title} by Nontsikelelo. Erotic fiction for adults.`,
+    title: `${chapterLabel} — ${series.title}`,
+    description: `${chapterLabel} of ${series.title} by Nontsikelelo. Erotic fiction for adults.`,
     openGraph: {
-      title: `${post.title} — ${series.title}`,
-      description: `Part ${partNumber} of ${series.title} by Nontsikelelo.`,
+      title: `${chapterLabel} — ${series.title}`,
+      description: `${chapterLabel} of ${series.title} by Nontsikelelo.`,
       type: "article",
     },
   };
@@ -107,7 +109,6 @@ export default async function ChapterPage({ params }: PageProps) {
   const {
     data: { user },
   } = await authSupabase.auth.getUser();
-  const isAuthenticated = !!user;
 
   // 4. Check access for Part 2+ (Part 1 is always free)
   let hasAccess = true;
@@ -147,25 +148,63 @@ export default async function ChapterPage({ params }: PageProps) {
     ? post.website_content
     : truncateToWords(post.website_content, 300);
 
-  // 6. Fetch approved website images for this post (only if has access).
-  //    Hero SFW images render above the story body; everything else is inline.
-  let inlineImages: { url: string; afterWord: number; alt: string }[] = [];
+  // 6a. Fetch the chapter hero image — runs regardless of access.
+  //     The hero is SFW by definition (image_type='facebook_sfw' +
+  //     is_chapter_hero=true) and the EmailGate uses it as the card
+  //     header for non-paying readers, so it must NOT live inside the
+  //     hasAccess branch (Phase E.1).
   let heroImages: { url: string; alt: string }[] = [];
+  {
+    const { data: heroPrompts } = await supabase
+      .from("story_image_prompts")
+      .select("character_name, image_id, position")
+      .eq("post_id", post.id)
+      .eq("status", "approved")
+      .eq("excluded_from_publish", false)
+      .eq("image_type", "facebook_sfw")
+      .eq("is_chapter_hero", true)
+      .order("position", { ascending: true })
+      .limit(1);
+
+    const heroIds = (heroPrompts ?? [])
+      .map((ip) => ip.image_id)
+      .filter((id): id is string => id !== null);
+
+    if (heroIds.length > 0) {
+      const { data: images } = await supabase
+        .from("images")
+        .select("id, stored_url")
+        .in("id", heroIds);
+
+      const urlMap = Object.fromEntries(
+        (images ?? [])
+          .filter((img) => img.stored_url)
+          .map((img) => [img.id, img.stored_url!])
+      );
+
+      heroImages = (heroPrompts ?? [])
+        .filter((ip) => ip.image_id && urlMap[ip.image_id])
+        .map((ip) => ({
+          url: urlMap[ip.image_id!],
+          alt: ip.character_name || "Story illustration",
+        }));
+    }
+  }
+
+  // 6b. Fetch inline NSFW + website-only images — gated, only loaded
+  //     when the reader has access. Hero is already handled above.
+  let inlineImages: { url: string; afterWord: number; alt: string }[] = [];
 
   if (hasAccess) {
     const { data: imagePrompts } = await supabase
       .from("story_image_prompts")
       .select(
-        "id, image_type, pairs_with, position, position_after_word, character_name, image_id, is_chapter_hero"
+        "id, image_type, pairs_with, position, position_after_word, character_name, image_id"
       )
       .eq("post_id", post.id)
       .eq("status", "approved")
       .eq("excluded_from_publish", false)
-      .in("image_type", [
-        "facebook_sfw",
-        "website_nsfw_paired",
-        "website_only",
-      ]);
+      .in("image_type", ["website_nsfw_paired", "website_only"]);
 
     const imageIds = (imagePrompts || [])
       .map((ip) => ip.image_id)
@@ -219,26 +258,11 @@ export default async function ChapterPage({ params }: PageProps) {
       (ip) => ip.image_id && imageUrlMap[ip.image_id]
     );
 
-    // Hero: at most one facebook_sfw row, the editor-flagged hero.
-    // Non-hero facebook_sfw rows are not rendered on the website. If
-    // multiple rows are flagged we take the first by position — the
-    // partial unique index makes that scenario impossible at rest, but
-    // the array operation is defensive against transient states.
-    heroImages = usableImagePrompts
-      .filter((ip) => ip.image_type === "facebook_sfw" && ip.is_chapter_hero)
-      .sort((a, b) => a.position - b.position)
-      .slice(0, 1)
-      .map((ip) => ({
-        url: imageUrlMap[ip.image_id!],
-        alt: ip.character_name || "Story illustration",
-      }));
-
     // Inline: website_nsfw_paired + website_only. A paired NSFW with no
     // resolvable position is silently skipped (and warned server-side)
     // rather than appended at the end of the chapter — orphan intimate
     // images dumped after the last paragraph were the original bug.
     inlineImages = usableImagePrompts
-      .filter((ip) => ip.image_type !== "facebook_sfw")
       .map((ip) => {
         let afterWord: number | null = ip.position_after_word;
 
@@ -305,7 +329,7 @@ export default async function ChapterPage({ params }: PageProps) {
             className="text-3xl font-bold text-amber-50 sm:text-4xl lg:text-5xl"
             style={{ fontFamily: "var(--font-serif)" }}
           >
-            {post.title}
+            {formatChapterTitle(post.part_number, post.title)}
           </h1>
           <p className="mt-4 text-sm italic text-warm-400">By Nontsikelelo</p>
         </header>
@@ -330,15 +354,13 @@ export default async function ChapterPage({ params }: PageProps) {
           <StoryRenderer text={displayContent} images={inlineImages} />
         </div>
 
-        {/* Paywall gate for paywalled content */}
+        {/* Email gate for non-authenticated readers on chapter 2+ */}
         {!hasAccess && (
-          <div className="mx-auto max-w-reader">
-            <PaywallGate
-              seriesId={series.id}
+          <div className="mx-auto mt-12 max-w-reader">
+            <EmailGate
               seriesSlug={series.slug}
-              seriesTitle={series.title}
               partNumber={partNumber}
-              isAuthenticated={isAuthenticated}
+              heroImageUrl={heroImages[0]?.url ?? null}
             />
           </div>
         )}

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SOCIAL_LINKS } from "@/lib/social-links";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -100,12 +101,20 @@ export default function ContactPage() {
           </p>
           <div className="mt-2 space-y-1">
             <a
-              href="https://www.facebook.com/nosafeword"
+              href={SOCIAL_LINKS.facebook_brand}
               target="_blank"
               rel="noopener noreferrer"
               className="block text-amber-500 transition-colors hover:text-amber-400"
             >
-              Facebook &mdash; @nosafeword
+              Facebook &mdash; No Safe Word
+            </a>
+            <a
+              href={SOCIAL_LINKS.facebook_ntsiki}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-amber-500 transition-colors hover:text-amber-400"
+            >
+              Facebook &mdash; Nontsikelelo
             </a>
           </div>
         </div>

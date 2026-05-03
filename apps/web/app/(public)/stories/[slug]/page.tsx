@@ -9,6 +9,7 @@ import {
   resolveShortBlurb,
   resolveLongBlurb,
 } from "@/lib/server/get-published-series";
+import { formatChapterTitle } from "@/lib/format";
 
 export const revalidate = 3600;
 
@@ -275,15 +276,15 @@ export default async function SeriesPage({ params }: PageProps) {
             <Link
               key={post.part_number}
               href={`/stories/${series.slug}/${post.part_number}`}
-              className="group flex items-center gap-4 rounded-lg border border-amber-900/20 bg-surface-raised px-5 py-4 transition-all hover:border-amber-900/40 hover:bg-surface-overlay"
+              className="group flex items-center gap-4 rounded-lg border border-amber-500/60 bg-amber-700/40 px-5 py-4 transition-all hover:border-amber-400/80 hover:bg-amber-700/55"
             >
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-900/30 text-xs font-bold text-amber-400">
                 {post.part_number}
               </span>
-              <span className="text-warm-100 transition-colors group-hover:text-amber-300">
-                {post.title}
+              <span className="font-medium text-warm-100 transition-colors group-hover:text-amber-300">
+                {formatChapterTitle(post.part_number, post.title)}
               </span>
-              <span className="ml-auto text-warm-500 transition-transform group-hover:translate-x-0.5">
+              <span className="ml-auto text-amber-300/80 transition-transform group-hover:translate-x-0.5">
                 &rarr;
               </span>
             </Link>

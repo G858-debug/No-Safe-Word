@@ -15,6 +15,12 @@ export type EventType =
   | "auth.magic_link_requested"
   | "auth.sign_in_verified"
   | "auth.sign_out"
+  // email gate (Phase D — dual-channel email + WhatsApp)
+  | "auth.request_access"
+  | "auth.code_verified"
+  // marketing consent / unsubscribe (Phase D)
+  | "marketing.unsubscribed"
+  | "marketing.resubscribed"
   // reading
   | "reading.chapter_view"
   | "reading.story_view"
