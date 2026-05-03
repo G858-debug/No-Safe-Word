@@ -692,6 +692,30 @@ export type Database = {
         }
         Relationships: []
       }
+      payfast_itn_events: {
+        Row: {
+          m_payment_id: string | null
+          payment_status: string | null
+          pf_payment_id: string
+          raw_payload: Json
+          received_at: string
+        }
+        Insert: {
+          m_payment_id?: string | null
+          payment_status?: string | null
+          pf_payment_id: string
+          raw_payload: Json
+          received_at?: string
+        }
+        Update: {
+          m_payment_id?: string | null
+          payment_status?: string | null
+          pf_payment_id?: string
+          raw_payload?: Json
+          received_at?: string
+        }
+        Relationships: []
+      }
       pose_templates: {
         Row: {
           created_at: string
@@ -729,30 +753,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      payfast_itn_events: {
-        Row: {
-          m_payment_id: string | null
-          payment_status: string | null
-          pf_payment_id: string
-          raw_payload: Json
-          received_at: string
-        }
-        Insert: {
-          m_payment_id?: string | null
-          payment_status?: string | null
-          pf_payment_id: string
-          raw_payload: Json
-          received_at?: string
-        }
-        Update: {
-          m_payment_id?: string | null
-          payment_status?: string | null
-          pf_payment_id?: string
-          raw_payload?: Json
-          received_at?: string
-        }
-        Relationships: []
       }
       sessions: {
         Row: {
@@ -839,6 +839,7 @@ export type Database = {
           id: string
           image_id: string | null
           image_type: string
+          is_chapter_hero: boolean
           pairs_with: string | null
           pose_template_id: string | null
           position: number
@@ -868,6 +869,7 @@ export type Database = {
           id?: string
           image_id?: string | null
           image_type: string
+          is_chapter_hero?: boolean
           pairs_with?: string | null
           pose_template_id?: string | null
           position?: number
@@ -897,6 +899,7 @@ export type Database = {
           id?: string
           image_id?: string | null
           image_type?: string
+          is_chapter_hero?: boolean
           pairs_with?: string | null
           pose_template_id?: string | null
           position?: number
@@ -934,6 +937,13 @@ export type Database = {
             columns: ["pairs_with"]
             isOneToOne: false
             referencedRelation: "story_image_prompts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_image_prompts_pose_template_id_fkey"
+            columns: ["pose_template_id"]
+            isOneToOne: false
+            referencedRelation: "pose_templates"
             referencedColumns: ["id"]
           },
           {
@@ -1290,6 +1300,10 @@ export type Database = {
       get_payment_gateway: { Args: { p_country_code: string }; Returns: string }
       increment: { Args: { row_id: string; x: number }; Returns: number }
       mask_account_number: { Args: { account_number: string }; Returns: string }
+      set_chapter_hero: {
+        Args: { p_post_id: string; p_prompt_id: string }
+        Returns: undefined
+      }
       verify_trainer_client_relationship: {
         Args: { p_client_id: string; p_trainer_id: string }
         Returns: boolean

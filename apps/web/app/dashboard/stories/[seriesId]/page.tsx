@@ -94,6 +94,7 @@ interface SeriesData {
       final_prompt: string | null;
       final_prompt_drafted_at: string | null;
       pose_template_id: string | null;
+      is_chapter_hero: boolean;
     }[];
   })[];
   characters: CharacterFromAPI[];

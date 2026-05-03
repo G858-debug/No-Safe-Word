@@ -156,7 +156,7 @@ export default async function ChapterPage({ params }: PageProps) {
     const { data: imagePrompts } = await supabase
       .from("story_image_prompts")
       .select(
-        "id, image_type, pairs_with, position, position_after_word, character_name, image_id"
+        "id, image_type, pairs_with, position, position_after_word, character_name, image_id, is_chapter_hero"
       )
       .eq("post_id", post.id)
       .eq("status", "approved")
@@ -214,14 +214,24 @@ export default async function ChapterPage({ params }: PageProps) {
       (ip) => ip.image_id && imageUrlMap[ip.image_id]
     );
 
+    // Hero: at most one facebook_sfw row, the editor-flagged hero.
+    // Non-hero facebook_sfw rows are not rendered on the website. If
+    // multiple rows are flagged we take the first by position — the
+    // partial unique index makes that scenario impossible at rest, but
+    // the array operation is defensive against transient states.
     heroImages = usableImagePrompts
-      .filter((ip) => ip.image_type === "facebook_sfw")
+      .filter((ip) => ip.image_type === "facebook_sfw" && ip.is_chapter_hero)
       .sort((a, b) => a.position - b.position)
+      .slice(0, 1)
       .map((ip) => ({
         url: imageUrlMap[ip.image_id!],
         alt: ip.character_name || "Story illustration",
       }));
 
+    // Inline: website_nsfw_paired + website_only. A paired NSFW with no
+    // resolvable position is silently skipped (and warned server-side)
+    // rather than appended at the end of the chapter — orphan intimate
+    // images dumped after the last paragraph were the original bug.
     inlineImages = usableImagePrompts
       .filter((ip) => ip.image_type !== "facebook_sfw")
       .map((ip) => {
@@ -231,12 +241,26 @@ export default async function ChapterPage({ params }: PageProps) {
           afterWord = pairedPositions[ip.pairs_with] ?? null;
         }
 
+        if (afterWord == null) {
+          if (ip.image_type === "website_nsfw_paired") {
+            console.warn(
+              `[chapter-page] skipping orphan website_nsfw_paired image: no resolvable position_after_word`,
+              { image_prompt_id: ip.id, post_id: post.id }
+            );
+          }
+          return null;
+        }
+
         return {
           url: imageUrlMap[ip.image_id!],
-          afterWord: afterWord ?? Infinity,
+          afterWord,
           alt: ip.character_name || "Story illustration",
         };
       })
+      .filter(
+        (img): img is { url: string; afterWord: number; alt: string } =>
+          img !== null
+      )
       .sort((a, b) => a.afterWord - b.afterWord);
   }
 
