@@ -13,6 +13,12 @@ import { useEffect } from "react";
  *   - the URL fragment is `#gate-position`
  *   - an element with id `gate-position` exists in the DOM
  *   - at least one <p> sits above the anchor in document order
+ *
+ * Native browser fragment-scroll can fire before the page has fully
+ * hydrated, especially after a server redirect from /auth/confirm.
+ * We scroll explicitly here as a belt-and-braces measure — the page
+ * may already be at the right position, in which case scrollIntoView
+ * is a no-op.
  */
 export function GatePulse() {
   useEffect(() => {
@@ -22,11 +28,12 @@ export function GatePulse() {
     const anchor = document.getElementById("gate-position");
     if (!anchor) return;
 
+    anchor.scrollIntoView({ behavior: "auto", block: "start" });
+
     // Walk all <p> elements in document order. The last one whose
     // tree-position precedes the anchor is the paragraph the reader
-    // was on when the gate appeared. previousElementSibling alone
-    // can't find it because the anchor lives inside the gate card,
-    // and the prose paragraphs are nested in StoryRenderer above.
+    // was on when the gate appeared. StoryRenderer outputs literal
+    // <p> tags so a plain "p" selector is correct.
     const paragraphs = Array.from(document.querySelectorAll("p"));
     let target: HTMLParagraphElement | null = null;
     for (const p of paragraphs) {
@@ -42,7 +49,7 @@ export function GatePulse() {
     target.classList.add("gate-pulse");
     const timeout = setTimeout(() => {
       target?.classList.remove("gate-pulse");
-    }, 2000);
+    }, 3000);
 
     return () => clearTimeout(timeout);
   }, []);

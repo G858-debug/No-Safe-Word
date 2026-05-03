@@ -13,7 +13,7 @@ import ReadingProgress from "@/components/ReadingProgress";
 import EmailGate from "@/components/EmailGate";
 import { GatePulse } from "@/components/GatePulse";
 import { createClient } from "@/lib/supabase/server";
-import { checkSeriesAccess, truncateToWords } from "@/lib/access";
+import { checkSeriesAccess, splitAtWords } from "@/lib/access";
 import { logEvent } from "@/lib/server/events";
 import { formatChapterTitle } from "@/lib/format";
 
@@ -144,10 +144,22 @@ export default async function ChapterPage({ params }: PageProps) {
     });
   }
 
-  // 5. Determine content to display
-  const displayContent = hasAccess
-    ? post.website_content
-    : truncateToWords(post.website_content, 300);
+  // 5. Split prose at the ~300-word mark on every chapter where the
+  //    gate could fire (partNumber > 1). The split is paragraph-
+  //    aligned, so headWords is usually < 300. We render the head
+  //    chunk, then a stable `#gate-position` anchor, then either the
+  //    gate (if !hasAccess) or the tail chunk (if hasAccess). This
+  //    keeps the anchor at the same word position in both renderings
+  //    so authenticated readers landing via magic-link scroll to
+  //    where the gate previously sat.
+  //
+  //    Chapter 1 always shows full prose with no split — it's free
+  //    for everyone and has no gate, so an anchor mid-chapter would
+  //    be meaningless.
+  const split =
+    partNumber > 1
+      ? splitAtWords(post.website_content, 300)
+      : { head: post.website_content, tail: "", headWords: Infinity };
 
   // 6a. Fetch the chapter hero image — runs regardless of access.
   //     The hero is SFW by definition (image_type='facebook_sfw' +
@@ -335,7 +347,12 @@ export default async function ChapterPage({ params }: PageProps) {
           <p className="mt-4 text-sm italic text-warm-400">By Nontsikelelo</p>
         </header>
 
-        {/* Story content */}
+        {/* Story content. Head chunk → stable anchor → either the
+            gate (unauthenticated) or the tail chunk (authenticated).
+            Image partitioning: any image whose afterWord falls within
+            the head chunk renders inline with the head; the rest move
+            to the tail with afterWord re-zeroed against headWords.
+            Infinity stays Infinity (trailing). */}
         <div className="mx-auto max-w-reader">
           {heroImages.length > 0 && (
             <div className="mb-10">
@@ -352,10 +369,37 @@ export default async function ChapterPage({ params }: PageProps) {
               ))}
             </div>
           )}
-          <StoryRenderer text={displayContent} images={inlineImages} />
+
+          <StoryRenderer
+            text={split.head}
+            images={inlineImages.filter((i) => i.afterWord <= split.headWords)}
+          />
+
+          {partNumber > 1 && (
+            <span id="gate-position" aria-hidden="true" />
+          )}
+
+          {hasAccess && partNumber > 1 && split.tail.length > 0 && (
+            <StoryRenderer
+              text={split.tail}
+              images={inlineImages
+                .filter((i) => i.afterWord > split.headWords)
+                .map((i) => ({
+                  ...i,
+                  afterWord:
+                    i.afterWord === Infinity
+                      ? Infinity
+                      : i.afterWord - split.headWords,
+                }))}
+            />
+          )}
         </div>
 
-        {/* Email gate for non-authenticated readers on chapter 2+ */}
+        {/* Email gate for non-authenticated readers on chapter 2+.
+            Sits outside the prose container so the gate card has its
+            own spacing. The anchor lives in the prose container
+            above; this gate renders right after the anchor in
+            document order. */}
         {!hasAccess && (
           <div className="mx-auto mt-12 max-w-reader">
             <EmailGate
@@ -363,9 +407,15 @@ export default async function ChapterPage({ params }: PageProps) {
               partNumber={partNumber}
               heroImageUrl={heroImages[0]?.url ?? null}
             />
-            <GatePulse />
           </div>
         )}
+
+        {/* Pulse the paragraph above the anchor on first navigation
+            with #gate-position in the URL. Mounted regardless of
+            access so post-magic-link redirects can find it; the
+            component short-circuits when the hash or anchor is
+            missing. */}
+        <GatePulse />
 
         {/* Chapter navigation (only show if has access) */}
         {hasAccess && (

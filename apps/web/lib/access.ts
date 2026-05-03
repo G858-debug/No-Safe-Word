@@ -91,19 +91,52 @@ export async function checkSeriesAccess(
 }
 
 /**
- * Truncate text to approximately N words, splitting on paragraph breaks.
+ * Split text at approximately N words, on paragraph boundaries.
+ *
+ * Returns the head (whole paragraphs whose total word count fits
+ * within `wordLimit`), the tail (everything after), and the actual
+ * head word count — which is usually less than `wordLimit` because
+ * we don't slice mid-paragraph.
+ *
+ * Edge cases:
+ *   - First paragraph alone exceeds the limit → head = [first
+ *     paragraph], tail = [rest]. Better to over-show by one paragraph
+ *     than to render a zero-word head.
+ *   - Total words ≤ limit → head = full text, tail = "".
+ *
+ * Used by the chapter page to render an in-prose anchor at the
+ * boundary where the email gate previously appeared, so authenticated
+ * readers landing via magic-link land on the same word position they
+ * were stopped at.
  */
-export function truncateToWords(text: string, wordLimit: number): string {
+export function splitAtWords(
+  text: string,
+  wordLimit: number
+): { head: string; tail: string; headWords: number } {
   const blocks = text.split(/\n\n+/);
-  const result: string[] = [];
+  const head: string[] = [];
+  const tail: string[] = [];
   let count = 0;
+  let headDone = false;
 
   for (const block of blocks) {
+    if (headDone) {
+      tail.push(block);
+      continue;
+    }
     const blockWords = block.trim().split(/\s+/).length;
-    if (count + blockWords > wordLimit && count > 0) break;
-    result.push(block);
+    if (count + blockWords > wordLimit && count > 0) {
+      headDone = true;
+      tail.push(block);
+      continue;
+    }
+    head.push(block);
     count += blockWords;
   }
 
-  return result.join("\n\n");
+  return {
+    head: head.join("\n\n"),
+    tail: tail.join("\n\n"),
+    headWords: count,
+  };
 }

@@ -114,17 +114,13 @@ export default function EmailGate({
 
   return (
     <div className="relative">
-      {/* Deep-link anchor — magic-link emails redirect to
-          `#gate-position` so the reader lands at the gate instead of
-          the top of the chapter, and GatePulse highlights the
-          paragraph above the gate to mark "this is where you left off". */}
-      <span id="gate-position" aria-hidden="true" />
-
       {/* Soft fade overlay sits over the last paragraph of the truncated
           prose, easing the reader into the gate rather than cutting
           mid-sentence. The chapter page is responsible for placing the
           gate immediately below the prose; this overlay overlaps the
-          last 200px. */}
+          last 200px. The `#gate-position` anchor that drives the
+          deep-link scroll lives on the chapter page (between the
+          prose head and tail chunks), not here. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 -top-[200px] h-[200px] bg-gradient-to-b from-transparent to-[#0a0a0a]"

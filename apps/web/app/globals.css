@@ -115,7 +115,7 @@
   }
 
   .gate-pulse {
-    animation: gate-pulse 2s ease-out;
+    animation: gate-pulse 3s ease-out;
     border-radius: 4px;
   }
 }
