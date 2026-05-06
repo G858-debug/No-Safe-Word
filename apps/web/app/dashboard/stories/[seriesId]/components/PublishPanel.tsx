@@ -77,7 +77,25 @@ interface PostData {
   facebook_post_id: string | null;
   published_at: string | null;
   scheduled_for: string | null;
+  buffer_post_id: string | null;
+  buffer_status: string | null;
+  buffer_error: string | null;
   story_image_prompts: ImagePromptData[];
+}
+
+interface BufferSchedulePreviewItem {
+  postId: string;
+  partNumber: number;
+  title: string;
+  scheduledAt: string;
+  imageCount: number;
+  hasFirstComment: boolean;
+}
+
+interface BufferSchedulePreview {
+  plan: BufferSchedulePreviewItem[];
+  startDate: string;
+  chainTailDate: string | null;
 }
 
 interface PublishPanelProps {
@@ -180,6 +198,14 @@ export default function PublishPanel({
   const [scheduleInterval, setScheduleInterval] = useState(3);
   const [scheduleTime, setScheduleTime] = useState("19:30");
   const [scheduling, setScheduling] = useState(false);
+
+  // Buffer scheduling state — separate flow from the legacy DB-only
+  // "Schedule All". Operator clicks Preview first, then Schedule.
+  const [bufferPreview, setBufferPreview] =
+    useState<BufferSchedulePreview | null>(null);
+  const [bufferPreviewLoading, setBufferPreviewLoading] = useState(false);
+  const [bufferScheduling, setBufferScheduling] = useState(false);
+  const [bufferCancelling, setBufferCancelling] = useState(false);
 
   // Feedback
   const [actionError, setActionError] = useState<string | null>(null);
@@ -628,6 +654,183 @@ export default function PublishPanel({
       setScheduling(false);
     }
   }, [seriesId, scheduleStartDate, scheduleInterval, scheduleTime]);
+
+  // ---- Buffer scheduling -------------------------------------------------
+
+  const previewBufferSchedule = useCallback(async () => {
+    setBufferPreviewLoading(true);
+    setActionError(null);
+    try {
+      const res = await fetch(
+        `/api/stories/${seriesId}/buffer-schedule/preview`
+      );
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string; details?: string };
+        throw new Error(err.details || err.error || "Preview failed");
+      }
+      const data = (await res.json()) as BufferSchedulePreview;
+      setBufferPreview(data);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Buffer preview failed"
+      );
+    } finally {
+      setBufferPreviewLoading(false);
+    }
+  }, [seriesId]);
+
+  const scheduleViaBuffer = useCallback(async () => {
+    if (!bufferPreview || bufferPreview.plan.length === 0) return;
+    const first = bufferPreview.plan[0];
+    const last = bufferPreview.plan[bufferPreview.plan.length - 1];
+    const fmt = (iso: string) =>
+      new Date(iso).toLocaleString("en-ZA", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Africa/Johannesburg",
+      });
+    const ok = window.confirm(
+      `Schedule ${bufferPreview.plan.length} chapter${
+        bufferPreview.plan.length === 1 ? "" : "s"
+      } on Buffer? First post: ${fmt(first.scheduledAt)} SAST. Last post: ${fmt(
+        last.scheduledAt
+      )} SAST.`
+    );
+    if (!ok) return;
+
+    setBufferScheduling(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/buffer-schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      const data = (await res.json()) as {
+        scheduled?: Array<{
+          postId: string;
+          bufferPostId: string;
+          scheduledAt: string;
+        }>;
+        partial?: boolean;
+        failure?: { postId: string; error: string };
+        error?: string;
+        details?: string;
+      };
+
+      if (!res.ok && !data.partial) {
+        throw new Error(data.details || data.error || "Buffer scheduling failed");
+      }
+
+      if (data.scheduled && data.scheduled.length > 0) {
+        setPosts((prev) =>
+          prev.map((p) => {
+            const match = data.scheduled?.find((s) => s.postId === p.id);
+            return match
+              ? {
+                  ...p,
+                  status: "scheduled",
+                  scheduled_for: match.scheduledAt,
+                  buffer_post_id: match.bufferPostId,
+                  buffer_status: "scheduled",
+                  buffer_error: null,
+                }
+              : p;
+          })
+        );
+      }
+
+      if (data.partial && data.failure) {
+        setActionError(
+          `Scheduled ${data.scheduled?.length ?? 0}/${
+            bufferPreview.plan.length
+          }. Stopped at chapter with id ${data.failure.postId}: ${data.failure.error}`
+        );
+      } else {
+        setActionSuccess(
+          `Scheduled ${data.scheduled?.length ?? 0} chapter${
+            data.scheduled?.length === 1 ? "" : "s"
+          } on Buffer.`
+        );
+        setTimeout(() => setActionSuccess(null), 4000);
+        setBufferPreview(null);
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Buffer scheduling failed"
+      );
+    } finally {
+      setBufferScheduling(false);
+    }
+  }, [seriesId, bufferPreview]);
+
+  const cancelBufferSchedule = useCallback(async () => {
+    const ok = window.confirm(
+      "Cancel every Buffer-scheduled chapter for this story? Posts already published on Facebook are not affected."
+    );
+    if (!ok) return;
+
+    setBufferCancelling(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/buffer-schedule`, {
+        method: "DELETE",
+      });
+      const data = (await res.json()) as {
+        cancelled?: string[];
+        failures?: Array<{ postId: string; error: string }>;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || "Cancel failed");
+      }
+      if (data.cancelled && data.cancelled.length > 0) {
+        const cancelledIds = new Set(data.cancelled);
+        setPosts((prev) =>
+          prev.map((p) =>
+            cancelledIds.has(p.id)
+              ? {
+                  ...p,
+                  status: "draft",
+                  scheduled_for: null,
+                  buffer_post_id: null,
+                  buffer_status: null,
+                  buffer_error: null,
+                }
+              : p
+          )
+        );
+      }
+      const failureCount = data.failures?.length ?? 0;
+      if (failureCount > 0) {
+        setActionError(
+          `Cancelled ${data.cancelled?.length ?? 0}, but ${failureCount} could not be cancelled (already published or in flight).`
+        );
+      } else {
+        setActionSuccess(
+          `Cancelled ${data.cancelled?.length ?? 0} scheduled post${
+            data.cancelled?.length === 1 ? "" : "s"
+          }.`
+        );
+        setTimeout(() => setActionSuccess(null), 3000);
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Cancel failed"
+      );
+    } finally {
+      setBufferCancelling(false);
+    }
+  }, [seriesId]);
+
+  const hasBufferScheduledPosts = useMemo(
+    () => posts.some((p) => p.buffer_post_id != null),
+    [posts]
+  );
 
   // Schedule preview calculation
   const schedulePreview = useMemo(() => {
@@ -1170,6 +1373,136 @@ export default function PublishPanel({
         </CardContent>
       </Card>
 
+      {/* ============ SECTION 3: FACEBOOK SCHEDULING VIA BUFFER ============ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Send className="h-4 w-4" />
+                Facebook Scheduling via Buffer
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Hands publishing off to Buffer. Posts go live at 8:00 PM SAST,
+                one chapter per day, chained after the last scheduled post
+                across every story.
+              </p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <Button
+              variant="outline"
+              onClick={previewBufferSchedule}
+              disabled={
+                !coverApproved ||
+                bufferPreviewLoading ||
+                statusSummary.published === statusSummary.total
+              }
+            >
+              {bufferPreviewLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Eye className="mr-2 h-4 w-4" />
+              )}
+              Preview Schedule
+            </Button>
+
+            <Button
+              onClick={scheduleViaBuffer}
+              disabled={
+                !bufferPreview ||
+                bufferPreview.plan.length === 0 ||
+                bufferScheduling
+              }
+            >
+              {bufferScheduling ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
+              )}
+              Schedule on Buffer
+            </Button>
+
+            {hasBufferScheduledPosts && (
+              <Button
+                variant="ghost"
+                onClick={cancelBufferSchedule}
+                disabled={bufferCancelling}
+                className="text-red-400 hover:text-red-300"
+              >
+                {bufferCancelling ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <X className="mr-2 h-4 w-4" />
+                )}
+                Cancel scheduled posts
+              </Button>
+            )}
+          </div>
+
+          {bufferPreview && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-medium text-sm">
+                  Plan ({bufferPreview.plan.length} chapter
+                  {bufferPreview.plan.length === 1 ? "" : "s"})
+                </h4>
+                {bufferPreview.chainTailDate && (
+                  <p className="text-xs text-muted-foreground">
+                    Chained after{" "}
+                    {new Date(bufferPreview.chainTailDate).toLocaleDateString(
+                      "en-ZA",
+                      {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "Africa/Johannesburg",
+                      }
+                    )}
+                  </p>
+                )}
+              </div>
+              {bufferPreview.plan.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Nothing to schedule — every chapter is already published.
+                </p>
+              ) : (
+                <div className="rounded border border-border bg-background p-3 space-y-1.5 max-h-64 overflow-y-auto">
+                  {bufferPreview.plan.map((item) => (
+                    <div
+                      key={item.postId}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-muted-foreground truncate mr-4">
+                        Part {item.partNumber}: {item.title}{" "}
+                        <span className="text-xs">
+                          ({item.imageCount} image
+                          {item.imageCount === 1 ? "" : "s"}
+                          {item.hasFirstComment ? ", + first comment" : ""})
+                        </span>
+                      </span>
+                      <span className="font-medium shrink-0">
+                        {new Date(item.scheduledAt).toLocaleString("en-ZA", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                          timeZone: "Africa/Johannesburg",
+                        })}{" "}
+                        SAST
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* =================== AUTHOR'S NOTES (optional) =================== */}
       {authorNotes && <AuthorNotesPanel notes={authorNotes} />}
 
@@ -1229,6 +1562,31 @@ export default function PublishPanel({
               >
                 {postStatus.label}
               </Badge>
+
+              {post.buffer_post_id && (
+                <Badge
+                  variant="outline"
+                  title={post.buffer_error ?? undefined}
+                  className={`shrink-0 text-xs ${
+                    post.buffer_status === "sent"
+                      ? "bg-green-500/20 text-green-300 border-green-500/30"
+                      : post.buffer_status === "error"
+                        ? "bg-red-500/20 text-red-400 border-red-500/30"
+                        : post.buffer_status === "sending"
+                          ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                          : "bg-purple-500/20 text-purple-300 border-purple-500/30"
+                  }`}
+                >
+                  Buffer:{" "}
+                  {post.buffer_status === "error"
+                    ? "Failed"
+                    : post.buffer_status === "sent"
+                      ? "Sent"
+                      : post.buffer_status === "sending"
+                        ? "Sending"
+                        : "Scheduled"}
+                </Badge>
+              )}
             </button>
 
             {/* Expanded content */}

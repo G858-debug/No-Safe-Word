@@ -981,6 +981,9 @@ export type Database = {
       }
       story_posts: {
         Row: {
+          buffer_error: string | null
+          buffer_post_id: string | null
+          buffer_status: string | null
           created_at: string
           facebook_comment: string | null
           facebook_content: string
@@ -998,6 +1001,9 @@ export type Database = {
           website_content: string
         }
         Insert: {
+          buffer_error?: string | null
+          buffer_post_id?: string | null
+          buffer_status?: string | null
           created_at?: string
           facebook_comment?: string | null
           facebook_content: string
@@ -1015,6 +1021,9 @@ export type Database = {
           website_content: string
         }
         Update: {
+          buffer_error?: string | null
+          buffer_post_id?: string | null
+          buffer_status?: string | null
           created_at?: string
           facebook_comment?: string | null
           facebook_content?: string

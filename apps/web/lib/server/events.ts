@@ -57,7 +57,16 @@ export type EventType =
   // variant generation (RunPod / Replicate upstream image gen)
   | "cover.variant_generation_started"
   | "cover.variant_generated"
-  | "cover.variant_failed";
+  | "cover.variant_failed"
+  // buffer (Facebook publishing automation via Buffer)
+  | "buffer.api_call"
+  | "buffer.scheduled"
+  | "buffer.cancelled"
+  | "buffer.publish_synced"
+  | "buffer.publish_failed"
+  | "buffer.publish_pending"
+  | "buffer.health_ok"
+  | "buffer.health_failed";
 
 export interface LogEventParams {
   eventType: EventType;

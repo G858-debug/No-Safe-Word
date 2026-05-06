@@ -293,6 +293,9 @@ export interface StoryPostRow {
   facebook_post_id: string | null;
   published_at: string | null;
   scheduled_for: string | null;
+  buffer_post_id: string | null;
+  buffer_status: string | null;
+  buffer_error: string | null;
   created_at: string;
   updated_at: string;
 }
