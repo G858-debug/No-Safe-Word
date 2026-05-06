@@ -716,6 +716,7 @@ export default function PublishPanel({
           bufferPostId: string;
           scheduledAt: string;
         }>;
+        skipped?: Array<{ postId: string; reason: string }>;
         partial?: boolean;
         failure?: { postId: string; error: string };
         error?: string;
@@ -744,17 +745,20 @@ export default function PublishPanel({
         );
       }
 
+      const scheduledCount = data.scheduled?.length ?? 0;
+      const skippedCount = data.skipped?.length ?? 0;
+      const skippedSuffix =
+        skippedCount > 0
+          ? ` Skipped ${skippedCount} already-scheduled chapter${skippedCount === 1 ? "" : "s"}.`
+          : "";
+
       if (data.partial && data.failure) {
         setActionError(
-          `Scheduled ${data.scheduled?.length ?? 0}/${
-            bufferPreview.plan.length
-          }. Stopped at chapter with id ${data.failure.postId}: ${data.failure.error}`
+          `Scheduled ${scheduledCount}/${bufferPreview.plan.length}. Stopped at chapter with id ${data.failure.postId}: ${data.failure.error}.${skippedSuffix}`
         );
       } else {
         setActionSuccess(
-          `Scheduled ${data.scheduled?.length ?? 0} chapter${
-            data.scheduled?.length === 1 ? "" : "s"
-          } on Buffer.`
+          `Scheduled ${scheduledCount} chapter${scheduledCount === 1 ? "" : "s"} on Buffer.${skippedSuffix}`
         );
         setTimeout(() => setActionSuccess(null), 4000);
         setBufferPreview(null);
@@ -829,6 +833,18 @@ export default function PublishPanel({
 
   const hasBufferScheduledPosts = useMemo(
     () => posts.some((p) => p.buffer_post_id != null),
+    [posts]
+  );
+
+  // A chapter is schedulable on Buffer if it has never been sent
+  // (buffer_post_id IS NULL) or a previous Buffer attempt failed
+  // (buffer_status='error'). status='published' from the
+  // website-publish flow does NOT mean it has shipped to Facebook.
+  const bufferSchedulableCount = useMemo(
+    () =>
+      posts.filter(
+        (p) => p.buffer_post_id == null || p.buffer_status === "error"
+      ).length,
     [posts]
   );
 
@@ -1398,7 +1414,7 @@ export default function PublishPanel({
               disabled={
                 !coverApproved ||
                 bufferPreviewLoading ||
-                statusSummary.published === statusSummary.total
+                bufferSchedulableCount === 0
               }
             >
               {bufferPreviewLoading ? (

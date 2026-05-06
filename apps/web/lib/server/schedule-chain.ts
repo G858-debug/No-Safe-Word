@@ -52,14 +52,17 @@ interface PostRow {
   title: string;
   facebook_content: string;
   facebook_comment: string | null;
-  status: string;
+  buffer_post_id: string | null;
+  buffer_status: string | null;
 }
 
 /**
  * Compute the publish-schedule plan for the given series. Does not
- * write to the DB and does not call Buffer. The plan only includes
- * posts that haven't been published yet (status != 'published') —
- * already-live chapters are skipped silently.
+ * write to the DB and does not call Buffer. A chapter is schedulable
+ * if it has never been sent to Buffer (buffer_post_id IS NULL) or a
+ * previous Buffer attempt failed (buffer_status = 'error'). post.status
+ * is intentionally NOT consulted — status='published' from the
+ * website-publish flow does not mean a chapter has shipped to Facebook.
  */
 export async function buildScheduleForStory(
   seriesId: string,
@@ -69,7 +72,7 @@ export async function buildScheduleForStory(
   const { data: rawPosts, error: postsError } = await supabase
     .from("story_posts")
     .select(
-      "id, part_number, title, facebook_content, facebook_comment, status"
+      "id, part_number, title, facebook_content, facebook_comment, buffer_post_id, buffer_status"
     )
     .eq("series_id", seriesId)
     .order("part_number", { ascending: true });
@@ -82,8 +85,10 @@ export async function buildScheduleForStory(
     throw new Error("No posts found for this series");
   }
 
-  const unpublished = posts.filter((p) => p.status !== "published");
-  if (unpublished.length === 0) {
+  const schedulable = posts.filter(
+    (p) => p.buffer_post_id == null || p.buffer_status === "error"
+  );
+  if (schedulable.length === 0) {
     return {
       plan: [],
       startDate: nextEveningUTC(new Date()),
@@ -101,11 +106,11 @@ export async function buildScheduleForStory(
 
   // 3. Resolve images for the posts in one batch.
   const imageUrlsByPost = await loadFacebookSfwImageUrls(
-    unpublished.map((p) => p.id)
+    schedulable.map((p) => p.id)
   );
 
   // 4. Build the plan.
-  const plan: ScheduledPostPlan[] = unpublished.map((post, idx) => ({
+  const plan: ScheduledPostPlan[] = schedulable.map((post, idx) => ({
     postId: post.id,
     partNumber: post.part_number,
     title: post.title,
