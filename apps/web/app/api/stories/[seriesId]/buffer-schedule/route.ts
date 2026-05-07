@@ -16,7 +16,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { supabase } from "@no-safe-word/story-engine";
 import { bufferClient, BufferApiError } from "@/lib/server/buffer-client";
-import { buildScheduleForStory } from "@/lib/server/schedule-chain";
+import {
+  buildScheduleForStory,
+  ScheduleStartDateError,
+} from "@/lib/server/schedule-chain";
 
 interface ScheduleRequestBody {
   startDate?: string;
@@ -66,6 +69,12 @@ export async function POST(
       startDate: body.startDate ? new Date(body.startDate) : undefined,
     });
   } catch (err) {
+    if (err instanceof ScheduleStartDateError) {
+      return NextResponse.json(
+        { error: "Invalid startDate", details: err.message },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
         error: "Failed to build schedule plan",

@@ -34,6 +34,14 @@ interface PendingPostRow {
   status: string;
 }
 
+interface PendingCoverPostRow {
+  id: string;
+  slug: string | null;
+  cover_post_buffer_id: string;
+  cover_post_status: string | null;
+  cover_post_scheduled_for: string | null;
+}
+
 export async function GET(request: NextRequest) {
   const secret = new URL(request.url).searchParams.get("secret");
   const expected = process.env.CRON_SECRET;
@@ -171,8 +179,133 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Revalidate every story that had at least one chapter flip to
-  // published. We need the slug for the public path.
+  // ----- Cover-reveal post sync -----
+  //
+  // The cover-reveal post is a one-off per-series Facebook post stored
+  // on story_series.cover_post_*. Same decision matrix as chapter posts.
+  const { data: rawPendingCovers, error: pendingCoverError } = await supabase
+    .from("story_series")
+    .select(
+      "id, slug, cover_post_buffer_id, cover_post_status, cover_post_scheduled_for"
+    )
+    .not("cover_post_buffer_id", "is", null)
+    .in("cover_post_status", ["pending", "sending", "scheduled"])
+    .lte("cover_post_scheduled_for", nowIso);
+
+  let coversChecked = 0;
+  let coversSynced = 0;
+  let coversFailed = 0;
+  let coversSkipped = 0;
+  const coverErrors: Array<{ seriesId: string; error: string }> = [];
+
+  if (pendingCoverError) {
+    coverErrors.push({
+      seriesId: "<query>",
+      error: pendingCoverError.message,
+    });
+  } else {
+    const pendingCovers = (rawPendingCovers ?? []) as PendingCoverPostRow[];
+    coversChecked = pendingCovers.length;
+
+    for (const series of pendingCovers) {
+      let bufferStatus;
+      try {
+        bufferStatus = await bufferClient.getPostStatus(
+          series.cover_post_buffer_id
+        );
+      } catch (err) {
+        const message =
+          err instanceof BufferApiError
+            ? `${err.code}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "Unknown error";
+        coverErrors.push({ seriesId: series.id, error: message });
+        continue;
+      }
+
+      if (
+        bufferStatus.status === "scheduled" ||
+        bufferStatus.status === "sending" ||
+        bufferStatus.status === "draft" ||
+        bufferStatus.status === "needs_approval"
+      ) {
+        coversSkipped++;
+        void logEvent({
+          eventType: "buffer.cover_publish_pending",
+          metadata: {
+            series_id: series.id,
+            buffer_post_id: series.cover_post_buffer_id,
+            buffer_status: bufferStatus.status,
+          },
+        });
+        continue;
+      }
+
+      if (bufferStatus.status === "sent") {
+        const facebookPostId = parseFacebookPostId(bufferStatus.externalLink);
+        const publishedAt =
+          bufferStatus.sentAt ?? new Date().toISOString();
+
+        const { error: updateError } = await supabase
+          .from("story_series")
+          .update({
+            cover_post_status: "sent",
+            cover_post_published_at: publishedAt,
+            cover_post_facebook_id: facebookPostId,
+            cover_post_error: null,
+          })
+          .eq("id", series.id);
+
+        if (updateError) {
+          coverErrors.push({ seriesId: series.id, error: updateError.message });
+          continue;
+        }
+
+        coversSynced++;
+        seriesIdsToRevalidate.add(series.id);
+        void logEvent({
+          eventType: "buffer.cover_publish_synced",
+          metadata: {
+            series_id: series.id,
+            buffer_post_id: series.cover_post_buffer_id,
+            facebook_post_id: facebookPostId,
+            external_link: bufferStatus.externalLink,
+          },
+        });
+        continue;
+      }
+
+      if (bufferStatus.status === "error") {
+        const { error: updateError } = await supabase
+          .from("story_series")
+          .update({
+            cover_post_status: "error",
+            cover_post_error:
+              bufferStatus.error ?? "Buffer reported error with no message",
+          })
+          .eq("id", series.id);
+
+        if (updateError) {
+          coverErrors.push({ seriesId: series.id, error: updateError.message });
+          continue;
+        }
+
+        coversFailed++;
+        void logEvent({
+          eventType: "buffer.cover_publish_failed",
+          metadata: {
+            series_id: series.id,
+            buffer_post_id: series.cover_post_buffer_id,
+            error: bufferStatus.error,
+          },
+        });
+      }
+    }
+  }
+
+  // Revalidate every story that had at least one chapter (or the cover
+  // post) flip to published. We need the slug for the public path.
   if (seriesIdsToRevalidate.size > 0) {
     const { data: seriesRows } = await supabase
       .from("story_series")
@@ -191,6 +324,11 @@ export async function GET(request: NextRequest) {
     failed,
     skipped,
     errors,
+    coversChecked,
+    coversSynced,
+    coversFailed,
+    coversSkipped,
+    coverErrors,
   });
 }
 

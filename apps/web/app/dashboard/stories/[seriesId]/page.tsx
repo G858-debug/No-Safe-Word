@@ -48,6 +48,7 @@ import type {
   ImageModel,
   CoverStatus,
 } from "@no-safe-word/shared";
+import { getSelectedLongBlurb } from "@no-safe-word/shared";
 
 const MODEL_OPTIONS: Array<{ value: ImageModel; label: string; helper: string }> = [
   {
@@ -830,6 +831,28 @@ export default function SeriesDetailPage() {
             authorNotes={data.series.author_notes ?? null}
             seriesStatus={series.status}
             publishedAt={rawSeries?.published_at ?? null}
+            longBlurb={
+              rawSeries
+                ? getSelectedLongBlurb({
+                    blurb_long_variants: rawSeries.blurb_long_variants ?? null,
+                    blurb_long_selected: rawSeries.blurb_long_selected ?? null,
+                  })
+                : null
+            }
+            coverHeroUrl={data.series.cover_sizes?.hero ?? null}
+            seriesHashtags={
+              posts.find((p) => p.hashtags && p.hashtags.length > 0)
+                ?.hashtags ?? ["#NoSafeWord"]
+            }
+            coverPost={{
+              bufferPostId: data.series.cover_post_buffer_id ?? null,
+              status: data.series.cover_post_status ?? null,
+              error: data.series.cover_post_error ?? null,
+              scheduledFor: data.series.cover_post_scheduled_for ?? null,
+              publishedAt: data.series.cover_post_published_at ?? null,
+              facebookId: data.series.cover_post_facebook_id ?? null,
+              ctaLine: data.series.cover_post_cta_line ?? null,
+            }}
             onSeriesPublished={(publishedAt) =>
               setData((prev) =>
                 prev

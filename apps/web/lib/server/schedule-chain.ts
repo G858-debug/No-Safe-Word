@@ -35,6 +35,17 @@ export interface BuildScheduleOptions {
   startDate?: Date;
 }
 
+/**
+ * Thrown by buildScheduleForStory when an operator-supplied startDate
+ * is invalid. Routes should map this to a 400 response.
+ */
+export class ScheduleStartDateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduleStartDateError";
+  }
+}
+
 export interface BuildScheduleResult {
   plan: ScheduledPostPlan[];
   startDate: Date;
@@ -99,7 +110,7 @@ export async function buildScheduleForStory(
   // 2. Resolve the chain start date.
   const chainTailDate = await loadGlobalChainTail();
   const startDate = options.startDate
-    ? toEveningUTC(options.startDate)
+    ? toEveningUTC(validateStartDate(options.startDate))
     : chainTailDate
       ? addDaysUTC(chainTailDate, 1)
       : nextEveningUTC(new Date());
@@ -206,6 +217,25 @@ async function loadFacebookSfwImageUrls(
 // ---------------------------------------------------------------------------
 // Date helpers — all UTC, all 20:00 SAST = 18:00 UTC.
 // ---------------------------------------------------------------------------
+
+/**
+ * Validate an operator-supplied startDate. Must parse as a real Date
+ * and must not fall before today (in SAST). Throws with a clear message
+ * on failure so the route can return a 400.
+ */
+function validateStartDate(date: Date): Date {
+  if (Number.isNaN(date.getTime())) {
+    throw new ScheduleStartDateError("startDate is not a valid date");
+  }
+  // We accept any startDate whose 20:00-SAST instant is >= now.
+  const evening = toEveningUTC(date);
+  if (evening.getTime() < Date.now()) {
+    throw new ScheduleStartDateError(
+      "startDate is in the past. Pick today or a future date."
+    );
+  }
+  return date;
+}
 
 function toEveningUTC(date: Date): Date {
   const d = new Date(date);

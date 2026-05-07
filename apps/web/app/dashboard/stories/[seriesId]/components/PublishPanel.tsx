@@ -98,6 +98,25 @@ interface BufferSchedulePreview {
   chainTailDate: string | null;
 }
 
+interface CoverPostPreview {
+  seriesId: string;
+  scheduledAt: string;
+  text: string;
+  imageUrl: string;
+  firstComment: string;
+}
+
+/** Cover-reveal post state read from story_series.cover_post_*. */
+export interface CoverPostState {
+  bufferPostId: string | null;
+  status: string | null;
+  error: string | null;
+  scheduledFor: string | null;
+  publishedAt: string | null;
+  facebookId: string | null;
+  ctaLine: string | null;
+}
+
 interface PublishPanelProps {
   seriesId: string;
   posts: PostData[];
@@ -111,6 +130,14 @@ interface PublishPanelProps {
   publishedAt: string | null;
   /** Lift series-published state up to the page so the header badge updates without a refetch. */
   onSeriesPublished?: (publishedAt: string) => void;
+  /** Selected long blurb text. Null until operator picks one in Stage 10. */
+  longBlurb: string | null;
+  /** Composited 1600×2400 hero cover URL. Null until compositing completes. */
+  coverHeroUrl: string | null;
+  /** Hashtag set used by chapter posts (consistent per series). Falls back to ['#NoSafeWord']. */
+  seriesHashtags: string[];
+  /** Cover-reveal Buffer post state. */
+  coverPost: CoverPostState;
 }
 
 interface PreconditionFailure {
@@ -150,6 +177,51 @@ const POST_STATUS_CONFIG: Record<string, { label: string; className: string }> =
     },
   };
 
+/**
+ * Default datetime-local string for the cover-reveal post: tomorrow at
+ * 20:00 SAST (the night before a chapter-1 schedule that starts the
+ * morning after). Format: yyyy-MM-ddTHH:mm.
+ *
+ * The <input type="datetime-local"> control reads/writes a wall-clock
+ * value in the user's local timezone, which is what the operator
+ * expects to type ("8 PM Sunday"). The server converts to UTC.
+ */
+function defaultCoverPostDatetime(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(20, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+    d.getDate()
+  )}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const COVER_POST_STATUS_BADGE: Record<
+  string,
+  { label: string; className: string }
+> = {
+  pending: {
+    label: "Pending",
+    className: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+  },
+  scheduled: {
+    label: "Scheduled",
+    className: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  },
+  sending: {
+    label: "Sending",
+    className: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  },
+  sent: {
+    label: "Sent",
+    className: "bg-green-500/20 text-green-300 border-green-500/30",
+  },
+  error: {
+    label: "Failed",
+    className: "bg-red-500/20 text-red-300 border-red-500/30",
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -163,6 +235,10 @@ export default function PublishPanel({
   seriesStatus: initialSeriesStatus,
   publishedAt: initialPublishedAt,
   onSeriesPublished,
+  longBlurb,
+  coverHeroUrl,
+  seriesHashtags,
+  coverPost: initialCoverPost,
 }: PublishPanelProps) {
   const coverApproved =
     coverStatus === "approved" ||
@@ -206,6 +282,28 @@ export default function PublishPanel({
   const [bufferPreviewLoading, setBufferPreviewLoading] = useState(false);
   const [bufferScheduling, setBufferScheduling] = useState(false);
   const [bufferCancelling, setBufferCancelling] = useState(false);
+  // Operator-picked start date for Chapter 1 (yyyy-mm-dd, local format).
+  // Defaults to today + 4 days so operator has runway. Optional — when
+  // empty, the server falls back to "day after the global chain tail".
+  const [bufferStartDate, setBufferStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 4);
+    return d.toISOString().slice(0, 10);
+  });
+
+  // Cover-reveal Buffer post state.
+  const [coverPost, setCoverPost] = useState<CoverPostState>(initialCoverPost);
+  const [coverPostScheduledAt, setCoverPostScheduledAt] = useState<string>(
+    () => initialCoverPost.scheduledFor ?? defaultCoverPostDatetime()
+  );
+  const [coverPostCtaLine, setCoverPostCtaLine] = useState<string>(
+    initialCoverPost.ctaLine ?? ""
+  );
+  const [coverPostPreview, setCoverPostPreview] =
+    useState<CoverPostPreview | null>(null);
+  const [coverPostPreviewLoading, setCoverPostPreviewLoading] = useState(false);
+  const [coverPostScheduling, setCoverPostScheduling] = useState(false);
+  const [coverPostCancelling, setCoverPostCancelling] = useState(false);
 
   // Feedback
   const [actionError, setActionError] = useState<string | null>(null);
@@ -661,9 +759,14 @@ export default function PublishPanel({
     setBufferPreviewLoading(true);
     setActionError(null);
     try {
-      const res = await fetch(
-        `/api/stories/${seriesId}/buffer-schedule/preview`
+      const url = new URL(
+        `/api/stories/${seriesId}/buffer-schedule/preview`,
+        window.location.origin
       );
+      if (bufferStartDate) {
+        url.searchParams.set("startDate", bufferStartDate);
+      }
+      const res = await fetch(url.toString());
       if (!res.ok) {
         const err = (await res.json()) as { error?: string; details?: string };
         throw new Error(err.details || err.error || "Preview failed");
@@ -677,7 +780,7 @@ export default function PublishPanel({
     } finally {
       setBufferPreviewLoading(false);
     }
-  }, [seriesId]);
+  }, [seriesId, bufferStartDate]);
 
   const scheduleViaBuffer = useCallback(async () => {
     if (!bufferPreview || bufferPreview.plan.length === 0) return;
@@ -707,7 +810,9 @@ export default function PublishPanel({
       const res = await fetch(`/api/stories/${seriesId}/buffer-schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          bufferStartDate ? { startDate: bufferStartDate } : {}
+        ),
       });
 
       const data = (await res.json()) as {
@@ -770,7 +875,7 @@ export default function PublishPanel({
     } finally {
       setBufferScheduling(false);
     }
-  }, [seriesId, bufferPreview]);
+  }, [seriesId, bufferPreview, bufferStartDate]);
 
   const cancelBufferSchedule = useCallback(async () => {
     const ok = window.confirm(
@@ -830,6 +935,145 @@ export default function PublishPanel({
       setBufferCancelling(false);
     }
   }, [seriesId]);
+
+  // ---- Cover-reveal Buffer post --------------------------------------
+
+  const previewCoverPost = useCallback(async () => {
+    setCoverPostPreviewLoading(true);
+    setActionError(null);
+    try {
+      // datetime-local strings are wall-clock (no TZ). new Date(...)
+      // interprets them as the user's local time, which is what the
+      // operator means when typing "8 PM Sunday".
+      const scheduledIso = new Date(coverPostScheduledAt).toISOString();
+      const url = new URL(
+        `/api/stories/${seriesId}/cover-post/preview`,
+        window.location.origin
+      );
+      url.searchParams.set("scheduledAt", scheduledIso);
+      url.searchParams.set("ctaLine", coverPostCtaLine);
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string; details?: string };
+        throw new Error(err.details || err.error || "Preview failed");
+      }
+      const data = (await res.json()) as CoverPostPreview;
+      setCoverPostPreview(data);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Cover post preview failed"
+      );
+    } finally {
+      setCoverPostPreviewLoading(false);
+    }
+  }, [seriesId, coverPostScheduledAt, coverPostCtaLine]);
+
+  const scheduleCoverPost = useCallback(async () => {
+    if (!coverPostCtaLine.trim()) {
+      setActionError("Type a CTA line before scheduling.");
+      return;
+    }
+    const scheduledIso = new Date(coverPostScheduledAt).toISOString();
+    const fmt = (iso: string) =>
+      new Date(iso).toLocaleString("en-ZA", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "Africa/Johannesburg",
+      });
+    const ok = window.confirm(
+      `Schedule the cover-reveal post on Buffer for ${fmt(
+        scheduledIso
+      )} SAST?`
+    );
+    if (!ok) return;
+
+    setCoverPostScheduling(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/cover-post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scheduledAt: scheduledIso,
+          ctaLine: coverPostCtaLine,
+        }),
+      });
+      const data = (await res.json()) as {
+        bufferPostId?: string;
+        bufferStatus?: string;
+        scheduledAt?: string;
+        error?: string;
+        details?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.details || data.error || "Cover post failed");
+      }
+      setCoverPost({
+        bufferPostId: data.bufferPostId ?? null,
+        status: data.bufferStatus ?? "pending",
+        error: null,
+        scheduledFor: data.scheduledAt ?? scheduledIso,
+        publishedAt: null,
+        facebookId: null,
+        ctaLine: coverPostCtaLine,
+      });
+      setCoverPostPreview(null);
+      setActionSuccess("Cover-reveal post scheduled on Buffer.");
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Cover post failed"
+      );
+    } finally {
+      setCoverPostScheduling(false);
+    }
+  }, [seriesId, coverPostScheduledAt, coverPostCtaLine]);
+
+  const cancelCoverPost = useCallback(async () => {
+    const ok = window.confirm(
+      "Cancel the cover-reveal post on Buffer? You can re-schedule afterwards."
+    );
+    if (!ok) return;
+
+    setCoverPostCancelling(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/cover-post`, {
+        method: "DELETE",
+      });
+      const data = (await res.json()) as {
+        cancelled?: boolean;
+        error?: string;
+        details?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.details || data.error || "Cancel failed");
+      }
+      setCoverPost({
+        bufferPostId: null,
+        status: null,
+        error: null,
+        scheduledFor: null,
+        publishedAt: null,
+        facebookId: null,
+        ctaLine: null,
+      });
+      setActionSuccess("Cover-reveal post cancelled.");
+      setTimeout(() => setActionSuccess(null), 3000);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Cancel failed"
+      );
+    } finally {
+      setCoverPostCancelling(false);
+    }
+  }, [seriesId]);
+
+  const coverPostScheduledNow =
+    coverPost.bufferPostId != null && coverPost.status !== "error";
 
   const hasBufferScheduledPosts = useMemo(
     () => posts.some((p) => p.buffer_post_id != null),
@@ -1389,7 +1633,212 @@ export default function PublishPanel({
         </CardContent>
       </Card>
 
-      {/* ============ SECTION 3: FACEBOOK SCHEDULING VIA BUFFER ============ */}
+      {/* ============ SECTION 3a: FACEBOOK COVER REVEAL POST ============ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Star className="h-4 w-4" />
+                Facebook Cover Reveal Post
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Posts the cover image and long blurb to Facebook the night before
+                Chapter 1. One-time per story.
+              </p>
+            </div>
+            {coverPost.status && (
+              <Badge
+                variant="outline"
+                className={
+                  COVER_POST_STATUS_BADGE[coverPost.status]?.className ??
+                  "bg-zinc-500/20 text-zinc-300 border-zinc-500/30"
+                }
+              >
+                {COVER_POST_STATUS_BADGE[coverPost.status]?.label ??
+                  coverPost.status}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Cover preview + long blurb side-by-side */}
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="shrink-0">
+              {coverHeroUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={coverHeroUrl}
+                  alt="Cover preview"
+                  className="w-[160px] rounded-md border border-border"
+                />
+              ) : (
+                <div className="flex h-[240px] w-[160px] items-center justify-center rounded-md border border-dashed border-border bg-muted/20 text-xs text-muted-foreground">
+                  No composited cover yet
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <Label className="text-xs text-muted-foreground">
+                Selected long blurb
+              </Label>
+              {longBlurb ? (
+                <div className="max-h-40 overflow-y-auto rounded-md border border-border bg-muted/20 p-3 text-xs leading-relaxed whitespace-pre-line">
+                  {longBlurb}
+                </div>
+              ) : (
+                <p className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                  No long blurb selected. Pick one in the Blurbs tab first.
+                </p>
+              )}
+              <Label className="text-xs text-muted-foreground">Hashtags</Label>
+              <div className="rounded-md border border-border bg-muted/20 p-2 text-xs font-mono text-muted-foreground">
+                {seriesHashtags.join(" ")}
+              </div>
+            </div>
+          </div>
+
+          {/* Datetime + CTA inputs */}
+          <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
+            <div>
+              <Label htmlFor="cover-post-when" className="text-xs">
+                Schedule for
+              </Label>
+              <Input
+                id="cover-post-when"
+                type="datetime-local"
+                value={coverPostScheduledAt}
+                onChange={(e) => setCoverPostScheduledAt(e.target.value)}
+                disabled={coverPostScheduledNow}
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Local time. Default: tomorrow 20:00.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="cover-post-cta" className="text-xs">
+                CTA line
+              </Label>
+              <Textarea
+                id="cover-post-cta"
+                value={coverPostCtaLine}
+                onChange={(e) => setCoverPostCtaLine(e.target.value)}
+                placeholder="First chapter Monday at 8pm SAST. New chapter every night this week."
+                disabled={coverPostScheduledNow}
+                className="mt-1 min-h-[60px]"
+              />
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-wrap gap-3">
+            <Button
+              variant="outline"
+              onClick={previewCoverPost}
+              disabled={
+                coverPostPreviewLoading ||
+                !longBlurb ||
+                !coverHeroUrl ||
+                !coverPostCtaLine.trim()
+              }
+            >
+              {coverPostPreviewLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Eye className="mr-2 h-4 w-4" />
+              )}
+              Preview Cover Post
+            </Button>
+            <Button
+              onClick={scheduleCoverPost}
+              disabled={
+                coverPostScheduledNow ||
+                coverPostScheduling ||
+                !longBlurb ||
+                !coverHeroUrl ||
+                !coverPostCtaLine.trim()
+              }
+            >
+              {coverPostScheduling ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
+              )}
+              Schedule Cover Post on Buffer
+            </Button>
+            {coverPost.bufferPostId && coverPost.status !== "sent" && (
+              <Button
+                variant="ghost"
+                onClick={cancelCoverPost}
+                disabled={coverPostCancelling}
+                className="text-red-400 hover:text-red-300"
+              >
+                {coverPostCancelling ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <X className="mr-2 h-4 w-4" />
+                )}
+                Cancel
+              </Button>
+            )}
+          </div>
+
+          {/* Status / error / current schedule */}
+          {coverPost.scheduledFor && (
+            <p className="text-xs text-muted-foreground">
+              Scheduled for{" "}
+              <span className="font-medium text-foreground">
+                {new Date(coverPost.scheduledFor).toLocaleString("en-ZA", {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZone: "Africa/Johannesburg",
+                })}{" "}
+                SAST
+              </span>
+            </p>
+          )}
+          {coverPost.status === "error" && coverPost.error && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+              <span className="font-medium">Buffer error:</span> {coverPost.error}
+            </div>
+          )}
+
+          {/* Preview rendered output */}
+          {coverPostPreview && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+              <h4 className="font-medium text-sm">Assembled cover post</h4>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Post body</Label>
+                <pre className="whitespace-pre-wrap rounded border border-border bg-background p-3 text-xs">
+                  {coverPostPreview.text}
+                </pre>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">
+                  First comment
+                </Label>
+                <pre className="whitespace-pre-wrap rounded border border-border bg-background p-3 text-xs">
+                  {coverPostPreview.firstComment}
+                </pre>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">
+                  Image URL
+                </Label>
+                <p className="break-all rounded border border-border bg-background p-2 text-xs font-mono text-muted-foreground">
+                  {coverPostPreview.imageUrl}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ============ SECTION 3b: FACEBOOK SCHEDULING VIA BUFFER ============ */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
@@ -1400,13 +1849,35 @@ export default function PublishPanel({
               </CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">
                 Hands publishing off to Buffer. Posts go live at 8:00 PM SAST,
-                one chapter per day, chained after the last scheduled post
-                across every story.
+                one chapter per day starting on the date you pick below.
               </p>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
+            <div>
+              <Label htmlFor="buffer-start-date" className="text-xs">
+                Start date for Chapter 1
+              </Label>
+              <Input
+                id="buffer-start-date"
+                type="date"
+                value={bufferStartDate}
+                onChange={(e) => {
+                  setBufferStartDate(e.target.value);
+                  // Stale preview after the date changes — force a re-click.
+                  setBufferPreview(null);
+                }}
+                className="mt-1"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Chapter 1 lands on this date at 20:00 SAST. Each subsequent
+                chapter follows on the next day.
+              </p>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-3">
             <Button
               variant="outline"

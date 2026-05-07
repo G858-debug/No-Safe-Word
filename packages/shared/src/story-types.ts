@@ -230,6 +230,26 @@ export interface StorySeriesRow {
    */
   author_notes: AuthorNotes | null;
 
+  // --- Cover-reveal Buffer post (migration 20260506000000) ---
+  /** Buffer Post.id for the cover-reveal post. Null until scheduled. */
+  cover_post_buffer_id: string | null;
+  /**
+   * Last observed Buffer status for the cover post. Mirrors Buffer's
+   * PostStatus enum (pending|scheduled|sending|sent|error). Synced by
+   * /api/cron/buffer-sync.
+   */
+  cover_post_status: string | null;
+  /** Buffer-side error message when cover_post_status='error'. */
+  cover_post_error: string | null;
+  /** The scheduledAt we asked Buffer for. ISO string. */
+  cover_post_scheduled_for: string | null;
+  /** Buffer-reported sentAt for the cover post. ISO string. */
+  cover_post_published_at: string | null;
+  /** FB post id parsed from Buffer.externalLink. */
+  cover_post_facebook_id: string | null;
+  /** Operator-edited CTA line appended to the cover post body. */
+  cover_post_cta_line: string | null;
+
   created_at: string;
   updated_at: string;
 }

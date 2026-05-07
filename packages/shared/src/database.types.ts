@@ -1060,6 +1060,13 @@ export type Database = {
           blurb_short_variants: Json | null
           cover_base_url: string | null
           cover_error: string | null
+          cover_post_buffer_id: string | null
+          cover_post_cta_line: string | null
+          cover_post_error: string | null
+          cover_post_facebook_id: string | null
+          cover_post_published_at: string | null
+          cover_post_scheduled_for: string | null
+          cover_post_status: string | null
           cover_prompt: string | null
           cover_secondary_character_id: string | null
           cover_selected_variant: number | null
@@ -1089,6 +1096,13 @@ export type Database = {
           blurb_short_variants?: Json | null
           cover_base_url?: string | null
           cover_error?: string | null
+          cover_post_buffer_id?: string | null
+          cover_post_cta_line?: string | null
+          cover_post_error?: string | null
+          cover_post_facebook_id?: string | null
+          cover_post_published_at?: string | null
+          cover_post_scheduled_for?: string | null
+          cover_post_status?: string | null
           cover_prompt?: string | null
           cover_secondary_character_id?: string | null
           cover_selected_variant?: number | null
@@ -1118,6 +1132,13 @@ export type Database = {
           blurb_short_variants?: Json | null
           cover_base_url?: string | null
           cover_error?: string | null
+          cover_post_buffer_id?: string | null
+          cover_post_cta_line?: string | null
+          cover_post_error?: string | null
+          cover_post_facebook_id?: string | null
+          cover_post_published_at?: string | null
+          cover_post_scheduled_for?: string | null
+          cover_post_status?: string | null
           cover_prompt?: string | null
           cover_secondary_character_id?: string | null
           cover_selected_variant?: number | null

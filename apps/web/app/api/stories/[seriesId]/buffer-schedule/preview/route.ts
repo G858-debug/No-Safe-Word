@@ -6,7 +6,10 @@
 // before pulling the trigger on POST /buffer-schedule.
 
 import { NextRequest, NextResponse } from "next/server";
-import { buildScheduleForStory } from "@/lib/server/schedule-chain";
+import {
+  buildScheduleForStory,
+  ScheduleStartDateError,
+} from "@/lib/server/schedule-chain";
 
 export async function GET(
   request: NextRequest,
@@ -33,6 +36,12 @@ export async function GET(
       chainTailDate: result.chainTailDate?.toISOString() ?? null,
     });
   } catch (err) {
+    if (err instanceof ScheduleStartDateError) {
+      return NextResponse.json(
+        { error: "Invalid startDate", details: err.message },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
         error: "Failed to build schedule preview",

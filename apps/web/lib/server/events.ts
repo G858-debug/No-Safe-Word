@@ -66,7 +66,13 @@ export type EventType =
   | "buffer.publish_failed"
   | "buffer.publish_pending"
   | "buffer.health_ok"
-  | "buffer.health_failed";
+  | "buffer.health_failed"
+  // buffer cover-reveal post (one-off per series)
+  | "buffer.cover_scheduled"
+  | "buffer.cover_cancelled"
+  | "buffer.cover_publish_synced"
+  | "buffer.cover_publish_failed"
+  | "buffer.cover_publish_pending";
 
 export interface LogEventParams {
   eventType: EventType;
