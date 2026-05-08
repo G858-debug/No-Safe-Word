@@ -113,7 +113,7 @@ export async function buildCoverPostPlan(
   );
 
   const firstComment = [
-    "Read it from the start here \u{1F447}",
+    "Read it from the start here 👇",
     `${SITE_URL}/stories/${series.slug}`,
   ].join("\n\n");
 
