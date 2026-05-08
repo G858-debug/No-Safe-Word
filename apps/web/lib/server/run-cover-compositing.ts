@@ -21,7 +21,6 @@ import { logEvent } from "@/lib/server/events";
 
 const BUCKET = "story-covers";
 const SIZES: CoverSize[] = ["hero", "card", "og", "email"];
-const AUTHOR_NAME = "Nontsikelelo Mabaso";
 
 export type RunCoverCompositingResult =
   | { ok: true; coverSizes: Record<CoverSize, string> }
@@ -33,13 +32,26 @@ export async function runCoverCompositing(
   const { data: series, error: seriesErr } = await supabase
     .from("story_series")
     .select(
-      "id, slug, title, cover_base_url, cover_status, cover_sizes, blurb_short_variants, blurb_short_selected"
+      "id, slug, title, cover_base_url, cover_status, cover_sizes, blurb_short_variants, blurb_short_selected, author:authors!story_series_author_id_fkey ( name )"
     )
     .eq("id", seriesId)
     .single();
 
   if (seriesErr || !series) {
     return { ok: false, error: "Series not found", status: 404 };
+  }
+
+  // The FK is NOT NULL post-migration, so this should never fail in
+  // practice. We still fail loudly rather than render an empty author
+  // credit — anonymous covers would be a serious branding regression.
+  const authorRow = series.author as { name: string } | null;
+  const authorName = authorRow?.name;
+  if (!authorName) {
+    return {
+      ok: false,
+      error: "Series has no resolvable author — cannot composite cover.",
+      status: 500,
+    };
   }
 
   if (series.cover_status !== "approved" && series.cover_status !== "complete") {
@@ -140,7 +152,7 @@ export async function runCoverCompositing(
       const { buffer, width, height, contentHash } = await composeCover({
         baseImageBuffer,
         title: series.title,
-        author: AUTHOR_NAME,
+        author: authorName,
         blurbShort,
         size,
       });

@@ -33,10 +33,12 @@ import {
   FileText,
   ArrowLeft,
   Lock,
+  IdCard,
 } from "lucide-react";
 import CharacterApproval, {
   type CharacterFromAPI,
 } from "./components/CharacterApproval";
+import CharacterCardsApproval from "./components/CharacterCardsApproval";
 import CoverApproval from "./components/CoverApproval";
 import BlurbSelection from "./components/BlurbSelection";
 import ImageGeneration from "./components/ImageGeneration";
@@ -278,6 +280,11 @@ export default function SeriesDetailPage() {
   // Derived state
   const allCharsApproved =
     characters.length > 0 && characters.every((c) => c.approved);
+  // Phase 3a — Stage 9 gate. card_approved flips to true when the reviewer
+  // clicks Approve in the Cards tab (server stamps card_approved_at). Cover
+  // and Blurbs tabs gate on this; Cards tab itself gates on allCharsApproved.
+  const allCardsApproved =
+    characters.length > 0 && characters.every((c) => c.card_approved === true);
   const allReadyForImages = allCharsApproved;
 
   // Cover approval gates the Blurbs tab (must be at least approved). The
@@ -508,7 +515,7 @@ export default function SeriesDetailPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="overview" className="gap-1.5">
             <FileText className="h-4 w-4" />
             Overview
@@ -516,6 +523,10 @@ export default function SeriesDetailPage() {
           <TabsTrigger value="characters" className="gap-1.5">
             <Users className="h-4 w-4" />
             Characters
+          </TabsTrigger>
+          <TabsTrigger value="cards" className="gap-1.5">
+            <IdCard className="h-4 w-4" />
+            Cards
           </TabsTrigger>
           <TabsTrigger value="cover" className="gap-1.5">
             <ImageIcon className="h-4 w-4" />
@@ -734,24 +745,51 @@ export default function SeriesDetailPage() {
         <div className={activeTab === "characters" ? "mt-6" : "hidden"}>
           <CharacterApproval
             seriesId={seriesId}
-            onAllReady={() => setActiveTab("cover")}
+            onAllReady={() => setActiveTab("cards")}
             onCharactersChange={setCharacters}
           />
         </div>
 
-        {/* ======================= COVER TAB ======================== */}
-        <div className={activeTab === "cover" ? "mt-6" : "hidden"}>
+        {/* ======================== CARDS TAB ======================= */}
+        {/* Stage 9 — character profile cards. Sits between portrait
+            approval and cover generation. The reviewer tweaks the seven
+            imported text fields, generates the card image, and approves
+            per character. Cover and Blurbs unlock when every character
+            here is approved. */}
+        <div className={activeTab === "cards" ? "mt-6" : "hidden"}>
           {allCharsApproved ? (
-            <CoverApproval seriesId={seriesId} />
+            <CharacterCardsApproval
+              seriesId={seriesId}
+              onCharactersChange={setCharacters}
+            />
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Users className="mb-4 h-12 w-12 text-yellow-400" />
               <h3 className="mb-2 text-lg font-semibold">
-                Approve Characters First
+                Approve Character Portraits First
               </h3>
               <p className="max-w-md text-sm text-muted-foreground">
-                Cover generation uses the approved protagonist portrait as a reference
-                image. Finish the Characters step before generating the cover.
+                Card image generation uses the approved body portrait as a
+                reference. Finish the Characters step before generating
+                profile cards.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ======================= COVER TAB ======================== */}
+        <div className={activeTab === "cover" ? "mt-6" : "hidden"}>
+          {allCardsApproved ? (
+            <CoverApproval seriesId={seriesId} />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <IdCard className="mb-4 h-12 w-12 text-yellow-400" />
+              <h3 className="mb-2 text-lg font-semibold">
+                Finish Character Cards First
+              </h3>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Cover generation comes after character profile cards. Approve
+                every character in the Cards tab before continuing.
               </p>
             </div>
           )}
@@ -762,7 +800,7 @@ export default function SeriesDetailPage() {
             in the background while the user works on blurbs. Final publish
             still requires an approved cover (enforced in PublishPanel). */}
         <div className={activeTab === "blurbs" ? "mt-6" : "hidden"}>
-          {allCharsApproved ? (
+          {allCardsApproved ? (
             <BlurbSelection
               seriesId={seriesId}
               onChange={() => {
@@ -776,12 +814,13 @@ export default function SeriesDetailPage() {
             />
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Users className="mb-4 h-12 w-12 text-yellow-400" />
+              <IdCard className="mb-4 h-12 w-12 text-yellow-400" />
               <h3 className="mb-2 text-lg font-semibold">
-                Approve Characters First
+                Finish Character Cards First
               </h3>
               <p className="max-w-md text-sm text-muted-foreground">
-                Complete the Characters step before selecting blurbs.
+                Approve every character&apos;s profile card before selecting
+                blurbs.
               </p>
             </div>
           )}
@@ -831,6 +870,18 @@ export default function SeriesDetailPage() {
             imageUrls={data.image_urls}
             coverStatus={coverStatus}
             authorNotes={data.series.author_notes ?? null}
+            authorNoteImagePrompt={
+              (data.series as { author_note_image_prompt?: string | null })
+                .author_note_image_prompt ?? null
+            }
+            authorNoteImageUrl={
+              (data.series as { author_note_image_url?: string | null })
+                .author_note_image_url ?? null
+            }
+            authorNoteApprovedAt={
+              (data.series as { author_note_approved_at?: string | null })
+                .author_note_approved_at ?? null
+            }
             seriesStatus={series.status}
             publishedAt={rawSeries?.published_at ?? null}
             longBlurb={

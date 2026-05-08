@@ -1,4 +1,5 @@
 import { supabase } from "@no-safe-word/story-engine";
+import type { AuthorNotes } from "@no-safe-word/shared";
 
 // ============================================================
 // Single source of truth for "what fields do we select for
@@ -16,6 +17,12 @@ import { supabase } from "@no-safe-word/story-engine";
 // generateMetadata and the page body), React `cache()` wrapping would
 // happen here — deferred per the prompt instructions.
 // ============================================================
+
+export interface PublishedAuthor {
+  name: string;
+  slug: string;
+  portrait_url: string | null;
+}
 
 export interface PublishedSeries {
   id: string;
@@ -42,6 +49,19 @@ export interface PublishedSeries {
   blurb_short_selected: number | null;
   blurb_long_variants: string[] | null;
   blurb_long_selected: number | null;
+
+  // Phase 1+3b — Author's Notes block. Public renderers must check both
+  // `author_notes !== null` AND `author_note_approved_at !== null` before
+  // rendering anything; unapproved notes never leak.
+  author_notes: AuthorNotes | null;
+  author_note_image_url: string | null;
+  author_note_approved_at: string | null;
+
+  // Phase 1 — joined author row for the byline strip on the notes section
+  // and any future per-author affordances. May be null defensively, though
+  // story_series.author_id is NOT NULL post-Phase-1.
+  author_id: string | null;
+  author: PublishedAuthor | null;
 }
 
 /**
@@ -53,11 +73,27 @@ const SELECT_COLUMNS =
   "id, title, slug, description, total_parts, hashtag, " +
   "cover_base_url, cover_status, cover_sizes, " +
   "blurb_short_variants, blurb_short_selected, " +
-  "blurb_long_variants, blurb_long_selected";
+  "blurb_long_variants, blurb_long_selected, " +
+  "author_notes, author_note_image_url, author_note_approved_at, " +
+  "author_id, " +
+  "author:authors!story_series_author_id_fkey ( name, slug, portrait_url )";
 
 export interface GetPublishedSeriesListOptions {
   /** Maximum number of rows to return. Undefined = no limit. */
   limit?: number;
+}
+
+/**
+ * PostgREST embeds many-to-one FK joins as either a single object or a
+ * single-element array depending on the generated typings. Normalise to
+ * `PublishedAuthor | null` so renderers don't need to know the difference.
+ */
+function normaliseSeriesRow(row: unknown): PublishedSeries {
+  const r = row as PublishedSeries & {
+    author: PublishedAuthor | PublishedAuthor[] | null;
+  };
+  const author = Array.isArray(r.author) ? (r.author[0] ?? null) : r.author;
+  return { ...r, author };
 }
 
 export async function getPublishedSeriesList(
@@ -75,7 +111,7 @@ export async function getPublishedSeriesList(
 
   const { data } = await query;
   if (!data) return [];
-  return data as unknown as PublishedSeries[];
+  return (data as unknown[]).map(normaliseSeriesRow);
 }
 
 export async function getPublishedSeriesBySlug(
@@ -88,7 +124,7 @@ export async function getPublishedSeriesBySlug(
     .eq("status", "published")
     .maybeSingle();
 
-  return (data as unknown as PublishedSeries | null) ?? null;
+  return data ? normaliseSeriesRow(data) : null;
 }
 
 /**

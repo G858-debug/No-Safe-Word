@@ -10,6 +10,7 @@ import {
   resolveLongBlurb,
 } from "@/lib/server/get-published-series";
 import { formatChapterTitle } from "@/lib/format";
+import { MeetTheCast, type CastCharacter } from "@/components/MeetTheCast";
 
 export const revalidate = 3600;
 
@@ -30,8 +31,9 @@ export async function generateMetadata({
 
   const shortBlurb = resolveShortBlurb(series);
   const ogImage = series.cover_sizes?.og ?? series.cover_sizes?.card ?? null;
+  const authorName = series.author?.name ?? "Nontsikelelo";
   const description =
-    shortBlurb || `Read ${series.title} by Nontsikelelo on No Safe Word.`;
+    shortBlurb || `Read ${series.title} by ${authorName} on No Safe Word.`;
 
   const metadata: Metadata = {
     title: series.title,
@@ -97,72 +99,81 @@ export default async function SeriesPage({ params }: PageProps) {
     .eq("status", "published")
     .order("part_number", { ascending: true });
 
-  // Fetch characters with portraits
-  // Portrait state (approved_image_id) now lives on the base `characters`
-  // row. Join to fetch it.
+  // Phase 4 — fetch characters with their Stage-9 profile-card payload.
+  // Public render uses the seven reader-facing fields + card_image_url;
+  // card_image_prompt and prose_description are editorial-only and stay
+  // out of the public surface.
   const { data: characters } = await supabase
     .from("story_characters")
     .select(
-      "role, prose_description, character_id, characters:character_id ( id, name, approved_image_id )"
+      `id, role, character_id,
+       characters:character_id (
+         id, name,
+         card_image_url, card_approved_at,
+         archetype_tag, vibe_line, wants, needs,
+         defining_quote, watch_out_for, bio_short
+       )`
     )
     .eq("series_id", series.id);
 
-  // Resolve character display metadata
-  let characterDetails: {
-    name: string;
-    role: string;
-    description: string | null;
-    imageUrl: string | null;
-  }[] = [];
-
-  type Joined = {
+  type JoinedCharacter = {
+    id: string; // story_characters.id
     role: string | null;
-    prose_description: string | null;
     character_id: string;
     characters:
-      | { id: string; name: string; approved_image_id: string | null }
-      | { id: string; name: string; approved_image_id: string | null }[]
+      | {
+          id: string;
+          name: string;
+          card_image_url: string | null;
+          card_approved_at: string | null;
+          archetype_tag: string | null;
+          vibe_line: string | null;
+          wants: string | null;
+          needs: string | null;
+          defining_quote: string | null;
+          watch_out_for: string | null;
+          bio_short: string | null;
+        }
+      | {
+          id: string;
+          name: string;
+          card_image_url: string | null;
+          card_approved_at: string | null;
+          archetype_tag: string | null;
+          vibe_line: string | null;
+          wants: string | null;
+          needs: string | null;
+          defining_quote: string | null;
+          watch_out_for: string | null;
+          bio_short: string | null;
+        }[]
       | null;
   };
-  const rows = (characters ?? []) as unknown as Joined[];
-  const baseOf = (r: Joined) =>
-    Array.isArray(r.characters) ? r.characters[0] ?? null : r.characters;
+  const characterRows = (characters ?? []) as unknown as JoinedCharacter[];
+  const baseOf = (r: JoinedCharacter) =>
+    Array.isArray(r.characters) ? (r.characters[0] ?? null) : r.characters;
 
-  // Filter to only characters with an approved portrait (old `approved`
-  // boolean is gone; use approved_image_id on the base row as the signal).
-  const approvedRows = rows.filter((r) => baseOf(r)?.approved_image_id);
-
-  if (approvedRows.length > 0) {
-    const imgIds = approvedRows
-      .map((r) => baseOf(r)?.approved_image_id)
-      .filter((id): id is string => Boolean(id));
-
-    const { data: imgData } =
-      imgIds.length > 0
-        ? await supabase
-            .from("images")
-            .select("id, stored_url")
-            .in("id", imgIds)
-        : { data: [] as { id: string; stored_url: string | null }[] };
-
-    const urlMap = Object.fromEntries(
-      (imgData || [])
-        .filter((i) => i.stored_url)
-        .map((i) => [i.id, i.stored_url!])
-    );
-
-    characterDetails = approvedRows.map((r) => {
-      const base = baseOf(r);
+  // MEET THE CAST renders only characters whose profile card has been
+  // approved. Unapproved cards never leak to the public site, even when
+  // their fields are populated in the DB.
+  const cast: CastCharacter[] = characterRows
+    .filter((r) => Boolean(baseOf(r)?.card_approved_at))
+    .map((r) => {
+      const base = baseOf(r)!;
       return {
-        name: base?.name || "Unknown",
-        role: r.role || "",
-        description: r.prose_description,
-        imageUrl: base?.approved_image_id
-          ? urlMap[base.approved_image_id] || null
-          : null,
+        id: r.id,
+        name: base.name,
+        role: r.role,
+        card_image_url: base.card_image_url,
+        archetype_tag: base.archetype_tag,
+        vibe_line: base.vibe_line,
+        wants: base.wants,
+        needs: base.needs,
+        defining_quote: base.defining_quote,
+        watch_out_for: base.watch_out_for,
+        bio_short: base.bio_short,
       };
     });
-  }
 
   const heroUrl = series.cover_sizes?.hero ?? null;
   const longBlurb = resolveLongBlurb(series);
@@ -202,7 +213,7 @@ export default async function SeriesPage({ params }: PageProps) {
               {series.title}
             </h1>
             <p className="mt-3 text-sm italic text-warm-400">
-              By Nontsikelelo Mabaso
+              By {series.author?.name ?? "Nontsikelelo Mabaso"}
             </p>
             {longBlurb && (
               <p className="mt-6 max-w-2xl whitespace-pre-line text-base leading-relaxed text-warm-200">
@@ -226,44 +237,11 @@ export default async function SeriesPage({ params }: PageProps) {
         </div>
       </header>
 
-      {/* Characters */}
-      {characterDetails.length > 0 && (
-        <section className="mb-12">
-          <h2 className="mb-6 text-sm font-semibold uppercase tracking-widest text-warm-400">
-            Characters
-          </h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-            {characterDetails.map((char) => (
-              <div
-                key={char.name}
-                className="overflow-hidden rounded-xl border border-amber-900/20 bg-surface-raised"
-              >
-                {char.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={char.imageUrl}
-                    alt={char.name}
-                    className="aspect-[3/4] w-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="flex aspect-[3/4] items-center justify-center bg-surface-overlay">
-                    <span className="text-2xl text-warm-500">
-                      {char.name[0]}
-                    </span>
-                  </div>
-                )}
-                <div className="p-3">
-                  <p className="font-semibold text-amber-50">{char.name}</p>
-                  <p className="text-xs capitalize text-warm-400">
-                    {char.role.replace("_", " ")}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* Phase 4 — MEET THE CAST. Replaces the legacy name+role+portrait
+          section. Renders only characters with card_approved_at IS NOT NULL.
+          Hidden entirely when no approved cards exist. */}
+      <MeetTheCast characters={cast} />
+
 
       {/* Chapters */}
       <section>

@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@no-safe-word/story-engine";
 import type {
-  StorySeriesRow,
   StoryPostRow,
   StoryImagePromptRow,
 } from "@no-safe-word/shared";
@@ -12,10 +11,12 @@ import ChapterNav from "@/components/ChapterNav";
 import ReadingProgress from "@/components/ReadingProgress";
 import EmailGate from "@/components/EmailGate";
 import { GatePulse } from "@/components/GatePulse";
+import { AuthorsNotes } from "@/components/AuthorsNotes";
 import { createClient } from "@/lib/supabase/server";
 import { checkSeriesAccess, splitAtWords } from "@/lib/access";
 import { logEvent } from "@/lib/server/events";
 import { formatChapterTitle } from "@/lib/format";
+import { getPublishedSeriesBySlug } from "@/lib/server/get-published-series";
 
 export const revalidate = 3600;
 
@@ -34,14 +35,9 @@ export async function generateMetadata({
   const partNumber = parseInt(partNumberStr, 10);
   if (isNaN(partNumber)) return { title: "Not Found" };
 
-  const { data: seriesData } = await supabase
-    .from("story_series")
-    .select("id, title")
-    .eq("slug", slug)
-    .eq("status", "published")
-    .single();
-
-  const series = seriesData as Pick<StorySeriesRow, "id" | "title"> | null;
+  // Use the shared helper so metadata sees the same field set as the
+  // page body (including the joined author row used for the byline).
+  const series = await getPublishedSeriesBySlug(slug);
   if (!series) return { title: "Not Found" };
 
   const { data: postData } = await supabase
@@ -56,12 +52,13 @@ export async function generateMetadata({
   if (!post) return { title: "Not Found" };
 
   const chapterLabel = formatChapterTitle(partNumber, post.title);
+  const authorName = series.author?.name ?? "Nontsikelelo";
   return {
     title: `${chapterLabel} — ${series.title}`,
-    description: `${chapterLabel} of ${series.title} by Nontsikelelo. Erotic fiction for adults.`,
+    description: `${chapterLabel} of ${series.title} by ${authorName}. Erotic fiction for adults.`,
     openGraph: {
       title: `${chapterLabel} — ${series.title}`,
-      description: `${chapterLabel} of ${series.title} by Nontsikelelo.`,
+      description: `${chapterLabel} of ${series.title} by ${authorName}.`,
       type: "article",
     },
   };
@@ -76,18 +73,11 @@ export default async function ChapterPage({ params }: PageProps) {
   const partNumber = parseInt(partNumberStr, 10);
   if (isNaN(partNumber)) notFound();
 
-  // 1. Fetch series by slug
-  const { data: seriesData } = await supabase
-    .from("story_series")
-    .select("id, title, slug, total_parts")
-    .eq("slug", slug)
-    .eq("status", "published")
-    .single();
-
-  const series = seriesData as Pick<
-    StorySeriesRow,
-    "id" | "title" | "slug" | "total_parts"
-  > | null;
+  // 1. Fetch series by slug. Phase 4 swaps the inline select for the
+  //    shared helper so the chapter page sees the same field set as
+  //    the story detail page — including author + notes data needed
+  //    for the final-chapter Author's Notes section.
+  const series = await getPublishedSeriesBySlug(slug);
   if (!series) notFound();
 
   // 2. Fetch the specific post
@@ -344,7 +334,9 @@ export default async function ChapterPage({ params }: PageProps) {
           >
             {formatChapterTitle(post.part_number, post.title)}
           </h1>
-          <p className="mt-4 text-sm italic text-warm-400">By Nontsikelelo</p>
+          <p className="mt-4 text-sm italic text-warm-400">
+            By {series.author?.name ?? "Nontsikelelo"}
+          </p>
         </header>
 
         {/* Story content. Head chunk → stable anchor → either the
@@ -394,6 +386,24 @@ export default async function ChapterPage({ params }: PageProps) {
             />
           )}
         </div>
+
+        {/* Phase 4 — Author's Notes. Final chapter only, behind the
+            paywall, with notes + approval timestamp both present. The
+            three-condition gate is enforced inline; AuthorsNotes itself
+            does no re-checking. */}
+        {hasAccess &&
+          partNumber === series.total_parts &&
+          series.author_notes &&
+          series.author_note_approved_at && (
+            <AuthorsNotes
+              notes={series.author_notes}
+              imageUrl={series.author_note_image_url}
+              approvedAt={series.author_note_approved_at}
+              author={series.author}
+              shareUrl={`https://nosafeword.co.za/stories/${series.slug}/${partNumber}`}
+              seriesTitle={series.title}
+            />
+          )}
 
         {/* Email gate for non-authenticated readers on chapter 2+.
             Sits outside the prose container so the gate card has its

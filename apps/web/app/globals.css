@@ -118,4 +118,17 @@
     animation: gate-pulse 3s ease-out;
     border-radius: 4px;
   }
+
+  /* Phase 4 — used by MeetTheCast expanded body and the AuthorsNotes
+     ShareButton "Copied!" toast. Plain opacity fade-in; layout reflow
+     happens at conditional-render time so no height transition is
+     needed. */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }

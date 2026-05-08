@@ -115,6 +115,36 @@ export type Database = {
           },
         ]
       }
+      authors: {
+        Row: {
+          bio_short: string | null
+          created_at: string
+          id: string
+          name: string
+          portrait_url: string | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          bio_short?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          portrait_url?: string | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          bio_short?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          portrait_url?: string | null
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       characters: {
         Row: {
           approved_fullbody_image_id: string | null
@@ -123,12 +153,23 @@ export type Database = {
           approved_image_id: string | null
           approved_prompt: string | null
           approved_seed: number | null
+          archetype_tag: string | null
+          bio_short: string | null
+          card_approved_at: string | null
+          card_image_id: string | null
+          card_image_prompt: string | null
+          card_image_url: string | null
           created_at: string
+          defining_quote: string | null
           description: Json
           id: string
           name: string
+          needs: string | null
           portrait_prompt_locked: string | null
           updated_at: string
+          vibe_line: string | null
+          wants: string | null
+          watch_out_for: string | null
         }
         Insert: {
           approved_fullbody_image_id?: string | null
@@ -137,12 +178,23 @@ export type Database = {
           approved_image_id?: string | null
           approved_prompt?: string | null
           approved_seed?: number | null
+          archetype_tag?: string | null
+          bio_short?: string | null
+          card_approved_at?: string | null
+          card_image_id?: string | null
+          card_image_prompt?: string | null
+          card_image_url?: string | null
           created_at?: string
+          defining_quote?: string | null
           description?: Json
           id?: string
           name: string
+          needs?: string | null
           portrait_prompt_locked?: string | null
           updated_at?: string
+          vibe_line?: string | null
+          wants?: string | null
+          watch_out_for?: string | null
         }
         Update: {
           approved_fullbody_image_id?: string | null
@@ -151,12 +203,23 @@ export type Database = {
           approved_image_id?: string | null
           approved_prompt?: string | null
           approved_seed?: number | null
+          archetype_tag?: string | null
+          bio_short?: string | null
+          card_approved_at?: string | null
+          card_image_id?: string | null
+          card_image_prompt?: string | null
+          card_image_url?: string | null
           created_at?: string
+          defining_quote?: string | null
           description?: Json
           id?: string
           name?: string
+          needs?: string | null
           portrait_prompt_locked?: string | null
           updated_at?: string
+          vibe_line?: string | null
+          wants?: string | null
+          watch_out_for?: string | null
         }
         Relationships: [
           {
@@ -169,6 +232,13 @@ export type Database = {
           {
             foreignKeyName: "characters_approved_image_id_fkey"
             columns: ["approved_image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "characters_card_image_id_fkey"
+            columns: ["card_image_id"]
             isOneToOne: false
             referencedRelation: "images"
             referencedColumns: ["id"]
@@ -1074,6 +1144,12 @@ export type Database = {
       story_series: {
         Row: {
           access_tier: string
+          author_id: string
+          author_note_approved_at: string | null
+          author_note_image_id: string | null
+          author_note_image_prompt: string | null
+          author_note_image_url: string | null
+          author_note_publish_states: Json
           author_notes: Json | null
           blurb_long_selected: number | null
           blurb_long_variants: Json | null
@@ -1112,6 +1188,12 @@ export type Database = {
         }
         Insert: {
           access_tier?: string
+          author_id: string
+          author_note_approved_at?: string | null
+          author_note_image_id?: string | null
+          author_note_image_prompt?: string | null
+          author_note_image_url?: string | null
+          author_note_publish_states?: Json
           author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
@@ -1150,6 +1232,12 @@ export type Database = {
         }
         Update: {
           access_tier?: string
+          author_id?: string
+          author_note_approved_at?: string | null
+          author_note_image_id?: string | null
+          author_note_image_prompt?: string | null
+          author_note_image_url?: string | null
+          author_note_publish_states?: Json
           author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
@@ -1187,6 +1275,20 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "story_series_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "authors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_series_author_note_image_id_fkey"
+            columns: ["author_note_image_id"]
+            isOneToOne: false
+            referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "story_series_cover_secondary_character_id_fkey"
             columns: ["cover_secondary_character_id"]
@@ -1565,3 +1667,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

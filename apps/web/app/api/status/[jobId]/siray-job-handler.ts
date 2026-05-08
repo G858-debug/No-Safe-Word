@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getSirayClient } from "@no-safe-word/image-gen";
 import { supabase } from "@no-safe-word/story-engine";
 import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image";
+import {
+  applySimpleImageCompletion,
+  type SimpleImageJobType,
+} from "./simple-image-completion";
 
 /**
  * Handle a single browser-poll for a Siray-backed async job.
@@ -21,9 +25,11 @@ import { uploadRemoteImageToStorage } from "@/lib/server/upload-generated-image"
 export async function handleSirayJobStatus(args: {
   jobId: string;
   imageId: string | null;
-  imageType: "portrait" | "scene";
+  imageType: "portrait" | "scene" | "character_card" | "author_note";
+  /** generation_jobs.series_id, required for author_note completion. */
+  seriesId?: string | null;
 }): Promise<NextResponse> {
-  const { jobId, imageId, imageType } = args;
+  const { jobId, imageId, imageType, seriesId = null } = args;
 
   const taskId = jobId.startsWith("siray-") ? jobId.slice("siray-".length) : jobId;
 
@@ -118,13 +124,24 @@ export async function handleSirayJobStatus(args: {
   }
 
   // Download the Siray-hosted output and re-upload to Supabase Storage so
-  // the URL is permanent. Storage path mirrors the sync routes' convention:
-  //   portraits → characters/{imageId}.jpeg
-  //   scenes    → stories/{imageId}.jpeg
-  const storagePath =
-    imageType === "portrait"
-      ? `characters/${imageId}.jpeg`
-      : `stories/${imageId}.jpeg`;
+  // the URL is permanent. Storage path mirrors the sync routes' convention,
+  // with one subdirectory per image type so the bucket stays browseable:
+  //   portraits      → characters/{imageId}.jpeg
+  //   scenes         → stories/{imageId}.jpeg
+  //   character_card → characters/cards/{imageId}.jpeg
+  //   author_note    → stories/author-notes/{imageId}.jpeg
+  const storagePath = (() => {
+    switch (imageType) {
+      case "portrait":
+        return `characters/${imageId}.jpeg`;
+      case "scene":
+        return `stories/${imageId}.jpeg`;
+      case "character_card":
+        return `characters/cards/${imageId}.jpeg`;
+      case "author_note":
+        return `stories/author-notes/${imageId}.jpeg`;
+    }
+  })();
 
   let storedUrl: string;
   try {
@@ -150,7 +167,7 @@ export async function handleSirayJobStatus(args: {
     .eq("job_id", jobId);
 
   // Mark the linked story_image_prompts row as generated, if there is one
-  // (scene generation only — portraits don't have prompt rows).
+  // (scene generation only — portraits/cards/author-notes don't have prompt rows).
   const { data: linkedPrompt } = await supabase
     .from("story_image_prompts")
     .select("id")
@@ -161,6 +178,31 @@ export async function handleSirayJobStatus(args: {
       .from("story_image_prompts")
       .update({ status: "generated" })
       .eq("id", linkedPrompt.id);
+  }
+
+  // For "simple" job types, propagate the completion to the parent table
+  // (characters / story_series). Failures here are surfaced — we'd rather
+  // a stuck status row than a card image whose URL never made it onto the
+  // character.
+  const simpleJobType: SimpleImageJobType | null =
+    imageType === "character_card"
+      ? "character_card"
+      : imageType === "author_note"
+        ? "author_note"
+        : null;
+  if (simpleJobType) {
+    try {
+      await applySimpleImageCompletion({
+        jobType: simpleJobType,
+        imageId,
+        storedUrl,
+        seriesId,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "completion handler failed";
+      console.error(`[siray-handler] post-upload completion failed for ${jobId}:`, msg);
+      return NextResponse.json({ jobId, completed: false, error: msg });
+    }
   }
 
   return NextResponse.json({

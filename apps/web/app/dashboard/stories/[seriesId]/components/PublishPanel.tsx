@@ -41,6 +41,7 @@ import {
 import WebsitePreview, {
   type WebsiteImagePrompt,
 } from "./WebsitePreview";
+import { AuthorNotesReviewPanel } from "./AuthorNotesReviewPanel";
 import { setExcluded } from "@/lib/publisher-actions";
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,12 @@ interface PublishPanelProps {
   coverStatus: CoverStatus;
   /** Optional editorial reflection block. When non-null, renders the Author's Notes review panel. */
   authorNotes: AuthorNotes | null;
+  /** Phase 3b — accompanying-image prompt. Null when not yet authored. */
+  authorNoteImagePrompt: string | null;
+  /** Phase 3b — generated accompanying image URL. Null until the operator runs generation. */
+  authorNoteImageUrl: string | null;
+  /** Phase 3b — Stage 13 approval timestamp. Null until the reviewer approves. Drives the publish-action gate. */
+  authorNoteApprovedAt: string | null;
   /** Series-level status — drives the Website Publishing badge + button enable. */
   seriesStatus: string;
   /** When the series went live on the public website. NULL until publish-website succeeds. */
@@ -232,6 +239,9 @@ export default function PublishPanel({
   imageUrls,
   coverStatus,
   authorNotes,
+  authorNoteImagePrompt: initialAuthorNoteImagePrompt,
+  authorNoteImageUrl: initialAuthorNoteImageUrl,
+  authorNoteApprovedAt: initialAuthorNoteApprovedAt,
   seriesStatus: initialSeriesStatus,
   publishedAt: initialPublishedAt,
   onSeriesPublished,
@@ -321,6 +331,19 @@ export default function PublishPanel({
     PreconditionFailure[] | null
   >(null);
   const isWebsitePublished = seriesStatus === "published";
+
+  // Phase 3b — Stage 13 approval timestamp mirror. AuthorNotesReviewPanel
+  // owns the editing flow but reports approval flips up via a callback
+  // so this panel's `authorNotesReady` gate (computed below) snaps the
+  // publish-action disabled props on the same render.
+  const [authorNoteApprovedAt, setAuthorNoteApprovedAt] = useState<
+    string | null
+  >(initialAuthorNoteApprovedAt);
+
+  // The gate: if the story has no notes (`authorNotes` null), publish is
+  // unaffected. If notes exist, every publish action below waits for
+  // approval. Single computation, applied across all gated buttons.
+  const authorNotesReady = !authorNotes || authorNoteApprovedAt !== null;
 
   // ---------------------------------------------------------------------------
   // Derived state
@@ -1354,6 +1377,21 @@ export default function PublishPanel({
         </div>
       )}
 
+      {/* =================== STAGE 13: AUTHOR'S NOTES REVIEW =================== */}
+      {/* Sits at the top of PublishPanel — review/approve before any publish
+          action below unblocks. Hidden entirely when the story has no
+          author_notes (entertainment-only stories ship without notes). */}
+      {authorNotes && (
+        <AuthorNotesReviewPanel
+          seriesId={seriesId}
+          initialNotes={authorNotes}
+          initialImagePrompt={initialAuthorNoteImagePrompt}
+          initialImageUrl={initialAuthorNoteImageUrl}
+          initialApprovedAt={initialAuthorNoteApprovedAt}
+          onApprovalChange={setAuthorNoteApprovedAt}
+        />
+      )}
+
       {/* ================ SECTION 1: WEBSITE PUBLISHING ================ */}
       <Card>
         <CardHeader>
@@ -1400,7 +1438,9 @@ export default function PublishPanel({
           <div className="flex flex-wrap items-center gap-3">
             <Button
               onClick={publishWebsite}
-              disabled={isWebsitePublished || websitePublishing}
+              disabled={
+                isWebsitePublished || websitePublishing || !authorNotesReady
+              }
             >
               {websitePublishing ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1508,6 +1548,7 @@ export default function PublishPanel({
               onClick={() => setShowSchedule(!showSchedule)}
               disabled={
                 !coverApproved ||
+                !authorNotesReady ||
                 statusSummary.published === statusSummary.total
               }
             >
@@ -1520,6 +1561,7 @@ export default function PublishPanel({
               onClick={publishAll}
               disabled={
                 !coverApproved ||
+                !authorNotesReady ||
                 publishAllRunning ||
                 statusSummary.published === statusSummary.total
               }
@@ -1757,7 +1799,8 @@ export default function PublishPanel({
                 coverPostScheduling ||
                 !longBlurb ||
                 !coverHeroUrl ||
-                !coverPostCtaLine.trim()
+                !coverPostCtaLine.trim() ||
+                !authorNotesReady
               }
             >
               {coverPostScheduling ? (
@@ -1884,6 +1927,7 @@ export default function PublishPanel({
               onClick={previewBufferSchedule}
               disabled={
                 !coverApproved ||
+                !authorNotesReady ||
                 bufferPreviewLoading ||
                 bufferSchedulableCount === 0
               }
@@ -1901,7 +1945,8 @@ export default function PublishPanel({
               disabled={
                 !bufferPreview ||
                 bufferPreview.plan.length === 0 ||
-                bufferScheduling
+                bufferScheduling ||
+                !authorNotesReady
               }
             >
               {bufferScheduling ? (
@@ -1990,8 +2035,7 @@ export default function PublishPanel({
         </CardContent>
       </Card>
 
-      {/* =================== AUTHOR'S NOTES (optional) =================== */}
-      {authorNotes && <AuthorNotesPanel notes={authorNotes} />}
+      {/* Author's Notes review moved to the top of the panel (Phase 3b). */}
 
       {/* =================== PER-POST SECTIONS =================== */}
       {posts.map((post) => {
@@ -2117,7 +2161,8 @@ export default function PublishPanel({
                       isPublishing ||
                       publishAllRunning ||
                       post.status === "published" ||
-                      !imagesReady
+                      !imagesReady ||
+                      !authorNotesReady
                     }
                     size="sm"
                   >
@@ -2227,57 +2272,6 @@ function MobilePreviewTabs({
   );
 }
 
-// ---------------------------------------------------------------------------
-// AuthorNotesPanel — read-only preview of the editorial reflection block
-// ---------------------------------------------------------------------------
-
-const AUTHOR_NOTES_SECTIONS: ReadonlyArray<{
-  key: keyof AuthorNotes;
-  label: string;
-}> = [
-  { key: "website_long", label: "Website Long" },
-  { key: "email_version", label: "Email" },
-  { key: "linkedin_post", label: "LinkedIn" },
-  { key: "social_caption", label: "Social" },
-];
-
-function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function AuthorNotesPanel({ notes }: { notes: AuthorNotes }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Author&apos;s Notes</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Editorial reflection by the Nontsikelelo persona — read-only preview.
-        </p>
-      </CardHeader>
-      <CardContent>
-        <Tabs defaultValue={AUTHOR_NOTES_SECTIONS[0].key} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            {AUTHOR_NOTES_SECTIONS.map(({ key, label }) => (
-              <TabsTrigger key={key} value={key} className="gap-2">
-                <span>{label}</span>
-                <Badge variant="outline" className="text-xs font-normal">
-                  {countWords(notes[key])}
-                </Badge>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {AUTHOR_NOTES_SECTIONS.map(({ key, label }) => (
-            <TabsContent key={key} value={key} className="mt-4">
-              <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                {notes[key]}
-              </div>
-              <p className="mt-3 text-xs text-muted-foreground">
-                {label} · {countWords(notes[key])} words
-              </p>
-            </TabsContent>
-          ))}
-        </Tabs>
-      </CardContent>
-    </Card>
-  );
-}
+// AuthorNotesPanel was relocated + made editable in Phase 3b — see
+// AuthorNotesReviewPanel.tsx. The panel now renders at the top of
+// PublishPanel and gates every publish action below.

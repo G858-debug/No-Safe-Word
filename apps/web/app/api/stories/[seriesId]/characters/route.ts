@@ -19,7 +19,11 @@ export async function GET(
       characters:character_id (
         id, name, description,
         approved_image_id, approved_fullbody_image_id,
-        approved_seed, approved_prompt, portrait_prompt_locked
+        approved_seed, approved_prompt, portrait_prompt_locked,
+        archetype_tag, vibe_line, wants, needs, defining_quote,
+        watch_out_for, bio_short,
+        card_image_id, card_image_url, card_image_prompt,
+        card_approved_at
       )
     `
     )
@@ -43,6 +47,18 @@ export async function GET(
     approved_seed: number | null;
     approved_prompt: string | null;
     portrait_prompt_locked: string | null;
+    // Phase 1 + Phase 2 + Phase 3a fields ----------------------
+    archetype_tag: string | null;
+    vibe_line: string | null;
+    wants: string | null;
+    needs: string | null;
+    defining_quote: string | null;
+    watch_out_for: string | null;
+    bio_short: string | null;
+    card_image_id: string | null;
+    card_image_url: string | null;
+    card_image_prompt: string | null;
+    card_approved_at: string | null;
   };
 
   const baseOf = (row: unknown): BaseChar | null => {
@@ -137,6 +153,20 @@ export async function GET(
         : null,
       // Derived flag — the UI reads `approved`.
       approved: Boolean(base?.approved_image_id),
+
+      // Phase 3a — character profile card fields ----------------
+      archetype_tag: base?.archetype_tag ?? null,
+      vibe_line: base?.vibe_line ?? null,
+      wants: base?.wants ?? null,
+      needs: base?.needs ?? null,
+      defining_quote: base?.defining_quote ?? null,
+      watch_out_for: base?.watch_out_for ?? null,
+      bio_short: base?.bio_short ?? null,
+      card_image_id: base?.card_image_id ?? null,
+      card_image_url: base?.card_image_url ?? null,
+      card_image_prompt: base?.card_image_prompt ?? null,
+      card_approved_at: base?.card_approved_at ?? null,
+      card_approved: Boolean(base?.card_approved_at),
     };
   });
 

@@ -3,6 +3,10 @@ import { getRunPodJobStatus, base64ToBuffer } from "@no-safe-word/image-gen";
 import { handleCoverVariantCompletion } from "./cover-variant-handler";
 import { handleSirayJobStatus } from "./siray-job-handler";
 import { handleSirayCoverVariantStatus } from "./siray-cover-variant-handler";
+import {
+  applySimpleImageCompletion,
+  type SimpleImageJobType,
+} from "./simple-image-completion";
 import { supabase } from "@no-safe-word/story-engine";
 
 /**
@@ -91,16 +95,25 @@ export async function GET(
       });
     }
 
-    // Siray jobs (HunyuanImage 3.0 portraits + scenes) follow the
-    // submit-then-poll pattern; delegate to the Siray handler. Detect via
-    // the `siray-` prefix on job_id (mirrors the `runpod-` convention).
+    // Siray jobs (HunyuanImage 3.0 portraits + scenes + cards + author
+    // notes) follow the submit-then-poll pattern; delegate to the Siray
+    // handler. Detect via the `siray-` prefix on job_id (mirrors the
+    // `runpod-` convention). The handler differentiates storage paths +
+    // post-completion writes by imageType.
     if (jobId.startsWith("siray-")) {
-      const sirayJobType =
-        jobRow?.job_type === "scene_image" ? "scene" : "portrait";
+      const sirayImageType: "portrait" | "scene" | "character_card" | "author_note" =
+        jobRow?.job_type === "scene_image"
+          ? "scene"
+          : jobRow?.job_type === "character_card"
+            ? "character_card"
+            : jobRow?.job_type === "author_note"
+              ? "author_note"
+              : "portrait";
       return await handleSirayJobStatus({
         jobId,
         imageId,
-        imageType: sirayJobType,
+        imageType: sirayImageType,
+        seriesId: jobRow?.series_id ?? null,
       });
     }
 
@@ -178,6 +191,33 @@ export async function GET(
           .from("story_image_prompts")
           .update({ status: "generated" })
           .eq("id", promptResult.id);
+      }
+
+      // For Phase 2 "simple" job types, propagate the URL onto the parent
+      // table (characters.card_image_*, story_series.author_note_image_*).
+      const simpleJobType: SimpleImageJobType | null =
+        jobRow?.job_type === "character_card"
+          ? "character_card"
+          : jobRow?.job_type === "author_note"
+            ? "author_note"
+            : null;
+      if (simpleJobType) {
+        try {
+          await applySimpleImageCompletion({
+            jobType: simpleJobType,
+            imageId,
+            storedUrl: publicUrl,
+            seriesId: jobRow?.series_id ?? null,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "completion handler failed";
+          console.error(`[status] post-upload completion failed for ${jobId}:`, msg);
+          return NextResponse.json({
+            jobId,
+            completed: false,
+            error: msg,
+          });
+        }
       }
 
       const seed = settings.seed != null ? Number(settings.seed) : null;

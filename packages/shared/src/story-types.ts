@@ -34,6 +34,12 @@ export interface SeriesImport {
   description: string;
   hashtag: string;
   total_parts: number;
+  /**
+   * Optional author identifier. Resolves at import time against `authors.slug`.
+   * Absent → defaults to the platform's original author (Nontsikelelo Mabaso).
+   * An unknown slug fails the import loudly.
+   */
+  author_slug?: string;
 }
 
 export interface CharacterImport {
@@ -41,6 +47,17 @@ export interface CharacterImport {
   role: "protagonist" | "love_interest" | "supporting" | "antagonist";
   prose_description: string;
   structured: CharacterStructured;
+
+  // ── Profile-card fields (Phase 1). All optional. Drive the future
+  //    "MEET THE CAST" section + Story Publisher approval stage. ──
+  archetype_tag?: string;
+  vibe_line?: string;
+  wants?: string;
+  needs?: string;
+  defining_quote?: string;
+  watch_out_for?: string;
+  bio_short?: string;
+  card_image_prompt?: string;
 }
 
 /** Structured character data for image generation — matches existing CharacterData type */
@@ -114,11 +131,17 @@ export interface MarketingImport {
   /** Cover image prompt (Five Layers Framework, two-character intimate composition, suggestive-not-explicit). Generated via Flux 2 Dev regardless of story image_model. */
   cover_prompt?: string;
   /**
-   * Optional editorial reflection block from the "Nontsikelelo Mabaso" author persona.
+   * Optional editorial reflection block from the author persona.
    * Absent when the story is entertainment-only and did not earn notes.
    * When present, all four sub-fields are required and non-empty.
    */
   author_notes?: AuthorNotes;
+  /**
+   * Prompt for the image that accompanies the Author's Notes block on the
+   * story page. REQUIRED when `author_notes` is present (validator enforces
+   * the pairing). Image generation is Phase 2.
+   */
+  author_notes_image_prompt?: string;
 }
 
 /**
@@ -433,6 +456,11 @@ export function validateImportPayload(
     if (!s.title || typeof s.title !== "string") errors.push("series.title is required");
     if (!s.total_parts || typeof s.total_parts !== "number")
       errors.push("series.total_parts is required and must be a number");
+    if (s.author_slug !== undefined) {
+      if (typeof s.author_slug !== "string" || s.author_slug.trim().length === 0) {
+        errors.push("series.author_slug must be a non-empty string when provided");
+      }
+    }
   }
 
   // Characters validation
@@ -444,6 +472,23 @@ export function validateImportPayload(
       if (!c.name) errors.push(`characters[${i}].name is required`);
       if (!c.structured || typeof c.structured !== "object")
         errors.push(`characters[${i}].structured is required`);
+
+      // Optional profile-card fields — must be strings when present.
+      const optionalCharStringFields = [
+        "archetype_tag",
+        "vibe_line",
+        "wants",
+        "needs",
+        "defining_quote",
+        "watch_out_for",
+        "bio_short",
+        "card_image_prompt",
+      ] as const;
+      for (const field of optionalCharStringFields) {
+        if (c[field] !== undefined && c[field] !== null && typeof c[field] !== "string") {
+          errors.push(`characters[${i}].${field} must be a string when provided`);
+        }
+      }
     }
   }
 
@@ -524,6 +569,24 @@ export function validateImportPayload(
               errors.push(`marketing.author_notes contains unknown key: '${key}'`);
             }
           }
+        }
+
+        // When author_notes is present, the accompanying image prompt must
+        // also be present. Image generation is Phase 2; this guarantees the
+        // input is captured at import.
+        if (
+          m.author_notes_image_prompt === undefined ||
+          m.author_notes_image_prompt === null
+        ) {
+          errors.push(
+            "marketing.author_notes_image_prompt is required when marketing.author_notes is provided"
+          );
+        } else if (typeof m.author_notes_image_prompt !== "string") {
+          errors.push("marketing.author_notes_image_prompt must be a string");
+        } else if (m.author_notes_image_prompt.trim().length === 0) {
+          errors.push(
+            "marketing.author_notes_image_prompt must not be empty or whitespace-only"
+          );
         }
       }
     }

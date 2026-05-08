@@ -32,7 +32,7 @@ export interface ComposeCoverInput {
   baseImageBuffer: Buffer;
   /** Book title, e.g. "THE LOBOLA LIST". */
   title: string;
-  /** Author credit line. Currently always "Nontsikelelo Mabaso". */
+  /** Author credit line — resolved per-story from `authors.name`. */
   author: string;
   /**
    * Short blurb for landscape layouts (og/email). Prompt 4 integration;

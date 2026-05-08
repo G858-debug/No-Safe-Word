@@ -32,6 +32,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Resolve the default author. Stories created via this scaffold endpoint
+    // (no explicit author selection in the UI yet) belong to Nontsikelelo.
+    // story_series.author_id is NOT NULL — fail loudly if the seeded row is
+    // somehow missing rather than masking it with a partial insert.
+    const { data: defaultAuthor } = await supabase
+      .from('authors')
+      .select('id')
+      .eq('slug', 'nontsikelelo-mabaso')
+      .maybeSingle();
+
+    if (!defaultAuthor) {
+      return NextResponse.json(
+        { error: "Default author 'nontsikelelo-mabaso' not found in authors table" },
+        { status: 500 }
+      );
+    }
+
     // Create the story series
     const { data, error } = await supabase
       .from('story_series')
@@ -43,6 +60,7 @@ export async function POST(request: NextRequest) {
         hashtag: hashtag || null,
         status: 'draft',
         marketing: {},
+        author_id: defaultAuthor.id,
       })
       .select()
       .single();

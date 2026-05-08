@@ -42,6 +42,27 @@ export async function importStory(
     );
   }
 
+  // Resolve the author. An explicit `series.author_slug` must match an
+  // existing row in `authors`. Absence falls back to Nontsikelelo. Either
+  // way, an unresolvable slug throws — anonymous covers are not allowed.
+  const requestedSlug = payload.series.author_slug?.trim() || "nontsikelelo-mabaso";
+  const { data: authorRow } = await supabase
+    .from("authors")
+    .select("id")
+    .eq("slug", requestedSlug)
+    .maybeSingle();
+
+  if (!authorRow) {
+    const { data: existingAuthors } = await supabase
+      .from("authors")
+      .select("slug");
+    const slugList = (existingAuthors ?? []).map((r) => r.slug).join(", ");
+    throw new Error(
+      `Author with slug '${requestedSlug}' not found. Existing authors: [${slugList}]. Cannot import.`
+    );
+  }
+  const authorId = authorRow.id;
+
   // 1. Create or find characters — build a name→id map
   const characterMap = new Map<string, string>();
   for (const char of payload.characters) {
@@ -148,6 +169,27 @@ export async function importStory(
     };
   }
 
+  // Author-note accompanying image prompt — required when author_notes is
+  // present. Mirrors the validator rule for non-webhook callers.
+  let authorNoteImagePrompt: string | null = null;
+  if (authorNotes !== null) {
+    const raw = marketing?.author_notes_image_prompt;
+    if (raw === undefined || raw === null) {
+      throw new Error(
+        "marketing.author_notes_image_prompt is required when marketing.author_notes is provided"
+      );
+    }
+    if (typeof raw !== "string") {
+      throw new Error("marketing.author_notes_image_prompt must be a string");
+    }
+    if (raw.trim().length === 0) {
+      throw new Error(
+        "marketing.author_notes_image_prompt must not be empty or whitespace-only"
+      );
+    }
+    authorNoteImagePrompt = raw.trim();
+  }
+
   // 3. Create the story series
   const { data: series, error: seriesError } = await supabase
     .from("story_series")
@@ -164,6 +206,8 @@ export async function importStory(
       blurb_long_variants: (blurbLongVariants ?? null) as Json | null,
       cover_prompt: coverPrompt,
       author_notes: (authorNotes ?? null) as Json | null,
+      author_id: authorId,
+      author_note_image_prompt: authorNoteImagePrompt,
     })
     .select("id")
     .single();
@@ -406,10 +450,16 @@ async function finishImport(
 
 /**
  * Find an existing character by name or create a new one.
- * If the character exists, update the description to the latest.
+ * If the character exists, update the description and refresh any
+ * profile-card fields supplied in this import. Fields absent from the
+ * payload are NOT cleared on update — re-importing a story that doesn't
+ * include card data must not blank previously approved profile cards.
+ *
  * Returns the character UUID.
  */
 async function upsertCharacter(char: CharacterImport): Promise<string> {
+  const profileCardFields = buildProfileCardFields(char);
+
   // Try to find by exact name match
   const { data: existing } = await supabase
     .from("characters")
@@ -418,10 +468,12 @@ async function upsertCharacter(char: CharacterImport): Promise<string> {
     .maybeSingle();
 
   if (existing) {
-    // Update description to latest
     await supabase
       .from("characters")
-      .update({ description: char.structured as unknown as Json })
+      .update({
+        description: char.structured as unknown as Json,
+        ...profileCardFields,
+      })
       .eq("id", existing.id);
 
     return existing.id;
@@ -433,6 +485,7 @@ async function upsertCharacter(char: CharacterImport): Promise<string> {
     .insert({
       name: char.name,
       description: char.structured as unknown as Json,
+      ...profileCardFields,
     })
     .select("id")
     .single();
@@ -444,4 +497,22 @@ async function upsertCharacter(char: CharacterImport): Promise<string> {
   }
 
   return created.id;
+}
+
+/**
+ * Pick profile-card fields from a CharacterImport, dropping any keys whose
+ * values are undefined so the update path doesn't overwrite stored data
+ * with nulls.
+ */
+function buildProfileCardFields(char: CharacterImport): Record<string, string> {
+  const fields: Record<string, string> = {};
+  if (char.archetype_tag !== undefined) fields.archetype_tag = char.archetype_tag;
+  if (char.vibe_line !== undefined) fields.vibe_line = char.vibe_line;
+  if (char.wants !== undefined) fields.wants = char.wants;
+  if (char.needs !== undefined) fields.needs = char.needs;
+  if (char.defining_quote !== undefined) fields.defining_quote = char.defining_quote;
+  if (char.watch_out_for !== undefined) fields.watch_out_for = char.watch_out_for;
+  if (char.bio_short !== undefined) fields.bio_short = char.bio_short;
+  if (char.card_image_prompt !== undefined) fields.card_image_prompt = char.card_image_prompt;
+  return fields;
 }

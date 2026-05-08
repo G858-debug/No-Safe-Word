@@ -34,6 +34,22 @@ export interface CharacterFromAPI {
   // or no approved image.
   face_image_dimensions: PortraitDimensions | null;
   body_image_dimensions: PortraitDimensions | null;
+
+  // Phase 3a — Stage 9 character profile card fields. Optional for
+  // backwards compatibility with anything that builds a CharacterFromAPI
+  // outside the API endpoint; the endpoint always populates them.
+  archetype_tag?: string | null;
+  vibe_line?: string | null;
+  wants?: string | null;
+  needs?: string | null;
+  defining_quote?: string | null;
+  watch_out_for?: string | null;
+  bio_short?: string | null;
+  card_image_id?: string | null;
+  card_image_url?: string | null;
+  card_image_prompt?: string | null;
+  card_approved_at?: string | null;
+  card_approved?: boolean;
 }
 
 interface Props {
