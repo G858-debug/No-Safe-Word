@@ -386,40 +386,55 @@ export type Database = {
       }
       images: {
         Row: {
+          actual_height: number | null
+          actual_width: number | null
           character_id: string | null
           created_at: string
           critique: string | null
+          dimension_fallback_reason: string | null
           id: string
           mode: string
           negative_prompt: string
           nsfw_url: string | null
           prompt: string
+          requested_height: number | null
+          requested_width: number | null
           settings: Json
           sfw_url: string | null
           stored_url: string | null
         }
         Insert: {
+          actual_height?: number | null
+          actual_width?: number | null
           character_id?: string | null
           created_at?: string
           critique?: string | null
+          dimension_fallback_reason?: string | null
           id?: string
           mode?: string
           negative_prompt?: string
           nsfw_url?: string | null
           prompt: string
+          requested_height?: number | null
+          requested_width?: number | null
           settings?: Json
           sfw_url?: string | null
           stored_url?: string | null
         }
         Update: {
+          actual_height?: number | null
+          actual_width?: number | null
           character_id?: string | null
           created_at?: string
           critique?: string | null
+          dimension_fallback_reason?: string | null
           id?: string
           mode?: string
           negative_prompt?: string
           nsfw_url?: string | null
           prompt?: string
+          requested_height?: number | null
+          requested_width?: number | null
           settings?: Json
           sfw_url?: string | null
           stored_url?: string | null
@@ -847,10 +862,12 @@ export type Database = {
           position_after_word: number | null
           post_id: string
           previous_image_id: string | null
+          primary_ref_type: string
           prompt: string
           secondary_character_block_override: string | null
           secondary_character_id: string | null
           secondary_character_name: string | null
+          secondary_ref_type: string | null
           sfw_constraint_override: string | null
           sfw_image_id: string | null
           status: string
@@ -878,10 +895,12 @@ export type Database = {
           position_after_word?: number | null
           post_id: string
           previous_image_id?: string | null
+          primary_ref_type?: string
           prompt: string
           secondary_character_block_override?: string | null
           secondary_character_id?: string | null
           secondary_character_name?: string | null
+          secondary_ref_type?: string | null
           sfw_constraint_override?: string | null
           sfw_image_id?: string | null
           status?: string
@@ -909,10 +928,12 @@ export type Database = {
           position_after_word?: number | null
           post_id?: string
           previous_image_id?: string | null
+          primary_ref_type?: string
           prompt?: string
           secondary_character_block_override?: string | null
           secondary_character_id?: string | null
           secondary_character_name?: string | null
+          secondary_ref_type?: string | null
           sfw_constraint_override?: string | null
           sfw_image_id?: string | null
           status?: string
@@ -1067,8 +1088,10 @@ export type Database = {
           cover_post_published_at: string | null
           cover_post_scheduled_for: string | null
           cover_post_status: string | null
+          cover_primary_ref_type: string
           cover_prompt: string | null
           cover_secondary_character_id: string | null
+          cover_secondary_ref_type: string | null
           cover_selected_variant: number | null
           cover_sizes: Json | null
           cover_status: string
@@ -1103,8 +1126,10 @@ export type Database = {
           cover_post_published_at?: string | null
           cover_post_scheduled_for?: string | null
           cover_post_status?: string | null
+          cover_primary_ref_type?: string
           cover_prompt?: string | null
           cover_secondary_character_id?: string | null
+          cover_secondary_ref_type?: string | null
           cover_selected_variant?: number | null
           cover_sizes?: Json | null
           cover_status?: string
@@ -1139,8 +1164,10 @@ export type Database = {
           cover_post_published_at?: string | null
           cover_post_scheduled_for?: string | null
           cover_post_status?: string | null
+          cover_primary_ref_type?: string
           cover_prompt?: string | null
           cover_secondary_character_id?: string | null
+          cover_secondary_ref_type?: string | null
           cover_selected_variant?: number | null
           cover_sizes?: Json | null
           cover_status?: string

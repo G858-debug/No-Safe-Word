@@ -5,6 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CharacterCard } from "./CharacterCard";
 
+export interface PortraitDimensions {
+  requested_width: number | null;
+  requested_height: number | null;
+  actual_width: number | null;
+  actual_height: number | null;
+  fallback_reason: string | null;
+}
+
 export interface CharacterFromAPI {
   id: string;
   character_id: string | null;
@@ -20,6 +28,12 @@ export interface CharacterFromAPI {
   approved_seed: number | null;
   approved_prompt: string | null;
   portrait_prompt_locked: string | null;
+  // Visible-fallback metadata for the approved face/body images.
+  // Populated when Siray rejected the higher-resolution request and
+  // we retried at the documented cap. Null = pre-instrumentation row
+  // or no approved image.
+  face_image_dimensions: PortraitDimensions | null;
+  body_image_dimensions: PortraitDimensions | null;
 }
 
 interface Props {

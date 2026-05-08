@@ -32,6 +32,8 @@ interface CoverState {
   } | null;
   cover_error: string | null;
   cover_secondary_character_id: string | null;
+  cover_primary_ref_type: "face" | "body";
+  cover_secondary_ref_type: "face" | "body" | null;
   // Used by the polling-side recompose trigger to wait ~30s after
   // approval before firing a recompose-cover POST. Comes from
   // story_series.updated_at via the GET /api/stories/[seriesId] select("*").
@@ -562,6 +564,36 @@ export default function CoverApproval({ seriesId }: Props) {
     }
   }
 
+  // Persist a cover ref-type dropdown change. Both dropdowns hit the same
+  // endpoint; the body fields are sparse so we only PATCH the one that
+  // changed. Locked while the cover is generating/approved/complete.
+  async function handleCoverRefTypeChange(
+    field: "primary_ref_type" | "secondary_ref_type",
+    value: "face" | "body"
+  ) {
+    setSavingCharacter(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/${seriesId}/cover-ref-type`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to update reference type");
+        return;
+      }
+      await fetchCover();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to update reference type"
+      );
+    } finally {
+      setSavingCharacter(false);
+    }
+  }
+
   // Save the secondary cover-character override. `value === ""` means
   // clear the override and fall back to the love_interest role.
   async function handleSecondaryCharacterChange(value: string) {
@@ -716,6 +748,71 @@ export default function CoverApproval({ seriesId }: Props) {
               />
             </div>
           )}
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-muted-foreground">
+              Reference portraits used for cover generation
+            </label>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Protagonist:</span>
+                <Select
+                  value={state.cover_primary_ref_type}
+                  onValueChange={(v) =>
+                    handleCoverRefTypeChange("primary_ref_type", v as "face" | "body")
+                  }
+                  disabled={
+                    savingCharacter ||
+                    busy ||
+                    regeneratingPrompt ||
+                    isGenerating ||
+                    isCompositing ||
+                    state.cover_status === "approved" ||
+                    state.cover_status === "complete"
+                  }
+                >
+                  <SelectTrigger className="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="body">Body</SelectItem>
+                    <SelectItem value="face">Face</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Love interest:</span>
+                <Select
+                  value={state.cover_secondary_ref_type ?? "body"}
+                  onValueChange={(v) =>
+                    handleCoverRefTypeChange("secondary_ref_type", v as "face" | "body")
+                  }
+                  disabled={
+                    savingCharacter ||
+                    busy ||
+                    regeneratingPrompt ||
+                    isGenerating ||
+                    isCompositing ||
+                    state.cover_status === "approved" ||
+                    state.cover_status === "complete"
+                  }
+                >
+                  <SelectTrigger className="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="body">Body</SelectItem>
+                    <SelectItem value="face">Face</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Pick which approved portrait is used as the reference image for
+              each character on the cover. Default is body. Changing this after
+              variants exist requires regenerating to take effect.
+            </p>
+          </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium text-muted-foreground">

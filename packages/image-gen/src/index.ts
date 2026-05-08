@@ -108,12 +108,14 @@ export type {
 export {
   generateSirayImage,
   submitSirayImage,
+  submitSirayPortraitWithFallback,
   generateCharacterPortrait,
   generateSceneImage,
 } from './siray-generator';
 export type {
   GenerateSirayImageParams,
   SubmitSirayImageResult,
+  SubmitSirayPortraitResult,
 } from './siray-generator';
 
 // Generated image critic (Pixtral 12B)

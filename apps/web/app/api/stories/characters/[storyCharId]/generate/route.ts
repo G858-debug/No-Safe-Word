@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  submitSirayImage,
+  submitSirayPortraitWithFallback,
   generateFlux2Image,
   buildCharacterPortraitPrompt,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
+
+// Portrait resolution targets per pipeline. The fallback only fires for
+// HunyuanImage when Siray rejects the higher size at submit time.
+const HUNYUAN_FACE_SIZE = "1536x1536";
+const HUNYUAN_FACE_FALLBACK = "1280x1280";
+const FLUX_FACE_WIDTH = 2048;
+const FLUX_FACE_HEIGHT = 2048;
 
 // POST /api/stories/characters/[storyCharId]/generate — Generate a character portrait.
 export async function POST(
@@ -94,13 +101,19 @@ export async function POST(
         customPrompt ??
         buildCharacterPortraitPrompt(desc as PortraitCharacterDescription, "face");
 
-      // Submit to Siray (plain t2i — no reference image); returns immediately
-      // with a task_id.
-      const submitted = await submitSirayImage({
+      // Submit to Siray. Attempts 1536x1536 first; if Siray rejects the
+      // size at submit time, retries at 1280x1280 and surfaces the fallback
+      // visibly via dimension_fallback_reason on the images row.
+      const submitted = await submitSirayPortraitWithFallback({
         prompt: promptText,
-        aspectRatio: "4:5",
+        aspectRatio: "1:1",
+        size: HUNYUAN_FACE_SIZE,
+        fallbackSize: HUNYUAN_FACE_FALLBACK,
         referenceImageUrls: [],
       });
+
+      const [requestedW, requestedH] = parseSize(submitted.requestedSize);
+      const [actualW, actualH] = parseSize(submitted.actualSize);
 
       // Insert the images row up-front (stored_url filled in later by the
       // status handler when the job completes).
@@ -114,12 +127,17 @@ export async function POST(
             provider: "siray",
             siray_model: submitted.model,
             siray_task_id: submitted.taskId,
-            aspect_ratio: "4:5",
-            size: submitted.size,
+            aspect_ratio: "1:1",
+            size: submitted.actualSize,
             reference_image_count: submitted.referenceImageCount,
             imageType: "face",
           },
           mode: "sfw",
+          requested_width: requestedW,
+          requested_height: requestedH,
+          actual_width: actualW,
+          actual_height: actualH,
+          dimension_fallback_reason: submitted.fallbackReason,
         })
         .select("id")
         .single();
@@ -160,9 +178,9 @@ export async function POST(
       const flux2Result = await generateFlux2Image({
         scenePrompt: promptText,
         references: [],
-        // Portraits are always 3:4 (768×1024) per the standard portrait framing.
-        width: 768,
-        height: 1024,
+        // Face portrait at the 4MP cap, 1:1.
+        width: FLUX_FACE_WIDTH,
+        height: FLUX_FACE_HEIGHT,
         filenamePrefix: "flux2_portrait",
       });
 
@@ -175,11 +193,16 @@ export async function POST(
             model: "flux2_dev",
             provider: "runpod",
             seed: flux2Result.seed,
-            width: 768,
-            height: 1024,
+            width: FLUX_FACE_WIDTH,
+            height: FLUX_FACE_HEIGHT,
             imageType: "face",
           },
           mode: "sfw",
+          requested_width: FLUX_FACE_WIDTH,
+          requested_height: FLUX_FACE_HEIGHT,
+          actual_width: FLUX_FACE_WIDTH,
+          actual_height: FLUX_FACE_HEIGHT,
+          dimension_fallback_reason: null,
         })
         .select("id")
         .single();
@@ -217,4 +240,12 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+function parseSize(size: string): [number, number] {
+  const [w, h] = size.split("x").map((s) => Number(s));
+  if (!Number.isFinite(w) || !Number.isFinite(h)) {
+    throw new Error(`[generate-portrait] could not parse size string '${size}'`);
+  }
+  return [w, h];
 }

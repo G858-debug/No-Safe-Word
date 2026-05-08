@@ -77,7 +77,7 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, character_id, secondary_character_id, image_type, final_prompt, pose_template_id"
+      "id, character_id, secondary_character_id, image_type, final_prompt, pose_template_id, primary_ref_type, secondary_ref_type"
     )
     .eq("id", promptId)
     .single();
@@ -112,9 +112,13 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
     // 5. Resolve i2i reference image URLs from the linked characters' approved
     //    portraits. Identity flows through these references; the text prompt
     //    that Mistral wrote intentionally avoids re-describing faces/skin/hair.
+    //    The ref_type columns pick face vs body per character.
+    const primaryRefType = (prompt.primary_ref_type as "face" | "body") ?? "body";
+    const secondaryRefType =
+      (prompt.secondary_ref_type as "face" | "body" | null) ?? "body";
     const referenceImageUrls = await getPortraitUrlsForScene([
-      prompt.character_id,
-      prompt.secondary_character_id,
+      { characterId: prompt.character_id, refType: primaryRefType },
+      { characterId: prompt.secondary_character_id, refType: secondaryRefType },
     ]);
 
     // 5b. If a pose template is attached AND the template explicitly opts
@@ -164,6 +168,10 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
           aspect_ratio: aspectRatio,
           size: submitted.size,
           reference_image_count: submitted.referenceImageCount,
+          primary_ref_type: prompt.character_id ? primaryRefType : null,
+          secondary_ref_type: prompt.secondary_character_id
+            ? secondaryRefType
+            : null,
         },
         mode: deriveMode(prompt.image_type),
       })
@@ -252,7 +260,7 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, primary_ref_type, secondary_ref_type"
     )
     .eq("id", promptId)
     .single();
@@ -269,29 +277,38 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
 
   try {
     // 3. Resolve approved portrait URLs for each linked character from the
-    //    base `characters` table. Flux 2 uses these as reference images
-    //    (character identity anchor); the approval is canonical per identity.
+    //    base `characters` table. Flux 2 uses these as PuLID reference images.
+    //    The ref_type columns choose face vs body portrait per character:
+    //      - face → characters.approved_image_id
+    //      - body → characters.approved_fullbody_image_id
+    const primaryRefType = (prompt.primary_ref_type as "face" | "body") ?? "body";
+    const secondaryRefType =
+      (prompt.secondary_ref_type as "face" | "body" | null) ?? "body";
+
     const charIds = [
       prompt.character_id,
       prompt.secondary_character_id,
     ].filter((id): id is string => Boolean(id));
 
-    const portraitUrls: Record<string, string> = {};
+    const facePortraitUrls: Record<string, string> = {};
+    const bodyPortraitUrls: Record<string, string> = {};
     if (charIds.length > 0) {
       const { data: chars } = await supabase
         .from("characters")
-        .select("id, approved_image_id")
+        .select("id, approved_image_id, approved_fullbody_image_id")
         .in("id", charIds);
 
-      const approvedIds = (chars ?? [])
-        .map((c) => c.approved_image_id)
-        .filter((id): id is string => Boolean(id));
+      const allImageIds = (chars ?? []).flatMap((c) =>
+        [c.approved_image_id, c.approved_fullbody_image_id].filter(
+          (id): id is string => Boolean(id)
+        )
+      );
 
-      if (approvedIds.length > 0) {
+      if (allImageIds.length > 0) {
         const { data: approvedImages } = await supabase
           .from("images")
           .select("id, stored_url, sfw_url")
-          .in("id", approvedIds);
+          .in("id", allImageIds);
 
         const urlById = new Map<string, string>();
         for (const img of approvedImages ?? []) {
@@ -300,29 +317,38 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
         }
 
         for (const c of chars ?? []) {
-          const url = c.approved_image_id
+          const faceUrl = c.approved_image_id
             ? urlById.get(c.approved_image_id)
             : undefined;
-          if (url) portraitUrls[c.id] = url;
+          const bodyUrl = c.approved_fullbody_image_id
+            ? urlById.get(c.approved_fullbody_image_id)
+            : undefined;
+          if (faceUrl) facePortraitUrls[c.id] = faceUrl;
+          if (bodyUrl) bodyPortraitUrls[c.id] = bodyUrl;
         }
       }
     }
 
+    const pickUrl = (charId: string, refType: "face" | "body") =>
+      refType === "body"
+        ? bodyPortraitUrls[charId]
+        : facePortraitUrls[charId];
+
     const primaryUrl = prompt.character_id
-      ? portraitUrls[prompt.character_id]
+      ? pickUrl(prompt.character_id, primaryRefType)
       : undefined;
     const secondaryUrl = prompt.secondary_character_id
-      ? portraitUrls[prompt.secondary_character_id]
+      ? pickUrl(prompt.secondary_character_id, secondaryRefType)
       : undefined;
 
     if (prompt.character_id && !primaryUrl) {
       throw new Error(
-        `Character "${prompt.character_name ?? prompt.character_id}" has no approved portrait yet — approve the portrait before generating scenes under flux2_dev.`
+        `Character "${prompt.character_name ?? prompt.character_id}" has no approved ${primaryRefType} portrait yet — approve the ${primaryRefType} portrait before generating scenes under flux2_dev.`
       );
     }
     if (prompt.secondary_character_id && !secondaryUrl) {
       throw new Error(
-        `Secondary character "${prompt.secondary_character_name ?? prompt.secondary_character_id}" has no approved portrait yet.`
+        `Secondary character "${prompt.secondary_character_name ?? prompt.secondary_character_id}" has no approved ${secondaryRefType} portrait yet.`
       );
     }
 
@@ -376,6 +402,10 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
           seed: result.seed,
           width,
           height,
+          primary_ref_type: prompt.character_id ? primaryRefType : null,
+          secondary_ref_type: prompt.secondary_character_id
+            ? secondaryRefType
+            : null,
         },
         mode: deriveMode(prompt.image_type),
       })

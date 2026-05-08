@@ -1508,21 +1508,56 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
     url,
     greyed,
     label,
+    dimensions,
   }: {
     url: string;
     greyed?: boolean;
     label?: string;
-  }) => (
-    <div className="flex flex-col gap-1">
-      <img
-        src={url}
-        alt={label ?? `${name}`}
-        className={greyed ? GREYED_THUMB : FULL_THUMB}
-        onClick={() => setLightboxUrl(url)}
-      />
-      {label && <p className="text-[11px] text-muted-foreground">{label}</p>}
-    </div>
-  );
+    dimensions?: {
+      requested_width: number | null;
+      requested_height: number | null;
+      actual_width: number | null;
+      actual_height: number | null;
+      fallback_reason: string | null;
+    } | null;
+  }) => {
+    const fellBack =
+      dimensions?.actual_width != null &&
+      dimensions?.requested_width != null &&
+      dimensions.actual_width !== dimensions.requested_width;
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="relative">
+          <img
+            src={url}
+            alt={label ?? `${name}`}
+            className={greyed ? GREYED_THUMB : FULL_THUMB}
+            onClick={() => setLightboxUrl(url)}
+          />
+          {fellBack && (
+            <div
+              className="absolute bottom-1 right-1 max-w-[90%] truncate rounded bg-amber-500/95 px-1.5 py-0.5 text-[10px] font-medium text-black shadow"
+              title={
+                dimensions?.fallback_reason
+                  ? `Siray rejected ${dimensions.requested_width}×${dimensions.requested_height} — fell back to ${dimensions.actual_width}×${dimensions.actual_height}.\n\nUpstream: ${dimensions.fallback_reason}`
+                  : `Generated at ${dimensions?.actual_width}×${dimensions?.actual_height} (requested ${dimensions?.requested_width}×${dimensions?.requested_height})`
+              }
+            >
+              {dimensions?.actual_width}×{dimensions?.actual_height} (Siray rejected{" "}
+              {dimensions?.requested_width}×{dimensions?.requested_height})
+            </div>
+          )}
+        </div>
+        {label && <p className="text-[11px] text-muted-foreground">{label}</p>}
+      </div>
+    );
+  };
+
+  // Dimensions for the APPROVED face/body images, used to surface the
+  // visible-fallback badge on Hunyuan stories where Siray rejected the
+  // requested portrait size and we retried at the documented cap.
+  const approvedFaceDims = character.face_image_dimensions;
+  const approvedBodyDims = character.body_image_dimensions;
 
   const renderStateBody = (s: CardState, disabled = false) => {
     switch (s.kind) {
@@ -1655,8 +1690,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         return (
           <div className="space-y-3">
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} label="Face" />
-              <Thumb url={s.approvedBodyUrl} label="Body" />
+              <Thumb url={s.approvedFaceUrl} label="Face" dimensions={approvedFaceDims} />
+              <Thumb url={s.approvedBodyUrl} label="Body" dimensions={approvedBodyDims} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1690,8 +1725,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         return (
           <div className="space-y-2">
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" />
-              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" />
+              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" dimensions={approvedFaceDims} />
+              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" dimensions={approvedBodyDims} />
             </div>
             <SpinnerSlot label="Generating new face…" />
           </div>
@@ -1701,8 +1736,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         return (
           <div className="space-y-2">
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" />
-              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" />
+              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" dimensions={approvedFaceDims} />
+              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" dimensions={approvedBodyDims} />
             </div>
             <div className="flex gap-3">
               <Thumb url={s.candidateFaceUrl} label="New face" />
@@ -1715,11 +1750,11 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         return (
           <div className="space-y-2">
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} label="Approved face" />
-              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" />
+              <Thumb url={s.approvedFaceUrl} label="Approved face" dimensions={approvedFaceDims} />
+              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" dimensions={approvedBodyDims} />
             </div>
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} label="Face (unchanged)" />
+              <Thumb url={s.approvedFaceUrl} label="Face (unchanged)" dimensions={approvedFaceDims} />
               <SpinnerSlot label="Generating new body…" />
             </div>
           </div>
@@ -1734,8 +1769,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         return (
           <div className="space-y-2">
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" />
-              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" />
+              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" dimensions={approvedFaceDims} />
+              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" dimensions={approvedBodyDims} />
             </div>
             <p className="text-xs text-muted-foreground italic">
               Candidate generated {formatTimestamp(s.candidateGeneratedAt)}
@@ -1748,7 +1783,7 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
                 </>
               ) : (
                 <>
-                  <Thumb url={s.approvedFaceUrl} label="Face (unchanged)" />
+                  <Thumb url={s.approvedFaceUrl} label="Face (unchanged)" dimensions={approvedFaceDims} />
                   <Thumb url={s.candidateBodyUrl} label="Candidate body" />
                 </>
               )}
@@ -1779,8 +1814,8 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         return (
           <div className="space-y-2">
             <div className="flex gap-3">
-              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" />
-              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" />
+              <Thumb url={s.approvedFaceUrl} greyed label="Approved face" dimensions={approvedFaceDims} />
+              <Thumb url={s.approvedBodyUrl} greyed label="Approved body" dimensions={approvedBodyDims} />
             </div>
             <Spinner label="Resetting…" />
           </div>

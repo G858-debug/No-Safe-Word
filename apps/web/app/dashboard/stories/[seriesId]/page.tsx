@@ -97,6 +97,8 @@ interface SeriesData {
       pose_template_id: string | null;
       is_chapter_hero: boolean;
       excluded_from_publish: boolean;
+      primary_ref_type: "face" | "body";
+      secondary_ref_type: "face" | "body" | null;
     }[];
   })[];
   characters: CharacterFromAPI[];

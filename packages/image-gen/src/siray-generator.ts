@@ -35,6 +35,13 @@ const ASPECT_RATIO_TO_SIZE: Record<string, string> = {
 export interface GenerateSirayImageParams {
   prompt: string;
   aspectRatio: string;
+  /**
+   * Optional explicit Siray `size` string ("WIDTHxHEIGHT") that overrides
+   * the aspectRatio→size lookup. Used by portrait generation to request
+   * higher-resolution outputs (1536x1536 / 1024x1536) than the default
+   * 1-MP scene sizes.
+   */
+  size?: string;
   /** Empty/undefined → t2i. One or more URLs → i2i. */
   referenceImageUrls?: string[];
   seed?: number;
@@ -66,7 +73,7 @@ function buildSirayPayload(params: GenerateSirayImageParams): {
     throw new Error("[siray] prompt is empty");
   }
 
-  const size = mapAspectRatioToSize(params.aspectRatio);
+  const size = params.size ?? mapAspectRatioToSize(params.aspectRatio);
   const useI2I =
     Array.isArray(params.referenceImageUrls) && params.referenceImageUrls.length > 0;
 
@@ -176,4 +183,89 @@ export async function generateSceneImage(
 function mapAspectRatioToSize(aspectRatio: string | undefined): string {
   if (!aspectRatio) return FALLBACK_SIZE;
   return ASPECT_RATIO_TO_SIZE[aspectRatio] ?? FALLBACK_SIZE;
+}
+
+/**
+ * Result of a portrait submission, including visible-fallback metadata.
+ *
+ * If Siray rejected the requested size and we retried at the fallback,
+ * `actualSize` will differ from `requestedSize` and `fallbackReason`
+ * will carry Siray's submit-time error message. Otherwise `actualSize`
+ * equals `requestedSize` and `fallbackReason` is null.
+ */
+export interface SubmitSirayPortraitResult extends SubmitSirayImageResult {
+  requestedSize: string;
+  actualSize: string;
+  fallbackReason: string | null;
+}
+
+const SIZE_REJECTION_HINTS = [
+  "size",
+  "dimension",
+  "width",
+  "height",
+  "resolution",
+  "pixel",
+];
+
+function looksLikeSizeRejection(message: string): boolean {
+  const lower = message.toLowerCase();
+  return SIZE_REJECTION_HINTS.some((h) => lower.includes(h));
+}
+
+/**
+ * Portrait-specific submit with VISIBLE fallback.
+ *
+ * Attempt `requestedSize` first. If Siray rejects it at submit time with a
+ * size-shaped error, log a WARN with the full upstream message and retry
+ * once at `fallbackSize`. The result captures both the requested and the
+ * actual size used, plus the rejection reason — the caller persists those
+ * on the `images` row so the dashboard can surface a fallback badge.
+ *
+ * Never silently narrows. If the fallback also fails, throws the second
+ * error so the user sees that the portrait did not generate.
+ */
+export async function submitSirayPortraitWithFallback(
+  params: GenerateSirayImageParams & { fallbackSize: string }
+): Promise<SubmitSirayPortraitResult> {
+  const requestedSize =
+    params.size ?? mapAspectRatioToSize(params.aspectRatio);
+  const fallbackSize = params.fallbackSize;
+
+  try {
+    const submitted = await submitSirayImage({
+      ...params,
+      size: requestedSize,
+    });
+    return {
+      ...submitted,
+      requestedSize,
+      actualSize: submitted.size,
+      fallbackReason: null,
+    };
+  } catch (err) {
+    const firstMessage = err instanceof Error ? err.message : String(err);
+    if (
+      requestedSize === fallbackSize ||
+      !looksLikeSizeRejection(firstMessage)
+    ) {
+      throw err;
+    }
+
+    console.warn(
+      `[siray] portrait submission rejected at ${requestedSize}; ` +
+        `retrying at fallback ${fallbackSize}. Upstream: ${firstMessage}`
+    );
+
+    const submitted = await submitSirayImage({
+      ...params,
+      size: fallbackSize,
+    });
+    return {
+      ...submitted,
+      requestedSize,
+      actualSize: submitted.size,
+      fallbackReason: firstMessage,
+    };
+  }
 }

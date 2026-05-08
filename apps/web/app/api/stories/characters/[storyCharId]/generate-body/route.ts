@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@no-safe-word/story-engine";
 import {
-  submitSirayImage,
+  submitSirayPortraitWithFallback,
   generateFlux2Image,
   imageUrlToBase64,
   buildCharacterPortraitPrompt,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
+
+// Body portrait targets per pipeline (2:3 framing).
+const HUNYUAN_BODY_SIZE = "1024x1536";
+const HUNYUAN_BODY_FALLBACK = "1024x1280";
+const FLUX_BODY_WIDTH = 1664;
+const FLUX_BODY_HEIGHT = 2496;
 
 // POST /api/stories/characters/[storyCharId]/generate-body
 //
@@ -113,11 +119,18 @@ export async function POST(
 
     if (imageModel === "hunyuan3") {
       // Siray i2i — auto-selected when referenceImageUrls is non-empty.
-      const submitted = await submitSirayImage({
+      // Attempts 1024x1536 first; falls back to 1024x1280 (visibly) on
+      // size rejection.
+      const submitted = await submitSirayPortraitWithFallback({
         prompt: promptText,
-        aspectRatio: "4:5",
+        aspectRatio: "2:3",
+        size: HUNYUAN_BODY_SIZE,
+        fallbackSize: HUNYUAN_BODY_FALLBACK,
         referenceImageUrls: [faceImage.stored_url],
       });
+
+      const [requestedW, requestedH] = parseSize(submitted.requestedSize);
+      const [actualW, actualH] = parseSize(submitted.actualSize);
 
       const { data: imageRow, error: imgErr } = await supabase
         .from("images")
@@ -129,13 +142,18 @@ export async function POST(
             provider: "siray",
             siray_model: submitted.model,
             siray_task_id: submitted.taskId,
-            aspect_ratio: "4:5",
-            size: submitted.size,
+            aspect_ratio: "2:3",
+            size: submitted.actualSize,
             reference_image_count: submitted.referenceImageCount,
             imageType: "body",
             face_image_id: faceImageId,
           },
           mode: "sfw",
+          requested_width: requestedW,
+          requested_height: requestedH,
+          actual_width: actualW,
+          actual_height: actualH,
+          dimension_fallback_reason: submitted.fallbackReason,
         })
         .select("id")
         .single();
@@ -173,8 +191,9 @@ export async function POST(
             base64: refBase64,
           },
         ],
-        width: 768,
-        height: 1024,
+        // Body portrait at the 4MP cap, 2:3.
+        width: FLUX_BODY_WIDTH,
+        height: FLUX_BODY_HEIGHT,
         filenamePrefix: "flux2_body",
       });
 
@@ -187,12 +206,17 @@ export async function POST(
             model: "flux2_dev",
             provider: "runpod",
             seed: flux2Result.seed,
-            width: 768,
-            height: 1024,
+            width: FLUX_BODY_WIDTH,
+            height: FLUX_BODY_HEIGHT,
             imageType: "body",
             face_image_id: faceImageId,
           },
           mode: "sfw",
+          requested_width: FLUX_BODY_WIDTH,
+          requested_height: FLUX_BODY_HEIGHT,
+          actual_width: FLUX_BODY_WIDTH,
+          actual_height: FLUX_BODY_HEIGHT,
+          dimension_fallback_reason: null,
         })
         .select("id")
         .single();
@@ -229,4 +253,12 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+function parseSize(size: string): [number, number] {
+  const [w, h] = size.split("x").map((s) => Number(s));
+  if (!Number.isFinite(w) || !Number.isFinite(h)) {
+    throw new Error(`[generate-body] could not parse size string '${size}'`);
+  }
+  return [w, h];
 }

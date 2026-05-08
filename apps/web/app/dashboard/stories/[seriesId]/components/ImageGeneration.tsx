@@ -77,6 +77,10 @@ export interface ImagePromptData {
   final_prompt_drafted_at: string | null;
   pose_template_id: string | null;
   is_chapter_hero: boolean;
+  // Per-character reference selector — picks face vs body portrait when
+  // resolving the reference image for the next generation.
+  primary_ref_type: "face" | "body";
+  secondary_ref_type: "face" | "body" | null;
 }
 
 export interface PostWithPrompts {
@@ -148,6 +152,13 @@ interface PromptState {
   // ── Pose template ──────────────────────────────────────────────────
   poseTemplateId: string | null;
   savedPoseTemplateId: string | null;
+  // ── Reference type per character (face vs body) ────────────────────
+  // Local UI state for the dropdowns. Persisted to the prompt row when
+  // the user clicks Regenerate (or via PATCH on Save).
+  primaryRefType: "face" | "body";
+  savedPrimaryRefType: "face" | "body";
+  secondaryRefType: "face" | "body" | null;
+  savedSecondaryRefType: "face" | "body" | null;
 }
 
 export interface PoseTemplate {
@@ -350,6 +361,10 @@ export default function ImageGeneration({
           draftError: null,
           poseTemplateId: ip.pose_template_id ?? null,
           savedPoseTemplateId: ip.pose_template_id ?? null,
+          primaryRefType: (ip.primary_ref_type ?? "body") as "face" | "body",
+          savedPrimaryRefType: (ip.primary_ref_type ?? "body") as "face" | "body",
+          secondaryRefType: ip.secondary_ref_type ?? null,
+          savedSecondaryRefType: ip.secondary_ref_type ?? null,
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -747,6 +762,44 @@ export default function ImageGeneration({
             return;
           }
           updatePrompt(promptId, { savedFinalPromptText: state.finalPromptText });
+        }
+
+        // ── Ref-type PATCH ──────────────────────────────────────────────
+        // The dropdown values are local UI state until the user clicks
+        // Regenerate. Persist them now so the dispatcher reads the
+        // current selection, and so the values survive a page reload.
+        if (
+          state &&
+          (state.primaryRefType !== state.savedPrimaryRefType ||
+            state.secondaryRefType !== state.savedSecondaryRefType)
+        ) {
+          const refBody: Record<string, "face" | "body" | null> = {};
+          if (state.primaryRefType !== state.savedPrimaryRefType) {
+            refBody.primary_ref_type = state.primaryRefType;
+          }
+          if (state.secondaryRefType !== state.savedSecondaryRefType) {
+            refBody.secondary_ref_type = state.secondaryRefType;
+          }
+          const patchRes = await fetch(
+            `/api/stories/images/${promptId}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(refBody),
+            }
+          );
+          if (!patchRes.ok) {
+            const patchErr = await patchRes.json().catch(() => ({}));
+            updatePrompt(promptId, {
+              status: "failed",
+              error: patchErr?.error ?? "Failed to save reference type",
+            });
+            return;
+          }
+          updatePrompt(promptId, {
+            savedPrimaryRefType: state.primaryRefType,
+            savedSecondaryRefType: state.secondaryRefType,
+          });
         }
 
         const res = await fetch(
@@ -2045,6 +2098,71 @@ function ImageDetailModal({
                   freely — the inputs below are read-only context that Mistral consumed.
                 </p>
               </div>
+
+              {/* PER-CHARACTER REFERENCE TYPE dropdowns — pick face vs body
+                   portrait for the next regen. Local state until the user
+                   clicks Regenerate (then PATCHed alongside dispatch). */}
+              {ip.character_id && (
+                <div className="rounded border border-border/50 bg-muted/10 px-3 py-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2">
+                    Reference portraits (used on next regen)
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {ip.character_name ?? "Primary"}:
+                      </span>
+                      <Select
+                        value={state.primaryRefType}
+                        onValueChange={(v) =>
+                          onUpdatePrompt(ip.id, {
+                            primaryRefType: v as "face" | "body",
+                          })
+                        }
+                        disabled={isGenerating || isApproved || state.savingPrompt}
+                      >
+                        <SelectTrigger className="h-7 w-24 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="body">Body</SelectItem>
+                          <SelectItem value="face">Face</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {ip.secondary_character_id && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {ip.secondary_character_name ?? "Secondary"}:
+                        </span>
+                        <Select
+                          value={state.secondaryRefType ?? "body"}
+                          onValueChange={(v) =>
+                            onUpdatePrompt(ip.id, {
+                              secondaryRefType: v as "face" | "body",
+                            })
+                          }
+                          disabled={isGenerating || isApproved || state.savingPrompt}
+                        >
+                          <SelectTrigger className="h-7 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="body">Body</SelectItem>
+                            <SelectItem value="face">Face</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {(state.primaryRefType !== state.savedPrimaryRefType ||
+                      state.secondaryRefType !== state.savedSecondaryRefType) && (
+                      <span className="text-[10px] text-amber-300/80 self-center">
+                        Click Regenerate to apply
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* POSE TEMPLATE picker — editable, persists on change */}
               <PoseTemplatePicker

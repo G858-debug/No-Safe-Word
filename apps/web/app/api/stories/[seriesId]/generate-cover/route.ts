@@ -35,14 +35,15 @@ type GenerateCoverBody = {
 };
 
 // ── Shared character type (both pipelines use the same DB query) ──
+type BaseCharFields = {
+  approved_image_id: string | null;
+  approved_fullbody_image_id: string | null;
+};
 type CharWithBase = {
   id: string;
   character_id: string;
   role: string | null;
-  characters:
-    | { approved_image_id: string | null }
-    | { approved_image_id: string | null }[]
-    | null;
+  characters: BaseCharFields | BaseCharFields[] | null;
 };
 
 function baseChar(c: CharWithBase) {
@@ -50,6 +51,12 @@ function baseChar(c: CharWithBase) {
 }
 function approvedImageId(c: CharWithBase) {
   return baseChar(c)?.approved_image_id ?? null;
+}
+function approvedFullbodyImageId(c: CharWithBase) {
+  return baseChar(c)?.approved_fullbody_image_id ?? null;
+}
+function refImageId(c: CharWithBase, refType: "face" | "body") {
+  return refType === "body" ? approvedFullbodyImageId(c) : approvedImageId(c);
 }
 
 export async function POST(
@@ -76,7 +83,7 @@ export async function POST(
   const { data: series, error: seriesErr } = await supabase
     .from("story_series")
     .select(
-      "id, slug, cover_prompt, cover_status, cover_variants, cover_base_url, cover_selected_variant, cover_sizes, image_model, cover_secondary_character_id"
+      "id, slug, cover_prompt, cover_status, cover_variants, cover_base_url, cover_selected_variant, cover_sizes, image_model, cover_secondary_character_id, cover_primary_ref_type, cover_secondary_ref_type"
     )
     .eq("id", seriesId)
     .single();
@@ -195,7 +202,7 @@ export async function POST(
   const { data: seriesChars, error: charsErr } = await supabase
     .from("story_characters")
     .select(
-      "id, character_id, role, characters:character_id ( approved_image_id )"
+      "id, character_id, role, characters:character_id ( approved_image_id, approved_fullbody_image_id )"
     )
     .eq("series_id", seriesId);
 
@@ -319,6 +326,12 @@ export async function POST(
     },
   });
 
+  // Resolve cover ref types (default body for both)
+  const coverPrimaryRefType =
+    (series.cover_primary_ref_type as "face" | "body") ?? "body";
+  const coverSecondaryRefType =
+    (series.cover_secondary_ref_type as "face" | "body" | null) ?? "body";
+
   if (imageModel === "hunyuan3") {
     return generateHunyuanCover({
       seriesId,
@@ -327,13 +340,25 @@ export async function POST(
       protagonist,
       loveInterest,
       variantIndices,
+      primaryRefType: coverPrimaryRefType,
+      secondaryRefType: coverSecondaryRefType,
     });
   }
 
   // ── Flux 2 Dev path (async RunPod) ──────────────────────────────
 
-  // Resolve portrait URLs for reference images
-  const portraitIds = [approvedImageId(protagonist), loveInterest ? approvedImageId(loveInterest) : null].filter(
+  // Pick ref-image FK per character based on ref_type; fall back to face
+  // when body is unavailable so existing single-portrait stories still
+  // generate (the resolved image is what gets fed into PuLID).
+  const protagonistRefId =
+    refImageId(protagonist, coverPrimaryRefType) ??
+    refImageId(protagonist, "face");
+  const loveInterestRefId = loveInterest
+    ? refImageId(loveInterest, coverSecondaryRefType) ??
+      refImageId(loveInterest, "face")
+    : null;
+
+  const portraitIds = [protagonistRefId, loveInterestRefId].filter(
     (id): id is string => Boolean(id)
   );
 
@@ -355,16 +380,20 @@ export async function POST(
     if (url) urlById.set(img.id, url);
   }
 
-  const protagonistUrl = urlById.get(approvedImageId(protagonist)!);
+  const protagonistUrl = protagonistRefId
+    ? urlById.get(protagonistRefId)
+    : undefined;
   if (!protagonistUrl) {
     return NextResponse.json(
-      { error: "Protagonist portrait image URL is missing. Re-approve the portrait and retry." },
+      {
+        error: `Protagonist ${coverPrimaryRefType} portrait image URL is missing. Approve the ${coverPrimaryRefType} portrait and retry.`,
+      },
       { status: 400 }
     );
   }
 
-  const loveInterestUrl = loveInterest && approvedImageId(loveInterest)
-    ? urlById.get(approvedImageId(loveInterest)!)
+  const loveInterestUrl = loveInterestRefId
+    ? urlById.get(loveInterestRefId)
     : undefined;
 
   if (!loveInterestUrl) {
@@ -416,6 +445,8 @@ export async function POST(
             seed: result.seed,
             width: COVER_WIDTH,
             height: COVER_HEIGHT,
+            primary_ref_type: coverPrimaryRefType,
+            secondary_ref_type: loveInterest ? coverSecondaryRefType : null,
           },
           mode: "sfw",
         })
@@ -484,8 +515,19 @@ async function generateHunyuanCover(args: {
   protagonist: CharWithBase;
   loveInterest: CharWithBase | undefined;
   variantIndices: number[];
+  primaryRefType: "face" | "body";
+  secondaryRefType: "face" | "body";
 }): Promise<NextResponse> {
-  const { seriesId, slug, effectivePrompt, protagonist, loveInterest, variantIndices } = args;
+  const {
+    seriesId,
+    slug,
+    effectivePrompt,
+    protagonist,
+    loveInterest,
+    variantIndices,
+    primaryRefType,
+    secondaryRefType,
+  } = args;
 
   // Model-aware injection rule (Hunyuan / cover) on Siray:
   //   - Identity flows ONLY through i2i reference images (Siray's
@@ -499,12 +541,10 @@ async function generateHunyuanCover(args: {
   //     which is critical for editing wardrobe/pose/composition for a
   //     specific cover scene without competing against the original
   //     portrait's clothing description.
-  void protagonist;
-  void loveInterest;
 
   const referenceImageUrls = await getPortraitUrlsForScene([
-    protagonist.character_id,
-    loveInterest?.character_id,
+    { characterId: protagonist.character_id, refType: primaryRefType },
+    { characterId: loveInterest?.character_id, refType: secondaryRefType },
   ]);
 
   console.log("[generate-cover:hunyuan] submitting", {
@@ -549,6 +589,8 @@ async function generateHunyuanCover(args: {
             aspect_ratio: "4:5",
             size: submitted.size,
             reference_image_count: submitted.referenceImageCount,
+            primary_ref_type: primaryRefType,
+            secondary_ref_type: loveInterest ? secondaryRefType : null,
           },
           mode: "sfw",
         })
