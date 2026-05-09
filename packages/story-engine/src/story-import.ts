@@ -1,16 +1,25 @@
 import { supabase } from "./supabase";
-import type { Json } from "@no-safe-word/shared";
+import type { Database, Json } from "@no-safe-word/shared";
 import {
   slugify,
   AUTHOR_NOTES_KEYS,
   type StoryImportPayload,
   type ImportResult,
   type CharacterImport,
+  type CharacterImportAction,
+  type CharacterImportOutcome,
   type ImageModel,
   type AuthorNotes,
 } from "@no-safe-word/shared";
 import { cleanScenePrompt } from "@no-safe-word/image-gen";
 import { detectSecondaryCharacters } from "./detect-secondary-character";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+/**
+ * The subset of supabase methods upsertCharacter exercises. Lets tests
+ * pass an in-memory fake without faking the entire SupabaseClient surface.
+ */
+type SupabaseLike = SupabaseClient<Database>;
 
 export interface ImportStoryOptions {
   /** Image generation model for the new series. Defaults to 'flux2_dev'. */
@@ -63,11 +72,15 @@ export async function importStory(
   }
   const authorId = authorRow.id;
 
-  // 1. Create or find characters — build a name→id map
+  // 1. Create or find characters — build a name→id map and record the
+  //    per-character action (reused / name_matched / created) so the
+  //    operator can spot mistyped slugs in the response.
   const characterMap = new Map<string, string>();
+  const characterOutcomes: CharacterImportOutcome[] = [];
   for (const char of payload.characters) {
-    const characterId = await upsertCharacter(char);
+    const { id: characterId, action } = await upsertCharacter(char, authorId);
     characterMap.set(char.name, characterId);
+    characterOutcomes.push({ name: char.name, action });
   }
 
   // 2. Extract blurb variants + cover_prompt from the marketing block
@@ -227,7 +240,8 @@ export async function importStory(
       seriesId,
       slug,
       payload,
-      characterMap
+      characterMap,
+      characterOutcomes
     );
   } catch (err) {
     await supabase.from("story_series").delete().eq("id", seriesId);
@@ -239,7 +253,8 @@ async function finishImport(
   seriesId: string,
   slug: string,
   payload: StoryImportPayload,
-  characterMap: Map<string, string>
+  characterMap: Map<string, string>,
+  characterOutcomes: CharacterImportOutcome[]
 ): Promise<ImportResult> {
   // 4. Link characters to series. Portrait state (approved_image_id, etc.)
   //    lives on the base `characters` row and is populated via the approval
@@ -445,45 +460,110 @@ async function finishImport(
     characters_linked: payload.characters.length,
     image_prompts_queued: totalImagePrompts,
     auto_detected_secondary: autoDetectedSecondary,
+    characters: characterOutcomes,
   };
 }
 
 /**
- * Find an existing character by name or create a new one.
- * If the character exists, update the description and refresh any
- * profile-card fields supplied in this import. Fields absent from the
- * payload are NOT cleared on update — re-importing a story that doesn't
- * include card data must not blank previously approved profile cards.
+ * Find or create the canonical character row for an imported character.
  *
- * Returns the character UUID.
+ * Resolution order:
+ *   1. Slug match: SELECT WHERE author_id = ? AND character_slug = ?
+ *      → reuse the existing row, refresh description + profile-card
+ *      fields from the new JSON. Approved face/body/card FKs and
+ *      approval timestamps are NOT touched (they belong to the row).
+ *   2. Name match (author-scoped): SELECT WHERE author_id = ? AND name = ?
+ *      → reuse + opportunistically attach the slug if the new JSON
+ *      supplied one and the existing row doesn't already have one.
+ *      NOTE: this is a deliberate behaviour change from the prior
+ *      global name-keyed dedupe, which silently merged same-named
+ *      characters across authors (latent multi-author bug).
+ *   3. Insert fresh row with author_id + character_slug + name +
+ *      description + profile fields.
+ *
+ * Returns the character UUID and the action that fired so the import
+ * response can surface it.
+ *
+ * `client` parameter is for dependency injection in tests; defaults to
+ * the module-level service-role supabase client.
  */
-async function upsertCharacter(char: CharacterImport): Promise<string> {
+export async function upsertCharacter(
+  char: CharacterImport,
+  authorId: string,
+  client: SupabaseLike = supabase
+): Promise<{ id: string; action: CharacterImportAction }> {
   const profileCardFields = buildProfileCardFields(char);
 
-  // Try to find by exact name match
-  const { data: existing } = await supabase
+  // 1. Slug-keyed reuse (preferred when slug present)
+  if (char.character_slug) {
+    const { data: bySlug } = await client
+      .from("characters")
+      .select("id")
+      .eq("author_id", authorId)
+      .eq("character_slug", char.character_slug)
+      .maybeSingle();
+
+    if (bySlug) {
+      const { error } = await client
+        .from("characters")
+        .update({
+          name: char.name,
+          description: char.structured as unknown as Json,
+          ...profileCardFields,
+        })
+        .eq("id", bySlug.id);
+
+      if (error) {
+        throw new Error(
+          `Failed to update reused character "${char.name}" (${char.character_slug}): ${error.message}`
+        );
+      }
+      return { id: bySlug.id, action: "reused" };
+    }
+  }
+
+  // 2. Name-keyed fallback, scoped to author. Tightens the prior
+  //    global-name dedupe.
+  const { data: byName } = await client
     .from("characters")
-    .select("id")
+    .select("id, character_slug")
+    .eq("author_id", authorId)
     .eq("name", char.name)
     .maybeSingle();
 
-  if (existing) {
-    await supabase
+  if (byName) {
+    // Opportunistically attach the slug if the JSON supplied one and
+    // the existing row hasn't been slugged yet. Never overwrite an
+    // existing slug — that would silently rebind the slug namespace.
+    const slugAttachment =
+      char.character_slug && !byName.character_slug
+        ? { character_slug: char.character_slug }
+        : {};
+
+    const { error } = await client
       .from("characters")
       .update({
         description: char.structured as unknown as Json,
         ...profileCardFields,
+        ...slugAttachment,
       })
-      .eq("id", existing.id);
+      .eq("id", byName.id);
 
-    return existing.id;
+    if (error) {
+      throw new Error(
+        `Failed to update name-matched character "${char.name}": ${error.message}`
+      );
+    }
+    return { id: byName.id, action: "name_matched" };
   }
 
-  // Create new character
-  const { data: created, error } = await supabase
+  // 3. Fresh insert
+  const { data: created, error } = await client
     .from("characters")
     .insert({
       name: char.name,
+      author_id: authorId,
+      character_slug: char.character_slug ?? null,
       description: char.structured as unknown as Json,
       ...profileCardFields,
     })
@@ -495,8 +575,7 @@ async function upsertCharacter(char: CharacterImport): Promise<string> {
       `Failed to create character "${char.name}": ${error?.message}`
     );
   }
-
-  return created.id;
+  return { id: created.id, action: "created" };
 }
 
 /**

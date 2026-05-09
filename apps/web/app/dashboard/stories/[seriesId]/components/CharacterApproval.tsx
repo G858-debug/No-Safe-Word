@@ -50,6 +50,19 @@ export interface CharacterFromAPI {
   card_image_prompt?: string | null;
   card_approved_at?: string | null;
   card_approved?: boolean;
+
+  /**
+   * Set when this character's approved portrait was inherited from an
+   * earlier series. Drives the "Reused from [Series Title]" chip in
+   * Stage 8 and Stage 9 UIs and the "card image may not match current
+   * prompt" warning in Stage 9. Null = native to this series (or no
+   * portrait approved yet). Heuristic — see API route comment.
+   */
+  reused_from?: {
+    series_id: string;
+    series_title: string;
+    slug: string;
+  } | null;
 }
 
 interface Props {

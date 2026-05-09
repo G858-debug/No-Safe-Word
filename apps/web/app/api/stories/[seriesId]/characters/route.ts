@@ -108,6 +108,72 @@ export async function GET(
     }
   }
 
+  // ───────────────────────────────────────────────────────────────
+  // Resolve `reused_from` per character. Heuristic for now:
+  //   "reused" = base character has a story_characters link to a
+  //              series OTHER than this one AND has an approved face
+  //              portrait already.
+  //   The "most recent prior series" is picked by story_series.created_at.
+  //
+  // Once a face_approved_at column lands (follow-up epic), switch to
+  // ordering by that — the current proxy is good enough but not
+  // provably correct (an older approval on a newer series would win).
+  // ───────────────────────────────────────────────────────────────
+  const characterIds = storyCharacters
+    .map((sc) => baseOf(sc.characters)?.id)
+    .filter((id): id is string => Boolean(id));
+
+  const reusedFromByCharacterId = new Map<
+    string,
+    { series_id: string; series_title: string; slug: string }
+  >();
+
+  if (characterIds.length > 0) {
+    const { data: priorLinks } = await supabase
+      .from("story_characters")
+      .select(
+        "character_id, series_id, story_series:series_id ( id, title, slug, created_at )"
+      )
+      .in("character_id", characterIds)
+      .neq("series_id", seriesId);
+
+    if (priorLinks) {
+      type Prior = {
+        character_id: string;
+        story_series:
+          | { id: string; title: string; slug: string; created_at: string }
+          | { id: string; title: string; slug: string; created_at: string }[]
+          | null;
+      };
+      const seenAt = new Map<string, string>();
+      for (const row of priorLinks as Prior[]) {
+        const ss = Array.isArray(row.story_series)
+          ? row.story_series[0]
+          : row.story_series;
+        if (!ss) continue;
+        const prior = seenAt.get(row.character_id);
+        if (!prior || ss.created_at > prior) {
+          seenAt.set(row.character_id, ss.created_at);
+          reusedFromByCharacterId.set(row.character_id, {
+            series_id: ss.id,
+            series_title: ss.title,
+            slug: ss.slug,
+          });
+        }
+      }
+    }
+
+    // Only flag "reused" when the base row actually has an approved
+    // face — a prior link with no portrait isn't a reuse, it's a stub.
+    for (const sc of storyCharacters) {
+      const base = baseOf(sc.characters);
+      if (!base?.id) continue;
+      if (!base.approved_image_id) {
+        reusedFromByCharacterId.delete(base.id);
+      }
+    }
+  }
+
   const characters = storyCharacters.map((sc) => {
     const base = baseOf(sc.characters);
     const faceMeta = base?.approved_image_id
@@ -167,6 +233,9 @@ export async function GET(
       card_image_prompt: base?.card_image_prompt ?? null,
       card_approved_at: base?.card_approved_at ?? null,
       card_approved: Boolean(base?.card_approved_at),
+      reused_from: base?.id
+        ? reusedFromByCharacterId.get(base.id) ?? null
+        : null,
     };
   });
 

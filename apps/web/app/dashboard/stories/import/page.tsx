@@ -56,6 +56,10 @@ interface ImportResultData {
   posts_created: number;
   characters_linked: number;
   image_prompts_queued: number;
+  characters?: Array<{
+    name: string;
+    action: "reused" | "name_matched" | "created";
+  }>;
 }
 
 export default function ImportPage() {
@@ -183,6 +187,34 @@ export default function ImportPage() {
                 <p className="text-xs text-muted-foreground">Slug</p>
               </div>
             </div>
+
+            {importResult.characters && importResult.characters.length > 0 && (
+              <div className="rounded-md border bg-muted/30 p-3 text-xs">
+                <p className="mb-2 font-medium text-foreground">
+                  Character outcomes — verify these match expectations (a
+                  &ldquo;created&rdquo; where you expected &ldquo;reused&rdquo;
+                  usually means a typo in <code>character_slug</code>)
+                </p>
+                <ul className="space-y-1">
+                  {importResult.characters.map((c) => (
+                    <li key={c.name} className="flex items-center gap-2">
+                      <span
+                        className={
+                          c.action === "created"
+                            ? "rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-200"
+                            : c.action === "reused"
+                              ? "rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-200"
+                              : "rounded bg-zinc-500/20 px-1.5 py-0.5 text-zinc-200"
+                        }
+                      >
+                        {c.action}
+                      </span>
+                      <span>{c.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <Button
               onClick={() =>

@@ -44,6 +44,18 @@ export interface SeriesImport {
 
 export interface CharacterImport {
   name: string;
+  /**
+   * Optional stable identifier for cross-story reuse. When supplied
+   * and an existing character row matches (author_id, character_slug),
+   * the import reuses that row's approved face/body portraits, card
+   * image, and approval timestamps. Profile fields and prose_description
+   * are still rewritten from this JSON.
+   *
+   * Format: lowercase ASCII letters + digits + hyphens, 1–64 chars,
+   * no leading or trailing hyphen. Enforced by the validator AND a
+   * DB CHECK constraint (migration 20260510000000).
+   */
+  character_slug?: string;
   role: "protagonist" | "love_interest" | "supporting" | "antagonist";
   prose_description: string;
   structured: CharacterStructured;
@@ -410,6 +422,24 @@ export type ImagePromptStatus =
 // API RESPONSE TYPES
 // ============================================================
 
+/**
+ * What the import did with each character entry. Surfaced in
+ * ImportResult.characters so the operator can spot a mistyped slug
+ * (action="created" when "reused" was expected).
+ *
+ * - "reused"        — slug match → existing row reused (portraits inherited).
+ * - "name_matched"  — no slug or slug miss, but name match in this author's
+ *                     namespace → existing row reused (portraits inherited).
+ * - "created"       — fresh insert (typo in slug? new character? new author?).
+ */
+export type CharacterImportAction = "reused" | "name_matched" | "created";
+
+export interface CharacterImportOutcome {
+  /** Character display name from the import JSON. */
+  name: string;
+  action: CharacterImportAction;
+}
+
 export interface ImportResult {
   series_id: string;
   slug: string;
@@ -417,6 +447,11 @@ export interface ImportResult {
   characters_linked: number;
   image_prompts_queued: number;
   auto_detected_secondary: number;
+  /**
+   * Per-character outcome aligned with payload.characters order. Lets the
+   * operator verify the slug-keyed reuse path fired as expected.
+   */
+  characters: CharacterImportOutcome[];
 }
 
 export interface SeriesWithDetails extends StorySeriesRow {
@@ -467,11 +502,25 @@ export function validateImportPayload(
   if (!Array.isArray(obj.characters)) {
     errors.push("'characters' must be an array");
   } else {
+    const SLUG_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
     for (let i = 0; i < obj.characters.length; i++) {
       const c = obj.characters[i] as Record<string, unknown>;
       if (!c.name) errors.push(`characters[${i}].name is required`);
       if (!c.structured || typeof c.structured !== "object")
         errors.push(`characters[${i}].structured is required`);
+
+      // Optional cross-story reuse identifier. Format mirrored in the
+      // DB CHECK constraint (migration 20260510000000) so both layers
+      // reject the same inputs.
+      if (c.character_slug !== undefined) {
+        if (typeof c.character_slug !== "string") {
+          errors.push(`characters[${i}].character_slug must be a string`);
+        } else if (!SLUG_REGEX.test(c.character_slug)) {
+          errors.push(
+            `characters[${i}].character_slug must be 1–64 chars, lowercase ASCII letters / digits / hyphens, no leading or trailing hyphen`
+          );
+        }
+      }
 
       // Optional profile-card fields — must be strings when present.
       const optionalCharStringFields = [

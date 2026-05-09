@@ -9,7 +9,8 @@
     "./supabase": "./src/supabase.ts"
   },
   "scripts": {
-    "lint": "eslint . --ext .ts,.tsx"
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@no-safe-word/image-gen": "*",
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

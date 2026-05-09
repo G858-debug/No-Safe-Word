@@ -154,11 +154,13 @@ export type Database = {
           approved_prompt: string | null
           approved_seed: number | null
           archetype_tag: string | null
+          author_id: string
           bio_short: string | null
           card_approved_at: string | null
           card_image_id: string | null
           card_image_prompt: string | null
           card_image_url: string | null
+          character_slug: string | null
           created_at: string
           defining_quote: string | null
           description: Json
@@ -179,11 +181,13 @@ export type Database = {
           approved_prompt?: string | null
           approved_seed?: number | null
           archetype_tag?: string | null
+          author_id: string
           bio_short?: string | null
           card_approved_at?: string | null
           card_image_id?: string | null
           card_image_prompt?: string | null
           card_image_url?: string | null
+          character_slug?: string | null
           created_at?: string
           defining_quote?: string | null
           description?: Json
@@ -204,11 +208,13 @@ export type Database = {
           approved_prompt?: string | null
           approved_seed?: number | null
           archetype_tag?: string | null
+          author_id?: string
           bio_short?: string | null
           card_approved_at?: string | null
           card_image_id?: string | null
           card_image_prompt?: string | null
           card_image_url?: string | null
+          character_slug?: string | null
           created_at?: string
           defining_quote?: string | null
           description?: Json
@@ -234,6 +240,13 @@ export type Database = {
             columns: ["approved_image_id"]
             isOneToOne: false
             referencedRelation: "images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "characters_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "authors"
             referencedColumns: ["id"]
           },
           {

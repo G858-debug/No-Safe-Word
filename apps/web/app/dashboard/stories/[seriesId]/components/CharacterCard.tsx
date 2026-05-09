@@ -1846,6 +1846,15 @@ export function CharacterCard({ character, seriesId, onUpdate }: Props) {
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-lg">{name}</CardTitle>
           <div className="flex items-center gap-1">
+            {character.reused_from && (
+              <Badge
+                variant="secondary"
+                className="text-xs"
+                title={`Approved portrait inherited from "${character.reused_from.series_title}"`}
+              >
+                Reused from {character.reused_from.series_title}
+              </Badge>
+            )}
             <Badge variant={portraitApproved ? "default" : "outline"}>
               {portraitApproved ? "✓ Approved" : "Pending"}
             </Badge>

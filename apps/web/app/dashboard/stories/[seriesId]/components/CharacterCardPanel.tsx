@@ -67,6 +67,16 @@ export function CharacterCardPanel({ seriesId, character, onUpdate }: Props) {
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
+  // §E1 (b) resolution: when the character was reused from a prior series,
+  // the inherited card_image_url was generated from the OLD card_image_prompt.
+  // Show a warning until the operator regenerates or dismisses. Session-
+  // scoped (resets on remount). Cleared automatically on regenerate.
+  const [warningDismissed, setWarningDismissed] = useState(false);
+  const showReuseWarning =
+    Boolean(character.reused_from) &&
+    Boolean(character.card_image_url) &&
+    !warningDismissed;
+
   const isMountedRef = useRef(true);
   const submittingRef = useRef(false);
   // Keep drafts in sync with parent re-fetch when nothing is being typed.
@@ -216,6 +226,9 @@ export function CharacterCardPanel({ seriesId, character, onUpdate }: Props) {
       }
       const jobId: string = data.jobId;
       setImageState({ kind: "generating", jobId });
+      // Regenerating produces a fresh card image that matches the live
+      // prompt — the inherited-mismatch warning no longer applies.
+      setWarningDismissed(true);
 
       try {
         await waitForCompletion(jobId);
@@ -315,6 +328,15 @@ export function CharacterCardPanel({ seriesId, character, onUpdate }: Props) {
           <Badge variant="outline" className="text-xs">
             {role}
           </Badge>
+          {character.reused_from && (
+            <Badge
+              variant="secondary"
+              className="text-xs"
+              title={`Inherited from "${character.reused_from.series_title}"`}
+            >
+              Reused from {character.reused_from.series_title}
+            </Badge>
+          )}
         </div>
         {character.card_approved ? (
           <Badge className="gap-1 bg-emerald-600/15 text-emerald-300 hover:bg-emerald-600/15">
@@ -331,6 +353,26 @@ export function CharacterCardPanel({ seriesId, character, onUpdate }: Props) {
         <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
           {/* ── LEFT — card image + prompt ──────────────────────────── */}
           <div className="space-y-3">
+            {showReuseWarning && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+                <span className="flex-1">
+                  Card image inherited from{" "}
+                  <span className="font-medium">
+                    {character.reused_from!.series_title}
+                  </span>
+                  . The current prompt may not match the existing image —
+                  regenerate to refresh, or dismiss to keep the inherited
+                  image.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setWarningDismissed(true)}
+                  className="rounded px-1.5 py-0.5 text-amber-100 hover:bg-amber-500/20"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             <div>
               <Label htmlFor={`card-prompt-${character.id}`} className="text-xs">
                 Card image prompt
