@@ -18,13 +18,17 @@ const DEFAULT_MAX_WAIT_MS = 600_000;
 
 export type SirayModelId =
   | "tencent/hunyuan-image-3-instruct-t2i"
-  | "tencent/hunyuan-image-3-instruct-i2i";
+  | "tencent/hunyuan-image-3-instruct-i2i"
+  | "google/nano-banana-2-t2i"
+  | "google/nano-banana-2-i2i";
 
 export interface SirayJobPayload {
   model: SirayModelId;
   prompt: string;
   size: string;
   seed?: number;
+  /** Required by nano-banana-2; absent on hunyuan payloads. */
+  aspect_ratio?: string;
   /** Only present for i2i. MUST be omitted entirely for t2i. */
   images?: string[];
 }

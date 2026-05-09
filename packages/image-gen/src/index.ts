@@ -118,5 +118,19 @@ export type {
   SubmitSirayPortraitResult,
 } from './siray-generator';
 
+// Nano Banana 2 (Google Gemini 3.1 Flash Image Preview) on Siray.ai.
+// Used by the face portrait dispatcher; body/scene/cover stay on
+// story_series.image_model.
+export {
+  buildNanoBananaPayload,
+  submitNanoBananaImage,
+} from './nano-banana-client';
+export type {
+  NanoBananaSize,
+  NanoBananaAspect,
+  SubmitNanoBananaParams,
+  SubmitNanoBananaResult,
+} from './nano-banana-client';
+
 // Generated image critic (Pixtral 12B)
 export { critiqueGeneratedImage } from './image-critic';

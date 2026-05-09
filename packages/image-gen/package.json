@@ -12,7 +12,8 @@
     "./prompt-constants": "./src/prompt-constants.ts"
   },
   "scripts": {
-    "lint": "eslint . --ext .ts,.tsx"
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.1",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^20",
     "@types/sharp": "^0.31.1",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

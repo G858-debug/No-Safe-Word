@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CharacterCard } from "./CharacterCard";
+import type { ImageModel } from "@no-safe-word/shared";
 
 export interface PortraitDimensions {
   requested_width: number | null;
@@ -68,6 +69,9 @@ export interface CharacterFromAPI {
 interface Props {
   seriesId: string;
   onAllReady?: () => void;
+  /** Story's image model. Threaded into CharacterCard so it can label which
+   *  model generates the body portrait (face is always Nano Banana 2). */
+  imageModel: ImageModel;
   /**
    * Fired with the fresh character list every time this component re-fetches
    * (initial mount + after any card-level update). Lets the parent page keep
@@ -78,7 +82,7 @@ interface Props {
   onCharactersChange?: (characters: CharacterFromAPI[]) => void;
 }
 
-export default function CharacterApproval({ seriesId, onAllReady, onCharactersChange }: Props) {
+export default function CharacterApproval({ seriesId, onAllReady, imageModel, onCharactersChange }: Props) {
   const [characters, setCharacters] = useState<CharacterFromAPI[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -136,6 +140,7 @@ export default function CharacterApproval({ seriesId, onAllReady, onCharactersCh
           key={char.id}
           character={char}
           seriesId={seriesId}
+          imageModel={imageModel}
           onUpdate={fetchCharacters}
         />
       ))}

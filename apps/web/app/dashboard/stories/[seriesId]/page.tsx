@@ -746,6 +746,7 @@ export default function SeriesDetailPage() {
           <CharacterApproval
             seriesId={seriesId}
             onAllReady={() => setActiveTab("cards")}
+            imageModel={(data.series.image_model as ImageModel | null) ?? "flux2_dev"}
             onCharactersChange={setCharacters}
           />
         </div>
