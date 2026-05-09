@@ -216,6 +216,7 @@ type Action =
   | { type: "DISCARDED" }
   | { type: "RESET_CLICKED" }
   | { type: "RESET_COMPLETED" }
+  | { type: "LOCKED_PROMPT_SAVED"; prompt: string }
   | { type: "HYDRATED"; payload: HydrationPayload }
   | { type: "ERROR"; message: string }
   | { type: "ERROR_DISMISSED" };
@@ -518,6 +519,16 @@ function reducer(state: CardState, action: Action): CardState {
       if (state.kind !== "resetting") return state;
       return { kind: "loading_default_prompt" };
 
+    case "LOCKED_PROMPT_SAVED":
+      if (
+        state.kind !== "approved" &&
+        state.kind !== "regenerating_full_face" &&
+        state.kind !== "regenerating_full_body" &&
+        state.kind !== "regenerating_body_only"
+      )
+        return state;
+      return { ...state, prompt: action.prompt };
+
     case "ERROR": {
       const recovery = computeRecoveryState(state);
       return {
@@ -557,6 +568,9 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
     kind: "loading_default_prompt",
   } as CardState);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState("");
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
 
   const isMountedRef = useRef(true);
   const stateRef = useRef(state);
@@ -1447,6 +1461,49 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
   }, [character.id]);
 
   // ───────────────────────────────────────────────────────────
+  // Prompt editing (approved state)
+  // ───────────────────────────────────────────────────────────
+
+  const handleEditPrompt = () => {
+    if (state.kind !== "approved") return;
+    setPendingPrompt(state.prompt);
+    setIsEditingPrompt(true);
+  };
+
+  const handleCancelEditPrompt = () => {
+    setIsEditingPrompt(false);
+    setPendingPrompt("");
+  };
+
+  const handleSavePrompt = async () => {
+    if (pendingPrompt.trim().length === 0) return;
+    setIsSavingPrompt(true);
+    try {
+      const res = await fetch(
+        `/api/stories/characters/${character.id}/patch-prompt`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ portrait_prompt_locked: pendingPrompt.trim() }),
+        }
+      );
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        dispatch({ type: "ERROR", message: data.error ?? "Failed to save prompt" });
+        return;
+      }
+      const data = (await res.json()) as { portrait_prompt_locked: string };
+      dispatch({ type: "LOCKED_PROMPT_SAVED", prompt: data.portrait_prompt_locked });
+      setIsEditingPrompt(false);
+      setPendingPrompt("");
+    } catch (e) {
+      dispatch({ type: "ERROR", message: errorMessage(e) });
+    } finally {
+      setIsSavingPrompt(false);
+    }
+  };
+
+  // ───────────────────────────────────────────────────────────
   // Render helpers
   // ───────────────────────────────────────────────────────────
 
@@ -1725,6 +1782,61 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
               >
                 Regenerate body only
               </Button>
+            </div>
+            <div className="border rounded-md p-3 space-y-2 bg-muted/30">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium">Portrait prompt</span>
+                  <Badge variant="secondary" className="text-xs">Used in scene &amp; cover generation</Badge>
+                </div>
+                {!isEditingPrompt && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    onClick={handleEditPrompt}
+                    disabled={disabled}
+                  >
+                    Edit
+                  </Button>
+                )}
+              </div>
+              {isEditingPrompt ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={pendingPrompt}
+                    onChange={(e) => setPendingPrompt(e.target.value)}
+                    rows={6}
+                    className="text-xs font-mono resize-y"
+                    disabled={isSavingPrompt}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleSavePrompt}
+                      disabled={isSavingPrompt || pendingPrompt.trim().length === 0}
+                    >
+                      {isSavingPrompt ? (
+                        <><Loader2 className="h-3 w-3 animate-spin mr-1" />Saving…</>
+                      ) : (
+                        "Save"
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCancelEditPrompt}
+                      disabled={isSavingPrompt}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground font-mono leading-relaxed line-clamp-3">
+                  {s.prompt || <span className="italic">No prompt locked</span>}
+                </p>
+              )}
             </div>
           </div>
         );
