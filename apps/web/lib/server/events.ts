@@ -61,6 +61,7 @@ export type EventType =
   // buffer (Facebook publishing automation via Buffer)
   | "buffer.api_call"
   | "buffer.scheduled"
+  | "buffer.scheduled_rejected"
   | "buffer.cancelled"
   | "buffer.publish_synced"
   | "buffer.publish_failed"

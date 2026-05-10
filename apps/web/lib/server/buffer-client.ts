@@ -563,6 +563,23 @@ export const bufferClient = {
 
     const result = data.createPost;
     if (result.__typename !== "PostActionSuccess") {
+      // Buffer returns HTTP 200 with a non-success __typename when it
+      // rejects a post at the application level (caption too long,
+      // duplicate content, channel disconnected, etc.). The HTTP-level
+      // logging in gqlRequest marks this as ok=true, so the rejection
+      // reason has nowhere to land unless we log it here explicitly.
+      void logEvent({
+        eventType: "buffer.scheduled_rejected",
+        metadata: {
+          channel_id: input.channelId,
+          due_at: variables.dueAt,
+          image_count: input.imageUrls?.length ?? 0,
+          has_first_comment: !!input.firstComment,
+          text_length: input.text.length,
+          rejection_typename: result.__typename,
+          rejection_message: result.message,
+        },
+      });
       throw new BufferApiError({
         message: `Buffer createPost rejected: ${result.message}`,
         code: result.__typename,

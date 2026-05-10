@@ -904,8 +904,14 @@ export default function PublishPanel({
           : "";
 
       if (data.partial && data.failure) {
+        const failedItem = bufferPreview.plan.find(
+          (p) => p.postId === data.failure!.postId
+        );
+        const failedLabel = failedItem
+          ? `Part ${failedItem.partNumber}: ${failedItem.title}`
+          : `chapter id ${data.failure.postId}`;
         setActionError(
-          `Scheduled ${scheduledCount}/${bufferPreview.plan.length}. Stopped at chapter with id ${data.failure.postId}: ${data.failure.error}.${skippedSuffix}`
+          `Scheduled ${scheduledCount}/${bufferPreview.plan.length}. Stopped at ${failedLabel}: ${data.failure.error}.${skippedSuffix}`
         );
       } else {
         setActionSuccess(
