@@ -233,6 +233,25 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 - `story_series.cover_status` — cover state machine: pending → generating → variants_ready → approved → compositing → complete (or failed).
 - Migrations are append-only. Never delete migration files.
 
+## Analytics
+
+Two trackers run on the public site:
+
+- **Google Analytics 4** — measurement ID `G-T42NV4VY9S`
+- **Meta Pixel** — pixel ID `1321927338365417`
+
+Both are wired into the root layout at [apps/web/app/layout.tsx](apps/web/app/layout.tsx) via Next.js `<Script strategy="afterInteractive">`. Because the App Router root layout wraps every route, **every current and future page automatically inherits both tags** — there is no per-page setup. The blocks (including the Meta Pixel `<noscript>` fallback) are gated on `process.env.NODE_ENV === "production"` so localhost pageviews don't pollute either property.
+
+Rules:
+
+- **Never add the gtag or fbq snippet to individual pages or nested layouts.** Each belongs in the root layout exactly once. Duplicating either causes double-counted pageviews.
+- **Never wrap the site in an alternate root** (e.g. don't add a second `<html>`/`<body>` in a route group layout) — that would bypass the root layout and silently drop analytics on those routes.
+- **If you build a new public surface that doesn't sit under `apps/web/app/`** (e.g. a separate Next.js app, a static export, an external embed), it is your responsibility to add the same gtag + Meta Pixel snippets there. Flag it to the user when you do.
+- **Do not use `next/head` or raw `<script>` tags** for either tracker — use `next/script` with `strategy="afterInteractive"` so it doesn't block hydration. (Meta's official instructions say "between `<head>` tags," but `afterInteractive` is the Next.js-correct equivalent and is what Meta's own Next.js guidance recommends.)
+- **The Meta Pixel `<noscript>` `<img>` lives inside the gating block too** — keep it adjacent to the `<Script>` blocks so a future edit can't accidentally leave it firing in dev.
+- The IDs are hardcoded intentionally (single property each, single environment). If we ever need staging/prod separation, switch to `NEXT_PUBLIC_GA_MEASUREMENT_ID` / `NEXT_PUBLIC_META_PIXEL_ID` and document it here.
+- **Custom conversion events** (e.g. `fbq('track', 'Subscribe')`, `gtag('event', 'sign_up')`) should be fired from the component that owns the conversion action, not added to the global init blocks. Wrap them in a `process.env.NODE_ENV === "production"` guard there too.
+
 ## Error Handling
 
 - Do NOT add silent fallbacks or default values that mask errors
