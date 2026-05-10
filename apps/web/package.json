@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
+    "prebuild": "rm -rf .next/cache/fetch-cache",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
