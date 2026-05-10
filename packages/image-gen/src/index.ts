@@ -75,6 +75,11 @@ export {
   stripPortraitFraming,
 } from './portrait-prompt-builder';
 export type { PortraitCharacterDescription } from './portrait-prompt-builder';
+export {
+  VISUAL_SIGNATURE,
+  PORTRAIT_COMPOSITION,
+  FULLBODY_COMPOSITION,
+} from './prompt-constants';
 
 // Flux 2 Dev workflow + generator
 export { buildFlux2Workflow } from './flux2-workflow-builder';

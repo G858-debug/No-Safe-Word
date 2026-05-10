@@ -5,6 +5,8 @@ import {
   generateFlux2Image,
   imageUrlToBase64,
   buildCharacterPortraitPrompt,
+  PORTRAIT_COMPOSITION,
+  FULLBODY_COMPOSITION,
   type PortraitCharacterDescription,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
@@ -110,12 +112,28 @@ export async function POST(
     }
 
     const desc = character.description as Record<string, string>;
-    const promptText =
+    const rawPrompt =
       promptOverride ??
       buildCharacterPortraitPrompt(
         desc as PortraitCharacterDescription,
         "body"
       );
+
+    // Body framing guardrail. The dashboard textarea lets users hand-edit the
+    // body prompt; if they kept the face-stage PORTRAIT_COMPOSITION text
+    // ("Portrait, ... Medium close-up, eye-level."), Hunyuan receives a
+    // prompt that asks for both full-body and medium close-up at once and
+    // falls back to portrait framing. Swap to FULLBODY_COMPOSITION here so
+    // the body route enforces body framing regardless of what the textarea
+    // contained.
+    const promptText = rawPrompt.includes(PORTRAIT_COMPOSITION)
+      ? rawPrompt.replace(PORTRAIT_COMPOSITION, FULLBODY_COMPOSITION)
+      : rawPrompt;
+    if (promptText !== rawPrompt) {
+      console.log(
+        `[StoryPublisher] /generate-body swapped PORTRAIT_COMPOSITION → FULLBODY_COMPOSITION for character=${character.name}`
+      );
+    }
 
     if (imageModel === "hunyuan3") {
       // Siray i2i — auto-selected when referenceImageUrls is non-empty.

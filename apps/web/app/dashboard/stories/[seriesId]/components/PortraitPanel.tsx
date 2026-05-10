@@ -4,6 +4,7 @@ import { Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { PORTRAIT_COMPOSITION } from "@no-safe-word/image-gen";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Two parallel state machines — one per panel.
@@ -112,6 +113,8 @@ export function PortraitPanel({
     state.kind !== "locked" &&
     state.kind !== "generating" &&
     state.kind !== "approved";
+  const bodyHasPortraitFraming =
+    kind === "body" && promptValue.includes(PORTRAIT_COMPOSITION);
 
   // ── Locked (body only) ─────────────────────────────────────────────
   if (state.kind === "locked") {
@@ -285,6 +288,11 @@ export function PortraitPanel({
             }
             disabled={!promptEditable || isBusy}
           />
+          {bodyHasPortraitFraming && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+              Contains portrait framing — will be auto-swapped to full-body framing on submit.
+            </p>
+          )}
           {helperText && (
             <p className="text-[11px] text-muted-foreground">{helperText}</p>
           )}
