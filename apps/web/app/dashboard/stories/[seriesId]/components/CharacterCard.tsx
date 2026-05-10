@@ -595,6 +595,8 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
   const [isEditingPrompt, setIsEditingPrompt] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState("");
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
+  const [facePromptExpanded, setFacePromptExpanded] = useState(false);
+  const [bodyPromptExpanded, setBodyPromptExpanded] = useState(false);
 
   const isMountedRef = useRef(true);
   const stateRef = useRef(state);
@@ -1695,11 +1697,18 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
       case "face_ready":
         return (
           <div className="space-y-3">
-            <div className="flex gap-3">
-              <Thumb url={s.faceUrl} label="Face" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Face prompt — edit and regenerate, or proceed to body</p>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+              Step 1 of 2 — Face portrait
+            </p>
+            <Thumb url={s.faceUrl} label="Face" />
+            <button
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setFacePromptExpanded(v => !v)}
+            >
+              <span>{facePromptExpanded ? "▾" : "▸"}</span>
+              <span>Edit face prompt</span>
+            </button>
+            {facePromptExpanded && (
               <Textarea
                 value={s.prompt}
                 onChange={(e) => handlePromptEdit(e.target.value)}
@@ -1707,7 +1716,7 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                 rows={5}
                 disabled={disabled}
               />
-            </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={handleRegenFace} disabled={disabled || !s.prompt.trim()}>
                 Regenerate face
@@ -1722,11 +1731,12 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
       case "body_prompt_editing":
         return (
           <div className="space-y-3">
-            <div className="flex gap-3">
-              <Thumb url={s.faceUrl} greyed label="Face (locked)" />
-            </div>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+              Step 2 of 2 — Body portrait
+            </p>
+            <Thumb url={s.faceUrl} greyed label="Face (approved)" />
             <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Body prompt — edit before generating</p>
+              <p className="text-xs font-medium">Body prompt</p>
               <Textarea
                 value={s.bodyPrompt}
                 onChange={(e) => handleBodyPromptEdit(e.target.value)}
@@ -1744,8 +1754,11 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
       case "generating_body":
         return (
           <div className="space-y-2">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+              Step 2 of 2 — Body portrait
+            </p>
             <div className="flex gap-3">
-              <Thumb url={s.faceUrl} greyed label="Face (locked)" />
+              <Thumb url={s.faceUrl} greyed label="Face (approved)" />
               <SpinnerSlot label="Generating body…" />
             </div>
           </div>
@@ -1754,12 +1767,21 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
       case "body_ready":
         return (
           <div className="space-y-3">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+              Step 2 of 2 — Body portrait
+            </p>
             <div className="flex gap-3">
               <Thumb url={s.faceUrl} label="Face" />
               <Thumb url={s.bodyUrl} label="Body" />
             </div>
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Body prompt — edit and regenerate, or approve</p>
+            <button
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setBodyPromptExpanded(v => !v)}
+            >
+              <span>{bodyPromptExpanded ? "▾" : "▸"}</span>
+              <span>Edit body prompt</span>
+            </button>
+            {bodyPromptExpanded && (
               <Textarea
                 value={s.bodyPrompt}
                 onChange={(e) => handleBodyPromptEdit(e.target.value)}
@@ -1767,7 +1789,7 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                 rows={4}
                 disabled={disabled}
               />
-            </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleApprove} size="sm" disabled={disabled}>
                 Approve
