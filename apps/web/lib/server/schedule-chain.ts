@@ -5,12 +5,19 @@
 // other story. This avoids two chapters from different stories landing
 // on the same evening.
 //
+// In addition to the chapter chain, an approved author note is scheduled
+// as a single Facebook post on the day AFTER the last chapter of THIS
+// series. The author-note item lives on story_series, not story_posts,
+// so it's surfaced as a separate `authorNote` field on the result; the
+// route handles it with a parallel write path against story_series.
+//
 // The plan returned by buildScheduleForStory is purely projection — no
 // Buffer or DB writes. The caller (the buffer-schedule route) iterates
 // the plan, calls bufferClient.schedulePost for each item, and persists
 // the returned buffer_post_id back onto story_posts.
 
 import { supabase } from "@no-safe-word/story-engine";
+import type { AuthorNotes } from "@no-safe-word/shared";
 
 // SAST is UTC+2 with no DST. 20:00 SAST = 18:00 UTC year-round.
 const PUBLISH_HOUR_UTC = 18;
@@ -24,6 +31,18 @@ export interface ScheduledPostPlan {
   facebookContent: string;
   firstComment: string;
   imageUrls: string[];
+}
+
+/**
+ * Synthesised plan item for the series' author note. The text is
+ * `story_series.author_notes.social_caption`; the image is
+ * `story_series.author_note_image_url`. Scheduled for 20:00 SAST on
+ * the day after the latest chapter date in this series.
+ */
+export interface AuthorNotePlan {
+  socialCaption: string;
+  imageUrl: string;
+  scheduledAt: Date;
 }
 
 export interface BuildScheduleOptions {
@@ -48,6 +67,15 @@ export class ScheduleStartDateError extends Error {
 
 export interface BuildScheduleResult {
   plan: ScheduledPostPlan[];
+  /**
+   * Author-note Facebook post for THIS series, if eligible and not yet
+   * scheduled. `null` when:
+   *   - the note is not approved (`author_note_approved_at` is null)
+   *   - `social_caption` or `author_note_image_url` is missing
+   *   - the note is already on Buffer (`author_note_buffer_post_id`
+   *     non-null AND status is not 'error')
+   */
+  authorNote: AuthorNotePlan | null;
   startDate: Date;
   /**
    * The latest scheduled_for we observed across ALL series. Useful for
@@ -65,6 +93,15 @@ interface PostRow {
   facebook_comment: string | null;
   buffer_post_id: string | null;
   buffer_status: string | null;
+  scheduled_for: string | null;
+}
+
+interface SeriesAuthorNoteRow {
+  author_notes: AuthorNotes | null;
+  author_note_image_url: string | null;
+  author_note_approved_at: string | null;
+  author_note_buffer_post_id: string | null;
+  author_note_buffer_status: string | null;
 }
 
 /**
@@ -83,7 +120,7 @@ export async function buildScheduleForStory(
   const { data: rawPosts, error: postsError } = await supabase
     .from("story_posts")
     .select(
-      "id, part_number, title, facebook_content, facebook_comment, buffer_post_id, buffer_status"
+      "id, part_number, title, facebook_content, facebook_comment, buffer_post_id, buffer_status, scheduled_for"
     )
     .eq("series_id", seriesId)
     .order("part_number", { ascending: true });
@@ -99,13 +136,6 @@ export async function buildScheduleForStory(
   const schedulable = posts.filter(
     (p) => p.buffer_post_id == null || p.buffer_status === "error"
   );
-  if (schedulable.length === 0) {
-    return {
-      plan: [],
-      startDate: nextEveningUTC(new Date()),
-      chainTailDate: await loadGlobalChainTail(),
-    };
-  }
 
   // 2. Resolve the chain start date.
   const chainTailDate = await loadGlobalChainTail();
@@ -131,7 +161,98 @@ export async function buildScheduleForStory(
     imageUrls: imageUrlsByPost.get(post.id) ?? [],
   }));
 
-  return { plan, startDate, chainTailDate };
+  // 5. Compute the author-note plan. Scheduled for the day after the
+  //    last chapter in THIS series — derived from the actual scheduled
+  //    dates already on disk plus the new plan items we're about to
+  //    schedule. Falls through to null when the note isn't eligible.
+  const authorNote = await loadAuthorNotePlanForSeries(
+    seriesId,
+    posts,
+    plan
+  );
+
+  // 6. Empty-plan short-circuit. We bail with an empty plan only when
+  //    there's nothing to schedule across BOTH chapters and the author
+  //    note. That preserves the "everything already on Buffer" guard
+  //    for the route while still allowing a standalone author-note
+  //    schedule when chapters are done.
+  if (plan.length === 0 && authorNote == null) {
+    return { plan: [], authorNote: null, startDate, chainTailDate };
+  }
+
+  return { plan, authorNote, startDate, chainTailDate };
+}
+
+/**
+ * Compute the author-note plan for a series, or `null` when not eligible.
+ *
+ * Eligibility:
+ *   - `author_note_approved_at` is non-null (operator approved the note)
+ *   - `author_notes.social_caption` is non-empty after trim
+ *   - `author_note_image_url` is non-empty
+ *   - the note is not already on Buffer (post_id is null OR status='error')
+ *
+ * Scheduled-for: 20:00 SAST on the day AFTER the latest chapter in the
+ * series. The "latest chapter date" is the max of (already-scheduled
+ * `scheduled_for` columns on story_posts, projected `scheduledAt` on
+ * the new chapter plan items). That makes the note land on day N+1
+ * regardless of whether we're scheduling all chapters in one call or
+ * topping up after a partial schedule.
+ */
+async function loadAuthorNotePlanForSeries(
+  seriesId: string,
+  allPosts: PostRow[],
+  chapterPlan: ScheduledPostPlan[]
+): Promise<AuthorNotePlan | null> {
+  const { data: row, error } = await supabase
+    .from("story_series")
+    .select(
+      "author_notes, author_note_image_url, author_note_approved_at, author_note_buffer_post_id, author_note_buffer_status"
+    )
+    .eq("id", seriesId)
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to load series for author note: ${error.message}`);
+  }
+  const series = row as SeriesAuthorNoteRow;
+
+  if (!series.author_note_approved_at) return null;
+
+  const alreadyScheduled =
+    series.author_note_buffer_post_id != null &&
+    series.author_note_buffer_status !== "error";
+  if (alreadyScheduled) return null;
+
+  const socialCaption = series.author_notes?.social_caption?.trim() ?? "";
+  if (socialCaption.length === 0) return null;
+
+  const imageUrl = series.author_note_image_url?.trim() ?? "";
+  if (imageUrl.length === 0) return null;
+
+  // Latest chapter date = max(already-scheduled rows, new plan dates).
+  let latestMs = 0;
+  for (const post of allPosts) {
+    if (!post.scheduled_for) continue;
+    const t = new Date(post.scheduled_for).getTime();
+    if (t > latestMs) latestMs = t;
+  }
+  for (const item of chapterPlan) {
+    const t = item.scheduledAt.getTime();
+    if (t > latestMs) latestMs = t;
+  }
+  if (latestMs === 0) {
+    // No chapter is scheduled or pending — nothing to anchor "day after"
+    // to. Skip rather than guess; the note will pick up on a later
+    // schedule run once at least one chapter has a date.
+    return null;
+  }
+
+  return {
+    socialCaption,
+    imageUrl,
+    scheduledAt: addDaysUTC(new Date(latestMs), 1),
+  };
 }
 
 /**

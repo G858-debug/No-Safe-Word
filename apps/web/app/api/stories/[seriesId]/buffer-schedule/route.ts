@@ -84,11 +84,11 @@ export async function POST(
     );
   }
 
-  if (plan.plan.length === 0) {
+  if (plan.plan.length === 0 && plan.authorNote == null) {
     return NextResponse.json(
       {
         error:
-          "No posts available to schedule on Buffer. Every chapter is already scheduled or sent.",
+          "Nothing available to schedule on Buffer. Every chapter (and the author note) is already scheduled or sent.",
       },
       { status: 400 }
     );
@@ -203,7 +203,97 @@ export async function POST(
     }
   }
 
-  if (successes.length > 0) {
+  // Author-note scheduling. Skipped on a chapter failure so we don't
+  // land the note ahead of a chapter that didn't make it onto Buffer.
+  // Idempotent: re-reads the series row and skips if the note is
+  // already on Buffer (post_id set + status not 'error'), and clears
+  // any prior 'error' state before re-scheduling.
+  let authorNoteResult:
+    | { bufferPostId: string; scheduledAt: string }
+    | null = null;
+  let authorNoteFailure: { error: string } | null = null;
+  let authorNoteSkipped: { reason: string } | null = null;
+
+  if (firstFailure == null && plan.authorNote != null) {
+    const { data: seriesRow, error: seriesReadErr } = await supabase
+      .from("story_series")
+      .select("author_note_buffer_post_id, author_note_buffer_status")
+      .eq("id", seriesId)
+      .single();
+
+    if (seriesReadErr || !seriesRow) {
+      authorNoteFailure = {
+        error: seriesReadErr?.message ?? "Series row not found",
+      };
+    } else {
+      const noteAlreadyScheduled =
+        seriesRow.author_note_buffer_post_id != null &&
+        seriesRow.author_note_buffer_status !== "error";
+
+      if (noteAlreadyScheduled) {
+        authorNoteSkipped = { reason: "already_scheduled" };
+      } else {
+        if (seriesRow.author_note_buffer_status === "error") {
+          await supabase
+            .from("story_series")
+            .update({
+              author_note_buffer_post_id: null,
+              author_note_buffer_status: null,
+              author_note_buffer_error: null,
+            })
+            .eq("id", seriesId);
+        }
+
+        try {
+          const result = await bufferClient.schedulePost({
+            channelId,
+            text: plan.authorNote.socialCaption,
+            scheduledAt: plan.authorNote.scheduledAt,
+            imageUrls: [plan.authorNote.imageUrl],
+          });
+
+          const scheduledAtIso = plan.authorNote.scheduledAt.toISOString();
+          const { error: updateErr } = await supabase
+            .from("story_series")
+            .update({
+              author_note_buffer_post_id: result.id,
+              author_note_buffer_status: result.status,
+              author_note_buffer_error: null,
+              author_note_scheduled_for: scheduledAtIso,
+            })
+            .eq("id", seriesId);
+
+          if (updateErr) {
+            console.error(
+              `[buffer-schedule] author note: persisted Buffer post but DB write failed for series ${seriesId}: ${updateErr.message}`
+            );
+          }
+
+          authorNoteResult = {
+            bufferPostId: result.id,
+            scheduledAt: scheduledAtIso,
+          };
+        } catch (err) {
+          const message =
+            err instanceof BufferApiError
+              ? `${err.code}: ${err.message}`
+              : err instanceof Error
+                ? err.message
+                : "Unknown error";
+          authorNoteFailure = { error: message };
+          await supabase
+            .from("story_series")
+            .update({
+              author_note_buffer_status: "error",
+              author_note_buffer_error: message,
+            })
+            .eq("id", seriesId);
+        }
+      }
+    }
+  }
+
+  if (successes.length > 0 || authorNoteResult != null) {
     await supabase
       .from("story_series")
       .update({ status: "scheduled" })
@@ -220,13 +310,16 @@ export async function POST(
     }
   }
 
-  if (firstFailure) {
+  if (firstFailure || authorNoteFailure) {
     return NextResponse.json(
       {
         partial: true,
         scheduled: successes,
         skipped,
         failure: firstFailure,
+        authorNote: authorNoteResult,
+        authorNoteSkipped,
+        authorNoteFailure,
       },
       { status: 207 }
     );
@@ -235,6 +328,8 @@ export async function POST(
   return NextResponse.json({
     scheduled: successes,
     skipped,
+    authorNote: authorNoteResult,
+    authorNoteSkipped,
     startDate: plan.startDate.toISOString(),
     chainTailDate: plan.chainTailDate?.toISOString() ?? null,
   });
@@ -259,14 +354,30 @@ export async function DELETE(
     );
   }
 
-  if (!posts || posts.length === 0) {
-    return NextResponse.json({ cancelled: [], failures: [] });
+  // Author-note Buffer state on the series row. Mirrors the per-post
+  // cancel logic — skip if the note has already been sent ('sent' from
+  // Buffer means it's live on Facebook), otherwise cancel + clear.
+  const { data: seriesRow, error: seriesErr } = await supabase
+    .from("story_series")
+    .select(
+      "author_note_buffer_post_id, author_note_buffer_status"
+    )
+    .eq("id", seriesId)
+    .single();
+
+  if (seriesErr) {
+    return NextResponse.json(
+      { error: seriesErr.message },
+      { status: 500 }
+    );
   }
 
   const cancelled: string[] = [];
   const failures: Array<{ postId: string; error: string }> = [];
+  let authorNoteCancelled = false;
+  let authorNoteFailure: { error: string } | null = null;
 
-  for (const post of posts) {
+  for (const post of posts ?? []) {
     if (!post.buffer_post_id) continue;
 
     // Don't try to cancel posts Buffer has already published. They are
@@ -297,9 +408,41 @@ export async function DELETE(
     }
   }
 
-  if (cancelled.length > 0) {
+  if (
+    seriesRow?.author_note_buffer_post_id &&
+    seriesRow.author_note_buffer_status !== "sent"
+  ) {
+    try {
+      await bufferClient.cancelPost(seriesRow.author_note_buffer_post_id);
+      await supabase
+        .from("story_series")
+        .update({
+          author_note_buffer_post_id: null,
+          author_note_buffer_status: null,
+          author_note_buffer_error: null,
+          author_note_scheduled_for: null,
+        })
+        .eq("id", seriesId);
+      authorNoteCancelled = true;
+    } catch (err) {
+      const message =
+        err instanceof BufferApiError
+          ? `${err.code}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : "Unknown error";
+      authorNoteFailure = { error: message };
+    }
+  }
+
+  if (cancelled.length > 0 || authorNoteCancelled) {
     revalidatePath(`/dashboard/stories/${seriesId}`);
   }
 
-  return NextResponse.json({ cancelled, failures });
+  return NextResponse.json({
+    cancelled,
+    failures,
+    authorNoteCancelled,
+    authorNoteFailure,
+  });
 }

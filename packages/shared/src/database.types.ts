@@ -1162,10 +1162,14 @@ export type Database = {
           access_tier: string
           author_id: string
           author_note_approved_at: string | null
+          author_note_buffer_error: string | null
+          author_note_buffer_post_id: string | null
+          author_note_buffer_status: string | null
           author_note_image_id: string | null
           author_note_image_prompt: string | null
           author_note_image_url: string | null
           author_note_publish_states: Json
+          author_note_scheduled_for: string | null
           author_notes: Json | null
           blurb_long_selected: number | null
           blurb_long_variants: Json | null
@@ -1206,10 +1210,14 @@ export type Database = {
           access_tier?: string
           author_id: string
           author_note_approved_at?: string | null
+          author_note_buffer_error?: string | null
+          author_note_buffer_post_id?: string | null
+          author_note_buffer_status?: string | null
           author_note_image_id?: string | null
           author_note_image_prompt?: string | null
           author_note_image_url?: string | null
           author_note_publish_states?: Json
+          author_note_scheduled_for?: string | null
           author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
@@ -1250,10 +1258,14 @@ export type Database = {
           access_tier?: string
           author_id?: string
           author_note_approved_at?: string | null
+          author_note_buffer_error?: string | null
+          author_note_buffer_post_id?: string | null
+          author_note_buffer_status?: string | null
           author_note_image_id?: string | null
           author_note_image_prompt?: string | null
           author_note_image_url?: string | null
           author_note_publish_states?: Json
+          author_note_scheduled_for?: string | null
           author_notes?: Json | null
           blurb_long_selected?: number | null
           blurb_long_variants?: Json | null
