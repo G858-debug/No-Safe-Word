@@ -5,7 +5,7 @@ import AuthProvider from "@/components/AuthProvider";
 import "./globals.css";
 
 const GA_MEASUREMENT_ID = "G-T42NV4VY9S";
-const META_PIXEL_ID = "1321927338365417";
+const META_PIXEL_ID = "2187647625317579";
 
 const inter = Inter({
   subsets: ["latin"],

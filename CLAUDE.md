@@ -238,7 +238,7 @@ Key tables: `story_series`, `story_posts`, `story_characters`, `story_image_prom
 Two trackers run on the public site:
 
 - **Google Analytics 4** — measurement ID `G-T42NV4VY9S`
-- **Meta Pixel** — pixel ID `1321927338365417`
+- **Meta Pixel** — pixel ID `2187647625317579`
 
 Both are wired into the root layout at [apps/web/app/layout.tsx](apps/web/app/layout.tsx) via Next.js `<Script strategy="afterInteractive">`. Because the App Router root layout wraps every route, **every current and future page automatically inherits both tags** — there is no per-page setup. The blocks (including the Meta Pixel `<noscript>` fallback) are gated on `process.env.NODE_ENV === "production"` so localhost pageviews don't pollute either property.
 
