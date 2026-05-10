@@ -1126,6 +1126,28 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
 
   const handleReset = useCallback(async () => {
     const current = stateRef.current;
+
+    // Pre-approval states: no DB records to clear, just cleanup generated images
+    // and snap back to idle with the current prompts preserved.
+    if (
+      current.kind === "face_ready" ||
+      current.kind === "body_prompt_editing" ||
+      current.kind === "body_ready"
+    ) {
+      const toClean: string[] = [];
+      if (current.kind === "face_ready") toClean.push(current.faceImageId);
+      if (current.kind === "body_prompt_editing") toClean.push(current.faceImageId);
+      if (current.kind === "body_ready") toClean.push(current.faceImageId, current.bodyImageId);
+      await Promise.allSettled(toClean.map(cleanupImage));
+      if (isMountedRef.current) {
+        dispatch({
+          type: "HYDRATED",
+          payload: { state: { kind: "idle", prompt: current.prompt, bodyPrompt: current.bodyPrompt } },
+        });
+      }
+      return;
+    }
+
     if (current.kind !== "approved") return;
     dispatch({ type: "RESET_CLICKED" });
     try {
@@ -1717,13 +1739,16 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                 disabled={disabled}
               />
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="outline" onClick={handleRegenFace} disabled={disabled || !s.prompt.trim()}>
                 Regenerate face
               </Button>
               <Button size="sm" onClick={handleProceedToBody} disabled={disabled}>
                 Looks good → Generate body
               </Button>
+              <button onClick={handleReset} disabled={disabled} className="text-xs underline text-muted-foreground hover:text-foreground disabled:opacity-50">
+                Reset portrait
+              </button>
             </div>
           </div>
         );
@@ -1745,9 +1770,14 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                 disabled={disabled}
               />
             </div>
-            <Button size="sm" onClick={handleGenerateBody} disabled={disabled || !s.bodyPrompt.trim()}>
-              Generate body
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={handleGenerateBody} disabled={disabled || !s.bodyPrompt.trim()}>
+                Generate body
+              </Button>
+              <button onClick={handleReset} disabled={disabled} className="text-xs underline text-muted-foreground hover:text-foreground disabled:opacity-50">
+                Reset portrait
+              </button>
+            </div>
           </div>
         );
 
@@ -1790,7 +1820,7 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                 disabled={disabled}
               />
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button onClick={handleApprove} size="sm" disabled={disabled}>
                 Approve
               </Button>
@@ -1800,6 +1830,9 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
               <Button variant="ghost" size="sm" onClick={handleCancel} disabled={disabled}>
                 Cancel
               </Button>
+              <button onClick={handleReset} disabled={disabled} className="text-xs underline text-muted-foreground hover:text-foreground disabled:opacity-50">
+                Reset portrait
+              </button>
             </div>
           </div>
         );
