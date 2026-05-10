@@ -7,7 +7,9 @@ import { cleanupOrphanedImage } from "@/lib/server/cleanup-orphaned-image";
  *
  * On component mount, the CharacterCard reducer needs to know:
  *  - Is this character approved? (face + body urls)
- *  - Is there a candidate or in-flight pair (pre-approval OR post-approval)?
+ *  - What is the most recent face/body image (whether approved, in-flight, or
+ *    Generated-unapproved)?
+ *  - Has the body been invalidated by a face cascade?
  *
  * Returns a compact summary. The client-side reducer maps this onto its
  * discriminated union; the server intentionally does not encode "kind" —
@@ -17,11 +19,11 @@ import { cleanupOrphanedImage } from "@/lib/server/cleanup-orphaned-image";
  * (set by /generate-body). Face images set settings.imageType = "face" going
  * forward; legacy rows lacking the field are treated as face by default.
  *
- * Eager orphan cleanup: before identifying candidates we tear down any
- * non-approved image whose generation_jobs row is in 'failed' status or has
- * no associated job at all. Without this, a crashed regenerate session
- * would leave behind images that get mistaken for legitimate candidates
- * the next time the card mounts.
+ * Eager orphan cleanup: before exposing the latest face/body images we tear
+ * down any non-approved image whose generation_jobs row is in 'failed'
+ * status or has no associated job at all. Without this, a crashed
+ * regenerate session would surface a stale image the next time the card
+ * mounts.
  */
 export async function GET(
   _request: NextRequest,
@@ -44,7 +46,9 @@ export async function GET(
 
     const { data: character } = await supabase
       .from("characters")
-      .select("id, approved_image_id, approved_fullbody_image_id")
+      .select(
+        "id, approved_image_id, approved_fullbody_image_id, body_invalidated_at"
+      )
       .eq("id", storyChar.character_id)
       .single();
     if (!character) {
@@ -116,12 +120,6 @@ export async function GET(
       }
     }
 
-    // Survivors after cleanup — these are real in-flight or completed
-    // candidates.
-    const liveCandidates = candidateRows.filter(
-      (r) => !orphanIds.includes(r.id)
-    );
-
     const urlOf = (id: string | null) => {
       if (!id) return null;
       const row = imagesForChar?.find((r) => r.id === id);
@@ -131,60 +129,81 @@ export async function GET(
     const approvedFaceUrl = urlOf(character.approved_image_id);
     const approvedBodyUrl = urlOf(character.approved_fullbody_image_id);
 
-    // Pick the freshest candidate body, then the face it was conditioned on
-    // (settings.face_image_id). Pre-Pass-3 face images don't carry that
-    // link; for the pre-approval case we fall back to the most-recent face
-    // row by created_at.
-    const candidateBody = liveCandidates.find((r) => {
+    // The two-panel UI consumes `latest_face` and `latest_body` regardless
+    // of approval state — each panel renders the most recent image whether
+    // it's approved, unapproved, or (for body) stale.
+    //
+    // Source from `liveImages` (imagesForChar minus orphans we just
+    // cleaned up), NOT raw imagesForChar — orphan rows have been DELETED
+    // from the DB and surfacing them would point the client at a missing
+    // image. imagesForChar was loaded before cleanup and still contains
+    // those rows in memory.
+    const liveImages = (imagesForChar ?? []).filter(
+      (r) => !orphanIds.includes(r.id)
+    );
+    const allFaceRows = liveImages.filter((r) => {
+      const s = r.settings as Record<string, unknown> | null;
+      return s?.imageType !== "body"; // legacy face rows lack the field
+    });
+    const allBodyRows = liveImages.filter((r) => {
       const s = r.settings as Record<string, unknown> | null;
       return s?.imageType === "body";
     });
+    // imagesForChar is already DESC by created_at, so the first match
+    // per kind is the most recent.
+    const latestFaceRow = allFaceRows[0] ?? null;
+    const latestBodyRow = allBodyRows[0] ?? null;
 
-    let candidateFace: (typeof liveCandidates)[number] | undefined;
-    if (candidateBody) {
-      const s = candidateBody.settings as Record<string, unknown> | null;
-      const linkedFaceId =
-        typeof s?.face_image_id === "string" ? s.face_image_id : null;
-      if (linkedFaceId && linkedFaceId !== character.approved_image_id) {
-        candidateFace = liveCandidates.find((r) => r.id === linkedFaceId);
-      }
-    } else {
-      // Body not yet started/done — find the most recent face candidate.
-      candidateFace = liveCandidates.find((r) => {
-        const s = r.settings as Record<string, unknown> | null;
-        return s?.imageType !== "body";
-      });
-    }
-
-    const faceJob = candidateFace ? jobsByImage.get(candidateFace.id) : null;
-    const bodyJob = candidateBody ? jobsByImage.get(candidateBody.id) : null;
+    // jobsByImage is keyed only on non-approved candidate ids. For an
+    // approved face/body image whose row also happens to be the latest, we
+    // do a small extra read to pick up its (possibly null) job row.
+    const approvedFaceId = character.approved_image_id;
+    const approvedBodyId = character.approved_fullbody_image_id;
+    const jobFor = async (imageId: string) => {
+      const cached = jobsByImage.get(imageId);
+      if (cached) return cached;
+      const isApproved =
+        imageId === approvedFaceId || imageId === approvedBodyId;
+      if (!isApproved) return null;
+      const { data: jobRow } = await supabase
+        .from("generation_jobs")
+        .select("job_id, status")
+        .eq("image_id", imageId)
+        .maybeSingle();
+      return jobRow ?? null;
+    };
+    const latestFaceJob = latestFaceRow ? await jobFor(latestFaceRow.id) : null;
+    const latestBodyJob = latestBodyRow ? await jobFor(latestBodyRow.id) : null;
 
     return NextResponse.json({
       character_id: character.id,
+      body_invalidated_at: character.body_invalidated_at ?? null,
       approved: {
         face_image_id: character.approved_image_id,
         face_url: approvedFaceUrl,
         body_image_id: character.approved_fullbody_image_id,
         body_url: approvedBodyUrl,
       },
-      pending:
-        candidateFace || candidateBody
-          ? {
-              face_image_id: candidateFace?.id ?? null,
-              face_url:
-                candidateFace?.sfw_url || candidateFace?.stored_url || null,
-              face_job_id: faceJob?.job_id ?? null,
-              face_status: faceJob?.status ?? null,
-              face_prompt: candidateFace?.prompt ?? null,
-              body_image_id: candidateBody?.id ?? null,
-              body_url:
-                candidateBody?.sfw_url || candidateBody?.stored_url || null,
-              body_job_id: bodyJob?.job_id ?? null,
-              body_status: bodyJob?.status ?? null,
-              body_prompt: candidateBody?.prompt ?? null,
-              body_created_at: candidateBody?.created_at ?? null,
-            }
-          : null,
+      latest_face: latestFaceRow
+        ? {
+            image_id: latestFaceRow.id,
+            url: latestFaceRow.sfw_url || latestFaceRow.stored_url || null,
+            created_at: latestFaceRow.created_at,
+            prompt: latestFaceRow.prompt ?? null,
+            job_id: latestFaceJob?.job_id ?? null,
+            status: latestFaceJob?.status ?? null,
+          }
+        : null,
+      latest_body: latestBodyRow
+        ? {
+            image_id: latestBodyRow.id,
+            url: latestBodyRow.sfw_url || latestBodyRow.stored_url || null,
+            created_at: latestBodyRow.created_at,
+            prompt: latestBodyRow.prompt ?? null,
+            job_id: latestBodyJob?.job_id ?? null,
+            status: latestBodyJob?.status ?? null,
+          }
+        : null,
     });
   } catch (err) {
     console.error("[in-flight-state] error:", err);

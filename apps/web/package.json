@@ -21,6 +21,7 @@
     "@no-safe-word/image-gen": "^0.1.0",
     "@no-safe-word/shared": "*",
     "@no-safe-word/story-engine": "*",
+    "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-separator": "^1.1.8",

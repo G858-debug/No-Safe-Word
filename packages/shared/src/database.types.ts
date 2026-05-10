@@ -156,6 +156,7 @@ export type Database = {
           archetype_tag: string | null
           author_id: string
           bio_short: string | null
+          body_invalidated_at: string | null
           card_approved_at: string | null
           card_image_id: string | null
           card_image_prompt: string | null
@@ -183,6 +184,7 @@ export type Database = {
           archetype_tag?: string | null
           author_id: string
           bio_short?: string | null
+          body_invalidated_at?: string | null
           card_approved_at?: string | null
           card_image_id?: string | null
           card_image_prompt?: string | null
@@ -210,6 +212,7 @@ export type Database = {
           archetype_tag?: string | null
           author_id?: string
           bio_short?: string | null
+          body_invalidated_at?: string | null
           card_approved_at?: string | null
           card_image_id?: string | null
           card_image_prompt?: string | null
