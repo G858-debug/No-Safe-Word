@@ -93,8 +93,15 @@ interface BufferSchedulePreviewItem {
   hasFirstComment: boolean;
 }
 
+interface BufferSchedulePreviewAuthorNote {
+  scheduledAt: string;
+  socialCaption: string;
+  imageUrl: string;
+}
+
 interface BufferSchedulePreview {
   plan: BufferSchedulePreviewItem[];
+  authorNote: BufferSchedulePreviewAuthorNote | null;
   startDate: string;
   chainTailDate: string | null;
 }
@@ -806,9 +813,12 @@ export default function PublishPanel({
   }, [seriesId, bufferStartDate]);
 
   const scheduleViaBuffer = useCallback(async () => {
-    if (!bufferPreview || bufferPreview.plan.length === 0) return;
-    const first = bufferPreview.plan[0];
-    const last = bufferPreview.plan[bufferPreview.plan.length - 1];
+    if (
+      !bufferPreview ||
+      (bufferPreview.plan.length === 0 && !bufferPreview.authorNote)
+    ) {
+      return;
+    }
     const fmt = (iso: string) =>
       new Date(iso).toLocaleString("en-ZA", {
         weekday: "short",
@@ -818,12 +828,25 @@ export default function PublishPanel({
         minute: "2-digit",
         timeZone: "Africa/Johannesburg",
       });
+    const firstIso =
+      bufferPreview.plan.length > 0
+        ? bufferPreview.plan[0].scheduledAt
+        : bufferPreview.authorNote!.scheduledAt;
+    const lastIso = bufferPreview.authorNote
+      ? bufferPreview.authorNote.scheduledAt
+      : bufferPreview.plan[bufferPreview.plan.length - 1].scheduledAt;
+    const chapterPart =
+      bufferPreview.plan.length > 0
+        ? `${bufferPreview.plan.length} chapter${
+            bufferPreview.plan.length === 1 ? "" : "s"
+          }`
+        : "";
+    const notePart = bufferPreview.authorNote ? "author's note" : "";
+    const itemsLabel = [chapterPart, notePart].filter(Boolean).join(" + ");
     const ok = window.confirm(
-      `Schedule ${bufferPreview.plan.length} chapter${
-        bufferPreview.plan.length === 1 ? "" : "s"
-      } on Buffer? First post: ${fmt(first.scheduledAt)} SAST. Last post: ${fmt(
-        last.scheduledAt
-      )} SAST.`
+      `Schedule ${itemsLabel} on Buffer? First post: ${fmt(
+        firstIso
+      )} SAST. Last post: ${fmt(lastIso)} SAST.`
     );
     if (!ok) return;
 
@@ -1944,7 +1967,8 @@ export default function PublishPanel({
               onClick={scheduleViaBuffer}
               disabled={
                 !bufferPreview ||
-                bufferPreview.plan.length === 0 ||
+                (bufferPreview.plan.length === 0 &&
+                  !bufferPreview.authorNote) ||
                 bufferScheduling ||
                 !authorNotesReady
               }
@@ -1979,7 +2003,8 @@ export default function PublishPanel({
               <div className="flex items-center justify-between">
                 <h4 className="font-medium text-sm">
                   Plan ({bufferPreview.plan.length} chapter
-                  {bufferPreview.plan.length === 1 ? "" : "s"})
+                  {bufferPreview.plan.length === 1 ? "" : "s"}
+                  {bufferPreview.authorNote ? " + author note" : ""})
                 </h4>
                 {bufferPreview.chainTailDate && (
                   <p className="text-xs text-muted-foreground">
@@ -1996,7 +2021,7 @@ export default function PublishPanel({
                   </p>
                 )}
               </div>
-              {bufferPreview.plan.length === 0 ? (
+              {bufferPreview.plan.length === 0 && !bufferPreview.authorNote ? (
                 <p className="text-sm text-muted-foreground">
                   Nothing to schedule — every chapter is already published.
                 </p>
@@ -2028,6 +2053,27 @@ export default function PublishPanel({
                       </span>
                     </div>
                   ))}
+                  {bufferPreview.authorNote && (
+                    <div className="flex items-center justify-between text-sm border-t border-border pt-1.5">
+                      <span className="text-muted-foreground truncate mr-4">
+                        Author&apos;s note{" "}
+                        <span className="text-xs">(social caption + image)</span>
+                      </span>
+                      <span className="font-medium shrink-0">
+                        {new Date(
+                          bufferPreview.authorNote.scheduledAt
+                        ).toLocaleString("en-ZA", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                          timeZone: "Africa/Johannesburg",
+                        })}{" "}
+                        SAST
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

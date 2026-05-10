@@ -32,6 +32,13 @@ export async function GET(
         imageCount: p.imageUrls.length,
         hasFirstComment: !!p.firstComment,
       })),
+      authorNote: result.authorNote
+        ? {
+            scheduledAt: result.authorNote.scheduledAt.toISOString(),
+            socialCaption: result.authorNote.socialCaption,
+            imageUrl: result.authorNote.imageUrl,
+          }
+        : null,
       startDate: result.startDate.toISOString(),
       chainTailDate: result.chainTailDate?.toISOString() ?? null,
     });
