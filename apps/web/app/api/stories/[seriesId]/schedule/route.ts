@@ -97,11 +97,14 @@ export async function POST(
       });
     }
 
-    // Update series status
+    // Update series status. Skip the nudge if the series is already
+    // 'published' — re-running schedule on a live story (e.g. to fix a
+    // chapter date) must not silently hide it from /stories.
     await supabase
       .from("story_series")
       .update({ status: "scheduled" })
-      .eq("id", seriesId);
+      .eq("id", seriesId)
+      .neq("status", "published");
 
     return NextResponse.json({ schedule });
   } catch (err) {

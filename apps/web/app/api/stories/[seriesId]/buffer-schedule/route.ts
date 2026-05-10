@@ -294,10 +294,16 @@ export async function POST(
   }
 
   if (successes.length > 0 || authorNoteResult != null) {
+    // Only nudge a non-published series. A series that's already 'published'
+    // (after publish_story_to_website) must NOT be downgraded just because
+    // the operator pushed more posts — e.g. scheduling the author-note add-on
+    // or re-scheduling a stuck chapter. Doing so silently hides a live story
+    // from /stories until someone notices.
     await supabase
       .from("story_series")
       .update({ status: "scheduled" })
-      .eq("id", seriesId);
+      .eq("id", seriesId)
+      .neq("status", "published");
 
     const { data: series } = await supabase
       .from("story_series")

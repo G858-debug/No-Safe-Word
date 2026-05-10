@@ -304,6 +304,39 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Auto-flip story_series.status to 'published' the first time a chapter
+  // or cover-reveal post on that series actually goes live. Without this,
+  // the series row stays at 'scheduled' until an operator manually clicks
+  // "Publish website" — and the public /stories listing keeps hiding the
+  // story even though Facebook has started dripping chapters. The
+  // .neq("status", "published") predicate makes this idempotent: only the
+  // first run that observes a live chapter performs the flip.
+  let seriesAutoPublished = 0;
+  const seriesPublishErrors: Array<{ seriesId: string; error: string }> = [];
+  if (seriesIdsToRevalidate.size > 0) {
+    const { data: flipped, error: flipErr } = await supabase
+      .from("story_series")
+      .update({
+        status: "published",
+        published_at: new Date().toISOString(),
+      })
+      .in("id", Array.from(seriesIdsToRevalidate))
+      .neq("status", "published")
+      .select("id, slug");
+
+    if (flipErr) {
+      seriesPublishErrors.push({ seriesId: "<batch>", error: flipErr.message });
+    } else {
+      seriesAutoPublished = flipped?.length ?? 0;
+      for (const row of flipped ?? []) {
+        void logEvent({
+          eventType: "buffer.series_published",
+          metadata: { series_id: row.id, slug: row.slug },
+        });
+      }
+    }
+  }
+
   // Revalidate every story that had at least one chapter (or the cover
   // post) flip to published. We need the slug for the public path.
   if (seriesIdsToRevalidate.size > 0) {
@@ -329,6 +362,8 @@ export async function GET(request: NextRequest) {
     coversFailed,
     coversSkipped,
     coverErrors,
+    seriesAutoPublished,
+    seriesPublishErrors,
   });
 }
 
