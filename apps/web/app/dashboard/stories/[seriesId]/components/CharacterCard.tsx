@@ -66,7 +66,21 @@ type CardState =
       bodyImageId?: string;
     }
   | {
-      kind: "pre_approval";
+      kind: "face_ready";
+      prompt: string;
+      bodyPrompt: string;
+      faceImageId: string;
+      faceUrl: string;
+    }
+  | {
+      kind: "body_prompt_editing";
+      prompt: string;
+      bodyPrompt: string;
+      faceImageId: string;
+      faceUrl: string;
+    }
+  | {
+      kind: "body_ready";
       prompt: string;
       bodyPrompt: string;
       faceImageId: string;
@@ -194,13 +208,10 @@ type Action =
   | { type: "CANCELLED" }
   | { type: "REGEN_FULL_CLICKED" }
   | { type: "REGEN_BODY_ONLY_CLICKED" }
-  | {
-      type: "BODY_RESTART_FROM_PRE_APPROVAL";
-      faceImageId: string;
-      faceUrl: string;
-      prompt: string;
-      bodyPrompt: string;
-    }
+  | { type: "PROCEED_TO_BODY" }
+  | { type: "GENERATE_BODY_CLICKED" }
+  | { type: "REGEN_FACE_CLICKED" }
+  | { type: "REGEN_BODY_CLICKED" }
   | { type: "CANDIDATE_FACE_STARTED"; jobId: string; imageId: string }
   | { type: "CANDIDATE_FACE_COMPLETED"; url: string }
   | { type: "CANDIDATE_BODY_STARTED"; jobId: string; imageId: string }
@@ -233,9 +244,14 @@ function computeRecoveryState(state: CardState): CardState {
       return state;
     case "approved":
       return state;
+    case "face_ready":
+      return { kind: "idle", prompt: state.prompt, bodyPrompt: state.bodyPrompt };
+    case "body_prompt_editing":
+      return { kind: "idle", prompt: state.prompt, bodyPrompt: state.bodyPrompt };
+    case "body_ready":
+      return { kind: "body_prompt_editing", prompt: state.prompt, bodyPrompt: state.bodyPrompt, faceImageId: state.faceImageId, faceUrl: state.faceUrl };
     case "generating_face":
     case "generating_body":
-    case "pre_approval":
     case "approving":
       return {
         kind: "idle",
@@ -294,11 +310,11 @@ function reducer(state: CardState, action: Action): CardState {
       };
 
     case "PROMPT_EDITED":
-      if (state.kind !== "idle") return state;
+      if (state.kind !== "idle" && state.kind !== "face_ready") return state;
       return { ...state, prompt: action.prompt };
 
     case "BODY_PROMPT_EDITED":
-      if (state.kind !== "idle") return state;
+      if (state.kind !== "idle" && state.kind !== "body_prompt_editing" && state.kind !== "body_ready") return state;
       return { ...state, bodyPrompt: action.bodyPrompt };
 
     case "GENERATE_CLICKED":
@@ -320,7 +336,7 @@ function reducer(state: CardState, action: Action): CardState {
     case "FACE_COMPLETED":
       if (state.kind !== "generating_face") return state;
       return {
-        kind: "generating_body",
+        kind: "face_ready",
         prompt: state.prompt,
         bodyPrompt: state.bodyPrompt,
         faceImageId: state.faceImageId,
@@ -339,7 +355,7 @@ function reducer(state: CardState, action: Action): CardState {
       if (state.kind !== "generating_body") return state;
       if (!state.bodyImageId) return state;
       return {
-        kind: "pre_approval",
+        kind: "body_ready",
         prompt: state.prompt,
         bodyPrompt: state.bodyPrompt,
         faceImageId: state.faceImageId,
@@ -349,7 +365,7 @@ function reducer(state: CardState, action: Action): CardState {
       };
 
     case "APPROVE_CLICKED":
-      if (state.kind !== "pre_approval") return state;
+      if (state.kind !== "body_ready") return state;
       return { ...state, kind: "approving" };
 
     case "APPROVED":
@@ -368,11 +384,13 @@ function reducer(state: CardState, action: Action): CardState {
       return state;
 
     case "CANCELLED":
-      if (state.kind !== "pre_approval") return state;
+      if (state.kind !== "body_ready") return state;
       return {
-        kind: "idle",
+        kind: "body_prompt_editing",
         prompt: state.prompt,
         bodyPrompt: state.bodyPrompt,
+        faceImageId: state.faceImageId,
+        faceUrl: state.faceUrl,
       };
 
     case "REGEN_FULL_CLICKED":
@@ -381,15 +399,21 @@ function reducer(state: CardState, action: Action): CardState {
       // CANDIDATE_*_STARTED on response.
       return state;
 
-    case "BODY_RESTART_FROM_PRE_APPROVAL":
-      if (state.kind !== "pre_approval") return state;
-      return {
-        kind: "generating_body",
-        prompt: action.prompt,
-        bodyPrompt: action.bodyPrompt,
-        faceImageId: action.faceImageId,
-        faceUrl: action.faceUrl,
-      };
+    case "REGEN_FACE_CLICKED":
+      if (state.kind !== "face_ready") return state;
+      return { kind: "idle", prompt: state.prompt, bodyPrompt: state.bodyPrompt };
+
+    case "PROCEED_TO_BODY":
+      if (state.kind !== "face_ready") return state;
+      return { kind: "body_prompt_editing", prompt: state.prompt, bodyPrompt: state.bodyPrompt, faceImageId: state.faceImageId, faceUrl: state.faceUrl };
+
+    case "GENERATE_BODY_CLICKED":
+      if (state.kind !== "body_prompt_editing") return state;
+      return { kind: "generating_body", prompt: state.prompt, bodyPrompt: state.bodyPrompt, faceImageId: state.faceImageId, faceUrl: state.faceUrl };
+
+    case "REGEN_BODY_CLICKED":
+      if (state.kind !== "body_ready") return state;
+      return { kind: "body_prompt_editing", prompt: state.prompt, bodyPrompt: state.bodyPrompt, faceImageId: state.faceImageId, faceUrl: state.faceUrl };
 
     case "CANDIDATE_FACE_STARTED":
       if (state.kind !== "approved") return state;
@@ -657,22 +681,15 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
   // (handleGenerate from idle) and hydration resume.
   // ───────────────────────────────────────────────────────────
 
-  const driveGenerateFlow = useCallback(
+  // Drives face-only generation. Stops at face_ready — body is separate.
+  // Handles both fresh generation (initial.kind === "idle") and hydration
+  // resume (initial.kind === "generating_face").
+  const driveGenerateFaceFlow = useCallback(
     async (initial: CardState) => {
-      const ids: { faceImageId?: string; bodyImageId?: string } = {};
+      const ids: { faceImageId?: string } = {};
       try {
         let faceImageId: string;
         let faceJobId: string;
-        // Capture bodyPrompt up-front. Reducer state may change between now
-        // and the /generate-body POST; the closure value is stable.
-        let bodyPromptToSend: string | undefined;
-        if (
-          initial.kind === "idle" ||
-          initial.kind === "generating_face" ||
-          initial.kind === "generating_body"
-        ) {
-          bodyPromptToSend = initial.bodyPrompt.trim() || undefined;
-        }
 
         if (initial.kind === "idle") {
           const res = await fetch(
@@ -701,55 +718,52 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
           faceImageId = initial.faceImageId;
           faceJobId = initial.faceJobId;
           ids.faceImageId = faceImageId;
-        } else if (initial.kind === "generating_body") {
-          ids.faceImageId = initial.faceImageId;
-          ids.bodyImageId = initial.bodyImageId;
-          if (!initial.bodyJobId) {
-            throw new Error(
-              "hydration: generating_body without bodyJobId"
-            );
-          }
-          const bodyResult = await waitForCompletion(initial.bodyJobId);
-          dispatch({ type: "BODY_COMPLETED", bodyUrl: bodyResult.url });
-          return;
         } else {
           return;
         }
 
         const faceResult = await waitForCompletion(faceJobId);
         dispatch({ type: "FACE_COMPLETED", faceUrl: faceResult.url });
+      } catch (err) {
+        if (isUnmounted(err)) return;
+        if (ids.faceImageId) await cleanupImage(ids.faceImageId);
+        dispatch({ type: "ERROR", message: errorMessage(err) });
+      }
+    },
+    [character.id, cleanupImage, waitForCompletion]
+  );
 
-        const bodyRes = await fetch(
+  // Drives body-only generation from an explicit face + body prompt.
+  // Called from handleGenerateBody and handleRegenBody.
+  const driveGenerateBodyFlow = useCallback(
+    async (input: { faceImageId: string; bodyPrompt: string }) => {
+      const ids: { bodyImageId?: string } = {};
+      try {
+        const res = await fetch(
           `/api/stories/characters/${character.id}/generate-body`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              face_image_id: faceImageId,
-              prompt: bodyPromptToSend,
+              face_image_id: input.faceImageId,
+              prompt: input.bodyPrompt.trim() || undefined,
             }),
           }
         );
-        const bodyData = (await bodyRes.json()) as {
+        const data = (await res.json()) as {
           jobId?: string;
           imageId?: string;
           error?: string;
         };
-        if (!bodyRes.ok || !bodyData.jobId || !bodyData.imageId) {
-          throw new Error(bodyData.error || "Body generate failed");
+        if (!res.ok || !data.jobId || !data.imageId) {
+          throw new Error(data.error || "Body generate failed");
         }
-        ids.bodyImageId = bodyData.imageId;
-        dispatch({
-          type: "BODY_STARTED",
-          bodyJobId: bodyData.jobId,
-          bodyImageId: bodyData.imageId,
-        });
-
-        const bodyResult = await waitForCompletion(bodyData.jobId);
+        ids.bodyImageId = data.imageId;
+        dispatch({ type: "BODY_STARTED", bodyJobId: data.jobId, bodyImageId: data.imageId });
+        const bodyResult = await waitForCompletion(data.jobId);
         dispatch({ type: "BODY_COMPLETED", bodyUrl: bodyResult.url });
       } catch (err) {
         if (isUnmounted(err)) return;
-        if (ids.faceImageId) await cleanupImage(ids.faceImageId);
         if (ids.bodyImageId) await cleanupImage(ids.bodyImageId);
         dispatch({ type: "ERROR", message: errorMessage(err) });
       }
@@ -943,15 +957,15 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
     submittingRef.current = true;
     try {
       dispatch({ type: "GENERATE_CLICKED" });
-      await driveGenerateFlow(current);
+      await driveGenerateFaceFlow(current);
     } finally {
       submittingRef.current = false;
     }
-  }, [driveGenerateFlow]);
+  }, [driveGenerateFaceFlow]);
 
   const handleApprove = useCallback(async () => {
     const current = stateRef.current;
-    if (current.kind !== "pre_approval") return;
+    if (current.kind !== "body_ready") return;
     dispatch({ type: "APPROVE_CLICKED" });
     try {
       const res = await fetch(
@@ -977,13 +991,11 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
 
   const handleCancel = useCallback(async () => {
     const current = stateRef.current;
-    if (current.kind !== "pre_approval") return;
+    if (current.kind !== "body_ready") return;
+    const { bodyImageId } = current;
     dispatch({ type: "CANCEL_CLICKED" });
     try {
-      await Promise.all([
-        cleanupImage(current.faceImageId),
-        cleanupImage(current.bodyImageId),
-      ]);
+      await cleanupImage(bodyImageId);
     } catch (e) {
       console.warn("[cancel] cleanup partial failure:", e);
     }
@@ -995,91 +1007,71 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
     if (submittingRef.current) return;
     submittingRef.current = true;
     try {
-      if (current.kind === "pre_approval") {
-        dispatch({ type: "REGEN_FULL_CLICKED" });
-        await Promise.all([
-          cleanupImage(current.faceImageId),
-          cleanupImage(current.bodyImageId),
-        ]);
-        dispatch({ type: "CANCELLED" });
-        await driveGenerateFlow(stateRef.current);
-      } else if (current.kind === "approved") {
+      if (current.kind === "approved") {
         dispatch({ type: "REGEN_FULL_CLICKED" });
         await driveRegenFullFlow(current);
       }
     } finally {
       submittingRef.current = false;
     }
-  }, [cleanupImage, driveGenerateFlow, driveRegenFullFlow]);
+  }, [driveRegenFullFlow]);
 
   const handleRegenBodyOnly = useCallback(async () => {
     const current = stateRef.current;
     if (submittingRef.current) return;
     submittingRef.current = true;
     try {
-      if (current.kind === "pre_approval") {
-        const { faceImageId, faceUrl, prompt, bodyPrompt, bodyImageId } =
-          current;
-        dispatch({ type: "REGEN_BODY_ONLY_CLICKED" });
-        await cleanupImage(bodyImageId);
-        dispatch({
-          type: "BODY_RESTART_FROM_PRE_APPROVAL",
-          faceImageId,
-          faceUrl,
-          prompt,
-          bodyPrompt,
-        });
-
-        try {
-          const res = await fetch(
-            `/api/stories/characters/${character.id}/generate-body`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                face_image_id: faceImageId,
-                prompt: bodyPrompt.trim() || undefined,
-              }),
-            }
-          );
-          const data = (await res.json()) as {
-            jobId?: string;
-            imageId?: string;
-            error?: string;
-          };
-          if (!res.ok || !data.jobId || !data.imageId) {
-            await cleanupImage(faceImageId);
-            dispatch({
-              type: "ERROR",
-              message: data.error || "Body generate failed",
-            });
-            return;
-          }
-          dispatch({
-            type: "BODY_STARTED",
-            bodyJobId: data.jobId,
-            bodyImageId: data.imageId,
-          });
-          const bodyResult = await waitForCompletion(data.jobId);
-          dispatch({ type: "BODY_COMPLETED", bodyUrl: bodyResult.url });
-        } catch (err) {
-          if (isUnmounted(err)) return;
-          await cleanupImage(faceImageId);
-          dispatch({ type: "ERROR", message: errorMessage(err) });
-        }
-      } else if (current.kind === "approved") {
+      if (current.kind === "approved") {
         dispatch({ type: "REGEN_BODY_ONLY_CLICKED" });
         await driveRegenBodyOnlyFlow(current);
       }
     } finally {
       submittingRef.current = false;
     }
-  }, [
-    character.id,
-    cleanupImage,
-    driveRegenBodyOnlyFlow,
-    waitForCompletion,
-  ]);
+  }, [driveRegenBodyOnlyFlow]);
+
+  const handleRegenFace = useCallback(async () => {
+    const current = stateRef.current;
+    if (current.kind !== "face_ready" || submittingRef.current) return;
+    submittingRef.current = true;
+    const { faceImageId, prompt, bodyPrompt } = current;
+    try {
+      dispatch({ type: "REGEN_FACE_CLICKED" }); // → idle
+      await cleanupImage(faceImageId);
+      await driveGenerateFaceFlow({ kind: "idle", prompt, bodyPrompt });
+    } finally {
+      submittingRef.current = false;
+    }
+  }, [cleanupImage, driveGenerateFaceFlow]);
+
+  const handleProceedToBody = useCallback(() => {
+    dispatch({ type: "PROCEED_TO_BODY" });
+  }, []);
+
+  const handleGenerateBody = useCallback(async () => {
+    const current = stateRef.current;
+    if (current.kind !== "body_prompt_editing" || submittingRef.current) return;
+    submittingRef.current = true;
+    const { faceImageId, bodyPrompt } = current;
+    try {
+      dispatch({ type: "GENERATE_BODY_CLICKED" }); // → generating_body
+      await driveGenerateBodyFlow({ faceImageId, bodyPrompt });
+    } finally {
+      submittingRef.current = false;
+    }
+  }, [driveGenerateBodyFlow]);
+
+  const handleRegenBody = useCallback(async () => {
+    const current = stateRef.current;
+    if (current.kind !== "body_ready" || submittingRef.current) return;
+    const { bodyImageId } = current;
+    dispatch({ type: "REGEN_BODY_CLICKED" }); // → body_prompt_editing
+    try {
+      await cleanupImage(bodyImageId);
+    } catch (e) {
+      console.warn("[regen-body] cleanup failed:", e);
+    }
+  }, [cleanupImage]);
 
   const handleReplace = useCallback(async () => {
     const current = stateRef.current;
@@ -1343,13 +1335,22 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
 
         if (faceDone && bodyDone) {
           return {
-            kind: "pre_approval",
+            kind: "body_ready",
             prompt,
             bodyPrompt,
             faceImageId: p.face_image_id!,
             faceUrl: p.face_url!,
             bodyImageId: p.body_image_id!,
             bodyUrl: p.body_url!,
+          };
+        }
+        if (faceDone && !bodyInFlight && !bodyDone) {
+          return {
+            kind: "body_prompt_editing",
+            prompt,
+            bodyPrompt,
+            faceImageId: p.face_image_id!,
+            faceUrl: p.face_url!,
           };
         }
         if (faceDone && bodyInFlight && p.body_job_id && p.body_image_id) {
@@ -1432,11 +1433,23 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
         if (!isMountedRef.current) return;
         dispatch({ type: "HYDRATED", payload: { state: hydrated } });
 
-        if (
-          hydrated.kind === "generating_face" ||
-          hydrated.kind === "generating_body"
-        ) {
-          await driveGenerateFlow(hydrated);
+        if (hydrated.kind === "generating_face") {
+          await driveGenerateFaceFlow(hydrated);
+        } else if (hydrated.kind === "generating_body") {
+          // Resume body polling — face already done, just wait for body job.
+          const { bodyJobId, bodyImageId } = hydrated;
+          if (!bodyJobId) {
+            dispatch({ type: "ERROR", message: "hydration: generating_body without bodyJobId" });
+          } else {
+            try {
+              const bodyResult = await waitForCompletion(bodyJobId);
+              if (isMountedRef.current) dispatch({ type: "BODY_COMPLETED", bodyUrl: bodyResult.url });
+            } catch (err) {
+              if (isUnmounted(err)) return;
+              if (bodyImageId) await cleanupImage(bodyImageId);
+              if (isMountedRef.current) dispatch({ type: "ERROR", message: errorMessage(err) });
+            }
+          }
         } else if (
           hydrated.kind === "regenerating_full_face" ||
           hydrated.kind === "regenerating_full_body"
@@ -1665,7 +1678,7 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                 size="sm"
                 disabled={disabled || !s.prompt.trim()}
               >
-                Generate portrait
+                Generate face
               </Button>
             </div>
             {s.error && <p className="text-xs text-red-600">{s.error}</p>}
@@ -1679,47 +1692,90 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
           </div>
         );
 
-      case "generating_body":
+      case "face_ready":
         return (
-          <div className="flex gap-3">
-            <Thumb url={s.faceUrl} label="Face" />
-            <SpinnerSlot label="Generating body…" />
+          <div className="space-y-3">
+            <div className="flex gap-3">
+              <Thumb url={s.faceUrl} label="Face" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Face prompt — edit and regenerate, or proceed to body</p>
+              <Textarea
+                value={s.prompt}
+                onChange={(e) => handlePromptEdit(e.target.value)}
+                className="text-xs font-mono"
+                rows={5}
+                disabled={disabled}
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={handleRegenFace} disabled={disabled || !s.prompt.trim()}>
+                Regenerate face
+              </Button>
+              <Button size="sm" onClick={handleProceedToBody} disabled={disabled}>
+                Looks good → Generate body
+              </Button>
+            </div>
           </div>
         );
 
-      case "pre_approval":
+      case "body_prompt_editing":
+        return (
+          <div className="space-y-3">
+            <div className="flex gap-3">
+              <Thumb url={s.faceUrl} greyed label="Face (locked)" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Body prompt — edit before generating</p>
+              <Textarea
+                value={s.bodyPrompt}
+                onChange={(e) => handleBodyPromptEdit(e.target.value)}
+                className="text-xs font-mono"
+                rows={5}
+                disabled={disabled}
+              />
+            </div>
+            <Button size="sm" onClick={handleGenerateBody} disabled={disabled || !s.bodyPrompt.trim()}>
+              Generate body
+            </Button>
+          </div>
+        );
+
+      case "generating_body":
+        return (
+          <div className="space-y-2">
+            <div className="flex gap-3">
+              <Thumb url={s.faceUrl} greyed label="Face (locked)" />
+              <SpinnerSlot label="Generating body…" />
+            </div>
+          </div>
+        );
+
+      case "body_ready":
         return (
           <div className="space-y-3">
             <div className="flex gap-3">
               <Thumb url={s.faceUrl} label="Face" />
               <Thumb url={s.bodyUrl} label="Body" />
             </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Body prompt — edit and regenerate, or approve</p>
+              <Textarea
+                value={s.bodyPrompt}
+                onChange={(e) => handleBodyPromptEdit(e.target.value)}
+                className="text-xs font-mono"
+                rows={4}
+                disabled={disabled}
+              />
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleApprove} size="sm" disabled={disabled}>
                 Approve
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRegenFull}
-                disabled={disabled}
-              >
-                Regenerate full
+              <Button variant="outline" size="sm" onClick={handleRegenBody} disabled={disabled}>
+                Regenerate body
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRegenBodyOnly}
-                disabled={disabled}
-              >
-                Regenerate body only
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCancel}
-                disabled={disabled}
-              >
+              <Button variant="ghost" size="sm" onClick={handleCancel} disabled={disabled}>
                 Cancel
               </Button>
             </div>
@@ -1734,18 +1790,9 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
               <Thumb url={s.bodyUrl} label="Body" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" disabled>
-                Approve
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                Regenerate full
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                Regenerate body only
-              </Button>
-              <Button variant="ghost" size="sm" disabled>
-                Cancel
-              </Button>
+              <Button size="sm" disabled>Approve</Button>
+              <Button variant="outline" size="sm" disabled>Regenerate body</Button>
+              <Button variant="ghost" size="sm" disabled>Cancel</Button>
               <Spinner label="Approving…" />
             </div>
           </div>
@@ -1790,15 +1837,26 @@ export function CharacterCard({ character, seriesId, imageModel, onUpdate }: Pro
                   <Badge variant="secondary" className="text-xs">Used in scene &amp; cover generation</Badge>
                 </div>
                 {!isEditingPrompt && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-xs"
-                    onClick={handleEditPrompt}
-                    disabled={disabled}
-                  >
-                    Edit
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={handleEditPrompt}
+                      disabled={disabled}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={handleRegenFull}
+                      disabled={disabled}
+                    >
+                      Regenerate face →
+                    </Button>
+                  </div>
                 )}
               </div>
               {isEditingPrompt ? (
