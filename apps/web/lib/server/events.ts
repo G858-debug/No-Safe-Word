@@ -66,6 +66,7 @@ export type EventType =
   | "buffer.publish_synced"
   | "buffer.publish_failed"
   | "buffer.publish_pending"
+  | "buffer.series_published"
   | "buffer.health_ok"
   | "buffer.health_failed"
   // buffer cover-reveal post (one-off per series)
