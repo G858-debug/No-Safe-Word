@@ -4,7 +4,7 @@ import { Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { PORTRAIT_COMPOSITION } from "@no-safe-word/image-gen";
+import { PORTRAIT_COMPOSITION } from "@no-safe-word/image-gen/prompt-constants";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Two parallel state machines — one per panel.

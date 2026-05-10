@@ -75,8 +75,8 @@ export {
   stripPortraitFraming,
 } from './portrait-prompt-builder';
 export type { PortraitCharacterDescription } from './portrait-prompt-builder';
+// VISUAL_SIGNATURE is re-exported from hunyuan-generator above.
 export {
-  VISUAL_SIGNATURE,
   PORTRAIT_COMPOSITION,
   FULLBODY_COMPOSITION,
 } from './prompt-constants';
