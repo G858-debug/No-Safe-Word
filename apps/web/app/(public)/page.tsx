@@ -9,6 +9,7 @@ export const revalidate = 3600;
 
 export default async function HomePage() {
   const stories = await getPublishedSeriesList({ limit: 6 });
+  const hideImages = process.env.HIDE_CHAPTER_IMAGES === "true";
 
   return (
     <>
@@ -55,6 +56,7 @@ export default async function HomePage() {
                 totalParts={story.total_parts}
                 hashtag={story.hashtag}
                 coverCardUrl={story.cover_sizes?.card ?? null}
+                isBlurred={hideImages}
               />
             ))}
           </div>

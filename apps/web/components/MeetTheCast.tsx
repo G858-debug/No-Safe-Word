@@ -38,9 +38,10 @@ export interface CastCharacter {
 
 interface Props {
   characters: CastCharacter[];
+  isBlurred?: boolean;
 }
 
-export function MeetTheCast({ characters }: Props) {
+export function MeetTheCast({ characters, isBlurred }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -84,6 +85,7 @@ export function MeetTheCast({ characters }: Props) {
             character={char}
             expanded={activeId === char.id}
             onToggle={() => onCardClick(char.id)}
+            isBlurred={isBlurred}
           />
         ))}
       </div>
@@ -95,9 +97,10 @@ interface CastCardProps {
   character: CastCharacter;
   expanded: boolean;
   onToggle: () => void;
+  isBlurred?: boolean;
 }
 
-function CastCard({ character, expanded, onToggle }: CastCardProps) {
+function CastCard({ character, expanded, onToggle, isBlurred }: CastCardProps) {
   const hasImage = Boolean(character.card_image_url);
   const expandedBodyId = `cast-body-${character.id}`;
 
@@ -118,7 +121,9 @@ function CastCard({ character, expanded, onToggle }: CastCardProps) {
         <img
           src={character.card_image_url ?? undefined}
           alt={character.name}
-          className="aspect-[4/5] w-full object-cover"
+          className={`aspect-[4/5] w-full object-cover ${
+            isBlurred ? "blur-heavy" : ""
+          }`}
           loading="lazy"
         />
       ) : (

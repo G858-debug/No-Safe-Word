@@ -16,9 +16,11 @@ interface InlineImage {
 export default function StoryRenderer({
   text,
   images,
+  isBlurred,
 }: {
   text: string;
   images: InlineImage[];
+  isBlurred?: boolean;
 }) {
   const blocks = splitBlocks(text);
   const positioned = images
@@ -85,7 +87,7 @@ export default function StoryRenderer({
           <img
             src={positioned[imageIdx].url}
             alt={positioned[imageIdx].alt}
-            className="story-image"
+            className={`story-image ${isBlurred ? "blur-heavy" : ""}`}
             loading="lazy"
           />
         </figure>
@@ -101,7 +103,7 @@ export default function StoryRenderer({
         <img
           src={positioned[imageIdx].url}
           alt={positioned[imageIdx].alt}
-          className="story-image"
+          className={`story-image ${isBlurred ? "blur-heavy" : ""}`}
           loading="lazy"
         />
       </figure>
@@ -116,7 +118,7 @@ export default function StoryRenderer({
         <img
           src={trailing[i].url}
           alt={trailing[i].alt}
-          className="story-image"
+          className={`story-image ${isBlurred ? "blur-heavy" : ""}`}
           loading="lazy"
         />
       </figure>

@@ -101,6 +101,11 @@
     }
   }
 
+  /* Heavy blur for HIDE_CHAPTER_IMAGES mode */
+  .blur-heavy {
+    @apply blur-[40px] saturate-[1.5] brightness-[0.7] transition-all duration-700;
+  }
+
   /* Briefly outlines the paragraph the reader was on before the
      gate fired, so they can locate where they left off after
      returning from the magic-link click. amber-700 (#b45309)

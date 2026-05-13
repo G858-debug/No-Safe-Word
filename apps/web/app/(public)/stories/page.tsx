@@ -15,6 +15,7 @@ export const metadata: Metadata = {
 
 export default async function StoriesBrowsePage() {
   const stories = await getPublishedSeriesList();
+  const hideImages = process.env.HIDE_CHAPTER_IMAGES === "true";
 
   return (
     <div>
@@ -41,6 +42,7 @@ export default async function StoriesBrowsePage() {
               totalParts={story.total_parts}
               hashtag={story.hashtag}
               coverCardUrl={story.cover_sizes?.card ?? null}
+              isBlurred={hideImages}
             />
           ))}
         </div>

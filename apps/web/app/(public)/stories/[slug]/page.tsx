@@ -79,6 +79,8 @@ export default async function SeriesPage({ params }: PageProps) {
   const series = await getPublishedSeriesBySlug(slug);
   if (!series) notFound();
 
+  const hideImages = process.env.HIDE_CHAPTER_IMAGES === "true";
+
   // Analytics: series summary view. Log userId if the reader is signed in,
   // else null (most summary-page visitors are anonymous).
   const authSupabase = await createClient();
@@ -195,7 +197,9 @@ export default async function SeriesPage({ params }: PageProps) {
               <img
                 src={heroUrl}
                 alt={`${series.title} cover`}
-                className="w-full rounded-lg border border-amber-900/20 shadow-[0_0_40px_-10px_rgba(217,119,6,0.25)]"
+                className={`w-full rounded-lg border border-amber-900/20 shadow-[0_0_40px_-10px_rgba(217,119,6,0.25)] ${
+                  hideImages ? "blur-heavy" : ""
+                }`}
                 loading="eager"
               />
             </div>
@@ -240,7 +244,7 @@ export default async function SeriesPage({ params }: PageProps) {
       {/* Phase 4 — MEET THE CAST. Replaces the legacy name+role+portrait
           section. Renders only characters with card_approved_at IS NOT NULL.
           Hidden entirely when no approved cards exist. */}
-      <MeetTheCast characters={cast} />
+      <MeetTheCast characters={cast} isBlurred={hideImages} />
 
 
       {/* Chapters */}

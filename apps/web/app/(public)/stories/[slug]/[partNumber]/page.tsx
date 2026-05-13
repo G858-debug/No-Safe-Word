@@ -2,10 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@no-safe-word/story-engine";
-import type {
-  StoryPostRow,
-  StoryImagePromptRow,
-} from "@no-safe-word/shared";
+import type { StoryPostRow, StoryImagePromptRow } from "@no-safe-word/shared";
 import StoryRenderer from "@/components/StoryRenderer";
 import ChapterNav from "@/components/ChapterNav";
 import ReadingProgress from "@/components/ReadingProgress";
@@ -102,13 +99,17 @@ export default async function ChapterPage({ params }: PageProps) {
     data: { user },
   } = await authSupabase.auth.getUser();
 
+  const hideImages = process.env.HIDE_CHAPTER_IMAGES
+    ? process.env.HIDE_CHAPTER_IMAGES === "true"
+    : false;
+
   // 4. Check access for Part 2+ (Part 1 is always free)
   let hasAccess = true;
   if (partNumber > 1) {
     const access = await checkSeriesAccess(
       user?.id ?? null,
       series.id,
-      partNumber
+      partNumber,
     );
     hasAccess = access.hasAccess;
   }
@@ -183,7 +184,7 @@ export default async function ChapterPage({ params }: PageProps) {
       const urlMap = Object.fromEntries(
         (images ?? [])
           .filter((img) => img.stored_url)
-          .map((img) => [img.id, img.stored_url!])
+          .map((img) => [img.id, img.stored_url!]),
       );
 
       heroImages = (heroPrompts ?? [])
@@ -203,7 +204,7 @@ export default async function ChapterPage({ params }: PageProps) {
     const { data: imagePrompts } = await supabase
       .from("story_image_prompts")
       .select(
-        "id, image_type, pairs_with, position, position_after_word, character_name, image_id"
+        "id, image_type, pairs_with, position, position_after_word, character_name, image_id",
       )
       .eq("post_id", post.id)
       .eq("status", "approved")
@@ -225,7 +226,7 @@ export default async function ChapterPage({ params }: PageProps) {
         imageUrlMap = Object.fromEntries(
           images
             .filter((img) => img.stored_url)
-            .map((img) => [img.id, img.stored_url!])
+            .map((img) => [img.id, img.stored_url!]),
         );
       }
     }
@@ -236,7 +237,7 @@ export default async function ChapterPage({ params }: PageProps) {
         (ip) =>
           ip.image_type === "website_nsfw_paired" &&
           ip.pairs_with &&
-          ip.position_after_word == null
+          ip.position_after_word == null,
       )
       .map((ip) => ip.pairs_with!);
 
@@ -253,13 +254,13 @@ export default async function ChapterPage({ params }: PageProps) {
 
       if (pairedPrompts) {
         pairedPositions = Object.fromEntries(
-          pairedPrompts.map((p) => [p.id, p.position_after_word])
+          pairedPrompts.map((p) => [p.id, p.position_after_word]),
         );
       }
     }
 
     const usableImagePrompts = (imagePrompts || []).filter(
-      (ip) => ip.image_id && imageUrlMap[ip.image_id]
+      (ip) => ip.image_id && imageUrlMap[ip.image_id],
     );
 
     // Inline: website_nsfw_paired + website_only. A paired NSFW with no
@@ -278,7 +279,7 @@ export default async function ChapterPage({ params }: PageProps) {
           if (ip.image_type === "website_nsfw_paired") {
             console.warn(
               `[chapter-page] skipping orphan website_nsfw_paired image: no resolvable position_after_word`,
-              { image_prompt_id: ip.id, post_id: post.id }
+              { image_prompt_id: ip.id, post_id: post.id },
             );
           }
           return null;
@@ -292,7 +293,7 @@ export default async function ChapterPage({ params }: PageProps) {
       })
       .filter(
         (img): img is { url: string; afterWord: number; alt: string } =>
-          img !== null
+          img !== null,
       )
       .sort((a, b) => a.afterWord - b.afterWord);
   }
@@ -305,12 +306,8 @@ export default async function ChapterPage({ params }: PageProps) {
     .eq("status", "published")
     .in("part_number", [partNumber - 1, partNumber + 1]);
 
-  const prevPost = adjacentPosts?.find(
-    (p) => p.part_number === partNumber - 1
-  );
-  const nextPost = adjacentPosts?.find(
-    (p) => p.part_number === partNumber + 1
-  );
+  const prevPost = adjacentPosts?.find((p) => p.part_number === partNumber - 1);
+  const nextPost = adjacentPosts?.find((p) => p.part_number === partNumber + 1);
 
   return (
     <>
@@ -355,7 +352,7 @@ export default async function ChapterPage({ params }: PageProps) {
                   <img
                     src={img.url}
                     alt={img.alt}
-                    className="story-image"
+                    className={`story-image ${hideImages ? "blur-heavy" : ""}`}
                     loading={idx === 0 ? "eager" : "lazy"}
                   />
                 </figure>
@@ -366,11 +363,10 @@ export default async function ChapterPage({ params }: PageProps) {
           <StoryRenderer
             text={split.head}
             images={inlineImages.filter((i) => i.afterWord <= split.headWords)}
+            isBlurred={hideImages}
           />
 
-          {partNumber > 1 && (
-            <span id="gate-position" aria-hidden="true" />
-          )}
+          {partNumber > 1 && <span id="gate-position" aria-hidden="true" />}
 
           {hasAccess && partNumber > 1 && split.tail.length > 0 && (
             <StoryRenderer
@@ -384,6 +380,7 @@ export default async function ChapterPage({ params }: PageProps) {
                       ? Infinity
                       : i.afterWord - split.headWords,
                 }))}
+              isBlurred={hideImages}
             />
           )}
         </div>

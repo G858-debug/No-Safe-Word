@@ -9,6 +9,7 @@ interface StoryCardProps {
   hashtag: string | null;
   /** cover_sizes.card (600×900 JPEG) if compositing has completed, else null → placeholder. */
   coverCardUrl: string | null;
+  isBlurred?: boolean;
 }
 
 export default function StoryCard({
@@ -18,6 +19,7 @@ export default function StoryCard({
   totalParts,
   hashtag,
   coverCardUrl,
+  isBlurred,
 }: StoryCardProps) {
   return (
     <Link href={`/stories/${slug}`} className="group block">
@@ -29,7 +31,9 @@ export default function StoryCard({
             <img
               src={coverCardUrl}
               alt={title}
-              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+              className={`h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
+                isBlurred ? "blur-heavy" : ""
+              }`}
               loading="lazy"
             />
           ) : (
