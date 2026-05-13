@@ -110,7 +110,7 @@ export async function sendMagicLinkEmail(
   const unsubscribeUrl = new URL("/unsubscribe", siteUrl);
   unsubscribeUrl.searchParams.set("token", unsubscribeToken);
 
-  const subject = "Read the rest of the story - The Wrong One";
+  const subject = "Your access link for No Safe Word";
   const html = renderHtml({
     confirmUrl: confirmUrl.toString(),
     unsubscribeUrl: unsubscribeUrl.toString(),
@@ -171,13 +171,14 @@ function renderHtml({ confirmUrl, unsubscribeUrl }: TemplateVars): string {
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:520px;background:#111111;border:1px solid rgba(180,83,9,0.3);border-radius:12px;">
           <tr>
             <td style="padding:32px;">
+              <p style="margin:0 0 16px 0;font-size:18px;font-weight:bold;color:#f5e6d3;">Your access link is ready</p>
               <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;color:#f5e6d3;">Hi from Ntsiki 👋</p>
-              <p style="margin:0 0 24px 0;font-size:16px;line-height:1.6;color:#f5e6d3;">Click the link below to keep reading <em>The Wrong One</em>:</p>
+              <p style="margin:0 0 24px 0;font-size:16px;line-height:1.6;color:#f5e6d3;">You requested access to read the rest of the story on <strong>No Safe Word</strong>. Click the button below to sign in and continue reading:</p>
               <p style="margin:0 0 24px 0;text-align:center;">
-                <a href="${escapeAttr(confirmUrl)}" style="display:inline-block;padding:12px 24px;background:#b45309;color:#fef3c7;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;">Read the full story</a>
+                <a href="${escapeAttr(confirmUrl)}" style="display:inline-block;padding:14px 32px;background:#b45309;color:#fef3c7;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;">Continue Reading</a>
               </p>
-              <p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:#d4b896;">This link expires in 2 hours. If it expires, just go back to the story and request another one.</p>
-              <p style="margin:0;font-size:16px;line-height:1.6;color:#f5e6d3;">— Ntsiki</p>
+              <p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:#d4b896;">For your security, this link will expire in 2 hours. If you didn't request this link, you can safely ignore this email.</p>
+              <p style="margin:0;font-size:16px;line-height:1.6;color:#f5e6d3;">See you in the next chapter,<br>Ntsiki</p>
             </td>
           </tr>
           <tr>
@@ -198,15 +199,18 @@ function renderHtml({ confirmUrl, unsubscribeUrl }: TemplateVars): string {
 
 function renderText({ confirmUrl, unsubscribeUrl }: TemplateVars): string {
   return [
+    "Your access link for No Safe Word",
+    "",
     "Hi from Ntsiki 👋",
     "",
-    "Click the link below to keep reading The Wrong One:",
+    "You requested access to read the rest of the story on No Safe Word. Click the link below to sign in and continue reading:",
     "",
     confirmUrl,
     "",
-    "This link expires in 2 hours. If it expires, just go back to the story and request another one.",
+    "For your security, this link will expire in 2 hours. If you didn't request this link, you can safely ignore this email.",
     "",
-    "— Ntsiki",
+    "See you in the next chapter,",
+    "Ntsiki",
     "",
     "---",
     "",

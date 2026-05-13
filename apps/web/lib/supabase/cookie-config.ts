@@ -9,7 +9,7 @@
  */
 
 export function getCookieOptions() {
-  const domain = process.env.COOKIE_DOMAIN; // ".nosafeword.co.za" in production
+  const domain = process.env.NEXT_PUBLIC_COOKIE_DOMAIN; // ".nosafeword.co.za" in production
 
   return {
     ...(domain && { domain }),

@@ -56,6 +56,7 @@ export interface PublishedSeries {
   author_notes: AuthorNotes | null;
   author_note_image_url: string | null;
   author_note_approved_at: string | null;
+  access_tier: "free_authenticated" | "paid";
 
   // Phase 1 — joined author row for the byline strip on the notes section
   // and any future per-author affordances. May be null defensively, though
@@ -75,7 +76,7 @@ const SELECT_COLUMNS =
   "blurb_short_variants, blurb_short_selected, " +
   "blurb_long_variants, blurb_long_selected, " +
   "author_notes, author_note_image_url, author_note_approved_at, " +
-  "author_id, " +
+  "author_id, access_tier, " +
   "author:authors!story_series_author_id_fkey ( name, slug, portrait_url )";
 
 export interface GetPublishedSeriesListOptions {

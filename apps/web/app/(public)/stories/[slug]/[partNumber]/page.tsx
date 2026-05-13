@@ -10,6 +10,7 @@ import StoryRenderer from "@/components/StoryRenderer";
 import ChapterNav from "@/components/ChapterNav";
 import ReadingProgress from "@/components/ReadingProgress";
 import EmailGate from "@/components/EmailGate";
+import PaywallGate from "@/components/PaywallGate";
 import { GatePulse } from "@/components/GatePulse";
 import { AuthorsNotes } from "@/components/AuthorsNotes";
 import { createClient } from "@/lib/supabase/server";
@@ -412,11 +413,22 @@ export default async function ChapterPage({ params }: PageProps) {
             document order. */}
         {!hasAccess && (
           <div className="mx-auto mt-12 max-w-reader">
-            <EmailGate
-              seriesSlug={series.slug}
-              partNumber={partNumber}
-              heroImageUrl={heroImages[0]?.url ?? null}
-            />
+            {user && series.access_tier === "paid" ? (
+              <PaywallGate
+                seriesId={series.id}
+                seriesSlug={series.slug}
+                seriesTitle={series.title}
+                partNumber={partNumber}
+                isAuthenticated={true}
+              />
+            ) : (
+              <EmailGate
+                seriesSlug={series.slug}
+                partNumber={partNumber}
+                heroImageUrl={heroImages[0]?.url ?? null}
+                isPaid={series.access_tier === "paid"}
+              />
+            )}
           </div>
         )}
 

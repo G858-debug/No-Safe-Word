@@ -13,6 +13,7 @@ interface EmailGateProps {
    * the chapter rather than an interruption.
    */
   heroImageUrl: string | null;
+  isPaid?: boolean;
 }
 
 type Status =
@@ -42,6 +43,7 @@ export default function EmailGate({
   seriesSlug,
   partNumber,
   heroImageUrl,
+  isPaid = false,
 }: EmailGateProps) {
   const [email, setEmail] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
@@ -152,9 +154,19 @@ export default function EmailGate({
 
         <div className="space-y-4 text-base leading-relaxed text-warm-200">
           <p>
-            This book is free. You get access to the full explicit website
-            version — every scene and every image, nothing held back. Share
-            your email address below to get the login link to keep reading.
+            {isPaid ? (
+              <>
+                Unlock the full explicit website version — every scene and every
+                image, nothing held back. Share your email address below to
+                create your account and proceed to purchase.
+              </>
+            ) : (
+              <>
+                This book is free. You get access to the full explicit website
+                version — every scene and every image, nothing held back. Share
+                your email address below to get the login link to keep reading.
+              </>
+            )}
           </p>
           <p className="italic text-warm-300">— Ntsiki</p>
         </div>
@@ -235,6 +247,8 @@ export default function EmailGate({
                   <span className="h-5 w-5 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
                   Sending…
                 </>
+              ) : isPaid ? (
+                "Continue to payment"
               ) : (
                 "Read the full story"
               )}

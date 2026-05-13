@@ -29,6 +29,7 @@ const COUNTRY_RULES: Array<{
   { cc: "254", minTotal: 12, maxTotal: 12 }, // Kenya
   { cc: "263", minTotal: 12, maxTotal: 12 }, // Zimbabwe
   { cc: "267", minTotal: 11, maxTotal: 11 }, // Botswana
+  { cc: "880", minTotal: 13, maxTotal: 13 }, // Bangladesh
 ];
 
 const ERR_TOO_SHORT =
@@ -73,6 +74,11 @@ export function parsePhone(input: string): PhoneParseResult {
   // 4. SA local format: "0" + 9 digits → strip the 0, prepend +27.
   if (stripped.startsWith("0") && stripped.length === 10) {
     return { ok: true, e164: `+27${stripped.slice(1)}` };
+  }
+
+  // 4b. Bangladesh local format: "0" + 10 digits -> strip the 0, prepend +880.
+  if (stripped.startsWith("0") && stripped.length === 11) {
+    return { ok: true, e164: `+880${stripped.slice(1)}` };
   }
 
   // 5. SA international form without the +: "27" + 9 digits.
