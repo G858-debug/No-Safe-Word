@@ -37,7 +37,7 @@ export async function GET(
         prompt, image_id, previous_image_id, status, character_block_override, secondary_character_block_override, suppress_character_block,
         clothing_override, sfw_constraint_override, visual_signature_override,
         final_prompt, final_prompt_drafted_at, pose_template_id, is_chapter_hero,
-        excluded_from_publish, primary_ref_type, secondary_ref_type
+        excluded_from_publish, primary_ref_type, secondary_ref_type, ref_mode
       )
     `
     )

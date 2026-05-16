@@ -56,6 +56,7 @@ export async function PATCH(
       visual_signature_override,
       final_prompt,
       pose_template_id,
+      ref_mode,
     } = body as {
       prompt?: string;
       character_block_override?: string | null;
@@ -66,6 +67,7 @@ export async function PATCH(
       visual_signature_override?: string | null;
       final_prompt?: string | null;
       pose_template_id?: string | null;
+      ref_mode?: "face" | "body" | "face_and_body";
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
@@ -77,6 +79,14 @@ export async function PATCH(
     const hasVisualSignatureOverrideUpdate = visual_signature_override !== undefined;
     const hasFinalPromptUpdate = final_prompt !== undefined;
     const hasPoseTemplateUpdate = pose_template_id !== undefined;
+    const hasRefModeUpdate = ref_mode !== undefined;
+
+    if (hasRefModeUpdate && !["face", "body", "face_and_body"].includes(ref_mode!)) {
+      return NextResponse.json(
+        { error: "ref_mode must be 'face', 'body', or 'face_and_body'" },
+        { status: 400 }
+      );
+    }
 
     if (
       !hasPromptUpdate &&
@@ -87,7 +97,8 @@ export async function PATCH(
       !hasSfwConstraintOverrideUpdate &&
       !hasVisualSignatureOverrideUpdate &&
       !hasFinalPromptUpdate &&
-      !hasPoseTemplateUpdate
+      !hasPoseTemplateUpdate &&
+      !hasRefModeUpdate
     ) {
       return NextResponse.json(
         { error: "At least one field to update is required" },
@@ -119,21 +130,19 @@ export async function PATCH(
     if (hasVisualSignatureOverrideUpdate) updates.visual_signature_override = visual_signature_override;
     if (hasFinalPromptUpdate) updates.final_prompt = final_prompt;
     if (hasPoseTemplateUpdate) updates.pose_template_id = pose_template_id;
+    if (hasRefModeUpdate) updates.ref_mode = ref_mode;
 
     // Reset to pending on any content change EXCEPT a pure final_prompt edit
-    // — that doesn't invalidate an existing approved image.
-    const onlyFinalPromptChanged =
-      hasFinalPromptUpdate &&
-      !hasPromptUpdate &&
-      !hasOverrideUpdate &&
-      !hasSecondaryOverrideUpdate &&
-      !hasSuppressUpdate &&
-      !hasClothingOverrideUpdate &&
-      !hasSfwConstraintOverrideUpdate &&
-      !hasVisualSignatureOverrideUpdate;
+    // or a pure ref_mode change — neither invalidates an existing approved image.
+    const contentFields = [hasPromptUpdate, hasOverrideUpdate, hasSecondaryOverrideUpdate,
+      hasSuppressUpdate, hasClothingOverrideUpdate, hasSfwConstraintOverrideUpdate,
+      hasVisualSignatureOverrideUpdate];
+    const onlyNonPendingFieldChanged =
+      !contentFields.some(Boolean) &&
+      (hasFinalPromptUpdate || hasRefModeUpdate);
 
     if (
-      !onlyFinalPromptChanged &&
+      !onlyNonPendingFieldChanged &&
       (existing.status === "generated" || existing.status === "approved")
     ) {
       updates.status = "pending";

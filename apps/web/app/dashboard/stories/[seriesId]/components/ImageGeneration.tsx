@@ -77,10 +77,10 @@ export interface ImagePromptData {
   final_prompt_drafted_at: string | null;
   pose_template_id: string | null;
   is_chapter_hero: boolean;
-  // Per-character reference selector — picks face vs body portrait when
-  // resolving the reference image for the next generation.
   primary_ref_type: "face" | "body";
   secondary_ref_type: "face" | "body" | null;
+  // Single reference-mode selector (Flux 2 Dev only).
+  ref_mode: "face" | "body" | "face_and_body";
 }
 
 export interface PostWithPrompts {
@@ -152,13 +152,9 @@ interface PromptState {
   // ── Pose template ──────────────────────────────────────────────────
   poseTemplateId: string | null;
   savedPoseTemplateId: string | null;
-  // ── Reference type per character (face vs body) ────────────────────
-  // Local UI state for the dropdowns. Persisted to the prompt row when
-  // the user clicks Regenerate (or via PATCH on Save).
-  primaryRefType: "face" | "body";
-  savedPrimaryRefType: "face" | "body";
-  secondaryRefType: "face" | "body" | null;
-  savedSecondaryRefType: "face" | "body" | null;
+  // ── Reference mode (Flux 2 Dev only) ──────────────────────────────
+  refMode: "face" | "body" | "face_and_body";
+  savedRefMode: "face" | "body" | "face_and_body";
 }
 
 export interface PoseTemplate {
@@ -361,10 +357,8 @@ export default function ImageGeneration({
           draftError: null,
           poseTemplateId: ip.pose_template_id ?? null,
           savedPoseTemplateId: ip.pose_template_id ?? null,
-          primaryRefType: (ip.primary_ref_type ?? "body") as "face" | "body",
-          savedPrimaryRefType: (ip.primary_ref_type ?? "body") as "face" | "body",
-          secondaryRefType: ip.secondary_ref_type ?? null,
-          savedSecondaryRefType: ip.secondary_ref_type ?? null,
+          refMode: (ip.ref_mode ?? "face_and_body") as "face" | "body" | "face_and_body",
+          savedRefMode: (ip.ref_mode ?? "face_and_body") as "face" | "body" | "face_and_body",
         };
 
         // Collect "generating" prompts — we'll resolve their real status below
@@ -764,42 +758,25 @@ export default function ImageGeneration({
           updatePrompt(promptId, { savedFinalPromptText: state.finalPromptText });
         }
 
-        // ── Ref-type PATCH ──────────────────────────────────────────────
-        // The dropdown values are local UI state until the user clicks
-        // Regenerate. Persist them now so the dispatcher reads the
-        // current selection, and so the values survive a page reload.
-        if (
-          state &&
-          (state.primaryRefType !== state.savedPrimaryRefType ||
-            state.secondaryRefType !== state.savedSecondaryRefType)
-        ) {
-          const refBody: Record<string, "face" | "body" | null> = {};
-          if (state.primaryRefType !== state.savedPrimaryRefType) {
-            refBody.primary_ref_type = state.primaryRefType;
-          }
-          if (state.secondaryRefType !== state.savedSecondaryRefType) {
-            refBody.secondary_ref_type = state.secondaryRefType;
-          }
-          const patchRes = await fetch(
-            `/api/stories/images/${promptId}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(refBody),
-            }
-          );
+        // ── Ref-mode PATCH ──────────────────────────────────────────────
+        // The dropdown fires an immediate PATCH on change; this block is a
+        // safety net in case the immediate PATCH was skipped (e.g. network
+        // hiccup). Only fires if savedRefMode drifted from refMode.
+        if (state && state.refMode !== state.savedRefMode) {
+          const patchRes = await fetch(`/api/stories/images/${promptId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ref_mode: state.refMode }),
+          });
           if (!patchRes.ok) {
             const patchErr = await patchRes.json().catch(() => ({}));
             updatePrompt(promptId, {
               status: "failed",
-              error: patchErr?.error ?? "Failed to save reference type",
+              error: patchErr?.error ?? "Failed to save reference mode",
             });
             return;
           }
-          updatePrompt(promptId, {
-            savedPrimaryRefType: state.primaryRefType,
-            savedSecondaryRefType: state.secondaryRefType,
-          });
+          updatePrompt(promptId, { savedRefMode: state.refMode });
         }
 
         const res = await fetch(
@@ -1785,7 +1762,7 @@ function ImageDetailModal({
   onLightbox,
   onDraftFinalPrompt,
   batchGenerating,
-  imageModel: _imageModel,
+  imageModel,
   characterIdentityMap,
   onNavigateToCharacters: _onNavigateToCharacters,
   poseTemplates,
@@ -2128,6 +2105,49 @@ function ImageDetailModal({
                   }
                 }}
               />
+
+              {/* REFERENCE IMAGES — Flux 2 Dev only */}
+              {imageModel === "flux2_dev" && (
+                <div className="rounded border border-border/50 bg-muted/10 p-3 space-y-2">
+                  <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground block">
+                    Reference images
+                  </label>
+                  <Select
+                    value={state.refMode}
+                    disabled={isGenerating || isApproved || state.savingPrompt}
+                    onValueChange={async (val) => {
+                      const newMode = val as "face" | "body" | "face_and_body";
+                      onUpdatePrompt(ip.id, { refMode: newMode });
+                      try {
+                        const res = await fetch(`/api/stories/images/${ip.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ ref_mode: newMode }),
+                        });
+                        if (res.ok) {
+                          onUpdatePrompt(ip.id, { savedRefMode: newMode });
+                        } else {
+                          onUpdatePrompt(ip.id, { refMode: state.savedRefMode });
+                        }
+                      } catch {
+                        onUpdatePrompt(ip.id, { refMode: state.savedRefMode });
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="face_and_body">Face + Body — strongest identity, most wardrobe bleed</SelectItem>
+                      <SelectItem value="face">Face only — no wardrobe bleed, body described by Mistral</SelectItem>
+                      <SelectItem value="body">Body only — proportions in reference, some wardrobe bleed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">
+                    Controls which approved portraits are sent as ReferenceLatent conditioning. Applies to all characters in this image.
+                  </p>
+                </div>
+              )}
 
               {/* READ-ONLY INPUTS — what Mistral consumed when drafting */}
               <details className="rounded border border-border/50 bg-muted/10" open>

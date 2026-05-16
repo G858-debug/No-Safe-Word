@@ -33,7 +33,7 @@ export async function draftAndPersistScenePrompt(
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, clothing_override, sfw_constraint_override, visual_signature_override, post_id, image_id, pose_template_id"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, clothing_override, sfw_constraint_override, visual_signature_override, post_id, image_id, pose_template_id, ref_mode"
     )
     .eq("id", promptId)
     .single();
@@ -170,6 +170,7 @@ export async function draftAndPersistScenePrompt(
     previousCritique,
     poseTemplate,
     pipeline,
+    refMode: (prompt.ref_mode ?? "face_and_body") as "face" | "body" | "face_and_body",
   });
 
   const draftedAt = new Date().toISOString();

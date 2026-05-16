@@ -101,6 +101,7 @@ interface SeriesData {
       excluded_from_publish: boolean;
       primary_ref_type: "face" | "body";
       secondary_ref_type: "face" | "body" | null;
+      ref_mode: "face" | "body" | "face_and_body";
     }[];
   })[];
   characters: CharacterFromAPI[];

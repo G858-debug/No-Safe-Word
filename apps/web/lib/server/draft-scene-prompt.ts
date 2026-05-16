@@ -67,6 +67,13 @@ export interface DraftScenePromptInput {
   /** flux2_dev sends face + body reference; hunyuan3 sends face-only. Affects how Mistral treats character appearance. */
   pipeline?: "hunyuan3" | "flux2_dev";
   /**
+   * Which reference portraits are sent (flux2_dev only).
+   * face          → face portrait only; Mistral must describe body proportions in text.
+   * body          → body portrait only; Mistral must describe face/skin/hair in text.
+   * face_and_body → both portraits; Mistral describes neither (default).
+   */
+  refMode?: "face" | "body" | "face_and_body";
+  /**
    * If a previous image was generated and an AI critique exists,
    * passing both lets Mistral iteratively improve — the previous prompt
    * is what was sent, the critique is what Pixtral 12B said went wrong.
@@ -85,18 +92,42 @@ export interface DraftScenePromptInput {
 
 const DEFAULT_SFW_CONSTRAINT = "Both characters fully clothed. No nudity.";
 
-function buildSystemPrompt(knowledgeDoc: string, pipeline: "hunyuan3" | "flux2_dev"): string {
+function flux2DevRefCritical(refMode: "face" | "body" | "face_and_body"): string {
+  if (refMode === "face_and_body") {
+    return `CRITICAL — BOTH BODY AND FACE PORTRAIT REFERENCES ARE SENT PER CHARACTER:
+- Each linked character has TWO approved portraits passed as ReferenceLatent conditioning inputs: a full-body portrait (body proportions, silhouette, build) and a face portrait (facial features, skin, eyes, hair). Together they give the model a complete identity anchor.
+- For characters WITH reference images:
+  - Do NOT describe their face, skin, eyes, hair, body shape, proportions, or any physical features. Both references carry all of that — competing text degrades likeness.
+  - DO describe what they are WEARING for this scene, where they are LOOKING, and HOW they are positioned.
+- For background figures or unnamed extras: describe them inline (no reference exists for them).`;
+  }
+  if (refMode === "face") {
+    return `CRITICAL — FACE PORTRAIT ONLY IS BEING SENT PER CHARACTER (no body portrait):
+- Each linked character has ONE approved face portrait passed as a ReferenceLatent conditioning input. It carries facial features, skin, eyes, and hair ONLY — NOT body proportions, NOT wardrobe.
+- For characters WITH a face reference:
+  - Do NOT redescribe their face, skin, eyes, or hair — the face reference handles those.
+  - DO describe their BODY: build, silhouette, body type, proportions, height — state these explicitly near the start of the character clause because the reference does NOT carry body information.
+  - DO describe what they are WEARING for this scene, where they are LOOKING, and HOW they are positioned.
+- For background figures or unnamed extras: describe them inline.`;
+  }
+  // body only
+  return `CRITICAL — BODY PORTRAIT ONLY IS BEING SENT PER CHARACTER (no face portrait):
+- Each linked character has ONE approved full-body portrait passed as a ReferenceLatent conditioning input. It carries body proportions, silhouette, and build — but the face portrait is NOT being sent separately.
+- For characters WITH a body reference:
+  - Do NOT describe their body shape, proportions, or silhouette — the body reference carries those.
+  - DO describe their face, skin tone, eyes, and hair near the start of the character clause so the model has facial identity in text.
+  - DO describe what they are WEARING for this scene (the body portrait may show a different outfit — describe the scene wardrobe explicitly to override the reference).
+  - DO describe where they are LOOKING and HOW they are positioned.
+- For background figures or unnamed extras: describe them inline.`;
+}
+
+function buildSystemPrompt(knowledgeDoc: string, pipeline: "hunyuan3" | "flux2_dev", refMode: "face" | "body" | "face_and_body"): string {
   const modelLine = pipeline === "flux2_dev"
     ? "Each prompt is rendered photorealistically by Flux 2 Dev on RunPod via ComfyUI (native ReferenceLatent conditioning)."
     : "Each prompt is rendered photorealistically by HunyuanImage 3.0 (Instruct, i2i variant) on Siray.ai.";
 
   const referenceCritical = pipeline === "flux2_dev"
-    ? `CRITICAL — BOTH BODY AND FACE PORTRAIT REFERENCES ARE SENT PER CHARACTER:
-- Each linked character has TWO approved portraits passed as ReferenceLatent conditioning inputs: a full-body portrait (body proportions, silhouette, build) and a face portrait (facial features, skin, eyes, hair). Together they give the model a complete identity anchor.
-- For characters WITH reference images:
-  - Do NOT describe their face, skin, eyes, hair, body shape, proportions, or any physical features. Both references carry all of that — competing text degrades likeness.
-  - DO describe what they are WEARING for this scene, where they are LOOKING, and HOW they are positioned.
-- For background figures or unnamed extras: describe them inline (no reference exists for them).`
+    ? flux2DevRefCritical(refMode)
     : `CRITICAL — THE i2i REFERENCE IS A FACE PORTRAIT ONLY:
 - Each linked character's approved portrait is passed to the model as an i2i reference image. The user message will tell you which characters' portraits are being sent.
 - That reference is a head-and-shoulders FACE PORTRAIT. It carries the character's face, skin, eyes, hair, and head/shoulders only — NOT their body proportions, NOT their wardrobe, NOT the setting.
@@ -163,15 +194,22 @@ guidance.
 ${knowledgeDoc}`;
 }
 
-function describeCharacter(c: DraftSceneCharacter, pipeline: "hunyuan3" | "flux2_dev"): string {
+function describeCharacter(c: DraftSceneCharacter, pipeline: "hunyuan3" | "flux2_dev", refMode: "face" | "body" | "face_and_body"): string {
   const lockedText = c.lockedPromptText?.trim();
   const fallbackBody = c.fallbackBodyType?.trim();
   const clothing = c.defaultClothing?.trim();
 
   if (pipeline === "flux2_dev") {
-    const refNote = c.hasApprovedPortrait
-      ? "    (body + face portrait references sent via ReferenceLatent — do NOT describe any physical appearance; only wardrobe, gaze, and positioning)"
-      : "    (no reference images — describe the character inline including face and body)";
+    let refNote: string;
+    if (!c.hasApprovedPortrait) {
+      refNote = "    (no reference images — describe the character inline including face and body)";
+    } else if (refMode === "face") {
+      refNote = "    (face portrait reference only — DO describe body/build/proportions in text near the start; do NOT describe face/skin/eyes/hair)";
+    } else if (refMode === "body") {
+      refNote = "    (body portrait reference only — DO describe face/skin tone/eyes/hair in text near the start; do NOT describe body proportions)";
+    } else {
+      refNote = "    (body + face portrait references sent via ReferenceLatent — do NOT describe any physical appearance; only wardrobe, gaze, and positioning)";
+    }
     const clothingLine = clothing
       ? `    Default wardrobe (use unless the scene needs different clothing): ${clothing}`
       : "";
@@ -199,16 +237,17 @@ function describeCharacter(c: DraftSceneCharacter, pipeline: "hunyuan3" | "flux2
 
 function buildUserPrompt(input: DraftScenePromptInput): string {
   const pipeline = input.pipeline ?? "hunyuan3";
+  const refMode = input.refMode ?? "face_and_body";
   const lines: string[] = [];
   lines.push(`Image type: ${input.imageType}`);
   lines.push(`Aspect ratio: ${input.aspectRatio}`);
   lines.push("");
   lines.push("Linked characters (approved canonical descriptions):");
   if (input.primaryCharacter) {
-    lines.push(describeCharacter(input.primaryCharacter, pipeline));
+    lines.push(describeCharacter(input.primaryCharacter, pipeline, refMode));
   }
   if (input.secondaryCharacter) {
-    lines.push(describeCharacter(input.secondaryCharacter, pipeline));
+    lines.push(describeCharacter(input.secondaryCharacter, pipeline, refMode));
   }
   if (!input.primaryCharacter && !input.secondaryCharacter) {
     lines.push("  (no linked characters — purely environmental/background scene)");
@@ -271,7 +310,8 @@ export async function draftScenePrompt(
   }
 
   const pipeline = input.pipeline ?? "hunyuan3";
-  const systemPrompt = buildSystemPrompt(loadHunyuanKnowledge(), pipeline);
+  const refMode = input.refMode ?? "face_and_body";
+  const systemPrompt = buildSystemPrompt(loadHunyuanKnowledge(), pipeline, refMode);
   const userPrompt = buildUserPrompt(input);
 
   const rawText = await callMistral(systemPrompt, userPrompt);

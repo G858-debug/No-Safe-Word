@@ -251,7 +251,7 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, primary_ref_type, secondary_ref_type"
+      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, primary_ref_type, secondary_ref_type, ref_mode"
     )
     .eq("id", promptId)
     .single();
@@ -329,8 +329,14 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     const width = twoCharacter ? 1024 : 768;
     const height = twoCharacter ? 768 : 1024;
 
-    // 5. Encode face + body references for each character (body first, then face).
-    //    Body carries proportions/silhouette; face carries facial detail.
+    // 5. Encode portrait references per character based on ref_mode.
+    //    body: body portrait only (some wardrobe bleed, proportions in ref)
+    //    face: face portrait only (no wardrobe bleed, body described by Mistral)
+    //    face_and_body: both (strongest identity, most wardrobe bleed) — default
+    const refMode = (prompt.ref_mode ?? "face_and_body") as "face" | "body" | "face_and_body";
+    const sendFace = refMode === "face" || refMode === "face_and_body";
+    const sendBody = refMode === "body" || refMode === "face_and_body";
+
     const references: Array<{ name: string; base64: string }> = [];
     for (const [label, charId] of [
       ["primary", prompt.character_id],
@@ -339,8 +345,8 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
       if (!charId) continue;
       const bodyUrl = bodyPortraitUrls[charId];
       const faceUrl = facePortraitUrls[charId];
-      if (bodyUrl) references.push({ name: `ref_${label}_body_${charId}.jpeg`, base64: await downscaleRefToBase64(bodyUrl) });
-      if (faceUrl) references.push({ name: `ref_${label}_face_${charId}.jpeg`, base64: await downscaleRefToBase64(faceUrl) });
+      if (sendBody && bodyUrl) references.push({ name: `ref_${label}_body_${charId}.jpeg`, base64: await downscaleRefToBase64(bodyUrl) });
+      if (sendFace && faceUrl) references.push({ name: `ref_${label}_face_${charId}.jpeg`, base64: await downscaleRefToBase64(faceUrl) });
     }
 
     // 6. Submit to RunPod — async, returns a jobId the client polls.
