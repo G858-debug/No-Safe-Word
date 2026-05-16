@@ -6,11 +6,14 @@ FROM runpod/worker-comfyui:5.8.5-base
 RUN cd /comfyui && git fetch origin --tags && git checkout v0.21.1 && \
     pip install -r requirements.txt --quiet
 
-# Verify that all required native Flux 2 nodes are present in this ComfyUI
-# version. Fails the build loudly if any are missing rather than silently
-# producing a broken worker. PYTHONPATH=/comfyui is required because ComfyUI
-# is installed as a local directory, not a pip package.
-RUN PYTHONPATH=/comfyui python3 -c "from comfy import nodes; required=['EmptyFlux2LatentImage','Flux2Scheduler','ReferenceLatent','FluxGuidance','SamplerCustomAdvanced','BasicGuider','RandomNoise','KSamplerSelect']; missing=[n for n in required if n not in nodes.NODE_CLASS_MAPPINGS]; assert not missing, 'Missing native Flux 2 nodes: '+str(missing); print('[NSW] All required native Flux 2 nodes confirmed present')"
+# Verify that all required native Flux 2 node classes exist in the source tree.
+# NODE_CLASS_MAPPINGS is populated at runtime (server startup), not on import,
+# so this uses grep instead of Python import — works in the build environment.
+RUN for node in EmptyFlux2LatentImage Flux2Scheduler ReferenceLatent \
+        FluxGuidance SamplerCustomAdvanced BasicGuider RandomNoise KSamplerSelect; do \
+      grep -rq "class ${node}" /comfyui/ --include="*.py" || \
+        (echo "[NSW] FAIL: class ${node} not found in /comfyui" && exit 1); \
+    done && echo "[NSW] All required native Flux 2 node classes confirmed present"
 
 # ---- Custom Nodes ----
 # ComfyUI-ppm: FluxKontextImageScale node (Kontext-aware image scaling)
