@@ -1,17 +1,21 @@
 name: Build RunPod Base Image
 
-# Heavy base image (~45 min). Only rebuild when models, custom nodes, or
-# dependencies change. The app image (Dockerfile) layers on top of this.
+# Heavy base image (~30-40 min after PuLID removal). Only rebuild when
+# models, custom nodes, or dependencies change. The app image (Dockerfile)
+# layers on top of this.
+#
+# Branch behaviour:
+#   main                  → pushes :latest + :sha-<7-char>
+#   flux2-native-multiref → pushes :multiref-latest + :multiref-<sha>
+#                           (never touches :latest or updates prod endpoint)
 on:
   push:
     paths:
       - 'infra/runpod/Dockerfile.base'
-      - 'infra/runpod/patch_pulid.py'
       - 'infra/runpod/download-models.sh'
-      - 'infra/runpod/download-civitai-loras.py'
-      - 'infra/runpod/download-insightface.py'
-      - 'infra/runpod/diagnose-ipadapter.py'
-    branches: [main]
+    branches:
+      - main
+      - flux2-native-multiref
   workflow_dispatch:
     inputs:
       version:
@@ -61,8 +65,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine tags
-        id: tags
+      - name: Determine tags (main branch)
+        id: tags_main
+        if: github.ref == 'refs/heads/main'
         run: |
           SHA_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-$(echo '${{ github.sha }}' | cut -c1-7)"
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -71,9 +76,17 @@ jobs:
           echo "latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
           echo "sha=${SHA_TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Determine tags (flux2-native-multiref branch)
+        id: tags_multiref
+        if: github.ref == 'refs/heads/flux2-native-multiref'
+        run: |
+          echo "multiref_latest=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:multiref-latest" >> "$GITHUB_OUTPUT"
+          echo "multiref_sha=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:multiref-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
       # Use plain docker build (not buildx) to avoid the docker-container driver
       # which duplicates storage and exhausts disk on ubuntu-latest runners.
-      - name: Build image
+      - name: Build image (main branch)
+        if: github.ref == 'refs/heads/main'
         run: |
           docker build \
             --progress=plain \
@@ -81,14 +94,34 @@ jobs:
             --build-arg GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             --build-arg BUILD_V2_PIPELINE="${{ github.event.inputs.build_v2_pipeline || 'false' }}" \
             -f ./infra/runpod/Dockerfile.base \
-            -t ${{ steps.tags.outputs.latest }} \
-            -t ${{ steps.tags.outputs.sha }} \
+            -t ${{ steps.tags_main.outputs.latest }} \
+            -t ${{ steps.tags_main.outputs.sha }} \
+            ./infra/runpod
+
+      - name: Build image (flux2-native-multiref branch)
+        if: github.ref == 'refs/heads/flux2-native-multiref'
+        run: |
+          docker build \
+            --progress=plain \
+            --build-arg CIVITAI_API_KEY="${{ secrets.CIVITAI_API_KEY }}" \
+            --build-arg GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            --build-arg BUILD_V2_PIPELINE="false" \
+            -f ./infra/runpod/Dockerfile.base \
+            -t ${{ steps.tags_multiref.outputs.multiref_latest }} \
+            -t ${{ steps.tags_multiref.outputs.multiref_sha }} \
             ./infra/runpod
 
       - name: Check disk after build
         run: df -h /
 
-      - name: Push image
+      - name: Push tags (main branch)
+        if: github.ref == 'refs/heads/main'
         run: |
-          docker push ${{ steps.tags.outputs.latest }}
-          docker push ${{ steps.tags.outputs.sha }}
+          docker push ${{ steps.tags_main.outputs.latest }}
+          docker push ${{ steps.tags_main.outputs.sha }}
+
+      - name: Push tags (flux2-native-multiref branch)
+        if: github.ref == 'refs/heads/flux2-native-multiref'
+        run: |
+          docker push ${{ steps.tags_multiref.outputs.multiref_latest }}
+          docker push ${{ steps.tags_multiref.outputs.multiref_sha }}

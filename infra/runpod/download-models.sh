@@ -239,45 +239,34 @@ download_to_volume \
     "OpenPoseXL2.safetensors" \
     "${CONTROLNET_DIR}"
 
-# ---- ControlNet: Flux2 Fun ControlNet Union (Flux 2 Dev pose guidance) ----
-# HuggingFace: alibaba-pai/FLUX.2-dev-Fun-ControlNet-Union
-# v2602 variant — improved per-layer control, more natural results (~8.2GB)
-download_to_volume \
-    "https://huggingface.co/alibaba-pai/FLUX.2-dev-Fun-ControlNet-Union/resolve/main/FLUX.2-dev-Fun-Controlnet-Union-2602.safetensors" \
-    "FLUX.2-dev-Fun-Controlnet-Union-2602.safetensors" \
-    "${CONTROLNET_DIR}"
+# ---- Flux 2 Dev core models (backstop downloads) ----
+# These models are normally pre-loaded onto the network volume manually.
+# These downloads are a safety net for fresh volumes — they skip if the
+# file already exists (idempotent).
+FLUX2_DIFFUSION_DIR="${VOLUME_MODELS}/diffusion_models"
+FLUX2_CLIP_DIR="${VOLUME_MODELS}/clip"
+FLUX2_VAE_DIR="${VOLUME_MODELS}/vae"
+mkdir -p "${FLUX2_DIFFUSION_DIR}" "${FLUX2_CLIP_DIR}" "${FLUX2_VAE_DIR}" 2>/dev/null
 
-# ---- PuLID Flux: Face identity injection for Flux 2 Dev ----
-# HuggingFace: guozinan/PuLID — face identity embedding model (~1.1GB)
-PULID_DIR="${VOLUME_MODELS}/pulid"
-mkdir -p "${PULID_DIR}" 2>/dev/null
+# Diffusion model (~8GB). NOTE: flux2-dev-fp8_scaled.safetensors is the
+# filename used by our workflow builder. Verify this URL is correct if
+# deploying on a fresh volume — Comfy-Org may list it as fp8mixed instead.
 download_to_volume \
-    "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors" \
-    "pulid_flux_v0.9.1.safetensors" \
-    "${PULID_DIR}"
+    "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2-dev-fp8_scaled.safetensors" \
+    "flux2-dev-fp8_scaled.safetensors" \
+    "${FLUX2_DIFFUSION_DIR}"
 
-# ---- EVA-02 CLIP Vision (PuLID face embedding encoder) ----
-# HuggingFace: QuanSun/EVA-CLIP — vision encoder for face features (~856MB)
-CLIP_VISION_DIR="${VOLUME_MODELS}/clip_vision"
-mkdir -p "${CLIP_VISION_DIR}" 2>/dev/null
+# Mistral 3 Small text encoder (~1.5GB)
 download_to_volume \
-    "https://huggingface.co/QuanSun/EVA-CLIP/resolve/main/EVA02_CLIP_L_336_psz14_s6B.pt" \
-    "EVA02_CLIP_L_336_psz14_s6B.pt" \
-    "${CLIP_VISION_DIR}"
+    "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors" \
+    "mistral_3_small_flux2_fp8.safetensors" \
+    "${FLUX2_CLIP_DIR}"
 
-# ---- DWPose models (reference image pose extraction) ----
-# Used by DWPreprocessor node from comfyui_controlnet_aux.
-# Extracts OpenPose skeletons from reference photos on the GPU.
-DWPOSE_DIR="/comfyui/custom_nodes/comfyui_controlnet_aux/ckpts/yzd-v/DWPose"
-mkdir -p "${DWPOSE_DIR}" 2>/dev/null
+# Flux 2 VAE (~335MB)
 download_to_volume \
-    "https://huggingface.co/yzd-v/DWPose/resolve/main/yolox_l.onnx" \
-    "yolox_l.onnx" \
-    "${DWPOSE_DIR}"
-download_to_volume \
-    "https://huggingface.co/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx" \
-    "dw-ll_ucoco_384.onnx" \
-    "${DWPOSE_DIR}"
+    "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors" \
+    "flux2-vae.safetensors" \
+    "${FLUX2_VAE_DIR}"
 
 # ---- Body shape slider LoRAs (female characters, portrait + dataset only) ----
 
@@ -298,50 +287,6 @@ download_to_volume "${BREASTSIZE_URL}" "Breast Slider - SDXL_alpha1.0_rank4_noxa
 
 # Character LoRAs are downloaded on-demand per-job by the handler (handler_wrapper.py).
 
-# ---- PuLID ComfyUI 5.x compatibility patch ----
-# Patches are applied every startup (idempotent — re.sub with no-match is a no-op).
-# Fixes two regressions introduced in ComfyUI 5.8.x that cause
-#   'NoneType' object is not callable  (ApplyPulidFlux returns None)
-#   KeyError: 'timesteps'              (hook accesses key that moved)
-# in the KSampler when PuLID is active.
-PULID_DIR="${COMFY_DIR}/custom_nodes/ComfyUI_PuLID_Flux_ll"
-if [ -d "${PULID_DIR}" ]; then
-    python3 - <<'PYEOF'
-import re, pathlib, sys
-
-PULID_DIR = pathlib.Path("/comfyui/custom_nodes/ComfyUI_PuLID_Flux_ll")
-patched_files = []
-
-for pyfile in sorted(PULID_DIR.rglob("*.py")):
-    txt = pyfile.read_text(errors="replace")
-    orig = txt
-
-    # Patch 1: forward_orig — accept **kwargs for timestep_zero_index et al.
-    txt = re.sub(
-        r"(    attn_mask: Tensor = None,\n)(\) -> Tensor:)",
-        r"\1    **kwargs,\n\2",
-        txt,
-    )
-
-    # Patch 2: transformer_options — use .get() so missing key returns {} not KeyError.
-    txt = re.sub(
-        r'transformer_options = extra_options\["transformer_options"\]',
-        'transformer_options = extra_options.get("transformer_options") or (input_args or {}).get("transformer_options", {})',
-        txt,
-    )
-
-    if txt != orig:
-        pyfile.write_text(txt)
-        patched_files.append(str(pyfile.relative_to(PULID_DIR)))
-
-if patched_files:
-    print(f"[NSW] PuLID patched: {', '.join(patched_files)}")
-else:
-    print("[NSW] PuLID: no patterns matched (already patched or source changed)")
-PYEOF
-else
-    echo "[NSW] PuLID custom node not found at ${PULID_DIR} — skipping patch"
-fi
 
 echo "[NSW] ========================================="
 if [ $FAILED -gt 0 ]; then

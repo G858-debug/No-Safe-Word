@@ -1,77 +1,22 @@
 FROM runpod/worker-comfyui:5.8.5-base
 
+# Pin ComfyUI to an explicit version. worker-comfyui:5.8.5-base installs
+# ComfyUI via comfy-cli --version=latest at its own build time, which is
+# opaque. Pinning here makes the worker's behaviour auditable and reproducible.
+RUN cd /comfyui && git fetch origin --tags && git checkout v0.21.1 && \
+    pip install -r requirements.txt --quiet
+
+# Verify that all required native Flux 2 nodes are present in this ComfyUI
+# version. Fails the build loudly if any are missing rather than silently
+# producing a broken worker.
+RUN printf 'from comfy import nodes\nrequired=["EmptyFlux2LatentImage","Flux2Scheduler","ReferenceLatent","FluxGuidance","SamplerCustomAdvanced","BasicGuider","RandomNoise","KSamplerSelect"]\nmissing=[n for n in required if n not in nodes.NODE_CLASS_MAPPINGS]\nassert not missing,f"Missing native Flux 2 nodes: {missing}"\nprint("[NSW] All required native Flux 2 nodes confirmed present")\n' \
+    > /tmp/assert_nodes.py && cd /comfyui && python3 /tmp/assert_nodes.py && rm /tmp/assert_nodes.py
+
 # ---- Custom Nodes ----
 # ComfyUI-ppm: FluxKontextImageScale node (Kontext-aware image scaling)
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/pamparamm/ComfyUI-ppm.git && \
     cd ComfyUI-ppm && git checkout ebb35c7
-
-# InsightFace + PuLID dependencies
-# cmake + libgl required by ComfyUI ecosystem.
-# build-essential + python3-dev needed to compile insightface from source.
-# insightface 0.7.x has no pre-built Python 3.12 wheels (source-only).
-# The base image ships insightface 0.2.1 which lacks insightface.app
-# (added in 0.4.1); PuLID requires insightface.app.FaceAnalysis.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake \
-    curl \
-    libgl1 \
-    libglib2.0-0 \
-    build-essential \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# PuLID: Face identity injection for Flux (portrait pipeline + scene refinement).
-# Combined into one RUN to prevent Docker layer caching of partial installs:
-#   1. Upgrade Cython (needed to compile insightface's face3d mesh extension)
-#   2. Force-reinstall insightface 0.7.3 from source, overriding the 0.2.1 in the base image
-#   3. Clone ComfyUI_PuLID_Flux_ll (Flux-specific, supports pulid_flux_v0.9.1) and install deps
-RUN pip install --upgrade "cython>=3.0" && \
-    pip install --force-reinstall "insightface==0.7.3" && \
-    cd /comfyui/custom_nodes && \
-    git clone https://github.com/lldacing/ComfyUI_PuLID_Flux_ll && \
-    pip install -r ComfyUI_PuLID_Flux_ll/requirements.txt && \
-    pip install facenet-pytorch --no-deps && \
-    cd ComfyUI_PuLID_Flux_ll
-
-# Stage the kwargs patch script (applied after all forward_orig-patching nodes are installed)
-COPY patch_pulid.py /tmp/patch_pulid.py
-
-# InsightFace buffalo_l — required by PulidFluxInsightFaceLoader at workflow runtime.
-# FaceAnalysis(name="buffalo_l") downloads ~230MB of ONNX models to ~/.insightface/models/buffalo_l/
-# on first call. Pre-download at build time so cold starts never hit the CDN.
-# ctx_id=-1 forces CPU mode (no CUDA available at build time on GitHub Actions runners).
-RUN python3 -c "from insightface.app import FaceAnalysis; m = FaceAnalysis(name='buffalo_l'); m.prepare(ctx_id=-1, det_size=(640, 640)); print('InsightFace buffalo_l ready:', sorted(m.models.keys()))"
-# Fail the build loudly if buffalo_l models are missing
-RUN echo "=== buffalo_l verification ===" && \
-    ls /root/.insightface/models/buffalo_l/ && \
-    echo "=== buffalo_l OK ===" || \
-    (echo "=== buffalo_l FAILED — aborting build ===" && exit 1)
-
-# ControlNet Preprocessors (DWPose for reference image pose extraction).
-# comfyui_controlnet_aux provides DWPreprocessor which extracts OpenPose-format
-# skeletons from reference photos on the GPU — more accurate than hand-crafted
-# COCO-18 keypoints. DWPose model files (yolox_l + dw-ll_ucoco_384) are
-# downloaded at runtime by download-models.sh.
-RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git && \
-    cd comfyui_controlnet_aux && git checkout 95a13e2 && \
-    pip install -r requirements.txt
-
-# Flux2 Fun ControlNet: Alibaba's unified ControlNet for Flux 2 Dev.
-# Provides Flux2FunControlNetLoader + Flux2FunControlNetApply nodes.
-# Handles pose/canny/depth/HED/MLSD/tile — auto-detects control type.
-# No pip install needed — only dependency is torch>=2.0.0 (already present).
-RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/bryanmcguire/comfyui-flux2fun-controlnet.git
-
-# Patch BOTH PuLID and Flux2Fun ControlNet for ComfyUI 5.8.5 compatibility.
-# Both packages monkey-patch Flux.forward_orig but neither accepts the new
-# timestep_zero_index kwarg that ComfyUI 5.8.x passes down. Add **kwargs
-# to both signatures. Build fails loudly if either patch doesn't apply.
-RUN python3 /tmp/patch_pulid.py \
-    /comfyui/custom_nodes/ComfyUI_PuLID_Flux_ll/PulidFluxHook.py \
-    /comfyui/custom_nodes/comfyui-flux2fun-controlnet/flux_patch.py
 
 # ---- V2 Pipeline: Florence-2 + SAM2 custom nodes ----
 # Only installed when BUILD_V2_PIPELINE=true to avoid bloating existing image.
@@ -86,8 +31,7 @@ RUN if [ "$BUILD_V2_PIPELINE" = "true" ]; then \
     fi
 
 # ---- Runtime Model Download ----
-# Large models (Flux Kontext ~8GB, CLIP encoders, VAE) are downloaded
-# on first startup to keep the image buildable on GitHub Actions runners.
-# With a RunPod network volume, these persist across restarts.
+# Flux 2 core models (UNET, text encoder, VAE) are stored on the RunPod
+# network volume and downloaded on first startup by download-models.sh.
 COPY download-models.sh /usr/local/bin/download-models.sh
 RUN chmod +x /usr/local/bin/download-models.sh

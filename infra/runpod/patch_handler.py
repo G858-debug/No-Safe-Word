@@ -233,7 +233,7 @@ def _nsw_patched_start(config):
         # Diagnostic mode: return file listings of model directories + ComfyUI node info
         if job_input.get("nsw_diagnostic"):
             diag = {}
-            for subdir in ["checkpoints", "loras", "diffusion_models", "clip", "vae", "pulid", "insightface"]:
+            for subdir in ["checkpoints", "loras", "diffusion_models", "clip", "vae"]:
                 for base in [_nsw_COMFY_DIR + "/models", "/runpod-volume/models"]:
                     d = _nsw_os.path.join(base, subdir)
                     key = d
@@ -268,26 +268,11 @@ def _nsw_patched_start(config):
             if comfy_ready:
                 try:
                     all_nodes = list(r.json().keys())
-                    diag["comfyui_pulid_nodes"] = [n for n in all_nodes if "pulid" in n.lower()]
-                    diag["comfyui_face_nodes"] = [n for n in all_nodes if any(x in n.lower() for x in ["face", "insight", "reactor"])]
                     diag["comfyui_total_nodes"] = len(all_nodes)
                 except Exception as e:
                     diag["comfyui_object_info_error"] = str(e)
             else:
                 diag["comfyui_object_info_error"] = "ComfyUI did not start within 5 minutes"
-            # Check InsightFace buffalo_l models — required by PulidFluxInsightFaceLoader at runtime
-            buffalo_l_dir = "/root/.insightface/models/buffalo_l"
-            if _nsw_os.path.isdir(buffalo_l_dir):
-                diag["insightface_buffalo_l"] = sorted(_nsw_os.listdir(buffalo_l_dir))
-            else:
-                diag["insightface_buffalo_l"] = "NOT FOUND — PulidFluxInsightFaceLoader will download at runtime"
-            # Read PuLID startup import test log (written by start-wrapper.sh)
-            pulid_log = "/tmp/pulid_import.log"
-            if _nsw_os.path.isfile(pulid_log):
-                with open(pulid_log) as f:
-                    diag["pulid_import_log"] = f.read()
-            else:
-                diag["pulid_import_log"] = "NOT FOUND (start-wrapper.sh may not have run this test)"
             # Also check for download log
             log_path = "/runpod-volume/nsw-download.log"
             if _nsw_os.path.isfile(log_path):
