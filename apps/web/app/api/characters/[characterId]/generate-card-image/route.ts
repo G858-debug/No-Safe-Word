@@ -1,25 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
 import { supabase } from "@no-safe-word/story-engine";
 import {
   submitSirayImage,
   generateFlux2Image,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
-
-// Fetch + resize to max 768px on the longest side before base64-encoding.
-// Keeps both face + body references well under RunPod's 10 MB payload cap.
-const REF_MAX_PX = 768;
-async function downscaleToBase64(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch reference image ${url}: ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  const resized = await sharp(buf)
-    .resize(REF_MAX_PX, REF_MAX_PX, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 88 })
-    .toBuffer();
-  return resized.toString("base64");
-}
+import { downscaleRefToBase64 } from "@/lib/server/downscale-ref";
 
 // 4:5 portrait — environmental "MEET THE CAST" character card.
 //
@@ -257,7 +243,7 @@ export async function POST(
       const refsBase64 = await Promise.all(
         referenceImageUrls.map(async (url, i) => ({
           name: `ref_card_${i}.jpeg`,
-          base64: await downscaleToBase64(url),
+          base64: await downscaleRefToBase64(url),
         }))
       );
 

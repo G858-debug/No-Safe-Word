@@ -3,11 +3,11 @@ import { supabase } from "@no-safe-word/story-engine";
 import {
   submitSirayImage,
   generateFlux2Image,
-  imageUrlToBase64,
 } from "@no-safe-word/image-gen";
 import type { ImageModel } from "@no-safe-word/shared";
 import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
 import { draftAndPersistScenePrompt } from "@/lib/server/draft-scene-prompt-from-db";
+import { downscaleRefToBase64 } from "@/lib/server/downscale-ref";
 
 /**
  * POST /api/stories/[seriesId]/generate-image
@@ -364,13 +364,13 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     if (primaryUrl) {
       references.push({
         name: `ref_primary_${prompt.character_id}.jpeg`,
-        base64: await imageUrlToBase64(primaryUrl),
+        base64: await downscaleRefToBase64(primaryUrl),
       });
     }
     if (secondaryUrl) {
       references.push({
         name: `ref_secondary_${prompt.secondary_character_id}.jpeg`,
-        base64: await imageUrlToBase64(secondaryUrl),
+        base64: await downscaleRefToBase64(secondaryUrl),
       });
     }
 

@@ -3,9 +3,9 @@ import { supabase } from "@no-safe-word/story-engine";
 import {
   generateFlux2Image,
   submitSirayImage,
-  imageUrlToBase64,
 } from "@no-safe-word/image-gen";
 import { getPortraitUrlsForScene } from "@/lib/server/get-portrait-urls";
+import { downscaleRefToBase64 } from "@/lib/server/downscale-ref";
 import { logEvent } from "@/lib/server/events";
 
 export const runtime = "nodejs";
@@ -403,13 +403,13 @@ export async function POST(
   const references: Array<{ name: string; base64: string }> = [
     {
       name: `ref_protagonist_${protagonist.character_id}.jpeg`,
-      base64: await imageUrlToBase64(protagonistUrl),
+      base64: await downscaleRefToBase64(protagonistUrl),
     },
   ];
   if (loveInterestUrl && loveInterest?.character_id) {
     references.push({
       name: `ref_love_interest_${loveInterest.character_id}.jpeg`,
-      base64: await imageUrlToBase64(loveInterestUrl),
+      base64: await downscaleRefToBase64(loveInterestUrl),
     });
   }
 
