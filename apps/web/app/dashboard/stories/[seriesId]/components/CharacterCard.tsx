@@ -317,6 +317,7 @@ export function CharacterCard({
         .catch((e) => {
           if (e instanceof Error && e.message === "unmounted") return;
           setError(errorMessage(e));
+          setFace((prev) => (prev.kind === "generating" ? { kind: "idle" } : prev));
         });
     },
     [waitForCompletion]
@@ -340,6 +341,7 @@ export function CharacterCard({
         .catch((e) => {
           if (e instanceof Error && e.message === "unmounted") return;
           setError(errorMessage(e));
+          setBody((prev) => (prev.kind === "generating" ? { kind: "idle" } : prev));
         });
     },
     [waitForCompletion]
