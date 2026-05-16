@@ -127,6 +127,9 @@ export async function GET(
     //                     plus queue depth adds variance. 15min gives
     //                     ~2× tail headroom while still catching truly
     //                     stuck jobs.
+    //   RunPod (Flux 2):  cold-start model loading (~5min) + generation
+    //                     (~8min) = ~13min end-to-end on first job. 20min
+    //                     matches the endpoint executionTimeoutMs (1200s).
     // We detect Siray via the `siray-` job_id prefix on the OLDEST job
     // (all jobs in one cover run come from the same backend, so any
     // sample is representative).
@@ -134,7 +137,7 @@ export async function GET(
       j.job_id?.startsWith("siray-")
     );
     const stuckModel = isSirayBatch ? "hunyuan3" : "flux2_dev";
-    const STUCK_THRESHOLD_MS = (isSirayBatch ? 15 : 5) * 60 * 1000;
+    const STUCK_THRESHOLD_MS = (isSirayBatch ? 15 : 20) * 60 * 1000;
     const now = Date.now();
     const oldestActive = coverJobStates.reduce<number | null>((acc, j) => {
       const t = new Date(j.created_at).getTime();
