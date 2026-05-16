@@ -326,12 +326,6 @@ export async function POST(
     },
   });
 
-  // Resolve cover ref types (default body for both)
-  const coverPrimaryRefType =
-    (series.cover_primary_ref_type as "face" | "body") ?? "body";
-  const coverSecondaryRefType =
-    (series.cover_secondary_ref_type as "face" | "body" | null) ?? "body";
-
   if (imageModel === "hunyuan3") {
     return generateHunyuanCover({
       seriesId,
@@ -340,32 +334,23 @@ export async function POST(
       protagonist,
       loveInterest,
       variantIndices,
-      primaryRefType: coverPrimaryRefType,
-      secondaryRefType: coverSecondaryRefType,
     });
   }
 
   // ── Flux 2 Dev path (async RunPod) ──────────────────────────────
 
-  // Pick ref-image FK per character based on ref_type; fall back to face
-  // when body is unavailable so existing single-portrait stories still
-  // generate (the resolved image is what gets fed into PuLID).
-  const protagonistRefId =
-    refImageId(protagonist, coverPrimaryRefType) ??
-    refImageId(protagonist, "face");
-  const loveInterestRefId = loveInterest
-    ? refImageId(loveInterest, coverSecondaryRefType) ??
-      refImageId(loveInterest, "face")
-    : null;
-
-  const portraitIds = [protagonistRefId, loveInterestRefId].filter(
-    (id): id is string => Boolean(id)
-  );
+  // Resolve all portrait image IDs (face + body for each character).
+  const allPortraitIds = [
+    refImageId(protagonist, "body"),
+    refImageId(protagonist, "face"),
+    loveInterest ? refImageId(loveInterest, "body") : null,
+    loveInterest ? refImageId(loveInterest, "face") : null,
+  ].filter((id): id is string => Boolean(id));
 
   const { data: portraitImages, error: imagesErr } = await supabase
     .from("images")
     .select("id, stored_url, sfw_url")
-    .in("id", portraitIds);
+    .in("id", allPortraitIds);
 
   if (imagesErr) {
     return NextResponse.json(
@@ -380,37 +365,30 @@ export async function POST(
     if (url) urlById.set(img.id, url);
   }
 
-  const protagonistUrl = protagonistRefId
-    ? urlById.get(protagonistRefId)
-    : undefined;
-  if (!protagonistUrl) {
+  const protagonistBodyUrl = refImageId(protagonist, "body") ? urlById.get(refImageId(protagonist, "body")!) : undefined;
+  const protagonistFaceUrl = refImageId(protagonist, "face") ? urlById.get(refImageId(protagonist, "face")!) : undefined;
+
+  if (!protagonistBodyUrl && !protagonistFaceUrl) {
     return NextResponse.json(
-      {
-        error: `Protagonist ${coverPrimaryRefType} portrait image URL is missing. Approve the ${coverPrimaryRefType} portrait and retry.`,
-      },
+      { error: "Protagonist has no approved portraits. Approve face and body portraits before generating a cover." },
       { status: 400 }
     );
   }
 
-  const loveInterestUrl = loveInterestRefId
-    ? urlById.get(loveInterestRefId)
-    : undefined;
+  const loveInterestBodyUrl = loveInterest && refImageId(loveInterest, "body") ? urlById.get(refImageId(loveInterest, "body")!) : undefined;
+  const loveInterestFaceUrl = loveInterest && refImageId(loveInterest, "face") ? urlById.get(refImageId(loveInterest, "face")!) : undefined;
 
-  if (!loveInterestUrl) {
+  if (!loveInterestBodyUrl && !loveInterestFaceUrl) {
     console.log("[generate-cover] protagonist_only mode", { seriesId });
   }
 
-  const references: Array<{ name: string; base64: string }> = [
-    {
-      name: `ref_protagonist_${protagonist.character_id}.jpeg`,
-      base64: await downscaleRefToBase64(protagonistUrl),
-    },
-  ];
-  if (loveInterestUrl && loveInterest?.character_id) {
-    references.push({
-      name: `ref_love_interest_${loveInterest.character_id}.jpeg`,
-      base64: await downscaleRefToBase64(loveInterestUrl),
-    });
+  // Build references: body first (proportions/silhouette), then face (facial detail).
+  const references: Array<{ name: string; base64: string }> = [];
+  if (protagonistBodyUrl) references.push({ name: `ref_protagonist_body_${protagonist.character_id}.jpeg`, base64: await downscaleRefToBase64(protagonistBodyUrl) });
+  if (protagonistFaceUrl) references.push({ name: `ref_protagonist_face_${protagonist.character_id}.jpeg`, base64: await downscaleRefToBase64(protagonistFaceUrl) });
+  if (loveInterest?.character_id) {
+    if (loveInterestBodyUrl) references.push({ name: `ref_love_interest_body_${loveInterest.character_id}.jpeg`, base64: await downscaleRefToBase64(loveInterestBodyUrl) });
+    if (loveInterestFaceUrl) references.push({ name: `ref_love_interest_face_${loveInterest.character_id}.jpeg`, base64: await downscaleRefToBase64(loveInterestFaceUrl) });
   }
 
   const jobIds: string[] = [];
@@ -445,8 +423,7 @@ export async function POST(
             seed: result.seed,
             width: COVER_WIDTH,
             height: COVER_HEIGHT,
-            primary_ref_type: coverPrimaryRefType,
-            secondary_ref_type: loveInterest ? coverSecondaryRefType : null,
+            ref_count: references.length,
           },
           mode: "sfw",
         })
@@ -515,8 +492,6 @@ async function generateHunyuanCover(args: {
   protagonist: CharWithBase;
   loveInterest: CharWithBase | undefined;
   variantIndices: number[];
-  primaryRefType: "face" | "body";
-  secondaryRefType: "face" | "body";
 }): Promise<NextResponse> {
   const {
     seriesId,
@@ -525,8 +500,6 @@ async function generateHunyuanCover(args: {
     protagonist,
     loveInterest,
     variantIndices,
-    primaryRefType,
-    secondaryRefType,
   } = args;
 
   // Model-aware injection rule (Hunyuan / cover) on Siray:
@@ -542,9 +515,11 @@ async function generateHunyuanCover(args: {
   //     specific cover scene without competing against the original
   //     portrait's clothing description.
 
+  // Use body portrait as the single Siray i2i reference (body portrait
+  // includes the face and carries the most complete identity signal).
   const referenceImageUrls = await getPortraitUrlsForScene([
-    { characterId: protagonist.character_id, refType: primaryRefType },
-    { characterId: loveInterest?.character_id, refType: secondaryRefType },
+    { characterId: protagonist.character_id, refType: "body" },
+    { characterId: loveInterest?.character_id, refType: "body" },
   ]);
 
   console.log("[generate-cover:hunyuan] submitting", {
@@ -589,8 +564,8 @@ async function generateHunyuanCover(args: {
             aspect_ratio: "4:5",
             size: submitted.size,
             reference_image_count: submitted.referenceImageCount,
-            primary_ref_type: primaryRefType,
-            secondary_ref_type: loveInterest ? secondaryRefType : null,
+            primary_ref_type: "body",
+            secondary_ref_type: loveInterest ? "body" : null,
           },
           mode: "sfw",
         })

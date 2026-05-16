@@ -110,15 +110,10 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
       prompt.character_id && prompt.secondary_character_id ? "5:4" : "4:5";
 
     // 5. Resolve i2i reference image URLs from the linked characters' approved
-    //    portraits. Identity flows through these references; the text prompt
-    //    that Mistral wrote intentionally avoids re-describing faces/skin/hair.
-    //    The ref_type columns pick face vs body per character.
-    const primaryRefType = (prompt.primary_ref_type as "face" | "body") ?? "body";
-    const secondaryRefType =
-      (prompt.secondary_ref_type as "face" | "body" | null) ?? "body";
+    //    portraits. Always use the body portrait (full-length, includes face).
     const referenceImageUrls = await getPortraitUrlsForScene([
-      { characterId: prompt.character_id, refType: primaryRefType },
-      { characterId: prompt.secondary_character_id, refType: secondaryRefType },
+      { characterId: prompt.character_id, refType: "body" },
+      { characterId: prompt.secondary_character_id, refType: "body" },
     ]);
 
     // 5b. If a pose template is attached AND the template explicitly opts
@@ -168,10 +163,6 @@ async function runHunyuanGeneration(_seriesId: string, promptId: string) {
           aspect_ratio: aspectRatio,
           size: submitted.size,
           reference_image_count: submitted.referenceImageCount,
-          primary_ref_type: prompt.character_id ? primaryRefType : null,
-          secondary_ref_type: prompt.secondary_character_id
-            ? secondaryRefType
-            : null,
         },
         mode: deriveMode(prompt.image_type),
       })
@@ -276,15 +267,10 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     .eq("id", promptId);
 
   try {
-    // 3. Resolve approved portrait URLs for each linked character from the
-    //    base `characters` table. Flux 2 uses these as PuLID reference images.
-    //    The ref_type columns choose face vs body portrait per character:
-    //      - face → characters.approved_image_id
-    //      - body → characters.approved_fullbody_image_id
-    const primaryRefType = (prompt.primary_ref_type as "face" | "body") ?? "body";
-    const secondaryRefType =
-      (prompt.secondary_ref_type as "face" | "body" | null) ?? "body";
-
+    // 3. Resolve both face and body portrait URLs for each linked character.
+    //    Both are sent as ReferenceLatent inputs: body carries proportions +
+    //    silhouette, face carries facial detail. Together they give the model
+    //    a complete identity anchor.
     const charIds = [
       prompt.character_id,
       prompt.secondary_character_id,
@@ -317,38 +303,22 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
         }
 
         for (const c of chars ?? []) {
-          const faceUrl = c.approved_image_id
-            ? urlById.get(c.approved_image_id)
-            : undefined;
-          const bodyUrl = c.approved_fullbody_image_id
-            ? urlById.get(c.approved_fullbody_image_id)
-            : undefined;
+          const faceUrl = c.approved_image_id ? urlById.get(c.approved_image_id) : undefined;
+          const bodyUrl = c.approved_fullbody_image_id ? urlById.get(c.approved_fullbody_image_id) : undefined;
           if (faceUrl) facePortraitUrls[c.id] = faceUrl;
           if (bodyUrl) bodyPortraitUrls[c.id] = bodyUrl;
         }
       }
     }
 
-    const pickUrl = (charId: string, refType: "face" | "body") =>
-      refType === "body"
-        ? bodyPortraitUrls[charId]
-        : facePortraitUrls[charId];
-
-    const primaryUrl = prompt.character_id
-      ? pickUrl(prompt.character_id, primaryRefType)
-      : undefined;
-    const secondaryUrl = prompt.secondary_character_id
-      ? pickUrl(prompt.secondary_character_id, secondaryRefType)
-      : undefined;
-
-    if (prompt.character_id && !primaryUrl) {
+    if (prompt.character_id && !facePortraitUrls[prompt.character_id] && !bodyPortraitUrls[prompt.character_id]) {
       throw new Error(
-        `Character "${prompt.character_name ?? prompt.character_id}" has no approved ${primaryRefType} portrait yet — approve the ${primaryRefType} portrait before generating scenes under flux2_dev.`
+        `Character "${prompt.character_name ?? prompt.character_id}" has no approved portraits — approve face and body portraits before generating scenes.`
       );
     }
-    if (prompt.secondary_character_id && !secondaryUrl) {
+    if (prompt.secondary_character_id && !facePortraitUrls[prompt.secondary_character_id] && !bodyPortraitUrls[prompt.secondary_character_id]) {
       throw new Error(
-        `Secondary character "${prompt.secondary_character_name ?? prompt.secondary_character_id}" has no approved ${secondaryRefType} portrait yet.`
+        `Secondary character "${prompt.secondary_character_name ?? prompt.secondary_character_id}" has no approved portraits.`
       );
     }
 
@@ -359,19 +329,18 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     const width = twoCharacter ? 1024 : 768;
     const height = twoCharacter ? 768 : 1024;
 
-    // 5. Encode portrait references as base64 for the RunPod payload
+    // 5. Encode face + body references for each character (body first, then face).
+    //    Body carries proportions/silhouette; face carries facial detail.
     const references: Array<{ name: string; base64: string }> = [];
-    if (primaryUrl) {
-      references.push({
-        name: `ref_primary_${prompt.character_id}.jpeg`,
-        base64: await downscaleRefToBase64(primaryUrl),
-      });
-    }
-    if (secondaryUrl) {
-      references.push({
-        name: `ref_secondary_${prompt.secondary_character_id}.jpeg`,
-        base64: await downscaleRefToBase64(secondaryUrl),
-      });
+    for (const [label, charId] of [
+      ["primary", prompt.character_id],
+      ["secondary", prompt.secondary_character_id],
+    ] as const) {
+      if (!charId) continue;
+      const bodyUrl = bodyPortraitUrls[charId];
+      const faceUrl = facePortraitUrls[charId];
+      if (bodyUrl) references.push({ name: `ref_${label}_body_${charId}.jpeg`, base64: await downscaleRefToBase64(bodyUrl) });
+      if (faceUrl) references.push({ name: `ref_${label}_face_${charId}.jpeg`, base64: await downscaleRefToBase64(faceUrl) });
     }
 
     // 6. Submit to RunPod — async, returns a jobId the client polls.
@@ -401,10 +370,7 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
           seed: result.seed,
           width,
           height,
-          primary_ref_type: prompt.character_id ? primaryRefType : null,
-          secondary_ref_type: prompt.secondary_character_id
-            ? secondaryRefType
-            : null,
+          ref_count: references.length,
         },
         mode: deriveMode(prompt.image_type),
       })

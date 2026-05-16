@@ -56,8 +56,6 @@ export async function PATCH(
       visual_signature_override,
       final_prompt,
       pose_template_id,
-      primary_ref_type,
-      secondary_ref_type,
     } = body as {
       prompt?: string;
       character_block_override?: string | null;
@@ -68,8 +66,6 @@ export async function PATCH(
       visual_signature_override?: string | null;
       final_prompt?: string | null;
       pose_template_id?: string | null;
-      primary_ref_type?: "face" | "body";
-      secondary_ref_type?: "face" | "body" | null;
     };
 
     const hasPromptUpdate = typeof prompt === "string" && prompt.length > 0;
@@ -81,26 +77,6 @@ export async function PATCH(
     const hasVisualSignatureOverrideUpdate = visual_signature_override !== undefined;
     const hasFinalPromptUpdate = final_prompt !== undefined;
     const hasPoseTemplateUpdate = pose_template_id !== undefined;
-    const hasPrimaryRefTypeUpdate = primary_ref_type !== undefined;
-    const hasSecondaryRefTypeUpdate = secondary_ref_type !== undefined;
-
-    if (hasPrimaryRefTypeUpdate && primary_ref_type !== "face" && primary_ref_type !== "body") {
-      return NextResponse.json(
-        { error: "primary_ref_type must be 'face' or 'body'" },
-        { status: 400 }
-      );
-    }
-    if (
-      hasSecondaryRefTypeUpdate &&
-      secondary_ref_type !== null &&
-      secondary_ref_type !== "face" &&
-      secondary_ref_type !== "body"
-    ) {
-      return NextResponse.json(
-        { error: "secondary_ref_type must be 'face', 'body', or null" },
-        { status: 400 }
-      );
-    }
 
     if (
       !hasPromptUpdate &&
@@ -111,9 +87,7 @@ export async function PATCH(
       !hasSfwConstraintOverrideUpdate &&
       !hasVisualSignatureOverrideUpdate &&
       !hasFinalPromptUpdate &&
-      !hasPoseTemplateUpdate &&
-      !hasPrimaryRefTypeUpdate &&
-      !hasSecondaryRefTypeUpdate
+      !hasPoseTemplateUpdate
     ) {
       return NextResponse.json(
         { error: "At least one field to update is required" },
@@ -145,13 +119,9 @@ export async function PATCH(
     if (hasVisualSignatureOverrideUpdate) updates.visual_signature_override = visual_signature_override;
     if (hasFinalPromptUpdate) updates.final_prompt = final_prompt;
     if (hasPoseTemplateUpdate) updates.pose_template_id = pose_template_id;
-    if (hasPrimaryRefTypeUpdate) updates.primary_ref_type = primary_ref_type;
-    if (hasSecondaryRefTypeUpdate) updates.secondary_ref_type = secondary_ref_type;
 
     // Reset to pending on any content change EXCEPT a pure final_prompt edit
-    // or pure ref-type edit — those don't invalidate an existing approved
-    // image (the dropdowns track *next* generation's reference, not the
-    // current one).
+    // — that doesn't invalidate an existing approved image.
     const onlyFinalPromptChanged =
       hasFinalPromptUpdate &&
       !hasPromptUpdate &&
@@ -160,23 +130,10 @@ export async function PATCH(
       !hasSuppressUpdate &&
       !hasClothingOverrideUpdate &&
       !hasSfwConstraintOverrideUpdate &&
-      !hasVisualSignatureOverrideUpdate &&
-      !hasPrimaryRefTypeUpdate &&
-      !hasSecondaryRefTypeUpdate;
-    const onlyRefTypeChanged =
-      (hasPrimaryRefTypeUpdate || hasSecondaryRefTypeUpdate) &&
-      !hasPromptUpdate &&
-      !hasOverrideUpdate &&
-      !hasSecondaryOverrideUpdate &&
-      !hasSuppressUpdate &&
-      !hasClothingOverrideUpdate &&
-      !hasSfwConstraintOverrideUpdate &&
-      !hasVisualSignatureOverrideUpdate &&
-      !hasFinalPromptUpdate;
+      !hasVisualSignatureOverrideUpdate;
 
     if (
       !onlyFinalPromptChanged &&
-      !onlyRefTypeChanged &&
       (existing.status === "generated" || existing.status === "approved")
     ) {
       updates.status = "pending";
