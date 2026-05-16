@@ -377,11 +377,10 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     // 6. Submit to RunPod — async, returns a jobId the client polls.
     //
     // Model-aware injection rule (Flux 2 Dev / scene): NO character text.
-    // Character identity is anchored by the PuLID reference images above
-    // (built from `characters.approved_image_id`). Adding a text block
-    // describing the same character competes with the image reference and
-    // measurably degrades both likeness and scene fidelity. Hunyuan is the
-    // opposite — see `runHunyuanGeneration` for the text-injection branch.
+    // Character identity is anchored by the ReferenceLatent reference image
+    // above (one full-body portrait per character). Adding a text block
+    // describing the same character competes with the reference and degrades
+    // likeness. Hunyuan is the opposite — text injection via Mistral draft.
     const result = await generateFlux2Image({
       scenePrompt: prompt.prompt,
       references,

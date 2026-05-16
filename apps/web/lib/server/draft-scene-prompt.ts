@@ -91,10 +91,10 @@ function buildSystemPrompt(knowledgeDoc: string, pipeline: "hunyuan3" | "flux2_d
     : "Each prompt is rendered photorealistically by HunyuanImage 3.0 (Instruct, i2i variant) on Siray.ai.";
 
   const referenceCritical = pipeline === "flux2_dev"
-    ? `CRITICAL — FULL FACE + BODY REFERENCE IMAGES ARE SENT:
-- Each linked character's approved FACE portrait AND FULL BODY portrait are passed as ReferenceLatent conditioning inputs. Both together carry the character's complete visual identity — face, skin, hair, body proportions, build, silhouette.
-- For characters WITH reference images:
-  - Do NOT describe their face, skin, eyes, hair, body shape, proportions, or any physical features. The references carry all of that — competing text degrades likeness.
+    ? `CRITICAL — A FULL-BODY PORTRAIT REFERENCE IS SENT PER CHARACTER:
+- Each linked character's approved portrait (typically a full-length shot) is passed as a ReferenceLatent conditioning input. This single image carries the character's complete visual identity — face, skin, hair, body proportions, build, silhouette, everything.
+- For characters WITH a reference image:
+  - Do NOT describe their face, skin, eyes, hair, body shape, proportions, or any physical features. The reference carries all of that — competing text degrades likeness.
   - DO describe what they are WEARING for this scene, where they are LOOKING, and HOW they are positioned.
 - For background figures or unnamed extras: describe them inline (no reference exists for them).`
     : `CRITICAL — THE i2i REFERENCE IS A FACE PORTRAIT ONLY:
@@ -170,8 +170,8 @@ function describeCharacter(c: DraftSceneCharacter, pipeline: "hunyuan3" | "flux2
 
   if (pipeline === "flux2_dev") {
     const refNote = c.hasApprovedPortrait
-      ? "    (FULL FACE + BODY reference images sent — do NOT describe any physical appearance; only wardrobe, gaze, and positioning)"
-      : "    (no reference images — describe the character inline including face and body)";
+      ? "    (full-body portrait reference sent via ReferenceLatent — do NOT describe any physical appearance; only wardrobe, gaze, and positioning)"
+      : "    (no reference image — describe the character inline including face and body)";
     const clothingLine = clothing
       ? `    Default wardrobe (use unless the scene needs different clothing): ${clothing}`
       : "";
