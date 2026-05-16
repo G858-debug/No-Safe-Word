@@ -1,4 +1,5 @@
 import { buildFlux2Workflow, type Flux2ReferenceImage } from "./flux2-workflow-builder";
+import { buildFlux2NativeWorkflow } from "./flux2-workflow-builder-native";
 import { submitRunPodJob } from "./runpod";
 import { VISUAL_SIGNATURE } from "./hunyuan-generator";
 
@@ -74,11 +75,21 @@ export function assembleFlux2Prompt(
 export async function generateFlux2Image(
   options: Flux2GenerateOptions
 ): Promise<Flux2GenerateResult> {
+  const useNative = process.env.FLUX2_USE_NATIVE_MULTIREF === "true";
+
   const endpointId =
     options.endpointId ??
+    (useNative ? process.env.RUNPOD_FLUX2_SANDBOX_ENDPOINT_ID : undefined) ??
     process.env.RUNPOD_FLUX2_ENDPOINT_ID ??
     process.env.RUNPOD_ENDPOINT_ID;
+
   if (!endpointId) {
+    if (useNative) {
+      throw new Error(
+        "FLUX2_USE_NATIVE_MULTIREF is enabled but RUNPOD_FLUX2_SANDBOX_ENDPOINT_ID is not set. " +
+        "Set RUNPOD_FLUX2_SANDBOX_ENDPOINT_ID to the sandbox RunPod endpoint ID before enabling the native path."
+      );
+    }
     throw new Error(
       "RUNPOD_FLUX2_ENDPOINT_ID (or RUNPOD_ENDPOINT_ID) is not set — required for Flux 2 Dev generation"
     );
@@ -96,7 +107,7 @@ export async function generateFlux2Image(
     options.references?.map((r) => ({ name: r.name, strength: r.strength })) ??
     [];
 
-  const workflow = buildFlux2Workflow({
+  const workflowOptions = {
     prompt,
     width,
     height,
@@ -113,7 +124,11 @@ export async function generateFlux2Image(
     steps: options.steps,
     cfg: options.cfg,
     filenamePrefix: options.filenamePrefix ?? "flux2_scene",
-  });
+  };
+
+  const workflow = useNative
+    ? buildFlux2NativeWorkflow(workflowOptions)
+    : buildFlux2Workflow(workflowOptions);
 
   const images = [
     ...(options.references ?? []).map((r) => ({ name: r.name, image: r.base64 })),
