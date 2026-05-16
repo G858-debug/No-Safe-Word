@@ -317,7 +317,7 @@ export function CharacterCard({
         .catch((e) => {
           if (e instanceof Error && e.message === "unmounted") return;
           setError(errorMessage(e));
-          setFace((prev) => (prev.kind === "generating" ? { kind: "idle" } : prev));
+          setFace((prev) => (prev.kind === "generating" ? { kind: "empty", prompt: prev.prompt } : prev));
         });
     },
     [waitForCompletion]
@@ -341,7 +341,7 @@ export function CharacterCard({
         .catch((e) => {
           if (e instanceof Error && e.message === "unmounted") return;
           setError(errorMessage(e));
-          setBody((prev) => (prev.kind === "generating" ? { kind: "idle" } : prev));
+          setBody((prev) => (prev.kind === "generating" ? { kind: "empty", prompt: prev.prompt } : prev));
         });
     },
     [waitForCompletion]
