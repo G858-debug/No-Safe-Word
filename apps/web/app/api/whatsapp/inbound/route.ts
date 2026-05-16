@@ -59,10 +59,10 @@ export async function POST(request: NextRequest) {
 
   const command = text.toLowerCase();
 
-  if (command === "stop") {
+  if (command === "stop" || command === "opt out") {
     return await handleStop(from);
   }
-  if (command === "start") {
+  if (command === "start" || command === "join") {
     return await handleStart(from);
   }
 
@@ -95,7 +95,7 @@ async function handleStop(phone: string) {
     await sendWhatsAppMessage({
       to: phone,
       message:
-        "You've been unsubscribed from WhatsApp story alerts. You'll still receive emails if you opted in. Reply START to re-enable WhatsApp.",
+        "You've been unsubscribed from WhatsApp story alerts. You'll still receive emails. To resubscribe, send JOIN.",
     });
   } catch (err) {
     console.warn("[whatsapp/inbound] STOP reply failed:", err);
@@ -126,7 +126,7 @@ async function handleStart(phone: string) {
     await sendWhatsAppMessage({
       to: phone,
       message:
-        "Welcome back. You'll receive WhatsApp story alerts again. Reply STOP at any time to opt out.",
+        "Welcome back. You'll receive WhatsApp story alerts again. Send OPT OUT at any time to unsubscribe.",
     });
   } catch (err) {
     console.warn("[whatsapp/inbound] START reply failed:", err);

@@ -105,7 +105,7 @@ function formatGateMessage(pin: string): string {
     "",
     "Enter it on the page where you signed up. Code expires in 10 minutes.",
     "",
-    "Reply STOP to unsubscribe.",
+    "Send OPT OUT to unsubscribe.",
   ].join("\n");
 }
 

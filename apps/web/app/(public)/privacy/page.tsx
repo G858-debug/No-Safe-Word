@@ -282,8 +282,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <span className="font-semibold text-amber-50">WhatsApp</span>:
-              reply <span className="font-mono text-amber-200">STOP</span> to
-              any of our messages to stop WhatsApp communications.
+              send <span className="font-mono text-amber-200">OPT OUT</span> to
+              stop WhatsApp communications.
             </li>
           </ul>
           <p className="mt-3">
