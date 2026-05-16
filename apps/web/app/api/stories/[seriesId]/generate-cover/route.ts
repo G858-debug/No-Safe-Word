@@ -15,9 +15,9 @@ export const runtime = "nodejs";
 // ============================================================
 // Generates 4 cover variants. Model selection mirrors the story's
 // image_model setting:
-//   flux2_dev  → 4 async RunPod jobs (ComfyUI + PuLID reference images)
-//   hunyuan3   → 4 async Siray jobs (portrait_prompt_locked text +
-//                approved portrait URLs as i2i reference images). Both
+//   flux2_dev  → 4 async RunPod jobs (ComfyUI + ReferenceLatent images)
+//   hunyuan3   → 4 async Siray jobs (approved portrait URLs as i2i
+//                reference images). Both
 //                paths return jobIds + cover_status='generating'; the
 //                client polls /api/status/{jobId} until cover_variants
 //                fill in.
@@ -417,9 +417,9 @@ export async function POST(
   const failures: Array<{ variantIndex: number; message: string }> = [];
 
   // Model-aware injection rule (Flux 2 Dev / cover): NO character text.
-  // Identity is carried by the PuLID reference images above. The same rule
-  // applies to the Flux scene path; the Hunyuan covers branch (above, when
-  // image_model === 'hunyuan3') is the opposite — text-only identity.
+  // Identity is carried by the ReferenceLatent reference images above. The
+  // same rule applies to the Flux scene path; the Hunyuan covers branch
+  // (above, when image_model === 'hunyuan3') uses text + i2i references.
   for (const variantIndex of variantIndices) {
     try {
       const seed = Math.floor(Math.random() * 2 ** 31);
