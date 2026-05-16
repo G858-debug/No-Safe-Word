@@ -95,11 +95,7 @@ export async function draftAndPersistScenePrompt(
     throw new Error(`Series for prompt ${promptId} not found`);
   }
 
-  if (series.image_model !== "hunyuan3") {
-    throw new Error(
-      `Mistral scene drafting is only supported for hunyuan3 (this series: ${series.image_model}). Flux 2 Dev still uses the legacy path.`
-    );
-  }
+  const pipeline = series.image_model === "flux2_dev" ? "flux2_dev" : "hunyuan3";
 
   const charIds = [prompt.character_id, prompt.secondary_character_id].filter(
     (id): id is string => Boolean(id)
@@ -132,7 +128,7 @@ export async function draftAndPersistScenePrompt(
           `Character ${c.name ?? c.id} has no approved portrait yet — approve the portrait before drafting scene prompts.`
         );
       }
-      if (!c.portrait_prompt_locked && !c.description) {
+      if (pipeline === "hunyuan3" && !c.portrait_prompt_locked && !c.description) {
         throw new Error(
           `Character ${c.name ?? c.id} has neither portrait_prompt_locked nor description. Approve the character's portrait before drafting.`
         );
@@ -173,6 +169,7 @@ export async function draftAndPersistScenePrompt(
     previousFinalPrompt,
     previousCritique,
     poseTemplate,
+    pipeline,
   });
 
   const draftedAt = new Date().toISOString();
