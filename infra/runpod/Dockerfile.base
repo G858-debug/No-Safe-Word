@@ -8,9 +8,9 @@ RUN cd /comfyui && git fetch origin --tags && git checkout v0.21.1 && \
 
 # Verify that all required native Flux 2 nodes are present in this ComfyUI
 # version. Fails the build loudly if any are missing rather than silently
-# producing a broken worker.
-RUN printf 'from comfy import nodes\nrequired=["EmptyFlux2LatentImage","Flux2Scheduler","ReferenceLatent","FluxGuidance","SamplerCustomAdvanced","BasicGuider","RandomNoise","KSamplerSelect"]\nmissing=[n for n in required if n not in nodes.NODE_CLASS_MAPPINGS]\nassert not missing,f"Missing native Flux 2 nodes: {missing}"\nprint("[NSW] All required native Flux 2 nodes confirmed present")\n' \
-    > /tmp/assert_nodes.py && cd /comfyui && python3 /tmp/assert_nodes.py && rm /tmp/assert_nodes.py
+# producing a broken worker. PYTHONPATH=/comfyui is required because ComfyUI
+# is installed as a local directory, not a pip package.
+RUN PYTHONPATH=/comfyui python3 -c "from comfy import nodes; required=['EmptyFlux2LatentImage','Flux2Scheduler','ReferenceLatent','FluxGuidance','SamplerCustomAdvanced','BasicGuider','RandomNoise','KSamplerSelect']; missing=[n for n in required if n not in nodes.NODE_CLASS_MAPPINGS]; assert not missing, 'Missing native Flux 2 nodes: '+str(missing); print('[NSW] All required native Flux 2 nodes confirmed present')"
 
 # ---- Custom Nodes ----
 # ComfyUI-ppm: FluxKontextImageScale node (Kontext-aware image scaling)
