@@ -1999,7 +1999,7 @@ function ImageDetailModal({
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <div className="flex items-baseline gap-2">
                     <label className="text-[11px] font-medium uppercase tracking-wide text-foreground">
-                      Final prompt — sent to Siray
+                      Final prompt — sent to {imageModel === "flux2_dev" ? "RunPod" : "Siray"}
                     </label>
                     {state.finalPromptDraftedAt && (
                       <span className="text-[10px] text-muted-foreground">
