@@ -109,9 +109,10 @@ export function buildFlux2NativeWorkflow(
   workflow["501"] = {
     class_type: "Flux2Scheduler",
     inputs: {
-      model:   ["100", 0],
       steps:   options.steps ?? NATIVE_STEPS,
       denoise: NATIVE_DENOISE,
+      width:   options.width,
+      height:  options.height,
     },
   };
   workflow["502"] = {

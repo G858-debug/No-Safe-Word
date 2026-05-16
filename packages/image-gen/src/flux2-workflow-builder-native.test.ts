@@ -98,6 +98,10 @@ test("zero references: FluxGuidance reads directly from CLIPTextEncode", () => {
   // Seed is wired
   assert.equal(workflow["503"].inputs.noise_seed, BASE_OPTIONS.seed);
 
+  // Flux2Scheduler has width + height
+  assert.equal(workflow["501"].inputs.width,  BASE_OPTIONS.width);
+  assert.equal(workflow["501"].inputs.height, BASE_OPTIONS.height);
+
   // SaveImage prefix
   assert.equal(workflow["601"].inputs.filename_prefix, BASE_OPTIONS.filenamePrefix);
 
@@ -205,15 +209,18 @@ test("controlNet option is silently ignored — no ControlNet nodes emitted", ()
   assert.deepEqual(workflow["400"].inputs.conditioning, ["302", 0]);
 });
 
-// ── Test 5: steps override propagates to Flux2Scheduler ──────────────────
+// ── Test 5: steps/width/height propagate to Flux2Scheduler ──────────────
 
-test("steps override is passed to Flux2Scheduler", () => {
+test("steps, width, height are passed to Flux2Scheduler (no model — v0.21.1 removed it)", () => {
   const workflow = buildFlux2NativeWorkflow({
     ...BASE_OPTIONS,
     references: [],
     steps: 20,
   });
-  assert.equal(workflow["501"].inputs.steps, 20);
+  assert.equal(workflow["501"].inputs.steps,  20);
+  assert.equal(workflow["501"].inputs.width,  BASE_OPTIONS.width);
+  assert.equal(workflow["501"].inputs.height, BASE_OPTIONS.height);
+  assert.ok(!("model" in workflow["501"].inputs), "Flux2Scheduler must not have model input in v0.21.1");
 });
 
 // ── Test 6: model name overrides propagate correctly ─────────────────────

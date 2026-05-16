@@ -26,6 +26,7 @@ npm-debug.log*
 
 # local test output / generated images (regeneratable, not source)
 apps/web/test-output/
+scripts/output/
 flux2_results/
 flux2_dev_results/
 flux2_controlnet_results/
