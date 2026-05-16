@@ -33,10 +33,10 @@ export async function generateFlux2ProImage(
       input: {
         prompt: options.prompt,
         aspect_ratio: options.aspectRatio ?? "2:3",
-        output_format: "jpeg",
+        output_format: "jpg",
         output_quality: 90,
         guidance: 3.5,
-        safety_tolerance: 6,
+        safety_tolerance: 5,
       },
     });
   } catch (err) {
