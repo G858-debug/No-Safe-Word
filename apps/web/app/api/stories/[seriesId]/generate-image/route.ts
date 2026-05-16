@@ -251,7 +251,7 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
   const { data: prompt, error: promptErr } = await supabase
     .from("story_image_prompts")
     .select(
-      "id, prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, primary_ref_type, secondary_ref_type, ref_mode"
+      "id, prompt, final_prompt, character_id, secondary_character_id, character_name, secondary_character_name, image_type, primary_ref_type, secondary_ref_type, ref_mode"
     )
     .eq("id", promptId)
     .single();
@@ -356,8 +356,12 @@ async function runFlux2Generation(seriesId: string, promptId: string) {
     // above (one full-body portrait per character). Adding a text block
     // describing the same character competes with the reference and degrades
     // likeness. Hunyuan is the opposite — text injection via Mistral draft.
+    // Use the Mistral-drafted final_prompt if available (the text the user
+    // sees and edits in the textarea); fall back to the raw scene description.
+    const scenePrompt = prompt.final_prompt?.trim() || prompt.prompt;
+
     const result = await generateFlux2Image({
-      scenePrompt: prompt.prompt,
+      scenePrompt,
       references,
       width,
       height,
