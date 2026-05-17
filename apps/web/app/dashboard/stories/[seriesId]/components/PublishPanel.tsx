@@ -1606,6 +1606,30 @@ export default function PublishPanel({
             </Button>
           </div>
 
+          {/* Hint: when all posts are website-published but not yet sent to
+              Buffer, the two buttons above are disabled. Point the user to the
+              Buffer scheduling section below so they don't get stuck. */}
+          {statusSummary.published === statusSummary.total &&
+            bufferSchedulableCount > 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-400">
+                <Send className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-medium">
+                    Ready for Facebook — use Buffer scheduling below
+                  </p>
+                  <p className="text-blue-400/70">
+                    All chapters are website-published. To schedule them on
+                    Facebook, scroll down to{" "}
+                    <span className="font-medium">
+                      Facebook Scheduling via Buffer
+                    </span>{" "}
+                    and click <span className="font-medium">Preview Schedule</span>{" "}
+                    then <span className="font-medium">Schedule on Buffer</span>.
+                  </p>
+                </div>
+              </div>
+            )}
+
           {/* Schedule form */}
           {showSchedule && (
             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
