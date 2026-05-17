@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { AuthorNotes, CoverStatus } from "@no-safe-word/shared";
 import { Button } from "@/components/ui/button";
 import {
@@ -200,8 +200,8 @@ const POST_STATUS_CONFIG: Record<string, { label: string; className: string }> =
  * value in the user's local timezone, which is what the operator
  * expects to type ("8 PM Sunday"). The server converts to UTC.
  */
-function defaultCoverPostDatetime(): string {
-  const d = new Date();
+function defaultCoverPostDatetime(base?: Date | null): string {
+  const d = base ? new Date(base) : new Date();
   d.setDate(d.getDate() + 1);
   d.setHours(20, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -299,20 +299,51 @@ export default function PublishPanel({
   const [bufferPreviewLoading, setBufferPreviewLoading] = useState(false);
   const [bufferScheduling, setBufferScheduling] = useState(false);
   const [bufferCancelling, setBufferCancelling] = useState(false);
-  // Operator-picked start date for Chapter 1 (yyyy-mm-dd, local format).
-  // Defaults to today + 4 days so operator has runway. Optional — when
-  // empty, the server falls back to "day after the global chain tail".
-  const [bufferStartDate, setBufferStartDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 4);
-    return d.toISOString().slice(0, 10);
-  });
+  // Operator-picked start date for Chapter 1 (yyyy-mm-dd UTC).
+  // Initialised to "" and set by the mount-time chain-tail fetch below.
+  const [bufferStartDate, setBufferStartDate] = useState<string>("");
 
   // Cover-reveal Buffer post state.
   const [coverPost, setCoverPost] = useState<CoverPostState>(initialCoverPost);
   const [coverPostScheduledAt, setCoverPostScheduledAt] = useState<string>(
     () => initialCoverPost.scheduledFor ?? defaultCoverPostDatetime()
   );
+
+  // On mount: fetch the global chain tail and pre-fill both date pickers.
+  //   cover     = chainTail + 1 day at 20:00 local  (N+1)
+  //   chapters  = chainTail + 2 days UTC date         (N+2)
+  // Guards ensure a user who edits before the fetch returns keeps their value,
+  // and an already-scheduled cover is never overwritten.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/stories/buffer-chain-tail")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { chainTailDate: string | null } | null) => {
+        if (cancelled) return;
+        const tail = data?.chainTailDate ? new Date(data.chainTailDate) : null;
+        if (initialCoverPost.scheduledFor === null) {
+          setCoverPostScheduledAt(defaultCoverPostDatetime(tail));
+        }
+        const chapterBase = tail ? new Date(tail) : new Date();
+        chapterBase.setUTCDate(chapterBase.getUTCDate() + (tail ? 2 : 1));
+        const chapterDate = chapterBase.toISOString().slice(0, 10);
+        setBufferStartDate((prev) => (prev === "" ? chapterDate : prev));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (initialCoverPost.scheduledFor === null) {
+          setCoverPostScheduledAt(defaultCoverPostDatetime());
+        }
+        const d = new Date();
+        d.setDate(d.getDate() + 2);
+        setBufferStartDate((prev) =>
+          prev === "" ? d.toISOString().slice(0, 10) : prev
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [coverPostCtaLine, setCoverPostCtaLine] = useState<string>(
     initialCoverPost.ctaLine ?? ""
   );

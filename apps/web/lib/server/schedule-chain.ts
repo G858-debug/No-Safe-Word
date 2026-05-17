@@ -259,7 +259,7 @@ async function loadAuthorNotePlanForSeries(
  * The latest scheduled_for across every series. Returns null if no
  * post anywhere has been scheduled yet.
  */
-async function loadGlobalChainTail(): Promise<Date | null> {
+export async function loadGlobalChainTail(): Promise<Date | null> {
   const { data, error } = await supabase
     .from("story_posts")
     .select("scheduled_for")
