@@ -256,23 +256,45 @@ async function loadAuthorNotePlanForSeries(
 }
 
 /**
- * The latest scheduled_for across every series. Returns null if no
- * post anywhere has been scheduled yet.
+ * The latest scheduled date in the global Buffer queue. Returns null if
+ * nothing has been scheduled yet.
+ *
+ * Primary source: the latest author_note_scheduled_for across all series.
+ * The author note is the last item in a story's run; the next story's cover
+ * should follow it. Fallback: latest story_posts.scheduled_for (chapters)
+ * for series that have chapters but no author note scheduled yet.
  */
 export async function loadGlobalChainTail(): Promise<Date | null> {
-  const { data, error } = await supabase
+  // Primary: latest author's note across all series.
+  const { data: noteData, error: noteError } = await supabase
+    .from("story_series")
+    .select("author_note_scheduled_for")
+    .not("author_note_scheduled_for", "is", null)
+    .order("author_note_scheduled_for", { ascending: false })
+    .limit(1);
+
+  if (noteError) {
+    throw new Error(`Failed to load chain tail: ${noteError.message}`);
+  }
+  const noteRow = noteData?.[0];
+  if (noteRow?.author_note_scheduled_for) {
+    return new Date(noteRow.author_note_scheduled_for);
+  }
+
+  // Fallback: latest chapter date (no author notes scheduled yet).
+  const { data: chapterData, error: chapterError } = await supabase
     .from("story_posts")
     .select("scheduled_for")
     .not("scheduled_for", "is", null)
     .order("scheduled_for", { ascending: false })
     .limit(1);
 
-  if (error) {
-    throw new Error(`Failed to load chain tail: ${error.message}`);
+  if (chapterError) {
+    throw new Error(`Failed to load chapter chain tail: ${chapterError.message}`);
   }
-  const row = data?.[0];
-  if (!row?.scheduled_for) return null;
-  return new Date(row.scheduled_for);
+  const chapterRow = chapterData?.[0];
+  if (!chapterRow?.scheduled_for) return null;
+  return new Date(chapterRow.scheduled_for);
 }
 
 /**
