@@ -168,7 +168,6 @@ export async function POST(
       const { error: updateError } = await supabase
         .from("story_posts")
         .update({
-          status: "scheduled",
           scheduled_for: item.scheduledAt.toISOString(),
           buffer_post_id: result.id,
           buffer_status: result.status,
