@@ -42,7 +42,7 @@ export function buildCharacterPortraitPrompt(
   // Who — gender + age
   const whoBits: string[] = [];
   if (description.gender) whoBits.push(description.gender.trim());
-  if (description.age) whoBits.push(`age ${description.age.trim()}`);
+  if (description.age) whoBits.push(`age ${String(description.age).trim()}`);
   if (whoBits.length > 0) {
     parts.push(`A ${whoBits.join(", ")}.`);
   }
@@ -108,7 +108,7 @@ export function buildSceneCharacterBlock(
   const who: string[] = [name];
   if (description.ethnicity) who.push(description.ethnicity.trim());
   if (description.gender) who.push(description.gender.trim());
-  if (description.age) who.push(description.age.trim());
+  if (description.age) who.push(String(description.age).trim());
   parts.push(who.join(", ") + ".");
 
   // Skin + hair + eyes
