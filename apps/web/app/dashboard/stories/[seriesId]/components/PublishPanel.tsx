@@ -366,9 +366,10 @@ export default function PublishPanel({
   // Feedback
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  // Inline error for Buffer scheduling — shown near the button so it's
-  // visible even when the user is scrolled down to the scheduling section.
+  // Inline errors — shown near their respective buttons so errors are visible
+  // even when the user is scrolled down past the top-of-page error banner.
   const [bufferScheduleError, setBufferScheduleError] = useState<string | null>(null);
+  const [coverPostScheduleError, setCoverPostScheduleError] = useState<string | null>(null);
 
   // React-based confirmation dialog — replaces window.confirm() which Safari
   // suppresses when popup-blocking is enabled, causing silent no-ops.
@@ -1053,6 +1054,7 @@ export default function PublishPanel({
   const previewCoverPost = useCallback(async () => {
     setCoverPostPreviewLoading(true);
     setActionError(null);
+    setCoverPostScheduleError(null);
     try {
       // datetime-local strings are wall-clock (no TZ). new Date(...)
       // interprets them as the user's local time, which is what the
@@ -1103,6 +1105,7 @@ export default function PublishPanel({
 
     setCoverPostScheduling(true);
     setActionError(null);
+    setCoverPostScheduleError(null);
     try {
       const res = await fetch(`/api/stories/${seriesId}/cover-post`, {
         method: "POST",
@@ -1135,9 +1138,9 @@ export default function PublishPanel({
       setActionSuccess("Cover-reveal post scheduled on Buffer.");
       setTimeout(() => setActionSuccess(null), 4000);
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Cover post failed"
-      );
+      const errMsg = err instanceof Error ? err.message : "Cover post failed";
+      setActionError(errMsg);
+      setCoverPostScheduleError(errMsg);
     } finally {
       setCoverPostScheduling(false);
     }
@@ -1939,6 +1942,16 @@ export default function PublishPanel({
               </Button>
             )}
           </div>
+
+          {coverPostScheduleError && (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex-1">{coverPostScheduleError}</span>
+              <button onClick={() => setCoverPostScheduleError(null)}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           {/* Status / error / current schedule */}
           {coverPost.scheduledFor && (
