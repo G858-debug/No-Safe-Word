@@ -356,6 +356,9 @@ export default function PublishPanel({
   // Feedback
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  // Inline error for Buffer scheduling — shown near the button so it's
+  // visible even when the user is scrolled down to the scheduling section.
+  const [bufferScheduleError, setBufferScheduleError] = useState<string | null>(null);
 
   // Website-publish state. Series status + timestamp shadow the props
   // so a successful publish reflects in the badge without waiting for a
@@ -819,6 +822,7 @@ export default function PublishPanel({
   const previewBufferSchedule = useCallback(async () => {
     setBufferPreviewLoading(true);
     setActionError(null);
+    setBufferScheduleError(null);
     try {
       const url = new URL(
         `/api/stories/${seriesId}/buffer-schedule/preview`,
@@ -883,6 +887,7 @@ export default function PublishPanel({
 
     setBufferScheduling(true);
     setActionError(null);
+    setBufferScheduleError(null);
     try {
       const res = await fetch(`/api/stories/${seriesId}/buffer-schedule`, {
         method: "POST",
@@ -941,9 +946,9 @@ export default function PublishPanel({
         const failedLabel = failedItem
           ? `Part ${failedItem.partNumber}: ${failedItem.title}`
           : `chapter id ${data.failure.postId}`;
-        setActionError(
-          `Scheduled ${scheduledCount}/${bufferPreview.plan.length}. Stopped at ${failedLabel}: ${data.failure.error}.${skippedSuffix}`
-        );
+        const errMsg = `Scheduled ${scheduledCount}/${bufferPreview.plan.length}. Stopped at ${failedLabel}: ${data.failure.error}.${skippedSuffix}`;
+        setActionError(errMsg);
+        setBufferScheduleError(errMsg);
       } else {
         setActionSuccess(
           `Scheduled ${scheduledCount} chapter${scheduledCount === 1 ? "" : "s"} on Buffer.${skippedSuffix}`
@@ -952,9 +957,9 @@ export default function PublishPanel({
         setBufferPreview(null);
       }
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Buffer scheduling failed"
-      );
+      const errMsg = err instanceof Error ? err.message : "Buffer scheduling failed";
+      setActionError(errMsg);
+      setBufferScheduleError(errMsg);
     } finally {
       setBufferScheduling(false);
     }
@@ -2058,6 +2063,16 @@ export default function PublishPanel({
               </Button>
             )}
           </div>
+
+          {bufferScheduleError && (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="flex-1">{bufferScheduleError}</span>
+              <button onClick={() => setBufferScheduleError(null)}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           {bufferPreview && (
             <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
