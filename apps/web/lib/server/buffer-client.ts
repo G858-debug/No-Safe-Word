@@ -344,7 +344,7 @@ const CREATE_POST_MUTATION = /* GraphQL */ `
     $channelId: ChannelId!
     $text: String
     $dueAt: DateTime
-    $assets: AssetsInput
+    $assets: [AssetInput!]
     $metadata: PostInputMetaData
   ) {
     createPost(
@@ -543,10 +543,8 @@ export const bufferClient = {
       dueAt: input.scheduledAt.toISOString(),
       assets:
         input.imageUrls && input.imageUrls.length > 0
-          ? {
-              images: input.imageUrls.map((url) => ({ url })),
-            }
-          : null,
+          ? input.imageUrls.map((url) => ({ image: { url } }))
+          : [],
       metadata: {
         facebook: {
           type: "post",
