@@ -43,6 +43,16 @@ import WebsitePreview, {
 } from "./WebsitePreview";
 import { AuthorNotesReviewPanel } from "./AuthorNotesReviewPanel";
 import { setExcluded } from "@/lib/publisher-actions";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -360,6 +370,19 @@ export default function PublishPanel({
   // visible even when the user is scrolled down to the scheduling section.
   const [bufferScheduleError, setBufferScheduleError] = useState<string | null>(null);
 
+  // React-based confirmation dialog — replaces window.confirm() which Safari
+  // suppresses when popup-blocking is enabled, causing silent no-ops.
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    description: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const showConfirm = useCallback(
+    (title: string, description: string): Promise<boolean> =>
+      new Promise((resolve) => setConfirmDialog({ title, description, resolve })),
+    []
+  );
+
   // Website-publish state. Series status + timestamp shadow the props
   // so a successful publish reflects in the badge without waiting for a
   // parent refetch. The parent is also notified via onSeriesPublished.
@@ -567,8 +590,9 @@ export default function PublishPanel({
   const publishWebsite = useCallback(async () => {
     if (isWebsitePublished || websitePublishing) return;
 
-    const ok = window.confirm(
-      "This will make the entire story visible on nosafeword.co.za immediately. This cannot be undone via this UI. Continue?"
+    const ok = await showConfirm(
+      "Publish to website",
+      "This will make the entire story visible on nosafeword.co.za immediately. This cannot be undone via this UI."
     );
     if (!ok) return;
 
@@ -878,10 +902,9 @@ export default function PublishPanel({
         : "";
     const notePart = bufferPreview.authorNote ? "author's note" : "";
     const itemsLabel = [chapterPart, notePart].filter(Boolean).join(" + ");
-    const ok = window.confirm(
-      `Schedule ${itemsLabel} on Buffer? First post: ${fmt(
-        firstIso
-      )} SAST. Last post: ${fmt(lastIso)} SAST.`
+    const ok = await showConfirm(
+      "Schedule on Buffer",
+      `Schedule ${itemsLabel} on Buffer? First post: ${fmt(firstIso)} SAST. Last post: ${fmt(lastIso)} SAST.`
     );
     if (!ok) return;
 
@@ -966,7 +989,8 @@ export default function PublishPanel({
   }, [seriesId, bufferPreview, bufferStartDate]);
 
   const cancelBufferSchedule = useCallback(async () => {
-    const ok = window.confirm(
+    const ok = await showConfirm(
+      "Cancel Buffer schedule",
       "Cancel every Buffer-scheduled chapter for this story? Posts already published on Facebook are not affected."
     );
     if (!ok) return;
@@ -1071,10 +1095,9 @@ export default function PublishPanel({
         minute: "2-digit",
         timeZone: "Africa/Johannesburg",
       });
-    const ok = window.confirm(
-      `Schedule the cover-reveal post on Buffer for ${fmt(
-        scheduledIso
-      )} SAST?`
+    const ok = await showConfirm(
+      "Schedule cover post",
+      `Schedule the cover-reveal post on Buffer for ${fmt(scheduledIso)} SAST?`
     );
     if (!ok) return;
 
@@ -1121,7 +1144,8 @@ export default function PublishPanel({
   }, [seriesId, coverPostScheduledAt, coverPostCtaLine]);
 
   const cancelCoverPost = useCallback(async () => {
-    const ok = window.confirm(
+    const ok = await showConfirm(
+      "Cancel cover post",
       "Cancel the cover-reveal post on Buffer? You can re-schedule afterwards."
     );
     if (!ok) return;
@@ -2343,6 +2367,47 @@ export default function PublishPanel({
           </div>
         );
       })}
+
+      {/* Confirmation dialog — replaces window.confirm() which Safari
+          suppresses when popup-blocking is enabled. */}
+      {confirmDialog && (
+        <AlertDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) {
+              confirmDialog.resolve(false);
+              setConfirmDialog(null);
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{confirmDialog.title}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmDialog.description}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                onClick={() => {
+                  confirmDialog.resolve(false);
+                  setConfirmDialog(null);
+                }}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  confirmDialog.resolve(true);
+                  setConfirmDialog(null);
+                }}
+              >
+                Confirm
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
